@@ -461,6 +461,24 @@ export function musicProgress(): number {
   return Math.min(1, Math.max(0, audio.currentTime / audio.duration))
 }
 
+const songEndListeners = new Set<() => void>()
+
+/**
+ * Called between songs: a song has played to its end and the next is not
+ * yet taken up. The quiet moment the stream picks to reload for a new
+ * version (store/useTvAnnounce maybeSelfUpdate). Returns how to stop listening.
+ */
+export function onSongEnd(fn: () => void): () => void {
+  songEndListeners.add(fn)
+  return () => { songEndListeners.delete(fn) }
+}
+
+function tellSongEnd(): void {
+  for (const fn of [...songEndListeners]) {
+    try { fn() } catch (e) { console.error('[onosendai] onSongEnd:', e) }
+  }
+}
+
 /** Start the music, from a tap when it can be: TV's start calls it. */
 export function startMusic(list: Track[] = PLAYLIST): void {
   if (typeof Audio === 'undefined' || audio || list.length === 0) return
@@ -471,7 +489,7 @@ export function startMusic(list: Track[] = PLAYLIST): void {
   a.preload = 'auto'
   a.volume = 0.5
   volumeWorks = a.volume === 0.5
-  a.addEventListener('ended', () => { if (audio === a) advance(list) })
+  a.addEventListener('ended', () => { if (audio === a) { tellSongEnd(); advance(list) } })
   // A browser that pauses the track as it is muted or unmuted: play on. Any
   // other pause stands, and the music is no longer wanted: the phone's own
   // controls, a key, or the lock screen's, which is the viewer's even with

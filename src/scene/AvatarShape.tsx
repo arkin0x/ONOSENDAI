@@ -15,12 +15,12 @@
  * anybody is.
  */
 
-import { EdgesGeometry, IcosahedronGeometry } from 'three'
 import { avatarDraw, avatarDrawKept, spectatorScale } from '../lib/avatar'
 import { useAvatarShard } from '../store/useAvatars'
 import { useCyberspace } from '../store/useCyberspace'
+import { useTryEye } from '../store/tryEye'
 import { ShardMesh } from './ShardMesh'
-import { markerMaterialProps } from './avatarMarker'
+import { markerEdges, markerMaterialProps } from './avatarMarker'
 
 /**
  * The marker's edges, one for every avatar for as long as the page is open.
@@ -30,7 +30,7 @@ import { markerMaterialProps } from './avatarMarker'
  * so a long watch added one for every avatar at every cut (arkinox,
  * 2026-10-20: "the perf on /tv on my laptop is not satisfactory").
  */
-const MARKER_EDGES = new EdgesGeometry(new IcosahedronGeometry(0.5, 1))
+const MARKER_EDGES = markerEdges()
 
 interface Props {
   pubkey: string
@@ -48,10 +48,21 @@ interface Props {
   outline?: boolean
   /** Its own shape at any zoom, never the marker (Cyberspace TV: avatarDrawKept). */
   keepShape?: boolean
+  /**
+   * The share of full opacity to draw a shard at: only ever below 1 in build
+   * mode, while the avatar stands between the camera and the build cursor
+   * (BuildOccluders). It is the one thing that makes an avatar see-through;
+   * the shard's own opacity is still ignored. The marker is lines, which
+   * never block, so it never takes it.
+   */
+  dim?: number
 }
 
-export function AvatarShape({ pubkey, color, renderOrder = 0, depthTest = true, firstPerson = false, outline = false, keepShape = false }: Props): JSX.Element | null {
-  const shard = useAvatarShard(pubkey)
+export function AvatarShape({ pubkey, color, renderOrder = 0, depthTest = true, firstPerson = false, outline = false, keepShape = false, dim = 1 }: Props): JSX.Element | null {
+  const worn = useAvatarShard(pubkey)
+  // SET EYE's TRY WALK: your own avatar drawn as the workshop shard you look from, on this device only (store/tryEye.ts).
+  const tried = useTryEye((t) => (t.pubkey === pubkey ? t.shard : null))
+  const shard = tried ?? worn
   const scaleExp = useCyberspace((s) => s.scaleExp)
   const spectator = spectatorScale(scaleExp)
   const draw = !outline && shard && shard.vertices.length > 0 ? (keepShape ? avatarDrawKept(shard, scaleExp, spectator) : avatarDraw(shard, scaleExp)) : 'marker'
@@ -59,8 +70,9 @@ export function AvatarShape({ pubkey, color, renderOrder = 0, depthTest = true, 
     const k = draw.mesh
     return (
       <group scale={[k, k, k]}>
-        {/* An avatar is opaque whatever its shard says (DECK-0003 §3.3). */}
-        <ShardMesh shard={shard} world cull={firstPerson} ignoreOpacity />
+        {/* An avatar is opaque whatever its shard says (DECK-0003 §3.3); only the build dim sees through it. */}
+        {/* An avatar ignores `anim` (DECK-0003 §1.14, §3.3). */}
+        <ShardMesh shard={shard} world cull={firstPerson} still ignoreOpacity dim={dim} />
       </group>
     )
   }

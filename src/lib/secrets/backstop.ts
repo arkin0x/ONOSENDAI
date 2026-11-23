@@ -1,7 +1,7 @@
 /**
  * backstop.ts: what localStorage keeps beside IndexedDB, and why.
  *
- * Two records, neither of them the old list (`onosendai:secrets`), which from
+ * Two records (and REFUSED_KEY, below), neither of them the old list (`onosendai:secrets`), which from
  * this build on is only ever read: by the one-time copy into IndexedDB, and
  * by db.syncLegacy, which takes in keys a tab still on an older build adds.
  *
@@ -28,6 +28,78 @@ import { describeError, parseLegacy } from './db'
 
 export const BOUGHT_KEY = 'onosendai:secrets:bought'
 export const FALLBACK_KEY = 'onosendai:secrets:fallback'
+/**
+ * Keys HOSAKA sold that failed a check at purchase (lib/regionKeyCheck.ts),
+ * set aside rather than destroyed: they were paid for, and a refusal could be
+ * wrong. Nothing reads this as a held key, so a key here never seals, opens
+ * or is offered anywhere; it is only kept, so a false refusal can be put
+ * right. Nothing clears it.
+ */
+export const REFUSED_KEY = 'onosendai:secrets:refused'
+
+/** A refused key, as it was set aside: the key, the cube it was bought for, and why it was refused. */
+export interface RefusedKey {
+  lookupId: string
+  keyHex: string
+  height: number
+  /** The cube asked for, computed from where it was bought, as decimal strings. */
+  base: { x: string; y: string; z: string }
+  plane: number
+  /** Why it was refused, in the words the purchase showed. */
+  why: string
+  /** HOSAKA's job, when known. */
+  jobId?: string
+  /** When it was set aside, in seconds since the epoch. */
+  at: number
+}
+
+/** The keys set aside so far, oldest first. */
+/**
+ * Everything the record holds, as it is: well formed or not. What cannot be
+ * read as a list is kept as one entry, so a later set-aside never writes over
+ * it (review of #629).
+ */
+function refusedEntries(): unknown[] {
+  const raw = storage()?.getItem(REFUSED_KEY) ?? null
+  if (!raw) return []
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed : [{ unreadable: raw }]
+  } catch {
+    return [{ unreadable: raw }]
+  }
+}
+
+function isRefusedKey(r: unknown): r is RefusedKey {
+  const k = r as RefusedKey | null
+  return !!k && typeof k === 'object' && typeof k.keyHex === 'string' && typeof k.lookupId === 'string'
+}
+
+/** The keys set aside so far, oldest first; an entry missing its key or lookup id is passed over, not thrown on. */
+export function readRefused(): RefusedKey[] {
+  try {
+    return refusedEntries().filter(isRefusedKey)
+  } catch {
+    return []
+  }
+}
+
+/**
+ * Set a refused key aside (REFUSED_KEY), once per key. Every entry already
+ * there stays, a corrupt one too. Returns null when it landed, else why not.
+ */
+export function setAsideRefused(key: RefusedKey): string | null {
+  const s = storage()
+  if (!s) return 'localStorage is not available here'
+  try {
+    const entries = refusedEntries()
+    if (entries.filter(isRefusedKey).some((r) => r.keyHex.toLowerCase() === key.keyHex.toLowerCase() && r.lookupId.toLowerCase() === key.lookupId.toLowerCase())) return null
+    s.setItem(REFUSED_KEY, JSON.stringify([...entries, key]))
+    return null
+  } catch (err) {
+    return describeError(err)
+  }
+}
 
 function storage(): Storage | null {
   try { return typeof localStorage === 'undefined' ? null : localStorage } catch { return null }
@@ -53,6 +125,28 @@ export function updateBought(add: HeldKey[], remove: string[] = []): string | nu
     let changed = false
     for (const k of bought) if (!kept[k.lookupId]) { kept[k.lookupId] = k; changed = true }
     for (const id of remove) if (kept[id]) { delete kept[id]; changed = true }
+    if (changed) s.setItem(BOUGHT_KEY, JSON.stringify(kept))
+    return null
+  } catch (err) {
+    return describeError(err)
+  }
+}
+
+/**
+ * Put right the corner of bought keys already kept here, and nothing else:
+ * never adds a key, never removes one (lib/secrets/base.ts repairBase).
+ * Returns null when it landed or there was nothing to do, else why not.
+ */
+export function repairBoughtBases(fixed: HeldKey[]): string | null {
+  const s = storage()
+  if (!s || fixed.length === 0) return null
+  try {
+    const kept = parseLegacy(s.getItem(BOUGHT_KEY))
+    let changed = false
+    for (const k of fixed) {
+      const was = kept[k.lookupId]
+      if (was) { kept[k.lookupId] = { ...was, base: k.base }; changed = true }
+    }
     if (changed) s.setItem(BOUGHT_KEY, JSON.stringify(kept))
     return null
   } catch (err) {

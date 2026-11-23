@@ -33,7 +33,8 @@ import type { NostrEvent } from 'nostr-tools'
 import { HIDDEN_KIND, type Hidden, type RegionOrigin } from '../hidden'
 import { unbagRemembered } from '../foundCache'
 import { hexToBytes } from '../events'
-import { queryEach } from '../relay'
+import { query, queryEach } from '../relay'
+import { bagsToOpen, type AskEvents } from '../bagVersions'
 import { mergeAnswers, type RelayAnswer } from '../relayOutcome'
 import { describeError } from './db'
 import { resolveReference } from '../references'
@@ -41,6 +42,7 @@ import { useCeremony } from '../../store/useCeremony'
 import { useSecrets, type HeldKey, type RescanStatus } from '../../store/useSecrets'
 import { useShards } from '../../store/useShards'
 import type { Place, PlaceKey } from './places'
+import { baseOf } from './base'
 import { placeById, placeKeyPages, placeKeysAmong, placeKeysOf } from './vault'
 
 /** Lookup ids per request. */
@@ -74,15 +76,23 @@ export interface RescanEntry {
   promote?: HeldKey
 }
 
-function originOf(base: { x: string; y: string; z: string }, plane: HeldKey['plane']): RegionOrigin {
-  return { at: { x: BigInt(base.x), y: BigInt(base.y), z: BigInt(base.z) }, plane }
+/**
+ * Where a reference with no point of its own is drawn, or undefined when the
+ * stored corner is not an exact integer (a bought key from before the corner
+ * was computed locally, lib/secrets/base.ts): the key is still asked about,
+ * and what it opens drawn at its own points. Never throws: one such key used
+ * to fail every batch of RESCAN ALL.
+ */
+function originOf(base: { x: string; y: string; z: string }, plane: HeldKey['plane'], height: number): RegionOrigin | undefined {
+  const at = baseOf(base, height)
+  return at ? { at, plane } : undefined
 }
 
 /** A held key as an entry. A box (one height per axis) is not a cube and carries no height or origin. */
 export function heldEntry(k: HeldKey): RescanEntry {
   const cube = !k.heights || (k.heights.x === k.heights.y && k.heights.y === k.heights.z)
   return cube
-    ? { lookupId: k.lookupId, keyHex: k.keyHex, height: k.height, origin: originOf(k.base, k.plane) }
+    ? { lookupId: k.lookupId, keyHex: k.keyHex, height: k.height, origin: originOf(k.base, k.plane, k.height) }
     : { lookupId: k.lookupId, keyHex: k.keyHex }
 }
 
@@ -97,7 +107,7 @@ export function placeKeyEntry(k: PlaceKey, now: number): RescanEntry {
     lookupId: k.lookupId,
     keyHex: k.keyHex,
     height: k.height,
-    origin: originOf(k.base, plane),
+    origin: originOf(k.base, plane, k.height),
     promote: { lookupId: k.lookupId, keyHex: k.keyHex, height: k.height, base: k.base, plane, source: 'scan', at: now },
   }
 }
@@ -271,6 +281,9 @@ export interface Asked {
   asked: number
   batches: number
   skipped: Skip[]
+  /** The bags opened and the deletions heard of, for dropping what they take away (lib/bagVersions.ts). */
+  bags: NostrEvent[]
+  deletions: NostrEvent[]
 }
 
 /**
@@ -285,8 +298,9 @@ export async function askAndOpen(
   open: (ev: NostrEvent, entry: RescanEntry) => Promise<Hidden[]>,
   onBatch?: (done: number, asked: number) => void,
   parallel: number = RESCAN_PARALLEL,
+  askEvents: AskEvents = query,
 ): Promise<Asked> {
-  const out: Asked = { found: [], opened: [], asked: 0, batches: 0, skipped: [] }
+  const out: Asked = { found: [], opened: [], asked: 0, batches: 0, skipped: [], bags: [], deletions: [] }
   const it = batches[Symbol.asyncIterator]()
   const worker = async (): Promise<void> => {
     for (;;) {
@@ -298,11 +312,19 @@ export async function askAndOpen(
       const got = await askAll([...byId.keys()], ask)
       out.skipped = tally([...out.skipped, ...got.skipped])
       const opened = new Set<string>()
-      for (const ev of got.events) {
+      // One version per bag, the newest, and none its author deleted (lib/bagVersions.ts).
+      const { bags, deletions } = await bagsToOpen(got.events, askEvents)
+      out.deletions.push(...deletions)
+      for (const ev of bags) {
         const id = ev.tags.find((t) => t[0] === 'd')?.[1]
         const entry = id ? byId.get(id) : undefined
         if (!entry) continue
-        const items = await open(ev, entry).catch(() => [] as Hidden[])
+        const items = await open(ev, entry).catch(() => null)
+        // Current only once it opened. A newest bag that would not open
+        // re-files nothing, and counted as current it took every find of the
+        // older one with it, a room behind a door in it too (review of #593).
+        if (items === null) continue
+        out.bags.push(ev)
         if (items.length > 0 && !opened.has(entry.lookupId)) { opened.add(entry.lookupId); out.opened.push(entry) }
         out.found.push(...items)
       }
@@ -340,6 +362,7 @@ export async function rescanBatches(batches: AsyncIterable<RescanEntry[]>, expec
   // Asked before addDiscovered, which records these as seen.
   const shards = useShards.getState()
   const fresh = shards.freshOf(result.found)
+  shards.dropStale(result.bags, result.deletions, result.found)
   if (result.found.length > 0) shards.addDiscovered(result.found)
   if (fresh.length > 0) useCeremony.getState().mark(fresh)
   const secrets = useSecrets.getState()

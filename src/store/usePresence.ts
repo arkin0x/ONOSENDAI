@@ -204,8 +204,22 @@ interface PresenceState {
   ingest: (ev: NostrEvent, now?: number, opts?: { quiet?: boolean }) => void
   /** Drop someone; the sweep does this when their newest action is elsewhere. */
   forget: (pubkey: string) => void
-  /** Everyone here who is not you and not already a target. */
+  /**
+   * Everyone here who is not you, nor blocked: your targets too, since who is
+   * nearby is a different question from who you follow (arkinox, 2026-11-14).
+   */
   others: () => Person[]
+}
+
+/**
+ * Who "N IN THIS SECTOR" counts and lists: everyone here but you and anyone
+ * blocked. Targets stay in (arkinox, 2026-11-14: "even if I'm targeting them
+ * I still want to know which avatars are nearby -- it serves a different
+ * purpose"); the row says TARGETED instead. Drawing still leaves them out
+ * (presenceDrawn): TargetAvatars draws a target, so the scene shows each once.
+ */
+export function sectorPeople(people: Record<string, Person>, me: string, blocked: ReadonlySet<string>): Person[] {
+  return Object.values(people).filter((p) => p.pubkey !== me && !blocked.has(p.pubkey))
 }
 
 export const usePresence = create<PresenceState>((set, get) => ({
@@ -280,11 +294,7 @@ export const usePresence = create<PresenceState>((set, get) => ({
     forgetNeighborEvents(pubkey)
   },
 
-  others: () => {
-    const { identity, targets } = useCyberspace.getState()
-    const blocked = useMutes.getState().muted.pubkeys
-    return Object.values(get().people).filter((p) => p.pubkey !== identity.pubkey && !targets[p.pubkey] && !blocked.has(p.pubkey))
-  },
+  others: () => sectorPeople(get().people, useCyberspace.getState().identity.pubkey, useMutes.getState().muted.pubkeys),
 }))
 
 let stopLive: (() => void) | null = null

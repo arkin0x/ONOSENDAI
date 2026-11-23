@@ -42,7 +42,8 @@ import {
   type PendingCloudJob,
   wirePosition,
   formatWait,
-  jobPatienceMs } from '../cloud'
+  jobPatienceMs,
+  loadCloudDeposit, saveCloudDeposit, clearCloudDeposit, loadKeysTicket, saveKeysTicket, clearKeysTicket, type PendingCloudDeposit, type PendingKeys } from '../cloud'
 import { HosakaError, cloudHopPause, cloudHopsSold, type HosakaClient, type HosakaDeposit, type HosakaJob, type HosakaLimits } from '../hosaka'
 
 const LIMITS: HosakaLimits = { max_hop_height: 25, max_sidestep_height: 29, hop_min_msats: 1000, deposit_min_msats: 1000, deposit_max_msats: 5_000_000_000, invoice_ttl_seconds: 3600, hop_proof_version: 2 }
@@ -131,15 +132,214 @@ describe('persistence', () => {
       plane: 1, prevEventId: 'ab'.repeat(32), costMsats: 1000, createdAt: 5, stage: 'awaiting_payment',
       deposit: { depositId: 'd', bolt11: 'lnbc', amountMsats: 1000, expiresAt: 9, paymentHash: 'h' },
     }
-    expect(loadCloudJob()).toBeNull()
+    expect(loadCloudJob('p')).toBeNull()
     saveCloudJob(record)
-    const back = loadCloudJob()
+    const back = loadCloudJob('p')
     expect(back).toEqual(record)
     expect(positionFromWire(back!.from)).toEqual(big)
-    clearCloudJob()
-    expect(loadCloudJob()).toBeNull()
-    localStorage.setItem('onosendai:cloudJob', JSON.stringify({ version: 1, jobId: 'j', stage: 'flying' }))
-    expect(loadCloudJob()).toBeNull()
+    clearCloudJob('p')
+    expect(loadCloudJob('p')).toBeNull()
+    localStorage.setItem('onosendai:cloudJob', JSON.stringify({ version: 1, jobId: 'j', pubkey: 'p', stage: 'flying' }))
+    expect(loadCloudJob('p')).toBeNull()
+  })
+
+  describe('one route deposit per identity (review of #597)', () => {
+    const dep = (pubkey: string, depositId: string): PendingCloudDeposit => ({ depositId, pubkey, amountMsats: 1000, expiresAt: 9_999_999_999, bolt11: `lnbc-${depositId}` })
+    beforeEach(() => { localStorage.removeItem('onosendai:cloudDeposit'); localStorage.removeItem('onosendai:cloudDeposit:kept') })
+
+    it('a second identity buying keeps the first identity\'s unclaimed deposit, and forgets only its own', () => {
+      saveCloudDeposit(dep('A', 'dep-a'))
+      saveCloudDeposit(dep('B', 'dep-b'))
+      expect(loadCloudDeposit('A')?.depositId).toBe('dep-a')
+      expect(loadCloudDeposit('B')?.depositId).toBe('dep-b')
+      clearCloudDeposit('B', 'an-older-deposit')
+      expect(loadCloudDeposit('B')?.depositId).toBe('dep-b')
+      clearCloudDeposit('B', 'dep-b')
+      expect(loadCloudDeposit('B')).toBeNull()
+      expect(loadCloudDeposit('A')?.depositId).toBe('dep-a')
+      clearCloudDeposit('A', 'dep-a')
+      expect(localStorage.getItem('onosendai:cloudDeposit')).toBeNull()
+    })
+
+    it('the single deposit an earlier version kept is read as its identity\'s, and kept when another identity buys', () => {
+      localStorage.setItem('onosendai:cloudDeposit', JSON.stringify(dep('A', 'dep-a')))
+      expect(loadCloudDeposit('A')?.depositId).toBe('dep-a')
+      expect(loadCloudDeposit('B')).toBeNull()
+      saveCloudDeposit(dep('B', 'dep-b'))
+      clearCloudDeposit('B', 'dep-b')
+      expect(loadCloudDeposit('A')?.depositId).toBe('dep-a')
+    })
+  })
+
+  describe('one cubes ticket per identity (review of #597)', () => {
+    const ticket = (pubkey: string, jobId: string): PendingKeys => ({ version: 1, pubkey, jobId, pollToken: `tok-${jobId}`, to: { x: '1', y: '2', z: '3' }, plane: 0, at: 5 })
+    beforeEach(() => { localStorage.removeItem('onosendai:cloudKeys'); localStorage.removeItem('onosendai:cloudKeys:kept') })
+
+    it('a second identity\'s paid hop keeps the first identity\'s ticket, and forgets only its own', () => {
+      saveKeysTicket(ticket('A', 'job-a'))
+      saveKeysTicket(ticket('B', 'job-b'))
+      expect(loadKeysTicket('A')?.jobId).toBe('job-a')
+      expect(loadKeysTicket('B')?.jobId).toBe('job-b')
+      clearKeysTicket('B', 'job-a')
+      expect(loadKeysTicket('A')?.jobId).toBe('job-a')
+      expect(loadKeysTicket('B')?.jobId).toBe('job-b')
+      clearKeysTicket('B', 'job-b')
+      expect(loadKeysTicket('B')).toBeNull()
+      expect(loadKeysTicket('A')?.jobId).toBe('job-a')
+      clearKeysTicket('A', 'job-a')
+      expect(localStorage.getItem('onosendai:cloudKeys')).toBeNull()
+    })
+
+    it('the single ticket an earlier version kept, which names no identity, is read by whoever collects, and never written over', () => {
+      const { pubkey: _none, ...old } = ticket('A', 'job-old')
+      void _none
+      localStorage.setItem('onosendai:cloudKeys', JSON.stringify(old))
+      expect(loadKeysTicket('A')?.jobId).toBe('job-old')
+      saveKeysTicket(ticket('B', 'job-b'))
+      expect(loadKeysTicket('B')?.jobId).toBe('job-b')
+      expect(loadKeysTicket('A')?.jobId).toBe('job-old')
+      clearKeysTicket('A', 'job-old')
+      expect(loadKeysTicket('A')).toBeNull()
+      expect(loadKeysTicket('B')?.jobId).toBe('job-b')
+    })
+  })
+
+  describe('one kept job per identity (review of #589)', () => {
+    const job = (pubkey: string, jobId: string): PendingCloudJob => ({
+      version: 1, jobId, pollToken: 't', action: 'hop', pubkey, from: wirePosition({ x: 1n, y: 2n, z: 3n }), to: wirePosition({ x: 4n, y: 2n, z: 3n }),
+      plane: 0, prevEventId: 'ab'.repeat(32), costMsats: 1000, createdAt: 5, stage: 'paid', deposit: null,
+    })
+    beforeEach(() => { localStorage.removeItem('onosendai:cloudJob'); localStorage.removeItem('onosendai:cloudJob:kept') })
+
+    it('a second identity buying keeps the first identity\'s paid record', () => {
+      saveCloudJob(job('A', 'job-a'))
+      saveCloudJob(job('B', 'job-b'))
+      expect(loadCloudJob('A')?.jobId).toBe('job-a')
+      expect(loadCloudJob('B')?.jobId).toBe('job-b')
+    })
+
+    it('forgetting one identity\'s job leaves the other, and a job id that is not the record\'s forgets nothing', () => {
+      saveCloudJob(job('A', 'job-a'))
+      saveCloudJob(job('B', 'job-b'))
+      clearCloudJob('B', 'an-older-job')
+      expect(loadCloudJob('B')?.jobId).toBe('job-b')
+      clearCloudJob('B')
+      expect(loadCloudJob('B')).toBeNull()
+      expect(loadCloudJob('A')?.jobId).toBe('job-a')
+      clearCloudJob('A', 'job-a')
+      expect(localStorage.getItem('onosendai:cloudJob')).toBeNull()
+    })
+
+    it('the single record an earlier version kept is read as its identity\'s, and kept when another identity buys', () => {
+      localStorage.setItem('onosendai:cloudJob', JSON.stringify(job('A', 'job-a')))
+      expect(loadCloudJob('A')?.jobId).toBe('job-a')
+      expect(loadCloudJob('B')).toBeNull()
+      saveCloudJob(job('B', 'job-b'))
+      expect(loadCloudJob('A')?.jobId).toBe('job-a')
+      expect(loadCloudJob('B')?.jobId).toBe('job-b')
+    })
+  })
+
+  // A tab still open on a build from before the per-identity tables writes its
+  // one entry over the whole key, and removes the key when it is done with it.
+  describe('a tab left open on an earlier build (review of #597 and #599)', () => {
+    const KEYS = ['onosendai:cloudJob', 'onosendai:cloudDeposit', 'onosendai:cloudKeys']
+    const clean = (): void => { for (const k of KEYS) { localStorage.removeItem(k); localStorage.removeItem(`${k}:kept`) } }
+    beforeEach(clean)
+    afterEach(clean)
+    const job = (pubkey: string, jobId: string): PendingCloudJob => ({
+      version: 1, jobId, pollToken: 't', action: 'hop', pubkey, from: wirePosition({ x: 1n, y: 2n, z: 3n }), to: wirePosition({ x: 4n, y: 2n, z: 3n }),
+      plane: 0, prevEventId: 'ab'.repeat(32), costMsats: 1000, createdAt: 5, stage: 'paid', deposit: null,
+    })
+    const dep = (pubkey: string, depositId: string): PendingCloudDeposit => ({ depositId, pubkey, amountMsats: 1000, expiresAt: 9_999_999_999, bolt11: `lnbc-${depositId}` })
+    const ticket = (pubkey: string, jobId: string): PendingKeys => ({ version: 1, pubkey, jobId, pollToken: `tok-${jobId}`, to: { x: '1', y: '2', z: '3' }, plane: 0, at: 5 })
+
+    it('its job record written over the key loses no other identity\'s paid job, and the key is repaired on read', () => {
+      saveCloudJob(job('A', 'job-a'))
+      saveCloudJob(job('B', 'job-b'))
+      // The old saveCloudJob: one record, over everything.
+      localStorage.setItem('onosendai:cloudJob', JSON.stringify(job('C', 'job-c')))
+      expect(loadCloudJob('A')?.jobId).toBe('job-a')
+      expect(loadCloudJob('B')?.jobId).toBe('job-b')
+      expect(loadCloudJob('C')?.jobId).toBe('job-c')
+      // Repaired: a table again, which a tab on this build or on #597's reads whole.
+      expect(Object.keys(JSON.parse(localStorage.getItem('onosendai:cloudJob')!).jobs).sort()).toEqual(['A', 'B', 'C'])
+    })
+
+    it('its job record over an older one of the same identity is the newer, and the rest stay', () => {
+      saveCloudJob(job('A', 'job-a'))
+      saveCloudJob(job('B', 'job-b'))
+      localStorage.setItem('onosendai:cloudJob', JSON.stringify(job('A', 'job-a2')))
+      expect(loadCloudJob('A')?.jobId).toBe('job-a2')
+      expect(loadCloudJob('B')?.jobId).toBe('job-b')
+    })
+
+    it('its clear, which removes the whole key, takes no other identity\'s paid job with it', () => {
+      saveCloudJob(job('A', 'job-a'))
+      saveCloudJob(job('B', 'job-b'))
+      // The old clearCloudJob.
+      localStorage.removeItem('onosendai:cloudJob')
+      expect(loadCloudJob('A')?.jobId).toBe('job-a')
+      expect(loadCloudJob('B')?.jobId).toBe('job-b')
+      expect(localStorage.getItem('onosendai:cloudJob')).not.toBeNull()
+    })
+
+    it('a key that cannot be read is rebuilt from the copy', () => {
+      saveCloudJob(job('A', 'job-a'))
+      localStorage.setItem('onosendai:cloudJob', '{not json')
+      expect(loadCloudJob('A')?.jobId).toBe('job-a')
+    })
+
+    it('a table written by a tab on #597\'s build is the truth: what it forgot stays forgotten, what it added is read', () => {
+      saveCloudJob(job('A', 'job-a'))
+      saveCloudJob(job('B', 'job-b'))
+      // That build reads the table, drops B's job (it ended) and adds D's.
+      const t = JSON.parse(localStorage.getItem('onosendai:cloudJob')!)
+      delete t.jobs.B
+      t.jobs.D = job('D', 'job-d')
+      localStorage.setItem('onosendai:cloudJob', JSON.stringify(t))
+      expect(loadCloudJob('B')).toBeNull()
+      expect(loadCloudJob('D')?.jobId).toBe('job-d')
+      // And the copy follows it, so a later old-build wipe brings back only what was there.
+      localStorage.removeItem('onosendai:cloudJob')
+      expect(loadCloudJob('A')?.jobId).toBe('job-a')
+      expect(loadCloudJob('B')).toBeNull()
+      expect(loadCloudJob('D')?.jobId).toBe('job-d')
+    })
+
+    it('forgetting on this build forgets for good: nothing comes back from the copy', () => {
+      saveCloudJob(job('A', 'job-a'))
+      clearCloudJob('A', 'job-a')
+      expect(localStorage.getItem('onosendai:cloudJob')).toBeNull()
+      expect(localStorage.getItem('onosendai:cloudJob:kept')).toBeNull()
+      expect(loadCloudJob('A')).toBeNull()
+    })
+
+    it('its deposit written over the key, then cleared, loses no other identity\'s unclaimed deposit', () => {
+      saveCloudDeposit(dep('A', 'dep-a'))
+      saveCloudDeposit(dep('B', 'dep-b'))
+      localStorage.setItem('onosendai:cloudDeposit', JSON.stringify(dep('C', 'dep-c')))
+      expect(loadCloudDeposit('A')?.depositId).toBe('dep-a')
+      expect(loadCloudDeposit('C')?.depositId).toBe('dep-c')
+      localStorage.removeItem('onosendai:cloudDeposit')
+      expect(loadCloudDeposit('A')?.depositId).toBe('dep-a')
+      expect(loadCloudDeposit('B')?.depositId).toBe('dep-b')
+    })
+
+    it('its cubes ticket written over the key, then cleared, loses no identity\'s ticket', () => {
+      saveKeysTicket(ticket('A', 'job-a'))
+      saveKeysTicket(ticket('B', 'job-b'))
+      const { pubkey: _none, ...old } = ticket('A', 'job-old')
+      void _none
+      localStorage.setItem('onosendai:cloudKeys', JSON.stringify(old))
+      expect(loadKeysTicket('A')?.jobId).toBe('job-a')
+      expect(loadKeysTicket('B')?.jobId).toBe('job-b')
+      // The old ticket names no identity: whoever collects first, as before.
+      expect(loadKeysTicket('C')?.jobId).toBe('job-old')
+      localStorage.removeItem('onosendai:cloudKeys')
+      expect(loadKeysTicket('A')?.jobId).toBe('job-a')
+      expect(loadKeysTicket('B')?.jobId).toBe('job-b')
+    })
   })
 })
 

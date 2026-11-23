@@ -3,67 +3,147 @@
  *
  * Made for the workshop (arkinox, 2026-10-10: "not being able to orbit
  * hurts"), where a drag on it turns the view about the shard and a tap sends
- * the view home. WALK uses the same ball in the bottom left to look around
+ * the view home. WALK uses the same ball in the bottom right to look around
  * (arkinox, 2026-10-23: "bring back the sphere we have in the workshop and
- * use it to look"). Pointer capture keeps a drag alive after the finger
- * leaves the ball, until it lifts. What a drag and a tap do is the caller's.
+ * use it to look"). What a drag and a tap do is the caller's.
+ *
+ * A drag started on the ball keeps turning after the finger leaves it, until
+ * it lifts (arkinox, 2026-11-02: "a drag started on LOOK continues even off
+ * the button"). The ball captures the pointer, and the drag is also followed
+ * on the document, as the scene's own look is (scene/Scene.tsx), so it goes
+ * on wherever the finger goes even where a capture is refused or dropped.
+ *
+ * One finger drives it at a time, whichever finger that is. It used to take
+ * only the primary pointer, which is the first finger on the screen: with a
+ * thumb already holding a pad key, a finger on LOOK was never primary and the
+ * ball did nothing, so you could not walk and look at once. A new press on
+ * the ball takes over from a drag still running, as the scene's own look
+ * lets go of one (scene/Scene.tsx): a release the page never heard (the
+ * finger lifted outside the window, a dropped event) must not leave the ball
+ * dead. A mouse that moves with no button held has let go somewhere unheard,
+ * and its drag ends there.
+ *
+ * `square` makes the whole square around the ball the thing you press
+ * (arkinox, 2026-11-02: "the touch area is a full square containing the
+ * sphere"); a round button's corners are not part of it.
+ *
+ * `children` replace the globe: the workshop's view ball is the same drag and
+ * tap round the axes compass (workshop/shell/ViewBall.tsx), drawn by its own
+ * class rather than the globe's.
  */
 
-import { useRef } from 'react'
+import { useEffect, useRef, type ReactNode } from 'react'
 import { noCallout } from '../../hooks/useRepeatable'
 
 interface OrbitSphereProps {
-  /** A drag of dx, dy CSS pixels since the last move. */
-  onTurn: (dx: number, dy: number) => void
+  /** A drag of dx, dy CSS pixels since the last move, on a ball `size` CSS pixels wide. */
+  onTurn: (dx: number, dy: number, size: number) => void
   /** A tap with no drag. Nothing when absent. */
   onTap?: () => void
   /** The small word on the ball. */
   label: string
   title: string
   ariaLabel: string
-  /** Added to `benchorb`, for where the ball stands. */
+  /** Added to `benchorb`, for where the ball stands; with `square`, to the square it stands in. */
   className?: string
+  /** Press anywhere in the square around the ball, not only on the ball. */
+  square?: boolean
+  /** Drawn inside instead of the globe; the button then wears `className` alone. */
+  children?: ReactNode
+  /** Extra attributes for the button (aria-expanded and the like). */
+  aria?: Record<`aria-${string}`, string | boolean>
 }
 
-export function OrbitSphere({ onTurn, onTap, label, title, ariaLabel, className }: OrbitSphereProps): JSX.Element {
-  const last = useRef<{ x: number; y: number } | null>(null)
-  const moved = useRef(false)
+/**
+ * How far a press may wander, in CSS pixels, and still be a tap when it
+ * lifts: a thumb never lifts where it landed. What it wandered still turns
+ * the view; it only does not cancel the tap.
+ */
+const TAP_SLOP = 6
+
+/** The document events a drag is followed through, in the capture phase. */
+const FOLLOWED = ['pointermove', 'pointerup', 'pointercancel'] as const
+
+export function OrbitSphere({ onTurn, onTap, label, title, ariaLabel, className, square = false, children, aria }: OrbitSphereProps): JSX.Element {
+  // The newest callbacks, read when an event arrives rather than when the drag began.
+  const turn = useRef(onTurn)
+  turn.current = onTurn
+  const tap = useRef(onTap)
+  tap.current = onTap
+  const drag = useRef<{ id: number; x: number; y: number; size: number; travel: number; off: () => void } | null>(null)
+
+  const end = (): void => {
+    const d = drag.current
+    if (!d) return
+    drag.current = null
+    d.off()
+  }
+  // Taken off the page mid-drag: the drag ends with it.
+  useEffect(() => end, [])
+
   const down = (e: React.PointerEvent<HTMLButtonElement>): void => {
-    if (!e.isPrimary) return
+    if (e.pointerType === 'mouse' && e.button !== 0) return
     e.preventDefault()
-    e.currentTarget.setPointerCapture(e.pointerId)
-    last.current = { x: e.clientX, y: e.clientY }
-    moved.current = false
+    // A drag still running, its release never heard, gives way to this press.
+    end()
+    const el = e.currentTarget
+    try { el.setPointerCapture(e.pointerId) } catch { /* followed on the document anyway */ }
+    const id = e.pointerId
+    const doc = el.ownerDocument
+    const listener = (ev: Event): void => {
+      const p = ev as PointerEvent
+      const d = drag.current
+      if (!d || p.pointerId !== id) return
+      if (p.type === 'pointermove') {
+        // A mouse moving with no button held let go where the page did not hear it.
+        if (p.pointerType === 'mouse' && (p.buttons & 1) === 0) { end(); return }
+        const dx = p.clientX - d.x
+        const dy = p.clientY - d.y
+        if (dx === 0 && dy === 0) return
+        d.x = p.clientX
+        d.y = p.clientY
+        d.travel += Math.abs(dx) + Math.abs(dy)
+        turn.current(dx, dy, d.size)
+        return
+      }
+      // Lifted, or taken by the browser: the drag is over, and with no move it was a tap.
+      const moved = d.travel > TAP_SLOP
+      end()
+      if (p.type === 'pointerup' && !moved) tap.current?.()
+    }
+    for (const t of FOLLOWED) doc.addEventListener(t, listener, true)
+    drag.current = {
+      id, x: e.clientX, y: e.clientY, size: el.getBoundingClientRect().width, travel: 0,
+      off: () => { for (const t of FOLLOWED) doc.removeEventListener(t, listener, true) },
+    }
   }
-  const move = (e: React.PointerEvent<HTMLButtonElement>): void => {
-    if (!last.current) return
-    const dx = e.clientX - last.current.x
-    const dy = e.clientY - last.current.y
-    if (dx === 0 && dy === 0) return
-    last.current = { x: e.clientX, y: e.clientY }
-    moved.current = true
-    onTurn(dx, dy)
+  // A capture lost while the ball is still on screen changes nothing: the
+  // document still has the drag. Hidden or gone (a modal over the HUD), the
+  // drag ends there, and it was no tap.
+  const lost = (e: React.PointerEvent<HTMLButtonElement>): void => {
+    const el = e.currentTarget
+    if (!el.isConnected || el.getClientRects().length === 0) end()
   }
-  const up = (): void => {
-    if (!last.current) return
-    last.current = null
-    if (!moved.current) onTap?.()
+
+  const handlers = { ...noCallout, ...aria, onPointerDown: down, onLostPointerCapture: lost }
+  if (children !== undefined) {
+    return (
+      <button className={className} title={title} aria-label={ariaLabel} {...handlers}>
+        {children}
+      </button>
+    )
   }
-  // Capture lost with no release (the ball hidden mid-drag under a modal):
-  // the drag ends there, and it was no tap.
-  const lost = (): void => { last.current = null }
+  if (square) {
+    return (
+      <button className={className ? `orbsquare ${className}` : 'orbsquare'} title={title} aria-label={ariaLabel} {...handlers}>
+        <span className="benchorb benchorb--inside" aria-hidden>
+          <span className="benchorb__sub">{label}</span>
+        </span>
+      </button>
+    )
+  }
   return (
-    <button
-      className={className ? `benchorb ${className}` : 'benchorb'}
-      title={title}
-      aria-label={ariaLabel}
-      {...noCallout}
-      onPointerDown={down}
-      onPointerMove={move}
-      onPointerUp={up}
-      onPointerCancel={up}
-      onLostPointerCapture={lost}
-    >
+    <button className={className ? `benchorb ${className}` : 'benchorb'} title={title} aria-label={ariaLabel} {...handlers}>
       <span className="benchorb__sub">{label}</span>
     </button>
   )

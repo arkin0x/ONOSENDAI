@@ -34,7 +34,11 @@ import { positionOf, regionOf, useShards } from '../useShards'
 import { useWorkshop } from '../useWorkshop'
 import { useBuilder } from '../useBuilder'
 import { stepBuild } from '../buildStep'
-import { buildCursorOf, buildStepOf } from '../../lib/buildCursor'
+import { BASE_CAPS } from 'sno-core/seeds'
+import { ORIGINAL_DNAS } from '../../lib/seeds/originalDnas'
+import { seedDraftHeight, seedFitFor, type SeedFit } from '../../lib/seeds/plant'
+import { buildPlane } from '../../lib/buildCursor'
+import { buildCursorOf, buildStepOf, moveStepOf } from '../../lib/buildCursor'
 import { alignTo, deployPoint, type Position } from '../../lib/space'
 
 const S = () => useCyberspace.getState()
@@ -67,8 +71,8 @@ function lineUp(zoom: number, height: number): void {
 
 /** Lower (or raise) STEP until it reads `to`. */
 function stepTo(to: number): void {
-  while (buildStepOf(S()) > to) stepBuild(-1)
-  while (buildStepOf(S()) < to) stepBuild(1)
+  while (moveStepOf(S()) > to) stepBuild(-1)
+  while (moveStepOf(S()) < to) stepBuild(1)
 }
 
 const placed = (): Position => deployPoint(S().cursor, buildStepOf(S()), D().deployHeight)
@@ -77,7 +81,7 @@ beforeEach(() => {
   useShards.setState({ mine: [], deleted: {}, discovered: {}, pending: null, deployHeight: 0, deployUnit: 0, deployStatus: 'idle', deployError: null })
   useBuilder.getState().exit()
   S().clearFocus()
-  useCyberspace.setState({ live: false, position: SPOT, anchor: SPOT, cursor: SPOT, scaleExp: 0, buildStep: null, spectate: null, exploreIndex: null, transit: null })
+  useCyberspace.setState({ live: false, position: SPOT, anchor: SPOT, cursor: SPOT, scaleExp: 0, buildStep: null, buildSettle: null, buildExact: false, spectate: null, exploreIndex: null, transit: null })
 })
 
 afterEach(() => {
@@ -135,7 +139,7 @@ describe('STEP', () => {
     expect(placed().z).toBe(center.z + 1n)
   })
 
-  it('never exceeds the zoom: + stops at the zoom, and zooming in below it brings it down', () => {
+  it('never exceeds the zoom: + stops at the zoom, and zoomed in below it a move steps the zoom', () => {
     lineUp(15, 20)
     stepBuild(1)
     expect(buildStepOf(S())).toBe(15)
@@ -144,13 +148,12 @@ describe('STEP', () => {
     stepTo(10)
     S().adjustScale(-7)
     expect(S().scaleExp).toBe(8)
-    expect(buildStepOf(S())).toBe(8)
-    expect(S().buildStep).toBeNull()
+    expect(moveStepOf(S())).toBe(8)
     const x = S().cursor.x
     S().moveCursor({ axis: 'x', dir: 1 })
     expect(S().cursor.x - x).toBe(1n << 8n)
     // Even a stored step past the zoom reads as the zoom.
-    expect(buildStepOf({ scaleExp: 4, buildStep: 9 })).toBe(4)
+    expect(moveStepOf({ scaleExp: 4, buildStep: 9 })).toBe(4)
   })
 
   it('leaves the hide height and its region alone', () => {
@@ -260,10 +263,12 @@ describe('STEP', () => {
     lineUp(15, 20)
     stepTo(14)
     stepTo(15)
+    // The zoom puts the cursor on the placement, 2^15's center, and holds it
+    // there (arkinox, 2026-11-11): STEP no longer re-centers it on 2^18's.
     S().adjustScale(3)
     stepTo(17)
-    // Re-centered on the 2^18 cube's center, not left where 2^15 put it.
-    expect(S().cursor).toEqual(deployPoint(SPOT, 18, 20))
+    expect(S().cursor).toEqual(deployPoint(SPOT, 15, 20))
+    expect(placed()).toEqual(deployPoint(SPOT, 15, 20))
 
     // Lowered, canceled, and deployed again at another zoom: the same.
     D().cancelDeploy()
@@ -274,13 +279,15 @@ describe('STEP', () => {
     expect(S().cursor).toEqual(deployPoint(SPOT, 12, 20))
   })
 
-  it('a zoom changed without the pad or keys (a focus, a hyperspace view) still brings STEP down for good', () => {
+  it('a zoom changed without the pad or keys (a focus, a hyperspace view) moves nothing either', () => {
     lineUp(15, 20)
     stepTo(10)
+    const p = placed()
     useCyberspace.setState({ scaleExp: 8 })
-    expect(S().buildStep).toBeNull()
+    expect(moveStepOf(S())).toBe(8)
     useCyberspace.setState({ scaleExp: 15 })
-    expect(buildStepOf(S())).toBe(15)
+    expect(moveStepOf(S())).toBe(10)
+    expect(placed()).toEqual(p)
   })
 
   it('snaps a message the same way', () => {
@@ -291,5 +298,49 @@ describe('STEP', () => {
     const p = placed()
     for (const a of ['x', 'y', 'z'] as const) expect(p[a]).toBe(alignTo(S().cursor[a], 5) + (1n << 4n))
     expect(alignTo(p.x, 12)).toBe(alignTo(SPOT.x, 12))
+  })
+})
+
+describe('STEP lowered before SEED (found by the tutorial\'s review, 2026-11-11)', () => {
+  const seedDraft = (fit?: SeedFit) => ({ text: ORIGINAL_DNAS[5].text, caps: BASE_CAPS, scale: 0, title: '', ...(fit ? { fit } : {}) })
+
+  it('a seed SEED measured at the lowered STEP keeps it, and its cursor, and hides at its measured height, not 12', () => {
+    lineUp(15, 20)
+    stepTo(10)
+    const at = { ...S().cursor }
+    // The composer measures where the seed lands at this STEP and cursor (plant.ts seedHideFor) ...
+    const fit = seedFitFor({ height: 5, reach: 6 }, at, buildPlane(S()), buildStepOf(S()))
+    // ... and PLANT lines the seed up in place of what was lined up.
+    D().startDeploySeed(seedDraft(fit))
+    expect(D().pending?.type).toBe('seed')
+    expect(buildStepOf(S())).toBe(10)
+    expect(S().cursor).toEqual(at)
+    expect(seedDraftHeight(fit, S().cursor, buildPlane(S()), buildStepOf(S()), 20)).toBe(5)
+  })
+
+  it('anything else lined up in its place still takes STEP back to the zoom; so does a seed measured elsewhere', () => {
+    lineUp(15, 20)
+    stepTo(10)
+    D().startDeploySeed(seedDraft())
+    expect(S().buildStep).toBeNull()
+    lineUp(15, 20)
+    stepTo(10)
+    D().startDeploySeed(seedDraft(seedFitFor({ height: 5, reach: 6 }, S().cursor, buildPlane(S()), 9)))
+    expect(S().buildStep).toBeNull()
+    lineUp(15, 20)
+    stepTo(10)
+    D().startDeploySeed(seedDraft(seedFitFor({ height: 5, reach: 6 }, { ...S().cursor, x: S().cursor.x + 1n }, buildPlane(S()), buildStepOf(S()))))
+    expect(S().buildStep).toBeNull()
+  })
+
+  it('a bloom the worker could not measure still keeps the STEP it was composed at, and hides at 12 there', () => {
+    lineUp(15, 20)
+    stepTo(10)
+    const at = { ...S().cursor }
+    const fit = seedFitFor({ height: 12, reach: undefined }, at, buildPlane(S()), buildStepOf(S()))
+    D().startDeploySeed(seedDraft(fit))
+    expect(buildStepOf(S())).toBe(10)
+    expect(S().cursor).toEqual(at)
+    expect(seedDraftHeight(fit, S().cursor, buildPlane(S()), buildStepOf(S()), 20)).toBe(12)
   })
 })

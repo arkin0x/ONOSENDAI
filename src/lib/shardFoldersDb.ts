@@ -1,8 +1,14 @@
 /**
  * shardFoldersDb.ts: where the shard folder trees are kept, in IndexedDB.
  *
- * One database, one store, one row per identity: { owner, tree }, the whole
- * tree of lib/shardFolders.ts. A tree is small (names and ids, a few hundred
+ * One database, one store: { owner, tree }, the whole tree of
+ * lib/shardFolders.ts. The tree is the device's (DEVICE_OWNER), the same for
+ * every identity, as the workshop library is (owner ruling, 2026-11-19):
+ * the folders, the filings, the folds and when each shard was last deployed,
+ * which only sorts the lists. Builds before that kept one row per identity,
+ * under its pubkey; those rows are merged into the device's row the first
+ * time it is read or written (mergeTrees, in the same transaction), and are
+ * left as they were, never deleted. A tree is small (names and ids, a few hundred
  * at most), so it is read and written whole. A change is never a tree written
  * over another: commit() reads the row, applies the ops and puts it back in
  * one readwrite transaction, and IndexedDB runs readwrite transactions on a
@@ -12,7 +18,7 @@
  */
 
 import { openDatabase, request } from './idb'
-import { applyOps, normalizeTree, type FolderOp, type FolderTree } from './shardFolders'
+import { applyOps, mergeTrees, normalizeTree, type FolderOp, type FolderTree } from './shardFolders'
 
 /**
  * Named for the format, not the app: snocrash keeps its folders in a database
@@ -48,29 +54,74 @@ export function openShardFoldersDb(timeoutMs: number = OPEN_TIMEOUT_MS): Promise
   return Promise.race([opening, timeout]).finally(() => clearTimeout(timer))
 }
 
-/** One identity's tree; empty when it has none yet. */
-export async function readTree(db: IDBDatabase, owner: string): Promise<FolderTree> {
-  const row = await request(db.transaction(TREES_STORE, 'readonly').objectStore(TREES_STORE).get(owner)) as { tree?: unknown } | undefined
-  return normalizeTree(row?.tree)
-}
+/**
+ * The row of the device's one tree. Not a pubkey (those are 64 hex), so it
+ * can never be an identity's old row.
+ */
+export const DEVICE_OWNER = 'device'
 
-/** Apply ops to one identity's stored tree in one transaction; resolves with the tree as committed. */
-export function commitOps(db: IDBDatabase, owner: string, ops: readonly FolderOp[]): Promise<FolderTree> {
+interface Row { owner?: unknown; tree?: unknown; mergedFrom?: unknown }
+
+/**
+ * The device's tree after `ops`, in one readwrite transaction. When the
+ * device's row does not exist yet it is made first from every identity's
+ * old row (mergeTrees) and written even with no ops, so the merge runs once;
+ * the old rows are only read. Otherwise it is written only when an op
+ * changed it.
+ */
+function inTransaction(db: IDBDatabase, ops: readonly FolderOp[]): Promise<FolderTree> {
   return new Promise((resolve, reject) => {
     const tx = db.transaction(TREES_STORE, 'readwrite')
     const os = tx.objectStore(TREES_STORE)
     let next: FolderTree | null = null
-    const got = os.get(owner)
-    got.onsuccess = () => {
-      const row = got.result as { tree?: unknown } | undefined
-      next = applyOps(normalizeTree(row?.tree), ops)
+    const write = (row: Row, tree: FolderTree, made: boolean): void => {
+      next = applyOps(tree, ops)
+      if (!made && next === tree) return
       // Whatever a later build keeps beside the tree is kept as it was.
-      const kept = row && typeof row === 'object' ? row : {}
-      const keptTree = row?.tree && typeof row.tree === 'object' ? row.tree : {}
-      os.put({ ...kept, owner, tree: { ...keptTree, ...next } })
+      const keptTree = row.tree && typeof row.tree === 'object' ? row.tree : {}
+      os.put({ ...row, owner: DEVICE_OWNER, tree: { ...keptTree, ...next } })
+    }
+    const got = os.get(DEVICE_OWNER)
+    got.onsuccess = () => {
+      const row = got.result as Row | undefined
+      if (row) { write(row, normalizeTree(row.tree), false); return }
+      const all = os.getAll()
+      all.onsuccess = () => {
+        const old = (all.result as Row[]).filter((r) => r && typeof r.owner === 'string' && r.owner !== DEVICE_OWNER)
+        write({ owner: DEVICE_OWNER, mergedFrom: old.map((r) => r.owner) }, mergeTrees(old.map((r) => normalizeTree(r.tree))), true)
+      }
     }
     tx.oncomplete = () => resolve(next ?? normalizeTree(null))
     tx.onerror = () => reject(tx.error ?? new Error('IndexedDB write failed'))
     tx.onabort = () => reject(tx.error ?? new Error('IndexedDB write aborted'))
   })
+}
+
+/** The device's tree; on the first read, made from the trees each identity kept before (and written). */
+export function readTree(db: IDBDatabase): Promise<FolderTree> {
+  return inTransaction(db, [])
+}
+
+/** Apply ops to the device's stored tree in one transaction; resolves with the tree as committed. */
+export function commitOps(db: IDBDatabase, ops: readonly FolderOp[]): Promise<FolderTree> {
+  return inTransaction(db, ops)
+}
+
+/**
+ * The device's tree, read only: its row, or the merge of the identities'
+ * rows when it has none yet, with nothing written. For when readTree failed
+ * (a full disk refuses the first write that keeps the merge): the folders are
+ * still shown, for the session, rather than none (review of #822).
+ */
+export async function peekTree(db: IDBDatabase): Promise<FolderTree> {
+  const rows = await request(db.transaction(TREES_STORE, 'readonly').objectStore(TREES_STORE).getAll()) as Row[]
+  const device = rows.find((r) => r?.owner === DEVICE_OWNER)
+  if (device) return normalizeTree(device.tree)
+  return mergeTrees(rows.filter((r) => r && typeof r.owner === 'string').map((r) => normalizeTree(r.tree)))
+}
+
+/** One identity's tree as a build before 2026-11-19 kept it; for tests and diagnosis. */
+export async function readIdentityTree(db: IDBDatabase, owner: string): Promise<FolderTree> {
+  const row = await request(db.transaction(TREES_STORE, 'readonly').objectStore(TREES_STORE).get(owner)) as Row | undefined
+  return normalizeTree(row?.tree)
 }

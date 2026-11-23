@@ -20,7 +20,7 @@ import { createPortal } from 'react-dom'
 import { GENERAL_RELAYS } from '../lib/contacts'
 import type { NostrEvent } from '../lib/events'
 import { publishMany, queryAny, relaySet } from '../lib/relay'
-import { SERVER_LIST_KIND, explainUpload, uploadBlob } from '../lib/blossom'
+import { SERVER_LIST_KIND, explainUpload, serverAnswered, uploadBlob } from '../lib/blossom'
 import { BlossomServerPicker, useBlossomChoice } from './BlossomServer'
 import { fieldsOf, mergeProfile, newest, parseContent, profileProblems, profileTemplate, type ProfileField, type ProfileFields } from '../lib/profileEdit'
 import { shortHex } from '../lib/time'
@@ -28,6 +28,8 @@ import { ProfilePic } from './ProfileBadge'
 import { useCyberspace } from '../store/useCyberspace'
 import { useProfiles } from '../store/useProfiles'
 import { useEscape } from '../hooks/useEscape'
+import { ModalClose } from './ui/ModalClose'
+import { CopyValue } from './ui/CopyValue'
 
 /** How long to wait on the general relays for the current kind 0 and server list. */
 const FETCH_WAIT_MS = 5000
@@ -35,6 +37,8 @@ const FETCH_WAIT_MS = 5000
 const SIGN_PATIENCE_MS = 120_000
 /** The upload token is small and the prompt says what it is for. */
 const UPLOAD_SIGN_PATIENCE_MS = 60_000
+/** Said when the identity changed while a picture was prepared for upload. */
+const UPLOAD_SWITCHED = 'You switched identity while this picture was being uploaded, so it was not used. Upload it again as the identity signed in now.'
 
 const SIGNER_NOTE: Record<string, string> = {
   local: 'This profile belongs to the key generated on this device. Export the key (CHANGE) before you invest in it.',
@@ -125,13 +129,25 @@ export function ProfileModal({ onClose }: { onClose: () => void }): JSX.Element 
     const host = target.replace(/^https?:\/\//, '')
     setUploading(field)
     setStatus({ kind: 'note', text: `Signing the upload for ${host}. Your signer may ask.` })
+    // The upload is signed after the file is hashed, by whoever is signed in
+    // by then: a switch meanwhile had the new identity sign the old one's
+    // upload, and its address went into the new identity's profile form.
+    // Neither now (identity-switch audit, 2026-11-19).
+    const owner = identity.pubkey
+    const switched = (): boolean => useCyberspace.getState().identity.pubkey !== owner
     try {
-      const desc = await uploadBlob(target, file, (t) => useCyberspace.getState().signEvent(t, UPLOAD_SIGN_PATIENCE_MS))
+      const desc = await uploadBlob(target, file, (t) => {
+        if (switched()) throw new Error(UPLOAD_SWITCHED)
+        return useCyberspace.getState().signEvent(t, UPLOAD_SIGN_PATIENCE_MS)
+      })
+      if (switched()) throw new Error(UPLOAD_SWITCHED)
       set(field, desc.url)
       if (field === 'picture') setPictureBroken(false)
       setStatus({ kind: 'ok', text: `Uploaded to ${host} (${Math.max(1, Math.round(file.size / 1024))} KB). Publish the profile to use it.` })
       blossom.remember(target)
     } catch (e) {
+      // The server answered, even with a no (one that wants a subscription): it sticks (owner 2026-11-10).
+      if (serverAnswered(e)) blossom.remember(target)
       setStatus({ kind: 'err', text: explainUpload(e) })
     } finally {
       setUploading(null)
@@ -177,7 +193,7 @@ export function ProfileModal({ onClose }: { onClose: () => void }): JSX.Element 
       <div className="modal__card login profile" onPointerDown={(e) => e.stopPropagation()}>
         <div className="login__head">
           <h2 className="modal__title">Profile</h2>
-          <button className="secret__close" onClick={onClose} aria-label="Close">✕</button>
+          <ModalClose onClose={onClose} />
         </div>
 
         <div className={`profile__banner${banner ? '' : ' profile__banner--empty'}`} style={banner ? { backgroundImage: `url("${banner}")` } : undefined} aria-hidden="true">
@@ -191,7 +207,7 @@ export function ProfileModal({ onClose }: { onClose: () => void }): JSX.Element 
           <div className="login__current-text">
             <span className="secret__name">{(fields.display_name ?? fields.name ?? '').trim() || 'Unnamed'}</span>
             <span className="login__kind">{loaded ? (existing ? 'EDITING YOUR PROFILE' : 'NO PROFILE YET') : 'READING THE RELAYS…'}</span>
-            <span className="secret__npub" title={identity.npub}>{shortHex(identity.npub, 14, 8)}</span>
+            <CopyValue className="secret__npub" value={identity.npub} shown={shortHex(identity.npub, 14, 8)} />
           </div>
         </div>
 

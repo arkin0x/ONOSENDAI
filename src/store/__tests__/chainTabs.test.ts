@@ -37,6 +37,8 @@ vi.hoisted(() => {
   }
   ;(globalThis as { localStorage?: Storage }).localStorage = storage
 })
+// The old stores, as version 1 keeps them and as a browser with no IndexedDB does: the rows have their own tests (chainRowsStore.test.ts).
+vi.mock('../../lib/chainStoreVersion', () => ({ CHAIN_STORE_VERSION: 1 }))
 vi.mock('../../lib/workers', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../lib/workers')>()
   return { ...actual, postProof: vi.fn((m: unknown) => { posted.push(m) }), cancelProof: vi.fn() }

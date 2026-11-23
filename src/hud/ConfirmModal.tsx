@@ -7,6 +7,7 @@
 import type { ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { useEscape } from '../hooks/useEscape'
+import { ModalClose } from './ui/ModalClose'
 
 interface Props {
   /** Something to show above the title, such as the HOSAKA banner. */
@@ -22,6 +23,8 @@ interface Props {
    */
   busy?: boolean
   confirmLabel: string
+  /** The confirm cannot be pressed (what it would do is refused for now); cancel still can. */
+  confirmDisabled?: boolean
   danger?: boolean
   /** An extra class on the card, for a border that is not the destructive red. */
   cardClassName?: string
@@ -40,7 +43,7 @@ interface Props {
   onCancel: () => void
 }
 
-export function ConfirmModal({ banner, title, body, figure, busy = false, confirmLabel, danger = true, cardClassName, cancelLabel = 'CANCEL', onBackdrop, scroll = false, onConfirm, onCancel }: Props): JSX.Element {
+export function ConfirmModal({ banner, title, body, figure, busy = false, confirmLabel, confirmDisabled = false, danger = true, cardClassName, cancelLabel = 'CANCEL', onBackdrop, scroll = false, onConfirm, onCancel }: Props): JSX.Element {
   // Escape is a tap on the backdrop: it answers nothing, so a held-chain
   // prompt sets itself aside and every other one cancels. Opened over another
   // modal, this is the more recent one, so it closes first (arkinox,
@@ -54,14 +57,18 @@ export function ConfirmModal({ banner, title, body, figure, busy = false, confir
     <div className="modal" role="dialog" aria-modal="true" aria-label={title} onPointerDown={() => { if (!busy) (onBackdrop ?? onCancel)() }}>
       <div className={`modal__card ${cardClassName ?? ''}`} onPointerDown={(e) => e.stopPropagation()}>
         {banner}
-        <h2 className="modal__title">{title}</h2>
+        {/* The ✕ is a tap outside: it answers nothing, and does nothing while the confirm is under way. */}
+        <div className="modal__head">
+          <h2 className="modal__title">{title}</h2>
+          <ModalClose onClose={() => (onBackdrop ?? onCancel)()} disabled={busy} />
+        </div>
         {figure !== undefined && <div className="modal__figure">{figure}</div>}
         {/* A div, not a paragraph: an explanation's lists and tables are not
             valid inside a <p>. */}
         <div className={`modal__body ${scroll ? 'modal__body--scroll' : ''}`}>{body}</div>
         <div className="modal__row">
           {cancelLabel !== null && <button className="modal__cancel" onClick={onCancel} disabled={busy}>{cancelLabel}</button>}
-          <button className={`modal__confirm ${danger ? 'modal__confirm--danger' : ''} ${busy ? 'is-busy' : ''}`} onClick={onConfirm} disabled={busy}>
+          <button className={`modal__confirm ${danger ? 'modal__confirm--danger' : ''} ${busy ? 'is-busy' : ''}`} onClick={onConfirm} disabled={busy || confirmDisabled}>
             {busy && <span className="spin" aria-hidden="true" />}{confirmLabel}
           </button>
         </div>

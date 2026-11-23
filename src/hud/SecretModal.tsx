@@ -22,23 +22,32 @@
  * actions every item has.
  */
 
-import { useEffect, useState, type ReactNode } from 'react'
-import { Copy, CopyPlus, Move3d, Rotate3d, Target, TvMinimal } from 'lucide-react'
+import { fetchRef } from '../lib/parts'
+import { useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react'
+import { Copy, CopyPlus, GitFork, Move3d, PackagePlus, Pencil, Rotate3d, Target, TvMinimal } from 'lucide-react'
+import type { FeedObject } from 'sno-core/feed'
 import { nip19 } from 'nostr-tools'
 import { regionLabel } from '../lib/loot'
 import { formatAgo, formatStamp, shortHex } from '../lib/time'
 import { spectate } from '../lib/spectator'
 import { ProfilePic, ProfileTap } from './ProfileBadge'
-import { Comments } from './Comments'
+import { Comments, PublicComments } from './Comments'
 import { Reactions } from './Reactions'
 import { itemKind } from '../lib/comments'
+import { subjectOfWorldItem } from '../lib/commentSubjects'
 import { useProfile } from '../hooks/useProfile'
+import { isGuideAuthor } from '../tutorial/guideBags'
 import { profileLabel } from '../store/useProfiles'
 import { useCyberspace } from '../store/useCyberspace'
-import { editable, muteSubject, useShards, type WorldItem } from '../store/useShards'
-import { editPlaced } from '../store/useBuilder'
+import { editable, movable as movableDep, muteSubject, rowLoss, useShards, worldItemHidden, type WorldItem } from '../store/useShards'
+import { useInventory } from '../store/useInventory'
+import { addToRoom, editPlaced, movePlaced } from '../store/useBuilder'
+import { DeleteDoorCard, DoorOwnerBlock } from './DoorOwner'
+import { doorSecret } from '../store/doorSecrets'
+import { openFeedObjectInWorkshop, useStash } from './stash'
 import { useWorkshop } from '../store/useWorkshop'
-import { useEscape } from '../hooks/useEscape'
+import { Stacked, leaveModals, useModalStack } from './modalStack'
+import { usePublicShard, worldItemOfObject } from '../store/usePublicShard'
 import { findCashuToken, textWithoutToken } from '../lib/cashu'
 import { hasNftLink, textWithoutNftLinks } from '../lib/nftLink'
 import { deleteWords, removeWords } from '../lib/deleteWords'
@@ -47,6 +56,10 @@ import { ChestBlock, KeyLine } from './ItemRows'
 import { ConfirmModal } from './ConfirmModal'
 import { ItemFace } from './ItemIcon'
 import { CardSpin } from '../scene/CardSpin'
+import { BloomCard } from './BloomCard'
+import { viewScaleOf } from '../lib/seeds/seedItem'
+import { drawnLook, lookOf, onSealedLooks, sealedLooksVersion } from '../lib/looks'
+import { openedByHand, useOpenedChests } from '../store/useOpenedChests'
 import { EventData } from './EventData'
 import { WireData } from './WireData'
 import { PublishRow } from './PublishSwitch'
@@ -54,8 +67,13 @@ import { Metadata } from './Metadata'
 import { AudioCard } from './AudioCard'
 import { BlockButton, MuteItemButton } from './BlockButton'
 import { useMutes } from '../store/useMutes'
+import { ModalClose } from './ui/ModalClose'
+import { CopyValue } from './ui/CopyValue'
 
 const ICON = 12
+
+/** Why DELETE waits: a hide is still going out (SecretModal `hiding`). */
+export const DELETE_WAITS = 'A hide is still going out. DELETE when it lands.'
 
 /** The id a MUTE THIS ITEM names: the lineage, else the item's own id, else (a LIVE LINK) the object's event id. */
 export function muteIdOf(item: Pick<WorldItem, 'lineage' | 'key' | 'event'>): string {
@@ -83,9 +101,48 @@ export function SecretModal(): JSX.Element | null {
   // Subscribed so a block or a mute re-reads the item below and closes the card.
   useMutes((s) => s.muted)
   const item = useShards((s) => (s.selectedSecret ? s.secretByEvent(s.selectedSecret) : null))
-  const me = useCyberspace((s) => s.identity.pubkey)
-  const targeted = useCyberspace((s) => (item?.author ? !!s.targets[item.author] : false))
   const author = item?.author ?? ''
+  const close = (): void => useShards.getState().selectSecret(null)
+  // A selection that no longer resolves (deleted, scrolled out) closes itself.
+  useEffect(() => { if (selected && !item) useShards.getState().selectSecret(null) }, [selected, item])
+  // Escape closes it as a tap outside does (arkinox, 2026-10-01); over a
+  // modal that opened it (notifications), which is there again when it closes (modalStack).
+  useModalStack(item !== null && author !== '', close)
+  if (!item || !author) return null
+  return <Stacked><ItemCard item={item} onClose={close} /></Stacked>
+}
+
+/**
+ * A published shard's card (usePublicShard): the same card as a hidden one,
+ * PUBLIC in its head, and none of what belongs to a place (arkinox,
+ * 2026-11-14). Reached by VIEW on a notification about a shard you published
+ * and hid nowhere, and by VIEW on a Shard Feed tile.
+ */
+export function PublicShardModal(): JSX.Element | null {
+  const object = usePublicShard((s) => s.object)
+  const me = useCyberspace((s) => s.identity.pubkey)
+  const muted = useMutes((s) => s.muted)
+  const item = useMemo(() => (object ? worldItemOfObject(object, me) : null), [object, me])
+  const close = usePublicShard((s) => s.close)
+  // Blocked or muted from its own card: it closes, as a hidden one does.
+  const gone = !!item && worldItemHidden(item, muted, me)
+  useEffect(() => { if (gone) close() }, [gone, close])
+  useModalStack(item !== null && !gone, close)
+  if (!item || gone) return null
+  return <Stacked><ItemCard item={item} onClose={close} published={object ?? undefined} /></Stacked>
+}
+
+/**
+ * The card itself, for a thing hidden in the world (SecretModal) or a
+ * published shard (`object`, PublicShardModal).
+ */
+export function ItemCard({ item, onClose, published: object }: { item: WorldItem; onClose: () => void; published?: FeedObject }): JSX.Element {
+  const published = object !== undefined
+  const me = useCyberspace((s) => s.identity.pubkey)
+  const targeted = useCyberspace((s) => (item.author ? !!s.targets[item.author] : false))
+  const author = item.author ?? ''
+  // Something the tutorial's guide key sealed (tutorial/guideBags.ts).
+  const guided = isGuideAuthor(author)
   const profile = useProfile(author || null)
   const [copied, setCopied] = useState(false)
   // REMOVE FROM CHEST, for a thing revealed from a chest of yours: whether it
@@ -93,6 +150,14 @@ export function SecretModal(): JSX.Element | null {
   // as every hook here must be.
   const [removing, setRemoving] = useState(false)
   const [refusal, setRefusal] = useState<string | null>(null)
+  // A DELETE refused for the last copy of a key offers ARCHIVE instead (arkinox, 2026-11-06).
+  const [archiveOffer, setArchiveOffer] = useState(false)
+  // An archived ITEMS row for each key the refused step would drop (useShards lostKeys); the step may then go ahead.
+  const archive = (): void => {
+    useShards.getState().archiveLost()
+    setArchiveOffer(false)
+    setRefusal('ARCHIVED')
+  }
   // The confirmation card over this modal, for DELETE or REMOVE FROM CHEST
   // (arkinox, 2026-10-10: "we need a confirmation step").
   const [confirming, setConfirming] = useState<'delete' | 'remove' | null>(null)
@@ -100,36 +165,53 @@ export function SecretModal(): JSX.Element | null {
   // wire facts, and a LOCAL / LIVE switch, to show. Never for a thing
   // revealed from a chest, which is in the chest's sealed contents and not a
   // bag entry of its own.
-  const wire = useShards((s) => (item && !item.chestId ? s.mine.find((d) => d.eventId === item.key) ?? null : null))
+  const wire = useShards((s) => (!published && !item.chestId ? s.mine.find((d) => d.eventId === item.key) ?? null : null))
   // EDIT: a shard of yours this device can move (useShards editable).
   const movable = !!wire && editable(wire, me)
+  // MOVE: a key item, a message or hidden audio of yours, as EDIT moves a shard.
+  const itemMoves = !!wire && wire.type !== 'shard' && wire.type !== 'chest' && movableDep(wire, me)
+  // A chest this device hid, signed by you: EDIT, MOVE and ADD.
+  const chestOfMine = !!wire && wire.type === 'chest' && !!wire.chest && wire.inner.pubkey === me
+  // A door of yours: everything but DELETE needs its secret, known here from
+  // sealing it or from opening it (4.11).
+  const doorOfMine = chestOfMine && wire?.chest?.door !== undefined
+  const editsDoor = doorOfMine && !!wire && !!doorSecret(me, wire.eventId)
+  // A hide still going out: a DELETE now would rewrite the same bag at the
+  // same moment, and one of the two could drop the other's change (review 3
+  // of #595). DELETE waits for it.
+  const hiding = useShards((s) => s.deployStatus === 'working')
+  const [converting, setConverting] = useState(false)
+  const [convertWhy, setConvertWhy] = useState<string | null>(null)
   // The chest a revealed thing came out of, by name, for the card's question.
   const chestName = useShards((s) => {
-    const id = item?.chestId
+    const id = item.chestId
     if (!id) return null
     return s.mine.find((d) => d.eventId === id)?.chest?.name ?? s.discovered[id]?.chest?.name ?? null
   })
 
-  // A selection that no longer resolves (deleted, scrolled out) closes itself.
-  useEffect(() => { if (selected && !item) useShards.getState().selectSecret(null) }, [selected, item])
-  // Escape closes it as a tap outside does (arkinox, 2026-10-01).
-  useEscape('modal', item !== null && author !== '', () => useShards.getState().selectSecret(null))
-
-  if (!item || !author) return null
+  // A chest's or a door's look, open once this identity opened it (R14), for the card's 3D header.
+  useOpenedChests((s) => s.opened)
+  // Drawn without a sealed look until it lands (DECK-0004 §3.6), then with it.
+  useSyncExternalStore(onSealedLooks, sealedLooksVersion, sealedLooksVersion)
+  const look = item.type === 'chest' ? lookOf(item) : null
 
   const npub = nip19.npubEncode(author)
   const name = profileLabel(profile, npub)
   const mine = item.author === me
-  const close = (): void => useShards.getState().selectSecret(null)
+  const close = onClose
+  // Out into the world (fly there, watch, place it): the modals it was
+  // opened over close too, so none of them covers the scene (modalStack).
+  const leave = (): void => { close(); leaveModals() }
 
   const goTo = (): void => {
-    close()
-    const label = item.type === 'message' ? name : item.type === 'key' ? item.keyItem?.name ?? 'key' : item.type === 'chest' ? item.chest?.name ?? 'chest' : item.type === 'audio' ? item.audio?.title ?? 'audio' : item.shard?.name ?? 'shard'
-    useCyberspace.getState().focusItem(item.at, item.plane, label, item.type === 'shard' ? item.shard?.unit ?? 0 : 0)
+    leave()
+    const label = item.type === 'message' ? name : item.type === 'key' ? item.keyItem?.name ?? 'key' : item.type === 'chest' ? item.chest?.name ?? 'chest' : item.type === 'audio' ? item.audio?.title ?? 'audio' : item.type === 'seed' ? 'seed' : item.shard?.name ?? 'shard'
+    useCyberspace.getState().viewAt(item.at, item.plane, label, viewScaleOf(item), { item: true })
   }
   // Where it was found, for what is taken out of a chest here.
-  const place = { lookupId: item.lookupId ?? '', bagId: item.bagId ?? '', at: { x: item.at.x.toString(), y: item.at.y.toString(), z: item.at.z.toString() }, plane: item.plane, height: item.height }
-  const watch = (): void => { close(); void spectate(author) }
+  const place = { lookupId: item.lookupId ?? '', bagId: item.bagId ?? '', at: { x: item.at.x.toString(), y: item.at.y.toString(), z: item.at.z.toString() }, plane: item.plane, height: item.height, ...(author ? { author } : {}) }
+  const commentSubject = useMemo(() => subjectOfWorldItem(item), [item])
+  const watch = (): void => { leave(); void spectate(author) }
   // A message with a Cashu token in it copies only the words around the
   // token: the token has its own COPY TOKEN on the card, and a message that
   // is nothing but a token has no words, so it offers no COPY TEXT at all.
@@ -139,7 +221,7 @@ export function SecretModal(): JSX.Element | null {
   const words = coin || nft ? textWithoutToken(textWithoutNftLinks(item.text)) : item.text ?? ''
   // A shard copies into your workshop as a model; a message copies its text.
   const copy = (): void => {
-    if (item.type === 'shard' && item.shard) useWorkshop.getState().importShard(item.shard)
+    if (item.type === 'shard' && item.shard) void useWorkshop.getState().takeShard(item.shard, fetchRef)
     else if (words) void navigator.clipboard?.writeText(words)
     setCopied(true)
     window.setTimeout(() => setCopied(false), 1400)
@@ -151,21 +233,26 @@ export function SecretModal(): JSX.Element | null {
   const card = confirming === 'delete' ? deleteWords(item) : confirming === 'remove' ? removeWords(item, chestName) : null
   const confirmed = (): void => {
     setConfirming(null)
-    if (confirming === 'delete') { close(); void useShards.getState().deleteInstance(item.key); return }
+    if (confirming === 'delete') {
+      if (useShards.getState().deployStatus === 'working') { setRefusal(DELETE_WAITS); return }
+      close(); void useShards.getState().deleteInstance(item.key); return
+    }
     setRemoving(true); setRefusal(null)
-    void useShards.getState().removeFromChest(item.key).then((why) => { setRemoving(false); if (why) setRefusal(why); else close() }, (err: unknown) => { setRemoving(false); setRefusal(err instanceof Error ? err.message : String(err)) })
+    void useShards.getState().removeFromChest(item.key).then((why) => { setRemoving(false); if (why) { setRefusal(why); setArchiveOffer(!!useShards.getState().lostKeys) } else close() }, (err: unknown) => { setRemoving(false); setRefusal(err instanceof Error ? err.message : String(err)) })
   }
 
   return (
-    <div className="modal modal--top" role="dialog" aria-modal="true" aria-label="Hidden content" onPointerDown={close}>
+    <div className="modal modal--top" role="dialog" aria-modal="true" aria-label={published ? 'Published shard' : 'Hidden content'} onPointerDown={close}>
       <div className="modal__card secret" onPointerDown={(e) => e.stopPropagation()}>
         <div className="secret__head">
           {/* The badge each kind of hidden thing opens under: its icon, or a
               keypair item's own picture (ItemFace), and its name. A kind 'key'
               is an ITEM to the reader (arkinox, 2026-10-10: "keys ARE items"). */}
-          <span className={`secret__badge secret__badge--${coin ? 'cashu' : item.type}`}><ItemFace type={item.type} coin={coin} image={item.keyItem?.image} size={11} />{item.type === 'key' ? 'ITEM' : item.type.toUpperCase()}</span>
+          <span className={`secret__badge secret__badge--${coin ? 'cashu' : item.type}`}><ItemFace type={item.type} coin={coin} image={item.keyItem?.image} size={11} />{item.type === 'key' ? 'ITEM' : look?.kind === 'door' ? 'DOOR' : item.type.toUpperCase()}</span>
           {mine && <span className="secret__mine">YOURS</span>}
-          <button className="secret__close" onClick={close} aria-label="Close">✕</button>
+          {/* A published shard, or a LIVE LINK to one: anyone can see the object (arkinox, 2026-11-14). */}
+          {(published || item.target?.public) && <span className="secret__mine secret__public" title={published ? 'Published: anyone can see it, in any client' : 'A published object: anyone can see it, in any client'}>PUBLIC</span>}
+          <ModalClose onClose={close} />
         </div>
 
         {item.type === 'message' ? (
@@ -173,7 +260,14 @@ export function SecretModal(): JSX.Element | null {
         ) : item.type === 'key' && item.keyItem ? (
           <div className="secret__shard"><KeyLine id={item.key} name={item.keyItem.name} author={author} /></div>
         ) : item.type === 'chest' && item.chest ? (
-          <div className="secret__shard"><ChestBlock id={item.key} chest={item.chest} author={author} verified place={place} /></div>
+          // The name, then the chest or door in 3D across the card, slowly
+          // turning (chest and door design, 4.7), then what opens it.
+          <>
+            <h3 className="secret__look-name">{item.chest.name}</h3>
+            {look && <div className="secret__spin secret__spin--look"><CardSpin shard={drawnLook(look, openedByHand(me, item.key, item.chest.lockPubkey)) ?? look.closed} size={180} wide /></div>}
+            <div className="secret__shard"><ChestBlock id={item.key} chest={item.chest} author={author} verified place={place} named={false} actsBelow /></div>
+            {doorOfMine && wire && <DoorOwnerBlock door={wire} />}
+          </>
         ) : item.type === 'audio' && item.audio ? (
           // MUTE THIS AUDIO and BLOCK AUTHOR in the card's own row, by PLAY
           // (store/useMutes): muting closes this card, and the voice, which
@@ -185,6 +279,9 @@ export function SecretModal(): JSX.Element | null {
             who={muteSubject(item)}
             moderation={audioModeration(item, author, mine, close)}
           />
+        ) : item.type === 'seed' ? (
+          // A seed's bloom, grown here, and what keeps it from growing (DECK-0008).
+          <BloomCard event={item.event} />
         ) : (
           <div className="secret__shard">
             <span className="secret__shard-name">{item.shard?.name}</span>
@@ -206,6 +303,13 @@ export function SecretModal(): JSX.Element | null {
             TEST DISCOVERY stays in METADATA (WireData). */}
         {wire && <PublishRow dep={wire} />}
 
+        {guided ? (
+          // Left by the tutorial's guide key: no profile, no one to tell, nothing that names it in an event (tutorial/guideBags.ts).
+          <div className="secret__creator">
+            <span className="secret__label">Left by</span>
+            <div className="secret__person-text"><span className="secret__name">the tutorial</span></div>
+          </div>
+        ) : (<>
         <div className="secret__creator">
           <span className="secret__label">Left by</span>
           <div className="secret__person">
@@ -213,7 +317,7 @@ export function SecretModal(): JSX.Element | null {
             <div className="secret__person-text">
               <ProfileTap pubkey={author} className="secret__name">{name}{mine ? ' (you)' : ''}</ProfileTap>
               {profile?.nip05 && <span className="secret__nip05">{profile.nip05.replace(/^_@/, '')}</span>}
-              <span className="secret__npub" title={npub}>{shortHex(npub, 14, 8)}</span>
+              <CopyValue className="secret__npub" value={npub} shown={shortHex(npub, 14, 8)} />
             </div>
           </div>
           {profile?.about && <p className="secret__about">{profile.about}</p>}
@@ -231,23 +335,35 @@ export function SecretModal(): JSX.Element | null {
               alsoTell={[author]}
             />}
 
-        {item.author && item.lookupId && (
-          <Comments subject={{ author: item.author, lookupId: item.lookupId, itemId: item.lineage ?? item.key, type: item.type, target: item.target, at: item.at, height: item.height }} />
+        {/* The thread every surface opens for this item (lib/commentSubjects): KEY ITEMS > MINE opens this one for a key taken from here. */}
+        {commentSubject && <Comments subject={commentSubject} />}
+        {/* A published shard's comments are public, as it is (Comments PublicComments). */}
+        {published && item.target?.id && (
+          <PublicComments target={{ id: item.target.id, pubkey: item.target.pubkey, kind: item.target.kind, address: item.target.address }} />
         )}
+        </>)}
 
         {/* The actions between two rules: the comments above, the event data
             below (arkinox, 2026-10-20). */}
         <hr className="secret__rule" />
 
         <div className="secret__actions">
-          <button className="secret__act" onClick={goTo} title="Go to it"><Rotate3d size={ICON} strokeWidth={2.25} aria-hidden />VIEW</button>
-          {(item.type === 'shard' || item.type === 'message') && (!(coin || nft) || words) && (
+          {/* A published shard is at no place: nothing to fly to. */}
+          {!published && <button className="secret__act" onClick={goTo} title="Go to it"><Rotate3d size={ICON} strokeWidth={2.25} aria-hidden />VIEW</button>}
+          {/* A published shard goes to the workshop as the Shard Feed sends it: yours under its own address, someone else's as a credited remix. */}
+          {object && (
+            <button className="secret__act" onClick={() => { leave(); openFeedObjectInWorkshop(object, me) }} title={mine ? 'Open it in your workshop under its own address, so PUBLISH edits it in place' : 'Copy it into your workshop as your own, still credited'}>
+              {mine ? <Pencil size={ICON} strokeWidth={2.25} aria-hidden /> : <GitFork size={ICON} strokeWidth={2.25} aria-hidden />}
+              {mine ? 'OPEN IN WORKSHOP' : 'REMIX'}
+            </button>
+          )}
+          {!object && (item.type === 'shard' || item.type === 'message') && (!(coin || nft) || words) && (
             <button className="secret__act" onClick={copy} title={item.type === 'shard' ? 'Copy this model into your workshop' : coin ? 'Copy the words around the token' : nft ? 'Copy the words around the NFT link' : 'Copy the text'}>
               {item.type === 'shard' ? <CopyPlus size={ICON} strokeWidth={2.25} aria-hidden /> : <Copy size={ICON} strokeWidth={2.25} aria-hidden />}
               {copied ? 'COPIED' : item.type === 'shard' ? 'COPY TO WORKSHOP' : 'COPY TEXT'}
             </button>
           )}
-          {!mine && (
+          {!mine && !guided && (
             <>
               <button className={`secret__act ${targeted ? 'is-on' : ''}`} onClick={target}><Target size={ICON} strokeWidth={2.25} aria-hidden />{targeted ? 'TARGETED' : 'TARGET'} CREATOR</button>
               <button className="secret__act" onClick={watch}><TvMinimal size={ICON} strokeWidth={2.25} aria-hidden />SPECTATE</button>
@@ -271,13 +387,42 @@ export function SecretModal(): JSX.Element | null {
               shard itself breathing where it stands until the move lands
               (arkinox, 2026-10-16). */}
           {movable && (
-            <button className="secret__act" title="Move it: aim the ghost, then deploy. The old one is taken down and its comments and reactions stay with it" onClick={() => { close(); editPlaced(item.key) }}><Move3d size={ICON} strokeWidth={2.25} aria-hidden />EDIT</button>
+            <button className="secret__act" title="Move it: aim the ghost, then deploy. The old one is taken down and its comments and reactions stay with it" onClick={() => { leave(); editPlaced(item.key) }}><Move3d size={ICON} strokeWidth={2.25} aria-hidden />EDIT</button>
           )}
-          {mine && !item.chestId && (
+          {/* MOVE: the same, for an item, a message or a sound of yours. It
+              keeps its reactions, mutes and once-trigger (its lineage). */}
+          {itemMoves && (
+            <button className="secret__act" title="Place it somewhere else. The old one is taken down once the new one is out" onClick={() => { leave(); movePlaced(item.key) }}><Move3d size={ICON} strokeWidth={2.25} aria-hidden />MOVE</button>
+          )}
+          {/* A chest of yours (R18, 4.8): EDIT its name, lock and label, MOVE
+              it anywhere on the hide bar (its model, SCALE, TURN and WALK
+              there too), ADD to what it holds. Each seals it again where it
+              stands; DELETE is below as for anything. From the device that
+              hid it, or one that can open it. */}
+          {mine && chestOfMine && (!doorOfMine || editsDoor) && (
+            <>
+              <button className="secret__act" title="Its name, its lock and what opens it" onClick={() => useStash.getState().openChestEdit(item.key, true)}><Pencil size={ICON} strokeWidth={2.25} aria-hidden />EDIT</button>
+              <button className="secret__act" title="Place it somewhere else, in another model if you like" onClick={() => { leave(); movePlaced(item.key) }}><Move3d size={ICON} strokeWidth={2.25} aria-hidden />MOVE</button>
+              <button className="secret__act" title="Put more in it" onClick={() => { if (doorOfMine) { leave(); addToRoom(item.key) } else useStash.getState().openChestEdit(item.key, false) }}><PackagePlus size={ICON} strokeWidth={2.25} aria-hidden />ADD</button>
+              {!doorOfMine && <button className="secret__act" disabled={converting} title="Make it a door where it stands, the same lock, what it holds behind it" onClick={() => { setConverting(true); setConvertWhy(null); void useShards.getState().convertToDoor(item.key).then((why) => { setConverting(false); setConvertWhy(why) }) }}>{converting ? 'CONVERTING…' : 'CONVERT TO DOOR'}</button>}
+            </>
+          )}
+          {mine && !item.chestId && !published && (
             <button
               className="secret__act secret__act--danger"
-              title="Rewrite this region's bag without it, or delete the whole envelope when it is the last thing of yours there. Copies others already took stay with them. This cannot be undone."
-              onClick={() => setConfirming('delete')}
+              disabled={hiding}
+              title={hiding ? DELETE_WAITS : "Rewrite this region's bag without it, or delete the whole envelope when it is the last thing of yours there. Copies others already took stay with them. This cannot be undone."}
+              onClick={() => {
+                // The last copy of a key one of your chests or doors is sealed to is not deleted:
+                // this key, or one forged inside this chest (rowLoss). ARCHIVE is offered instead.
+                const s = useShards.getState()
+                const row = s.mine.find((d) => d.eventId === item.key)
+                const loss = row ? rowLoss(row, s.mine, useInventory.getState().items, useCyberspace.getState().identity.pubkey) : null
+                useShards.setState({ lostKeys: loss?.keys ?? null })
+                if (loss) { setRefusal(loss.why); setArchiveOffer(true); return }
+                setArchiveOffer(false)
+                setConfirming('delete')
+              }}
             >DELETE</button>
           )}
           {mine && item.chestId && (
@@ -289,7 +434,8 @@ export function SecretModal(): JSX.Element | null {
             >{removing ? 'REMOVING…' : 'REMOVE FROM CHEST'}</button>
           )}
         </div>
-        {refusal && <p className="secret__status" role="status">{refusal}</p>}
+        {(refusal ?? convertWhy) && <p className="secret__status" role="status">{refusal ?? convertWhy}</p>}
+        {archiveOffer && <div className="secret__actions"><button className="secret__act" onClick={archive} title="File it away in ITEMS under ARCHIVED: its secret stays here, so what it opens still opens">ARCHIVE</button></div>}
 
         {/* The technical facts under one closed METADATA (arkinox,
             2026-10-26: "Collapse all the technical info on the chest, door,
@@ -300,11 +446,17 @@ export function SecretModal(): JSX.Element | null {
           {item.type === 'shard' && item.shard && (
             <span className="secret__shard-meta">{item.shard.vertices.length} v · {item.shard.faces.length} f · {item.shard.mode.toUpperCase()} · unit 2^{item.shard.unit}</span>
           )}
-          <dl className="secret__facts">
-            <div><dt>Placed</dt><dd title={item.createdAt ? formatStamp(item.createdAt) : ''}>{item.createdAt ? formatAgo(item.createdAt) : 'unknown'}</dd></div>
-            <div><dt>Region</dt><dd>{regionLabel(item.height)}</dd></div>
-            <div><dt>Plane</dt><dd>{item.plane === 0 ? 'dataspace' : 'ideaspace'}</dd></div>
-          </dl>
+          {published ? (
+            <dl className="secret__facts">
+              <div><dt>Published</dt><dd title={item.createdAt ? formatStamp(item.createdAt) : ''}>{item.createdAt ? formatAgo(item.createdAt) : 'unknown'}</dd></div>
+            </dl>
+          ) : (
+            <dl className="secret__facts">
+              <div><dt>Placed</dt><dd title={item.createdAt ? formatStamp(item.createdAt) : ''}>{item.createdAt ? formatAgo(item.createdAt) : 'unknown'}</dd></div>
+              <div><dt>Region</dt><dd>{regionLabel(item.height)}</dd></div>
+              <div><dt>Plane</dt><dd>{item.plane === 0 ? 'dataspace' : 'ideaspace'}</dd></div>
+            </dl>
+          )}
           {item.event && (
             <EventData event={item.event}>
               {/* Keyed by the row, so a test result never carries over to another item. */}
@@ -320,7 +472,8 @@ export function SecretModal(): JSX.Element | null {
             up this tree, and only this card's stopPropagation keeps a tap on
             the confirmation's backdrop from reaching the close on ours.
             Escape reaches it first because it opened later (useEscape). */}
-        {card && (
+        {confirming === 'delete' && doorOfMine && wire && <DeleteDoorCard door={wire} onCancel={() => setConfirming(null)} onDone={close} />}
+        {card && !(confirming === 'delete' && doorOfMine) && (
           <ConfirmModal
             title={card.title}
             body={card.lines.map((line) => <span key={line} className="modal__line">{line}</span>)}

@@ -684,3 +684,124 @@ describe('bulk import over IndexedDB', () => {
     expect(vi.mocked(publishMany)).not.toHaveBeenCalled()
   })
 })
+
+describe('the read after the first frame (boot.tsx, 2026-11-22)', () => {
+  it('reads a library bigger than a page whole, in order, a page at a time', async () => {
+    const list = Array.from({ length: 97 }, (_, i) => bigShard(`piece ${i}`, 2, i))
+    seedLocal(list)
+    await boot()
+    const { openWorkshopDb, readAll, READ_PAGE } = await import('../../lib/workshopDb')
+    // A malformed row in the middle is counted, not the library.
+    await rawPut([{ id: 'zz-broken', seq: 5 }])
+    const d = await openWorkshopDb()
+    const pages: number[] = []
+    try {
+      const { records: rows, malformed } = await readAll(d, (page) => pages.push(page.length))
+      expect(rows.map((r) => r.id)).toEqual(list.map((s) => s.id))
+      expect(malformed).toBe(1)
+      expect(pages.length).toBe(Math.ceil(98 / READ_PAGE))
+      expect(pages.reduce((a, b) => a + b, 0)).toBe(97)
+    } finally { d.close() }
+    const again = await boot()
+    expect(again.ws.useWorkshop.getState().shards.map((s) => s.id)).toEqual(list.map((s) => s.id))
+  })
+
+  it('OPEN WORKSHOP while the library is still reading opens on it once read, and makes no new model', async () => {
+    const list = [bigShard('older', 2, 1), { ...bigShard('newest', 2, 2), updatedAt: 1_800_000_000_000 }]
+    seedLocal(list)
+    await boot()
+    lastTab?.st.closeForTests()
+    const t = await openTab()
+    lastTab = t
+    const reading = t.ws.hydrateWorkshop()
+    expect(t.st.workshopReading()).not.toBeNull()
+    t.ws.useWorkshop.getState().openWorkshop()
+    // Not on an empty list: nothing opens, and nothing is made, until the read lands.
+    expect(t.ws.useWorkshop.getState().open).toBe(false)
+    expect(t.ws.useWorkshop.getState().shards).toEqual([])
+    await reading
+    await new Promise((r) => setTimeout(r, 0))
+    const s = t.ws.useWorkshop.getState()
+    expect(t.st.workshopReading()).toBeNull()
+    expect(s.open).toBe(true)
+    expect(s.shards.map((m) => m.id)).toEqual(list.map((m) => m.id))
+    expect(s.currentId).toBe(list[1].id)
+  })
+
+  it('a copy of a shard you keep, added while the library reads, never replaces the stored one', async () => {
+    const mine = bigShard('edited here', 2, 1)
+    seedLocal([mine])
+    await boot()
+    lastTab?.st.closeForTests()
+    const t = await openTab()
+    lastTab = t
+    const reading = t.ws.hydrateWorkshop()
+    // OPEN IN WORKSHOP on your own published object (hud/stash.ts): the list is empty, so it imports the relay's older copy under the same id.
+    const relayCopy = { ...bigShard('as published', 2, 9), id: mine.id }
+    t.ws.useWorkshop.getState().importShard(relayCopy, undefined, mine.id)
+    const fresh = t.ws.useWorkshop.getState().addShard(newShard('made meanwhile'), 'made meanwhile')!.id
+    expect(await reading).toBe('indexeddb')
+    const s = t.ws.useWorkshop.getState()
+    expect(s.shards.find((m) => m.id === mine.id)?.name).toBe('edited here')
+    expect(s.shards.some((m) => m.id === fresh)).toBe(true)
+    expect(await s.saveNow()).toBe(true)
+    const rows = await records()
+    expect(JSON.parse(rows.find((r) => r.id === mine.id)!.json).name).toBe('edited here')
+    expect(rows.some((r) => r.id === fresh)).toBe(true)
+  })
+
+  it('taps while it reads open it once, as asked last, and not at all once the tap is long past', async () => {
+    const list = [bigShard('a', 2, 1), bigShard('b', 2, 2)]
+    seedLocal(list)
+    await boot()
+    lastTab?.st.closeForTests()
+    let t = await openTab()
+    lastTab = t
+    let reading = t.ws.hydrateWorkshop()
+    const opens = vi.spyOn(t.ws.useWorkshop.getState(), 'openWorkshop')
+    t.ws.useWorkshop.getState().openWorkshop()
+    t.ws.useWorkshop.getState().openWorkshop(list[0].id)
+    await reading
+    await new Promise((r) => setTimeout(r, 0))
+    expect(t.ws.useWorkshop.getState().open).toBe(true)
+    expect(t.ws.useWorkshop.getState().currentId).toBe(list[0].id)
+    opens.mockRestore()
+
+    // A read that lands long after the tap opens nothing over whatever came next.
+    lastTab?.st.closeForTests()
+    t = await openTab()
+    lastTab = t
+    const now = Date.now()
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now)
+    reading = t.ws.hydrateWorkshop()
+    t.ws.useWorkshop.getState().openWorkshop()
+    clock.mockReturnValue(now + 60_000)
+    await reading
+    await new Promise((r) => setTimeout(r, 0))
+    clock.mockRestore()
+    expect(t.ws.useWorkshop.getState().open).toBe(false)
+  })
+
+  it('after the first draw, a tap before the read has started starts it and waits for it', async () => {
+    seedLocal([bigShard('a', 2, 1)])
+    await boot()
+    lastTab?.st.closeForTests()
+    const t = await openTab()
+    lastTab = t
+    expect(t.st.workshopReading()).toBeNull()
+    t.st.expectWorkshopRead()
+    t.ws.useWorkshop.getState().openWorkshop()
+    expect(t.ws.useWorkshop.getState().open).toBe(false)
+    await t.ws.hydrateWorkshop()
+    await new Promise((r) => setTimeout(r, 0))
+    expect(t.ws.useWorkshop.getState().open).toBe(true)
+    expect(t.ws.useWorkshop.getState().shards).toHaveLength(1)
+  })
+
+  it('a store never loaded (a test, or a page before its read starts) opens at once, as before', async () => {
+    const t = await openTab()
+    expect(t.st.workshopReading()).toBeNull()
+    t.ws.useWorkshop.getState().openWorkshop()
+    expect(t.ws.useWorkshop.getState().open).toBe(true)
+  })
+})

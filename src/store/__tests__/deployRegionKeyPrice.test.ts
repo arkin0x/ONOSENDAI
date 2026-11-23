@@ -105,11 +105,11 @@ describe('every place a region key is priced', () => {
   const src = (...p: string[]): string => readFileSync(join(__dirname, '..', '..', ...p), 'utf8')
 
   it('reads the region key ladder, never the hop ladder directly', () => {
-    // The BUY button, the deploy bar's quote and the hide's ask.
-    for (const file of [['hud', 'SecretsModal.tsx'], ['hud', 'DeployBar.tsx'], ['store', 'useShards.ts']]) {
+    // SCAN mode's price (which took the keyring's BUY), the deploy bar's quote and the hide's ask.
+    for (const file of [['store', 'useScan.ts'], ['hud', 'ScanControls.tsx'], ['hud', 'DeployBar.tsx'], ['store', 'useShards.ts']]) {
       expect(src(...file), file.join('/')).not.toContain('pricing?.hop')
     }
-    expect(src('hud', 'SecretsModal.tsx')).toContain('regionKeyQuote(buyHeight, provider)')
+    expect(src('store', 'useScan.ts')).toContain('regionKeyQuote(height, s.cloud.provider)')
     expect(src('hud', 'DeployBar.tsx')).toContain('regionKeyLadder(s.cloud.provider)')
     expect(src('store', 'useShards.ts')).toContain('regionKeyQuote(deployHeight, cs.cloud.provider)')
   })

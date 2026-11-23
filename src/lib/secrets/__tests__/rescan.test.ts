@@ -26,11 +26,11 @@ const mem = new Map<string, string>()
   clear: () => { mem.clear() },
 }
 
-type Ev = { id: string; content: string; created_at: number; tags: string[][] }
+type Ev = { id: string; pubkey?: string; content: string; created_at: number; tags: string[][] }
 /** How one stand-in relay behaves. */
 type Behavior = { url: string; cap: number; refuse?: boolean; ignoresUntil?: boolean }
 const relay = vi.hoisted(() => ({
-  events: [] as Array<{ id: string; content: string; created_at: number; tags: string[][] }>,
+  events: [] as Array<{ id: string; pubkey?: string; content: string; created_at: number; tags: string[][] }>,
   calls: [] as Array<{ ids: string[]; until?: number; limit?: number }>,
   relays: [] as Array<{ url: string; cap: number; refuse?: boolean; ignoresUntil?: boolean }>,
   inFlight: 0,
@@ -59,6 +59,8 @@ function answers(ids: string[], until: number | undefined, limit: number | undef
 vi.mock('../../relay', () => ({
   publishMany: vi.fn(async () => ({ ok: true })),
   relaySet: () => relay.relays.map((r) => r.url),
+  // The deletions a scan asks about (lib/bagVersions.ts): none here.
+  query: vi.fn(async () => []),
   queryEach: vi.fn(async (filter: { '#d': string[]; until?: number; limit?: number }) => {
     relay.calls.push({ ids: filter['#d'], until: filter.until, limit: filter.limit })
     relay.inFlight++
@@ -94,7 +96,8 @@ const lookup = (n: number): string => n.toString(16).padStart(64, '0')
 const keyOf = (n: number): string => (n + 1_000_000).toString(16).padStart(64, '0')
 let serial = 0
 /** A bag filed under lookup id `n`, opening with key `n`. */
-const bag = (n: number, createdAt = 1_000): Ev => ({ id: `e${(serial++).toString(16).padStart(63, '0')}`, content: keyOf(n), created_at: createdAt, tags: [['d', lookup(n)]] })
+// Each by its own author: a relay holds one version of an address, so many bags under one id are many hiders' (lib/bagVersions.ts).
+const bag = (n: number, createdAt = 1_000): Ev => { const s = (serial++).toString(16).padStart(63, '0'); return { id: `e${s}`, pubkey: `p${s}`, content: keyOf(n), created_at: createdAt, tags: [['d', lookup(n)]] } }
 
 const heldKey = (n: number, over: Partial<HeldKey> = {}): HeldKey => ({
   lookupId: lookup(n), keyHex: keyOf(n), height: 4, base: { x: '0', y: '0', z: '0' }, plane: 0, source: 'hop', at: 1, ...over,
@@ -311,6 +314,16 @@ describe('RESCAN ALL, over IndexedDB', () => {
     expect(s().keys[lookup(5)]).toMatchObject({ source: 'scan', plane: 1 })
     expect(s().keys[lookup(325)]).toMatchObject({ source: 'scan' })
     expect(s().keys[lookup(0)].source).toBe('hop')
+  })
+
+  it('completes with a bought key whose corner an earlier build stored as a rounded Number ("1.93e+25"), and opens what it holds', async () => {
+    const { secrets, rescan } = await boot()
+    const s = secrets.useSecrets.getState
+    s().hold([heldKey(0), heldKey(1, { source: 'cloud', height: 20, base: { x: '1.93e+25', y: '2.4178516392292583e+25', z: '1.9342813113834067e+25' } })])
+    relay.events = [bag(0), bag(1)]
+    const status = await rescan.rescanAll()
+    expect(status).toMatchObject({ running: false, asked: 2, found: 2, error: null, skipped: [] })
+    expect(s().keys[lookup(1)]).toBeDefined()
   })
 
   it('never has more than RESCAN_PARALLEL requests open, across batches, split halves and pages', async () => {

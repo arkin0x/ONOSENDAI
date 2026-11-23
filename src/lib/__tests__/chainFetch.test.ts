@@ -37,6 +37,9 @@ function answer(r: StandIn, f: Filter): NostrEvent[] {
 }
 
 vi.mock('../relay', () => ({
+  signedIn: () => true,
+  signInOwed: () => false,
+  CYBERSPACE_RELAY: 'wss://canonical.test',
   query: async (f: Filter) => {
     asked.push(f)
     const seen = new Map<string, NostrEvent>()

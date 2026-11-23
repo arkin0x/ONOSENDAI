@@ -1,21 +1,25 @@
 /**
- * useShardFolders.ts: the folders your shard lists are sorted into, this
- * identity's, kept on this device only.
+ * useShardFolders.ts: the folders your shard lists are sorted into, the
+ * device's, kept on this device only.
+ *
+ * The workshop is a local repository of SNO on the device, the same for
+ * every identity, and so are its folders and when each shard was last
+ * deployed (which only sorts the lists): a switch of identity never changes
+ * them (owner ruling, 2026-11-19, after every folder vanished on a NEW
+ * RANDOM KEY). Builds before kept one tree per identity; the first read
+ * merges them into the device's (lib/shardFoldersDb.ts, mergeTrees).
  *
  * Every shard list (the workshop MENU, PLACE OBJECT's MINE, STAMP's objects)
  * draws through hud/ShardFolders.tsx over this store, so they all show the
  * same folders. The tree is pure data with pure ops (lib/shardFolders.ts),
- * one row per identity in IndexedDB (lib/shardFoldersDb.ts). Nothing is
- * published.
+ * one row in IndexedDB (lib/shardFoldersDb.ts). Nothing is published.
  *
  * A change shows at once: the op is applied to the tree in memory and queued
  * for the database, where it is applied to the stored tree in one
  * transaction (commitOps). What the database answers is the tree with every
  * op still queued applied on top (replay), so a slow write never makes an
  * earlier change flicker back. Another tab's commit is announced on a
- * BroadcastChannel, and this tab reads the stored tree again. Ops are tagged
- * with the identity they were made for, so a switch while one is queued
- * writes it to that identity's tree and never shows it on the new one. Where
+ * BroadcastChannel, and this tab reads the stored tree again. Where
  * IndexedDB cannot be opened, folders last the session.
  *
  * A deploy is kept here too (markUsed): when each shard was last deployed,
@@ -25,27 +29,21 @@
  * 'forest']) makes or finds that path and returns the last folder's id, and
  * assignToFolder(ref, id) files a shard by its workshop model id. Both act at
  * once; flush() resolves when they have reached the database.
- *
- * The identity is watched from load() rather than at module load, for the
- * same import-cycle reason as useInventory.
  */
 
 import { create } from 'zustand'
 import { describeError } from '../lib/secrets/db'
-import { EMPTY_TREE, applyOp, canonical, childrenOf, cleanName, newFolderId, type Folder, type FolderOp, type FolderTree } from '../lib/shardFolders'
-import { commitOps, openShardFoldersDb, readTree } from '../lib/shardFoldersDb'
-import { useCyberspace } from './useCyberspace'
-import { readLastUsedFrom } from './useWorkshop'
+import { EMPTY_TREE, applyOp, canonical, childrenOf, cleanName, folderOf, newFolderId, type Folder, type FolderOp, type FolderTree } from '../lib/shardFolders'
+import { commitOps, openShardFoldersDb, peekTree, readTree } from '../lib/shardFoldersDb'
+import { fileCopiesWith, readLastUsedFrom } from './useWorkshop'
 
 export type FolderStorage = 'loading' | 'indexeddb' | 'memory'
 
 interface ShardFoldersState {
-  /** The identity whose tree this is. */
-  owner: string
   tree: FolderTree
   storage: FolderStorage
-  /** Read this identity's tree (the current one when no owner is given), and start following identity changes. */
-  load: (owner?: string) => Promise<void>
+  /** Read the device's tree (again), and start following other tabs' changes. */
+  load: () => Promise<void>
   /** A new folder; returns its id, or null for an empty name. */
   createFolder: (name: string, parent?: string | null) => string | null
   /** Make or find each folder of a path from the top; returns the last one's id, or null for an empty path. */
@@ -71,7 +69,7 @@ interface ShardFoldersState {
   flush: () => Promise<void>
 }
 
-interface Queued { owner: string; op: FolderOp }
+interface Queued { op: FolderOp }
 
 /** Ops applied in memory and not yet committed, oldest first. */
 const queued: Queued[] = []
@@ -81,10 +79,10 @@ function drop(entry: Queued): void {
   if (at >= 0) queued.splice(at, 1)
 }
 
-/** The tree the database holds for `owner` with what is still queued for it on top. */
-function replay(tree: FolderTree, owner: string): FolderTree {
+/** The tree the database holds with what is still queued on top. */
+function replay(tree: FolderTree): FolderTree {
   let t = tree
-  for (const q of queued) if (q.owner === owner) t = applyOp(t, q.op)
+  for (const q of queued) t = applyOp(t, q.op)
   return t
 }
 
@@ -116,45 +114,40 @@ function then(step: () => Promise<void>): Promise<void> {
 
 const CHANNEL = 'sno:shard-folders'
 let channel: BroadcastChannel | null = null
-function announce(owner: string): void {
-  try { channel?.postMessage({ owner }) } catch { /* closed */ }
+function announce(): void {
+  try { channel?.postMessage({ changed: true }) } catch { /* closed */ }
 }
 
 let watching = false
-
-/** Where IndexedDB cannot be opened: each identity's tree for the session. */
-const sessionTrees = new Map<string, FolderTree>()
+/** Another tab changed the tree while this one was hidden: read it once shown. */
+let rereadWhenShown = false
+function folderTabHidden(): boolean {
+  try { return typeof document !== 'undefined' && document.visibilityState === 'hidden' } catch { return false }
+}
 
 export const useShardFolders = create<ShardFoldersState>((set, get) => {
-  /** Read the stored tree for `owner` and show it, if that is still whose tree is shown. */
-  const reread = (owner: string): Promise<void> => then(async () => {
+  /** Read the stored tree and show it. */
+  const reread = (): Promise<void> => then(async () => {
     const d = await database()
-    if (get().owner !== owner) return
     if (!d) {
-      const kept = sessionTrees.get(owner)
-      set(kept ? { storage: 'memory', tree: replay(kept, owner) } : { storage: 'memory' })
-      return
-    }
-    let stored: FolderTree
-    try { stored = await readTree(d, owner) } catch (err) {
-      console.warn(`[folders] could not read folders: ${describeError(err)}`)
       set({ storage: 'memory' })
       return
     }
-    if (get().owner === owner) set({ tree: replay(stored, owner), storage: 'indexeddb' })
+    let stored: FolderTree
+    try { stored = await readTree(d) } catch (err) {
+      console.warn(`[folders] could not read folders: ${describeError(err)}`)
+      // Shown for the session from what is on disk, read only, rather than none.
+      let seen: FolderTree | null = null
+      try { seen = await peekTree(d) } catch { /* nothing readable either */ }
+      set(seen ? { storage: 'memory', tree: replay(seen) } : { storage: 'memory' })
+      return
+    }
+    set({ tree: replay(stored), storage: 'indexeddb' })
   })
-
-  /** Whose tree a change is for: the identity as it stands, loading its tree first if it is not the one shown. */
-  const ownerNow = (): string => {
-    const who = useCyberspace.getState().identity.pubkey
-    if (get().owner !== who) void get().load(who)
-    return who
-  }
 
   /** Apply an op now and queue it for the database; returns the tree it made. */
   const commit = (op: FolderOp): FolderTree => {
-    const owner = ownerNow()
-    const entry: Queued = { owner, op }
+    const entry: Queued = { op }
     const tree = applyOp(get().tree, op)
     // Refused or already so in the tree as loaded: nothing to write. While it
     // loads, the stored tree may differ, so the op goes to it regardless; and
@@ -171,10 +164,10 @@ export const useShardFolders = create<ShardFoldersState>((set, get) => {
       let failed = false
       try {
         if (!d) return
-        const stored = await commitOps(d, owner, [op])
+        const stored = await commitOps(d, [op])
         drop(entry)
-        if (get().owner === owner && get().storage !== 'memory') set({ tree: replay(stored, owner) })
-        announce(owner)
+        if (get().storage !== 'memory') set({ tree: replay(stored) })
+        announce()
       } catch (err) {
         console.warn(`[folders] could not save a folder change: ${describeError(err)}`)
         // Show what is stored rather than a change that was not kept, and
@@ -186,38 +179,43 @@ export const useShardFolders = create<ShardFoldersState>((set, get) => {
         // Committed, failed, or memory only: either way it is not waiting any more.
         drop(entry)
       }
-      if (failed && get().owner === owner) void reread(owner)
+      if (failed) void reread()
     })
     return tree
   }
 
   return {
-    owner: '',
     tree: EMPTY_TREE,
     storage: 'loading',
 
-    load: async (owner) => {
+    load: async () => {
       if (!watching) {
         watching = true
-        useCyberspace.subscribe((s, prev) => { if (s.identity.pubkey !== prev.identity.pubkey) void get().load(s.identity.pubkey) })
         if (typeof BroadcastChannel !== 'undefined') {
           try {
             channel = new BroadcastChannel(CHANNEL)
-            channel.onmessage = (e: MessageEvent<{ owner?: unknown }>) => {
-              const who = e.data?.owner
-              if (typeof who === 'string' && who === get().owner && get().storage === 'indexeddb') void reread(who)
+            // Any tab's change, of any build: read the stored tree again. Not
+            // while hidden: a hidden tab may be frozen mid-read, and its open
+            // read would hold the folders' store from the tab writing it; it
+            // reads once shown (store/workshopStorage.ts listen, 2026-11-22).
+            channel.onmessage = () => {
+              if (get().storage !== 'indexeddb') return
+              if (folderTabHidden()) { rereadWhenShown = true; return }
+              void reread()
             }
           } catch { channel = null }
         }
+        try {
+          if (typeof document !== 'undefined') {
+            document.addEventListener('visibilitychange', () => {
+              if (folderTabHidden() || !rereadWhenShown) return
+              rereadWhenShown = false
+              if (get().storage === 'indexeddb') void reread()
+            })
+          }
+        } catch { /* no document */ }
       }
-      const who = owner ?? useCyberspace.getState().identity.pubkey
-      // A new identity shows nothing of the old one's, from this moment.
-      if (who !== get().owner) {
-        // Without IndexedDB the old identity's folders wait here for it to come back.
-        if (get().storage === 'memory' && get().owner) sessionTrees.set(get().owner, get().tree)
-        set({ owner: who, tree: replay(EMPTY_TREE, who), storage: 'loading' })
-      }
-      await reread(who)
+      await reread()
     },
 
     createFolder: (name, parent = null) => {
@@ -274,6 +272,18 @@ export const useShardFolders = create<ShardFoldersState>((set, get) => {
 
 // The workshop opens the top of its list, deploys counted (useWorkshop newestId).
 readLastUsedFrom(() => useShardFolders.getState().tree.used)
+
+// A duplicate lands in its source's folder (useWorkshop duplicate); a source
+// at the top files nothing. While the tree is still being read, every shard
+// looks to be at the top, so the copy is filed once it has been read.
+fileCopiesWith((copy, source) => {
+  const file = (): void => {
+    const at = folderOf(useShardFolders.getState().tree, source)
+    if (at !== null) useShardFolders.getState().assignToFolder(copy, at)
+  }
+  if (useShardFolders.getState().storage === 'loading') void useShardFolders.getState().load().then(file)
+  else file()
+})
 
 /** Make or find a folder path from the top, for code outside React: returns the last folder's id. */
 export function createFolderPath(path: readonly string[]): string | null {

@@ -22,7 +22,7 @@ export interface RouteCard {
 
 /** Cyberspace TV's card (tools/og-tv-card.html renders public/og-tv.jpg). */
 export const TV_CARD: RouteCard = {
-  url: 'https://onosendai.tech/tv',
+  url: 'https://www.onosendai.tech/tv',
   title: 'CYBERSPACE TV · ONOSENDAI',
   description: 'Everything that ever happened in cyberspace, played back as a broadcast: every move, every hidden bag, every new object, from a random moment since v2 began.',
   // A JPEG: the grain makes a PNG of 800 KB, more than some chat apps
@@ -31,7 +31,7 @@ export const TV_CARD: RouteCard = {
   // needs a new one (2: "Always On. Everywhere. ™", 2026-10-19; 3: the
   // Cyberspace TV logo's bright grids, 2026-10-21; 4: the ™ on the ONOSENDAI
   // wordmark, 2026-10-21).
-  image: 'https://onosendai.tech/og-tv.jpg?v=4',
+  image: 'https://www.onosendai.tech/og-tv.jpg?v=5',
   imageType: 'image/jpeg',
   imageAlt: 'CYBERSPACE サイバースペース TV and the ONOSENDAI wordmark on a curved CRT screen, between a glowing teal, blue and purple grid floor and ceiling.',
 }
@@ -42,10 +42,10 @@ export const TV_CARD: RouteCard = {
  * second picture to keep current.
  */
 export const WORKSHOP_CARD: RouteCard = {
-  url: 'https://onosendai.tech/workshop',
+  url: 'https://www.onosendai.tech/workshop',
   title: 'SHARD WORKSHOP · ONOSENDAI',
   description: 'Make a 3D object in your browser: stamp shapes, color the points, then deploy it to hide it in cyberspace at a place you choose.',
-  image: 'https://onosendai.tech/og.png?v=2',
+  image: 'https://www.onosendai.tech/og.png?v=3',
   imageType: 'image/png',
   imageAlt: 'The ONOSENDAI wordmark and its yellow mark beside a scene from the app: the violet ring of the Black Sun, a cyan hyperjump beam with an avatar inside it, and a neon structure beyond.',
 }
@@ -77,6 +77,11 @@ export function withCard(html: string, card: RouteCard): string {
     attr('property="og:image"', card.image),
     attr('property="og:image:type"', card.imageType),
     attr('property="og:image:alt"', card.imageAlt),
+    // X reads twitter: tags before og: ones (2026-11-13: the /tv card did not show on x.com).
+    attr('name="twitter:title"', card.title),
+    attr('name="twitter:description"', card.description),
+    attr('name="twitter:image"', card.image),
+    attr('name="twitter:image:alt"', card.imageAlt),
   ]
   let out = html
   for (const [find, put] of swaps) {

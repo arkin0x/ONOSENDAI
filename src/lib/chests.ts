@@ -29,9 +29,12 @@ import { generateSecretKey, getEventHash, getPublicKey, verifyEvent } from 'nost
 import { bytesToHex, hexToBytes, type EventTemplate, type NostrEvent } from './events'
 import { coordToXyz, hexToCoord, type Plane } from 'cyberspace-core'
 import { fromPayload } from 'sno-core/shards'
-import { entryKey, isReference, readItem, sealedAsRumor, type BagEntry, type ChestItem, type Hidden, type ItemBody, type KeyItem } from './hidden'
+import { doorRefusal, inRoom } from './doors'
+import { CHEST_KIND, entryKey, innerAuthentic, isReference, readItem, sealedAsRumor, type BagEntry, type ChestItem, type Hidden, type ItemBody, type KeyItem } from './hidden'
 import { reachGibsons, type FitPoint } from './deployFit'
 import type { Position } from './space'
+import type { CarriedKey } from './keyringLocks'
+import { DNA_KIND } from './seeds/seedItem'
 
 /** A new key item: a fresh keypair under a name (B1 §3.1). The secret is shown to nobody; the public key is what chests are sealed to. */
 export function forgeKey(name: string, about = ''): KeyItem {
@@ -101,10 +104,35 @@ export function parseChestPlaintext(plaintext: string): BagEntry[] {
   return parsed.filter((e): e is BagEntry => isReference(e) || (!!e && typeof e === 'object' && !Array.isArray(e) && typeof (e as NostrEvent).kind === 'number'))
 }
 
+/**
+ * What a chest holds, split by whether it could stand in a room of `height`
+ * holding `at` (CONVERT TO DOOR: it must never lose anything). `list` is the
+ * plaintext's elements exactly as they are, unfiltered, so nothing is missed
+ * by not being counted. A thing can move when a reader would keep it in the
+ * room bag: this client reads it, its `C` lies in the room and its plane
+ * (§3.7.2), it is authentic under the door's signer (spec §7.6, the bag's
+ * rule, which is stricter than a chest's), and if it is a door, it is lower
+ * than the room (§3.7.1).
+ */
+export function movableIntoRoom(list: readonly unknown[], signer: string, at: Position, plane: Plane, height: number): { movable: ChestEntry[]; blocked: number } {
+  const movable = readContents(list as BagEntry[], signer).filter((e) => {
+    const p = placeOf(e.event)
+    if (!p || p.plane !== plane || !inRoom(at, height, p.at)) return false
+    const { sig, ...unsigned } = e.event
+    if (!innerAuthentic(sig ? e.event : unsigned, signer)) return false
+    return e.event.kind !== CHEST_KIND || doorRefusal(e.event.tags, height, height) === null
+  })
+  return { movable, blocked: list.length - movable.length }
+}
+
+/** Open a chest with an item's secret, its plaintext as it is: the holder's half of the conversation key. Throws on the wrong key. */
+export function plaintextWithSecret(chest: Pick<ChestItem, 'senderPubkey' | 'payload'>, secretHex: string): string {
+  return nip44.decrypt(chest.payload, nip44.utils.getConversationKey(hexToBytes(secretHex), chest.senderPubkey))
+}
+
 /** Open a chest with an item's secret: the holder's half of the conversation key. Throws on the wrong key. */
 export function openWithSecret(chest: Pick<ChestItem, 'senderPubkey' | 'payload'>, secretHex: string): BagEntry[] {
-  const key = nip44.utils.getConversationKey(hexToBytes(secretHex), chest.senderPubkey)
-  return parseChestPlaintext(nip44.decrypt(chest.payload, key))
+  return parseChestPlaintext(plaintextWithSecret(chest, secretHex))
 }
 
 /** What a person's identity offers: NIP-44 decrypt of a payload from a sender, as NIP-07 and NIP-46 both phrase it. */
@@ -156,6 +184,8 @@ function readEntry(e: BagEntry, sealer: string | undefined): ChestEntry | null {
     // on the object itself, and a copy made in memory would inherit it.
     const plain = { pubkey: ev.pubkey, created_at: ev.created_at, kind: ev.kind, tags: ev.tags, content: ev.content }
     if (signed && !verifyEvent({ ...plain, id: ev.id, sig: ev.sig })) return null
+    // A DNA must be signed (DECK-0008 §8.1: its id and signature are its identity).
+    if (!signed && ev.kind === DNA_KIND) return null
     // An unsigned entry's id is its hash, whatever it claims: a claimed id
     // could otherwise stand in for a real item's in the inventory.
     const hash = signed ? ev.id : getEventHash(plain)
@@ -242,7 +272,12 @@ export interface OpeningKey {
   id: string
   itemPubkey: string
   secretHex: string
+  /** A lock from your keyring (DECK-0004 §3.8): the region or room key it comes from, never an ITEMS row. */
+  carried?: CarriedKey
 }
+
+/** Your keyring's key for a lock, if you carry one (store/useKeyring lookupLock): one map lookup, no relay. */
+export type KeyringLookup = (lockPubkey: string) => OpeningKey | undefined
 
 /** What opens a chest for this reader: a held key, the reader's own identity, or nothing. */
 export type Opener = { by: 'key'; key: OpeningKey } | { by: 'self' } | null
@@ -250,10 +285,12 @@ export type Opener = { by: 'key'; key: OpeningKey } | { by: 'self' } | null
 /**
  * Which of the reader's keys opens this chest, or that the lock is the
  * reader's own pubkey, or null. A held key wins over the identity, because
- * opening with a key needs no signer.
+ * opening with a key needs no signer. Then a key you carry whose lock it is
+ * (`keyring`: a region or room key, DECK-0004 §3.8), opened the same way as
+ * with an item.
  */
-export function openerFor(chest: Pick<ChestItem, 'lockPubkey'>, keys: OpeningKey[], me: string): Opener {
-  const key = keys.find((k) => k.itemPubkey === chest.lockPubkey)
+export function openerFor(chest: Pick<ChestItem, 'lockPubkey'>, keys: OpeningKey[], me: string, keyring?: KeyringLookup): Opener {
+  const key = keys.find((k) => k.itemPubkey === chest.lockPubkey) ?? keyring?.(chest.lockPubkey)
   if (key) return { by: 'key', key }
   return chest.lockPubkey === me ? { by: 'self' } : null
 }
@@ -367,8 +404,9 @@ export function aimedPoint(signed: NostrEvent): (FitPoint & { plane: Plane }) | 
  * Each entry stands at its own `C` when it carries one inside the chest's
  * region, else where the chest stands; the chest's bag, lookup id, height and
  * hider carry over, so the scene draws a revealed room exactly as it draws a
- * found shard, and the record lists it under the same bag. A door is a chest
- * whose contents are the room behind it.
+ * found shard, and the record lists it under the same bag. What the world
+ * draws of it is lib/looks keptInChest's to say: nothing, since a chest's
+ * contents are taken, not placed (DECK-0004 §3.4).
  */
 export function revealedIn(chest: Pick<Hidden, 'eventId' | 'bagId' | 'lookupId' | 'author' | 'at' | 'plane' | 'height' | 'bag' | 'keyHex'>, entries: ChestEntry[]): Hidden[] {
   const shift = BigInt(chest.height)

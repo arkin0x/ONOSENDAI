@@ -1,5 +1,6 @@
 /**
- * SecretsModal.tsx — REGION KEYS: every region you can open.
+ * SecretsModal.tsx: KEYRING, every key you carry (arkinox, 2026-11-10: REGION
+ * KEYS renamed KEYRING). The regions you can open, and the rooms you opened.
  *
  * A key is a number you computed, not a password you were given: the Cantor
  * root of one aligned region, hashed for the key and again for the lookup id
@@ -32,15 +33,18 @@ import { formatAgo } from '../lib/time'
 import { axisDistance } from '../lib/nearby'
 import { RESCAN_BATCH, describeSkips, rescanAll, rescanPlace, type Skip } from '../lib/secrets/rescan'
 import { describeError } from '../lib/secrets/db'
+import { baseOf } from '../lib/secrets/base'
 import { pagePlaces } from '../lib/secrets/vault'
 import { useCyberspace } from '../store/useCyberspace'
 import { SECRETS_MAX, useSecrets, heldList, type HeldKey, type Place, type SecretsSort, type SecretsStorage } from '../store/useSecrets'
 import { sizeLabel } from '../scene/SecretRegions'
 import { SCAN_MAX_HEIGHT, useShards } from '../store/useShards'
 import { ConfirmModal } from './ConfirmModal'
+import { useRoomKeys } from '../store/useKeyring'
 import { Explanation } from './Explanation'
 import { useEscape } from '../hooks/useEscape'
-import { regionKeyQuote } from '../lib/deployPlan'
+import { ModalClose } from './ui/ModalClose'
+import { CopyValue } from './ui/CopyValue'
 
 const SORTS: Array<[SecretsSort, string]> = [['recent', 'MOST RECENT'], ['volume', 'LARGEST']]
 
@@ -54,6 +58,7 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
   const placesVersion = useSecrets((s) => s.placesVersion)
   const rescan = useSecrets((s) => s.rescan)
   const discovered = useShards((s) => s.discovered)
+  const roomCount = useRoomKeys().length
   const position = useCyberspace((s) => s.position)
   const [forgetAll, setForgetAll] = useState(false)
   const [forgetPlaces, setForgetPlaces] = useState(false)
@@ -69,22 +74,29 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
     return () => { for (const t of pending) window.clearTimeout(t) }
   }, [])
   const [keysShown, setKeysShown] = useState(PAGE)
+  // A key whose corner is not known exactly (lib/secrets/base.ts), once its
+  // jump was tapped: the reason under its row, and for a bought key the offer
+  // to read its HOSAKA job again. `gone` when HOSAKA no longer has it.
+  const [corner, setCorner] = useState<Record<string, 'unknown' | 'asking' | 'gone'>>({})
+  // Why the last ASK HOSAKA did not work this time, when it may work again (review of #637).
+  const [cornerWhy, setCornerWhy] = useState<Record<string, string>>({})
+  const askHosaka = (k: HeldKey): void => {
+    setCorner((prev) => ({ ...prev, [k.lookupId]: 'asking' }))
+    setCornerWhy((prev) => { const next = { ...prev }; delete next[k.lookupId]; return next })
+    void useSecrets.getState().refetchCorner(k.lookupId).then(
+      (r) => {
+        setCorner((prev) => ({ ...prev, [k.lookupId]: r.outcome === 'gone' ? 'gone' : 'unknown' }))
+        if (r.outcome === 'failed') setCornerWhy((prev) => ({ ...prev, [k.lookupId]: r.reason }))
+      },
+      (err: unknown) => {
+        setCorner((prev) => ({ ...prev, [k.lookupId]: 'unknown' }))
+        setCornerWhy((prev) => ({ ...prev, [k.lookupId]: describeError(err) }))
+      },
+    )
+  }
   const places = usePlacePages(placesVersion, storage.mode)
 
-  const anchor = useCyberspace((s) => s.anchor)
-  const anchorPlane = useCyberspace((s) => s.anchorPlane)
-  const limits = useCyberspace((s) => s.cloud.limits)
-  const provider = useCyberspace((s) => s.cloud.provider)
   const cloudOff = useCyberspace((s) => s.cloudPrefs.mode === 'off')
-  const buying = useSecrets((s) => s.buying)
-  const buyError = useSecrets((s) => s.buyError)
-
-  // Above what this machine sweeps for itself, up to what HOSAKA computes.
-  const lowest = SCAN_MAX_HEIGHT + 1
-  const highest = limits?.max_hop_height ?? lowest
-  const canBuy = !cloudOff && highest >= lowest
-  const [buyHeight, setBuyHeight] = useState(Math.min(highest, lowest + 4))
-  const price = useMemo(() => regionKeyQuote(buyHeight, provider)?.sats ?? null, [provider, buyHeight])
 
   const sort = useSecrets((s) => s.sort)
   const list = useMemo(() => heldList(keys, sort), [keys, sort])
@@ -109,13 +121,20 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
     // thing you asked about at the edge of the screen and everything else in
     // the middle. Half a side along each axis, per axis, because a movement's
     // region is a box.
+    // A corner stored inexact (lib/secrets/base.ts) has nowhere to go: the
+    // list stays, and says why under the row (review of #629).
+    const base = baseOf(k.base, k.heights ?? k.height)
+    if (!base) {
+      setCorner((prev) => ({ ...prev, [k.lookupId]: prev[k.lookupId] ?? 'unknown' }))
+      return
+    }
     const mid = (axis: 'x' | 'y' | 'z'): bigint => {
       const h = BigInt(k.heights ? k.heights[axis] : k.height)
-      return BigInt(k.base[axis]) + (1n << h) / 2n
+      return base[axis] + (1n << h) / 2n
     }
     useSecrets.getState().setOpen(false)
     useSecrets.getState().focus(k.lookupId)
-    useCyberspace.getState().focusOn({ x: mid('x'), y: mid('y'), z: mid('z') }, k.plane, `REGION ${sizeLabel(k)}`, Math.max(0, k.height - 3))
+    useCyberspace.getState().viewAt({ x: mid('x'), y: mid('y'), z: mid('z') }, k.plane, `REGION ${sizeLabel(k)}`, Math.max(0, k.height - 3), { fit: true })
   }
 
   // A place is one gibson, the spot itself; the zoom stays where it is. The
@@ -124,7 +143,7 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
   const look = (p: Place): void => {
     useSecrets.getState().setOpen(false)
     useSecrets.getState().focus(p.id)
-    useCyberspace.getState().focusOn({ x: BigInt(p.position.x), y: BigInt(p.position.y), z: BigInt(p.position.z) }, p.plane, 'SCANNED PLACE')
+    useCyberspace.getState().viewAt({ x: BigInt(p.position.x), y: BigInt(p.position.y), z: BigInt(p.position.z) }, p.plane, 'SCANNED PLACE')
   }
 
   // One SCAN button's answer, shown for a few seconds: a held key's lookup id
@@ -164,12 +183,12 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
   useEscape('modal', true, onClose)
 
   return createPortal(
-    <div className="modal" role="dialog" aria-label="Region keys" aria-modal="true" onPointerDown={onClose}>
+    <div className="modal" role="dialog" aria-label="Keyring" aria-modal="true" onPointerDown={onClose}>
       <div className="modal__card secrets__box" onPointerDown={(e) => e.stopPropagation()}>
         <header className="panel__head secrets__head">
-          <h2><ItemIcon type="key" size={14} /> Region keys</h2>
-          <span className="tag">{list.length === 0 ? 'NO KEYS' : `${list.length} REGION${list.length === 1 ? '' : 'S'}`}</span>
-          <button className="targets__remove secrets__close" onClick={onClose} aria-label="Close" title="Close">✕</button>
+          <h2><ItemIcon type="key" size={14} /> Keyring</h2>
+          <span className="tag">{list.length + roomCount === 0 ? 'NO KEYS' : [list.length > 0 ? `${list.length} REGION${list.length === 1 ? '' : 'S'}` : '', roomCount > 0 ? `${roomCount} ROOM${roomCount === 1 ? '' : 'S'}` : ''].filter(Boolean).join(' · ')}</span>
+          <ModalClose onClose={onClose} />
         </header>
 
         <div className="secrets__summary">
@@ -181,27 +200,11 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
         <div className="secrets__body">
           <StorageNote storage={storage} />
 
-          {/* The heights this machine cannot reach for itself. A cube of side
-              2^12 it computes as you walk; 2^20 is a million pairings an axis. */}
-          {canBuy && (
-            <div className="secrets__buy">
-              <span className="login__label">Buy a key where you stand</span>
-              <div className="secrets__buy-row">
-                <button className="secrets__step" disabled={!!buying || buyHeight <= lowest} onClick={() => setBuyHeight((h) => Math.max(lowest, h - 1))} aria-label="Smaller region">−</button>
-                <span className="secrets__buy-size">2^{buyHeight} · {formatCellSize(buyHeight)}</span>
-                <button className="secrets__step" disabled={!!buying || buyHeight >= highest} onClick={() => setBuyHeight((h) => Math.min(highest, h + 1))} aria-label="Larger region">+</button>
-                <button
-                  className="avatars__go secrets__buy-go"
-                  disabled={!!buying}
-                  onClick={() => { void useSecrets.getState().buy(anchor, anchorPlane, buyHeight) }}
-                >{buying ? (buying.status === 'submitting' ? 'ASKING' : 'COMPUTING') : `BUY${price !== null ? ` · ${price} SATS` : ''}`}</button>
-              </div>
-              {buying
-                ? <span className="cloud__profile-note">HOSAKA is computing the 2^{buying.height} cube around you. It lands in this list when it is done.</span>
-                : <Explanation>Three axis trees at 2^{buyHeight}. Paid from your HOSAKA balance.</Explanation>}
-              {buyError && <span className="secrets__error">{buyError}</span>}
-            </div>
-          )}
+          {/* Buying a key went to SCAN mode (arkinox, 2026-11-14: "With this
+              new mode, I don't even think we need the Buy a key button in the
+              keyring modal anymore"): free up to this device's limit, HOSAKA
+              above it (store/useScan.ts). */}
+          <span className="secrets__scanmode">To scan a bigger cube, use SCAN mode.</span>
 
           <div className="secrets__rescan">
             <div className="secrets__section-head">
@@ -251,7 +254,7 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
             </div>
             <Explanation>
               The keys this device holds: ones that opened something where a scan ran, the regions
-              your hops crossed, and keys bought from HOSAKA. They are drawn in the scene and kept
+              your hops crossed, cubes SCAN mode scanned, and keys bought from HOSAKA. They are drawn in the scene and kept
               until you forget them. If storage passes its budget, opened and crossed keys go,
               oldest first, only after every scanned place has gone; bought keys never do. Every
               bought key is also copied to a small backstop in localStorage, so a key you paid for
@@ -280,6 +283,8 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
                 return (
                   <Fragment key={k.lookupId}>
                   <li className="secrets__row">
+                    {/* The id beside the row's button, not in it: a tap on it copies and does not fly there. */}
+                    <div className="secrets__main">
                     <button className="secrets__go" onClick={() => go(k)} title="Look at this region">
                       <span className="secrets__where">
                         <ItemIcon type="key" size={11} />
@@ -289,11 +294,12 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
                           number could only ever be one of its edges. */}
                       <span className="secrets__dims">{physicalSize(k)}</span>
                       <span className="secrets__meta">
-                        {k.plane === 1 ? 'ideaspace' : 'dataspace'} · {k.source === 'cloud' ? 'bought' : k.source === 'hop' ? 'crossed' : 'opened'} · {formatAgo(k.at, now)}
+                        {k.plane === 1 ? 'ideaspace' : 'dataspace'} · {k.source === 'cloud' ? 'bought' : k.source === 'hop' ? 'crossed' : k.source === 'scanmode' ? 'scanned' : 'opened'} · {formatAgo(k.at, now)}
                         {found > 0 && <span className="secrets__found"> · {found} found</span>}
                       </span>
-                      <span className="secrets__id">{k.lookupId.slice(0, 16)}…</span>
                     </button>
+                    <CopyValue className="secrets__id" value={k.lookupId} shown={`${k.lookupId.slice(0, 16)}…`} />
+                    </div>
                     <button
                       className="secrets__scan"
                       disabled={scanning === k.lookupId}
@@ -308,6 +314,20 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
                     >✕</button>
                   </li>
                   {scanError(k.lookupId)}
+                  {corner[k.lookupId] && !baseOf(k.base, k.heights ?? k.height) && (
+                    <li className="secrets__error secrets__row-error">
+                      Nowhere to look: this key was bought before its corner was kept exactly. SCAN still asks with it.
+                      {k.source === 'cloud' && !cloudOff && corner[k.lookupId] !== 'gone' && (
+                        <> <button
+                          className="secrets__scan"
+                          disabled={corner[k.lookupId] === 'asking'}
+                          onClick={() => askHosaka(k)}
+                          title="Read this key's HOSAKA job again for its exact corner. Nothing is bought."
+                        >{corner[k.lookupId] === 'asking' ? 'ASKING…' : 'ASK HOSAKA'}</button></>
+                      )}
+                      {cornerWhy[k.lookupId] && corner[k.lookupId] !== 'asking' && <> Could not ask this time: {cornerWhy[k.lookupId]}</>}
+                    </li>
+                  )}
                   </Fragment>
                 )
               })}
@@ -319,6 +339,8 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
             </ul>
             <ShowMore shown={keysShown} total={list.length} what="keys" onMore={() => setKeysShown((n) => n + PAGE)} />
           </section>
+
+          <RoomKeys />
 
           <section className="secrets__section" aria-label="Scanned places">
             <div className="secrets__section-head">
@@ -345,6 +367,7 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
                 return (
                   <Fragment key={p.id}>
                   <li className="secrets__row">
+                    <div className="secrets__main">
                     <button className="secrets__go" onClick={() => look(p)} title="Look at this place">
                       <span className="secrets__where">
                         <MapPin size={11} strokeWidth={2.25} aria-hidden />
@@ -355,8 +378,9 @@ export function SecretsModal({ onClose }: { onClose: () => void }): JSX.Element 
                         {p.plane === 1 ? 'ideaspace' : 'dataspace'} · stood here {formatAgo(p.at, now)}
                         {p.first < p.at && ` · first ${formatAgo(p.first, now)}`}
                       </span>
-                      <span className="secrets__id">{p.keys[0]?.slice(0, 16)}…</span>
                     </button>
+                    {p.keys[0] && <CopyValue className="secrets__id" value={p.keys[0]} shown={`${p.keys[0].slice(0, 16)}…`} />}
+                    </div>
                     <button
                       className="secrets__scan"
                       disabled={scanning === p.id}
@@ -527,4 +551,31 @@ function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
   return `${(n / (1024 * 1024)).toFixed(1)} MB`
+}
+
+/**
+ * ROOMS on the KEYRING: the room keys you carry, from doors you opened and
+ * rooms you hid in (store/useKeyring roomKeysNow). A chest or door can be
+ * locked to one (DECK-0004 §3.8). Nothing to forget here: a room key comes
+ * back whenever its door opens.
+ */
+function RoomKeys(): JSX.Element | null {
+  const rooms = useRoomKeys()
+  if (rooms.length === 0) return null
+  return (
+    <section className="secrets__section" aria-label="Rooms">
+      <div className="secrets__section-head">
+        <span className="login__label">Rooms</span>
+        <span className="tag">{rooms.length}</span>
+      </div>
+      <ul className="secrets__list">
+        {rooms.map((r) => (
+          <li key={r.lookupId} className="secrets__row">
+            <span className="secrets__where">{r.kind === 'room' && r.name ? r.name : 'a room'}</span>
+            <CopyValue className="secrets__id" value={r.lookupId} shown={`${r.lookupId.slice(0, 16)}…`} />
+          </li>
+        ))}
+      </ul>
+    </section>
+  )
 }

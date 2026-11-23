@@ -3,11 +3,14 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- Same-origin requests (the analytics collector among them) carry only the origin, never /C/<hex> or the query (src/lib/analytics.ts). -->
+    <meta name="referrer" content="strict-origin" />
     
-    <!-- Prevent caching: always fetch fresh build -->
-    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
-    <meta http-equiv="Pragma" content="no-cache" />
-    <meta http-equiv="Expires" content="0" />
+    <!-- No cache-busting meta tags here: Vercel already serves this page with
+         Cache-Control: max-age=0, must-revalidate (and the build's assets are
+         hashed), so a new build always loads. The old no-store / Expires 0 tags
+         are the one thing this page had that cards X does show (fanfares.io)
+         do not, while X showed no card for any onosendai.tech link (2026-11-13). -->
     
     <title>ONOSENDAI V2 — Cyberspace Explorer</title>
     <meta name="description" content="Cyberspace is the digital fabric of reality. Encrypt data to a location, build your digital world, find hidden treasures and visit real places on Earth." />
@@ -21,16 +24,21 @@
       ™ on the wordmark, 2026-10-21).
     -->
     <meta property="og:type" content="website" />
-    <meta property="og:url" content="https://onosendai.tech/" />
+    <meta property="og:url" content="https://www.onosendai.tech/" />
     <meta property="og:site_name" content="ONOSENDAI" />
     <meta property="og:title" content="ONOSENDAI" />
     <meta property="og:description" content="Cyberspace is the digital fabric of reality. Encrypt data to a location, build your digital world, find hidden treasures and visit real places on Earth." />
-    <meta property="og:image" content="https://onosendai.tech/og.png?v=2" />
+    <meta property="og:image" content="https://www.onosendai.tech/og.png?v=3" />
     <meta property="og:image:type" content="image/png" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
     <meta property="og:image:alt" content="The ONOSENDAI wordmark and its yellow mark beside a scene from the app: the violet ring of the Black Sun, a cyan hyperjump beam with an avatar inside it, and a neon structure beyond." />
     <meta name="twitter:card" content="summary_large_image" />
+    <!-- X reads these first; kept equal to the og: tags (src/lib/routeCard.ts swaps both). -->
+    <meta name="twitter:title" content="ONOSENDAI" />
+    <meta name="twitter:description" content="Cyberspace is the digital fabric of reality. Encrypt data to a location, build your digital world, find hidden treasures and visit real places on Earth." />
+    <meta name="twitter:image" content="https://www.onosendai.tech/og.png?v=3" />
+    <meta name="twitter:image:alt" content="The ONOSENDAI wordmark and its yellow mark beside a scene from the app: the violet ring of the Black Sun, a cyan hyperjump beam with an avatar inside it, and a neon structure beyond." />
     
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=1">
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png?v=1">
@@ -56,7 +64,23 @@
     </script>
   </head>
   <body>
-    <div id="root"></div>
+    <!--
+      The first paint: the wordmark on black, drawn by the browser from this
+      page alone, before any script runs or any database answers. It sits in
+      #root, so the app's first render takes its place (src/boot.tsx). Inline
+      and tiny on purpose: nothing here waits on the network but the logo,
+      which is preloaded above, and the page is black without it.
+    -->
+    <style>
+      html { background: #000; }
+      .boot-shell { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 22px; background: #000; }
+      .boot-shell img { width: min(56vw, 300px); height: auto; aspect-ratio: 1969 / 354; opacity: 0.92; }
+      .boot-shell i { position: relative; display: block; width: 132px; height: 2px; overflow: hidden; background: rgba(255, 255, 255, 0.14); clip-path: polygon(2px 0, 100% 0, calc(100% - 2px) 100%, 0 100%); }
+      .boot-shell i::after { content: ''; position: absolute; inset: 0; width: 40%; background: #fff; animation: boot-shell-run 1.4s ease-in-out infinite; }
+      @keyframes boot-shell-run { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
+      @media (prefers-reduced-motion: reduce) { .boot-shell i::after { animation: none; width: 100%; opacity: 0.4; } }
+    </style>
+    <div id="root"><div class="boot-shell" aria-label="ONOSENDAI is loading"><img src="/logo.png" alt="ONOSENDAI" width="1969" height="354" decoding="async"><i></i></div></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

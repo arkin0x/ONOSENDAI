@@ -17,6 +17,7 @@ import { useEffect } from 'react'
 import { Tv, X } from 'lucide-react'
 import { useEscape } from '../hooks/useEscape'
 import { startTvInPlace, tvBlocked, useTv } from '../store/useTv'
+import { useTvAnnounce } from '../store/useTvAnnounce'
 import { useCyberspace } from '../store/useCyberspace'
 import { useBuilder } from '../store/useBuilder'
 import { useShards } from '../store/useShards'
@@ -30,6 +31,8 @@ export const BROADCAST_RETUNE_MS = 60_000
 export function TvScreen(): JSX.Element | null {
   const on = useTv((s) => s.on)
   const status = useTv((s) => s.status)
+  // An UPGRADE ANNOUNCEMENT covers the picture (store/useTvAnnounce): NO SIGNAL's RETRY waits under it.
+  const announcing = useTvAnnounce((s) => s.showing !== null)
   const broadcast = isBroadcast()
   // Escape turns the set off, over anything else (there is nothing else up).
   useEscape('modal', on && !broadcast, () => useTv.getState().stop())
@@ -45,7 +48,7 @@ export function TvScreen(): JSX.Element | null {
       <button className="chip ws__icon tv__off" onClick={() => useTv.getState().stop()} title="Turn Cyberspace TV off (Esc)" aria-label="Turn Cyberspace TV off">
         <X size={15} strokeWidth={2.25} aria-hidden />
       </button>
-      {status === 'no-signal' && <button className="chip tv__retry" onClick={() => useTv.getState().retune()}>RETRY</button>}
+      {status === 'no-signal' && !announcing && <button className="chip tv__retry" onClick={() => useTv.getState().retune()}>RETRY</button>}
       <TvSpinHost />
     </div>
   )

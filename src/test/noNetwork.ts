@@ -14,6 +14,17 @@ import { afterEach, vi } from 'vitest'
 // test file's own mock of it, which spreads the same.
 vi.mock('../lib/relay', async (orig) => ({ ...(await orig<typeof import('../lib/relay')>()), ...(await import('./offlineRelay')).offlineRelay }))
 
+// The tutorial dungeon as the tests play it: its DEV game, whose world is the
+// bundled fixture, whatever key lib/games/tutorialGame.ts names. Once the
+// owner's key is set there (TUTORIAL_PUBKEY, one line) the real game reads
+// its world from the relays, which no test may touch. A test of the real
+// constant reads TUTORIAL_PUBKEY, which this leaves as it is; one that plays
+// a live game mocks this module itself.
+vi.mock('../lib/games/tutorialGame', async (orig) => {
+  const real = await orig<typeof import('../lib/games/tutorialGame')>()
+  return { ...real, TUTORIAL_GAME: real.tutorialGameFor(real.TUTORIAL_DEV_PUBKEY) }
+})
+
 const opened: string[] = []
 
 class NoWebSocket {

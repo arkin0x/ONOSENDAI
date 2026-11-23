@@ -286,7 +286,7 @@ describe('switching, canceling and leaving', () => {
     expect(S().pending).not.toBeNull()
   })
 
-  it('the mode ending under a copy keeps no draft and says nothing was kept', async () => {
+  it('the mode ending under a copy keeps no draft', async () => {
     S().startDeployMessage('you are here')
     await S().deploy()
     expect(S().pending).not.toBeNull()
@@ -295,8 +295,7 @@ describe('switching, canceling and leaving', () => {
     expect(B().active).toBe(false)
     expect(S().pending).toBeNull()
     expect(B().messageDraft).toBeNull()
-    const meta = useToast.getState().toast?.meta ?? ''
-    expect(meta).not.toMatch(/kept|canceled/)
+    expect(useToast.getState().toast).toMatchObject({ label: 'BUILD MODE ENDED', meta: '' })
     expect(S().mine).toHaveLength(1)
   })
 

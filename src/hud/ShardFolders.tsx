@@ -19,17 +19,24 @@
  * every shard and folder under it at any depth, in one step (arkinox,
  * 2026-10-25: "i need an option to actually delete a folder and everything
  * in it"). The pickers never get it.
+ *
+ * A list with a search box hands in what is typed (`query`): the list then
+ * shows only the matches and the folders on the way to them, opened for the
+ * search alone, and the row kit's `mark` marks the matched part of a name
+ * (lib/shardSearch.ts; arkinox, 2026-11-16).
  */
 
-import { Fragment, useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { ChevronDown, ChevronRight, Folder as FolderIcon, FolderInput, FolderPlus, Pencil, X } from 'lucide-react'
 import { buildTree, canonical, contentsOf, flatFolders, newestFirst, parentOf, folderOf, isWithin, pathOf, type FolderNode, type FolderTree } from '../lib/shardFolders'
 import { useShardFolders } from '../store/useShardFolders'
-import { useCyberspace } from '../store/useCyberspace'
 import { useEscape } from '../hooks/useEscape'
 import { ConfirmModal } from './ConfirmModal'
 import { Field, Switch } from './ui/Switch'
+import { ModalClose } from './ui/ModalClose'
+import { Highlight, highlighter } from './ui/SearchField'
+import { filterTree, searchKey } from '../lib/shardSearch'
 
 /** The drag payload's type, so a file dragged onto the workshop is never read as a shard. */
 const DRAG_TYPE = 'application/x-onosendai-folder-item'
@@ -46,6 +53,18 @@ export interface RowKit {
   }
   /** MOVE TO FOLDER, or the row's checkbox while selecting. */
   tool: JSX.Element
+  /**
+   * Whether SELECT is on. A tap on the row itself should then pick it or let
+   * it go (`toggle`), as its checkbox does, and not open it: opening may take
+   * the list away, and the picks with it (review of PR 631).
+   */
+  selecting: boolean
+  /** Whether the row is picked, while selecting. */
+  picked: boolean
+  /** Pick the row, or let it go. */
+  toggle: () => void
+  /** The row's name with the part the search matched marked (the name as it is with no search). */
+  mark: (text: string) => ReactNode
 }
 
 interface Props<T> {
@@ -59,6 +78,13 @@ interface Props<T> {
    * nowhere else): a folder's DELETE then offers to delete what is in it too.
    */
   deleteContents?: DeleteContents
+  /**
+   * The search typed under the list (ui/SearchField). While it holds text the
+   * list shows only what matches and the folders on the way to it, opened
+   * for the search alone (lib/shardSearch.ts): the folds kept in the store are
+   * never touched, so clearing it puts every folder back as it was.
+   */
+  query?: string
 }
 
 /** How a list deletes its shards, for DELETE CONTENTS. Local only: nothing is retracted. */
@@ -163,13 +189,12 @@ export function moveTo(moving: Moving, to: string | null): void {
   else useShardFolders.getState().moveFolder(moving.id, to)
 }
 
-export function ShardFolders<T>({ items, refOf, nameOf, row, deleteContents }: Props<T>): JSX.Element {
-  const me = useCyberspace((s) => s.identity.pubkey)
+export function ShardFolders<T>({ items, refOf, nameOf, row, deleteContents, query = '' }: Props<T>): JSX.Element {
   const tree = useShardFolders((s) => s.tree)
+  // The device's folders, the same whoever is signed in (store/useShardFolders.ts).
   useEffect(() => {
-    const st = useShardFolders.getState()
-    if (st.owner !== me) void st.load(me)
-  }, [me])
+    if (useShardFolders.getState().storage === 'loading') void useShardFolders.getState().load()
+  }, [])
   const f = useShardFolders.getState
 
   const built = useMemo(() => buildTree(tree, items, refOf), [tree, items, refOf])
@@ -180,6 +205,21 @@ export function ShardFolders<T>({ items, refOf, nameOf, row, deleteContents }: P
   const [deleting, setDeleting] = useState<string | null>(null)
   const [over, setOver] = useState<string | null>(null)
   const drag = useMemo(canDrag, [])
+
+  // The search: what it shows, which folders it opens, and the folds tapped
+  // while it is on, kept apart from the stored ones and dropped when the
+  // search changes. A folder being named is kept in sight whatever its name.
+  const key = searchKey(query)
+  const searching = key !== ''
+  const filtered = useMemo(() => (searching ? filterTree(built, key, nameOf, renaming) : null), [searching, built, key, nameOf, renaming])
+  const [searchFolds, setSearchFolds] = useState<{ key: string; open: Record<string, boolean> }>({ key: '', open: {} })
+  const folds = searchFolds.key === key ? searchFolds.open : {}
+  const isOpen = (id: string): boolean => (filtered ? folds[id] ?? filtered.open.has(id) : !tree.collapsed[id])
+  const setOpen = (id: string, open: boolean): void => {
+    if (filtered) setSearchFolds({ key, open: { ...folds, [id]: open } })
+    else f().setCollapsed(id, !open)
+  }
+  const mark = useMemo(() => (searching ? highlighter(key) : (text: string): ReactNode => text), [searching, key])
 
   // A picked shard that left the list is no longer picked.
   const present = useMemo(() => new Set(items.map(refOf)), [items, refOf])
@@ -222,6 +262,7 @@ export function ShardFolders<T>({ items, refOf, nameOf, row, deleteContents }: P
 
   const kitFor = (item: T): RowKit => {
     const ref = refOf(item)
+    const toggle = (): void => setPicked((cur) => { const next = new Set(cur); if (next.has(ref)) next.delete(ref); else next.add(ref); return next })
     const tool = selecting ? (
       <input
         type="checkbox"
@@ -235,14 +276,15 @@ export function ShardFolders<T>({ items, refOf, nameOf, row, deleteContents }: P
         <FolderInput size={13} strokeWidth={2.25} aria-hidden />
       </button>
     )
-    if (!drag) return { drag: {}, tool }
+    const kit = { tool, selecting, picked: selecting && picked.has(ref), toggle, mark }
+    if (!drag) return { drag: {}, ...kit }
     return {
+      ...kit,
       drag: {
         draggable: true,
         onDragStart: (e) => startDrag(e, { kind: 'shards', refs: selecting && picked.has(ref) ? pickedNow : [ref] }),
         onDragEnd: () => { draggingFolder = null; setOver(null) },
       },
-      tool,
     }
   }
 
@@ -250,7 +292,7 @@ export function ShardFolders<T>({ items, refOf, nameOf, row, deleteContents }: P
 
   const folderRow = (node: FolderNode<T>): JSX.Element => {
     const { folder } = node
-    const open = !tree.collapsed[folder.id]
+    const open = isOpen(folder.id)
     const Chevron = open ? ChevronDown : ChevronRight
     return (
       <li key={folder.id} className={`sfold ${over === folder.id ? 'is-over' : ''}`}>
@@ -264,10 +306,10 @@ export function ShardFolders<T>({ items, refOf, nameOf, row, deleteContents }: P
           {renaming === folder.id ? (
             <RenameField name={folder.name} onDone={(name) => { if (name !== null) f().renameFolder(folder.id, name); setRenaming(null) }} />
           ) : (
-            <button className="sfold__toggle" aria-expanded={open} onClick={() => f().setCollapsed(folder.id, open)} title={open ? 'Fold' : 'Unfold'}>
+            <button className="sfold__toggle" aria-expanded={open} onClick={() => setOpen(folder.id, !open)} title={open ? 'Fold' : 'Unfold'}>
               <Chevron size={12} strokeWidth={2.25} aria-hidden />
               <FolderIcon size={12} strokeWidth={2.25} aria-hidden />
-              <span className="sfold__name">{folder.name}</span>
+              <span className="sfold__name">{searching ? <Highlight text={folder.name} query={key} /> : folder.name}</span>
               <span className="sfold__count">{node.count}</span>
             </button>
           )}
@@ -280,7 +322,11 @@ export function ShardFolders<T>({ items, refOf, nameOf, row, deleteContents }: P
                 className="sfold__mini sfold__mini--danger"
                 title={deleteContents ? 'Delete folder' : 'Delete folder; what is in it moves up'}
                 aria-label={`Delete ${folder.name}`}
-                onClick={() => { if (node.count === 0 && node.folders.length === 0) f().deleteFolder(folder.id); else setDeleting(folder.id) }}
+                onClick={() => {
+                  // Whether it is empty is asked of the whole folder, not of what a search shows of it.
+                  const whole = filtered ? findNode(built.folders, folder.id) ?? node : node
+                  if (whole.count === 0 && whole.folders.length === 0) f().deleteFolder(folder.id); else setDeleting(folder.id)
+                }}
               ><X size={14} strokeWidth={2.25} aria-hidden /></button>
             </>
           )}
@@ -312,8 +358,9 @@ export function ShardFolders<T>({ items, refOf, nameOf, row, deleteContents }: P
           items.length > 1 && <button className="sfold__btn" onClick={() => setSelecting(true)} title="Pick several to move together">SELECT</button>
         )}
       </li>
-      {built.folders.map(folderRow)}
-      {rows(built.items)}
+      {(filtered ?? built).folders.map(folderRow)}
+      {rows((filtered ?? built).items)}
+      {filtered && filtered.folders.length === 0 && filtered.items.length === 0 && <li className="sfold__none" role="status">No matches</li>}
       {moving && (
         <FolderChooser
           tree={tree}
@@ -477,7 +524,7 @@ function FolderChooser({ tree, moving, current, onPick, onClose }: {
       <div className="modal__card sfold__chooser" onPointerDown={(e) => e.stopPropagation()}>
         <div className="login__head">
           <h2 className="modal__title">Move &quot;{moving.label}&quot;</h2>
-          <button className="secret__close" onClick={onClose} aria-label="Close">✕</button>
+          <ModalClose onClose={onClose} />
         </div>
         <ul className="sfold__choices">
           <li>

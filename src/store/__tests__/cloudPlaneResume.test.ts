@@ -82,7 +82,7 @@ async function cloudCase(headPlane: 0 | 1, jobPlane: 0 | 1, planeAtResume: 0 | 1
   await vi.waitFor(() => expect(S().events.length === 3 || S().cloud.status === 'error').toBe(true))
   const head = S().events[S().events.length - 1]
   const cloudLib = await import('../../lib/cloud')
-  return { plane: S().plane, loadedPlane, signed: S().events.length === 3, C: head.tags.find((t) => t[0] === 'C')?.[1], want: positionHex(target, jobPlane), msg: S().proof.message ?? S().cloud.message, kept: !!cloudLib.loadCloudJob(), submits: fake.submitHop.mock.calls.length, starts: fake.startJob.mock.calls.length, level1: S().events.length === 3 ? verifyHopLevel1({ from: { ...at1, plane: headPlane }, to: { ...target, plane: jobPlane }, previousEventIdHex: h1.id, proof: tag(head, 'proof'), nonce: tag(head, 'mn'), openings: tag(head, 'mp'), eventId: head.id }) : null }
+  return { plane: S().plane, loadedPlane, signed: S().events.length === 3, C: head.tags.find((t) => t[0] === 'C')?.[1], want: positionHex(target, jobPlane), msg: S().proof.message ?? S().cloud.message, kept: !!cloudLib.loadCloudJob(S().identity.pubkey), submits: fake.submitHop.mock.calls.length, starts: fake.startJob.mock.calls.length, level1: S().events.length === 3 ? verifyHopLevel1({ from: { ...at1, plane: headPlane }, to: { ...target, plane: jobPlane }, previousEventIdHex: h1.id, proof: tag(head, 'proof'), nonce: tag(head, 'mn'), openings: tag(head, 'mp'), eventId: head.id }) : null }
 }
 
 describe('a paid cloud hop resumed signs its own move, in its own plane', () => {

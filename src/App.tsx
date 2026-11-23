@@ -10,7 +10,7 @@ import { Workshop } from './workshop/Workshop'
 import { DeployBar } from './hud/DeployBar'
 import { StashModals } from './hud/StashModals'
 import { ThumbHost } from './scene/ThumbStage'
-import { SecretModal } from './hud/SecretModal'
+import { PublicShardModal, SecretModal } from './hud/SecretModal'
 import { FocusBar } from './hud/FocusBar'
 import { BuildBar } from './hud/BuildBar'
 import { KeyFoundChip } from './hud/KeyFoundChip'
@@ -22,8 +22,22 @@ import { NearbyChip } from './hud/NearbyChip'
 import { NowPlayingChip, SoundChip } from './hud/NowPlaying'
 import { GoalChip } from './hud/GoalChip'
 import { watchNearbyReturn } from './lib/nearbyReturn'
-import { startCoordRoute } from './store/useCoordRoute'
+import { watchDoorReturn } from './lib/doorReturn'
+import { startCoordRoute, watchCoordRouteHistory } from './store/useCoordRoute'
 import { DemoCoach } from './hud/DemoCoach'
+import { TutorialCoach } from './hud/TutorialCoach'
+import { useTutorial, watchFirstArrival } from './store/useTutorial'
+import { watchArrivalMode } from './store/arrivalMode'
+// The tutorial's staged things and the waits on them (registered on load; stages only while it runs).
+import './tutorial/director'
+// The Earth route's waits: a stop picked, BOARD, RIDE.
+import './tutorial/earthRoute'
+// The Straylight route's OPEN STRAYLIGHT CAFE: the invite in a new tab.
+import './tutorial/straylight'
+// The final card's DUNGEON, when games are on for this device.
+import './tutorial/dungeon'
+import { GameView } from './game/GameView'
+import { GameChip } from './hud/GameChip'
 import { TvScreen } from './hud/TvScreen'
 import { isTvPath, useTv } from './store/useTv'
 import { isBroadcast, reloadBroadcast } from './lib/tv/broadcast'
@@ -31,6 +45,9 @@ import { parseDemoRoute } from './lib/demoRoute'
 import { startWorkshopRoute } from './lib/workshopRoute'
 import { restoreAfterUnfinishedTour, useDemo } from './store/useDemo'
 import { ToastChip } from './hud/ToastChip'
+import { SignerStuckChip, SignerUiHost } from './hud/SignerControls'
+import { TutorialToast } from './hud/TutorialToast'
+import { watchTutorialToast } from './tutorial/toast'
 import { StarNickname } from './hud/StarNickname'
 import { StarredPlaceCard } from './hud/StarredPlaceCard'
 import { LootDetail } from './hud/LootDetail'
@@ -39,20 +56,26 @@ import { CloudApproval, CreditedModal, InvoiceModal, PaidModal } from './hud/Inv
 import { HosakaOffer } from './hud/HosakaOffer'
 import { ChainConflictPrompt } from './hud/ChainConflict'
 import { ChainStatusModal } from './hud/ChainStatus'
+import { ChainStoreTrial } from './hud/ChainStoreTrial'
 import { BrokenChainChip, BrokenChainModal } from './hud/BrokenChain'
 import { VersionChip } from './hud/VersionChip'
-import { startVersionGate } from './lib/versionGate'
+import { startVersionGate, useVersionGate } from './lib/versionGate'
 import { HosakaPulse } from './hud/HosakaPulse'
 import { useOfferView } from './store/useOffer'
 import { useDiscovery } from './hooks/useDiscovery'
 import { Hud } from './hud/Hud'
+import { KeyLockGate } from './hud/KeyLock'
 import { Targets } from './hud/Targets'
 import { PersonModal } from './hud/PersonModal'
 import { ProfileView } from './hud/ProfileView'
 import { ProfileModal } from './hud/ProfileModal'
 import { useProfileView } from './store/useProfileView'
 import { TouchControls } from './hud/TouchControls'
+import { RegionChip } from './hud/RegionChip'
+import { useRegion } from './store/useRegion'
 import { WalkLookSphere } from './hud/WalkLookSphere'
+import { ViewFlyButtons } from './hud/ViewFlyButtons'
+import { ScanControls } from './hud/ScanControls'
 import { SyncWarning } from './hud/SyncWarning'
 import { RouteOverlay } from './hud/RouteOverlay'
 import { ViewMenu } from './hud/ViewMenu'
@@ -62,18 +85,21 @@ import { startPresence } from './store/usePresence'
 import { hydrateRoster } from './store/useRoster'
 import { ChatDock } from './hud/ChatDock'
 import { useChatFeed } from './hooks/useChatFeed'
-import { watchConnectivity } from './lib/relay'
+import { watchConnectivity, watchTabReturn } from './lib/relay'
 import { Scene } from './scene/Scene'
 import { useCanvasTap } from './hooks/useCanvasTap'
 import { setMenuCovering, useKeyboard } from './hooks/useKeyboard'
 import { useEscape, useModalUp } from './hooks/useEscape'
 import { useProofListener } from './hooks/useProofListener'
 import { useIsMobile } from './hooks/useIsMobile'
+import { useMenuOpen } from './hooks/useMenuOpen'
+import { armMenuSlide } from './hooks/useMenuInset'
 import { useTargets } from './hooks/useTargets'
 import { startCalibration } from './lib/calibration'
 import { startPublisher } from './lib/publisher'
 import { startSelfSync } from './lib/selfSync'
 import { startMutes } from './store/useMutes'
+import { startHidesSync } from './store/hidesSyncLive'
 import { watchBlockedSpectation } from './lib/spectator'
 import { startTracker } from './lib/tracker'
 import { useCyberspace } from './store/useCyberspace'
@@ -81,8 +107,9 @@ import { useHyperspace } from './store/useHyperspace'
 import { useSecrets, watchFocus } from './store/useSecrets'
 import { useInventory } from './store/useInventory'
 import { useShardFolders } from './store/useShardFolders'
+import { startPersonalLists } from './store/personalStart'
 import { useFound } from './store/useFound'
-import { useAvatars } from './store/useAvatars'
+import { watchMyAvatar } from './store/useAvatars'
 import { setSyncPriority } from './lib/hyperspace/anchors'
 
 /** How long after the panels open the anchor sync goes full tilt. */
@@ -91,7 +118,15 @@ import { useShards } from './store/useShards'
 import { useBuilder } from './store/useBuilder'
 import { CHAT_COVERS_PAD, linkChatAndPad, tapScene, usePad } from './store/usePad'
 
+/** A stable empty list for a step that keeps no chips, so the selector never churns. */
+const EMPTY_KEEP: ReadonlyArray<'found' | 'chain'> = []
+
 export default function App(): JSX.Element {
+  // Landing on /tv, the first render is already TV's alone, as it will be
+  // once TV starts (in the effect below): the panels would mount for one
+  // render and ask the relays for megabytes (every bag, the avatars) ahead
+  // of TV's first question, on the same sockets.
+  const [tvLanding, setTvLanding] = useState(() => isTvPath(window.location.pathname))
   // Reactions and comments that tag you: the first page per identity, then a poll.
   useNotificationsLoop()
   // New private messages from your agents, for the dot on AGENTS and the
@@ -104,9 +139,14 @@ export default function App(): JSX.Element {
   useProofListener()
   // The chain drains to the relay from here on, whenever Live is on, and the
   // targets' positions are kept current.
-  useEffect(() => { startVersionGate(); startPublisher(); startTracker(); startPresence(); startSelfSync(); startMutes(); watchBlockedSpectation(); startCalibration(); void useCyberspace.getState().initSigner(); useHyperspace.getState().startSync(); useAvatars.getState().loadMine(); void useSecrets.getState().load(); void useInventory.getState().load(); void useShardFolders.getState().load(); void useFound.getState().load(); watchFocus(); watchNearbyReturn() }, [])
-  // onosendai.tech/C/<hex>: a place or a region to open on (store/useCoordRoute.ts).
-  useEffect(() => startCoordRoute(), [])
+  useEffect(() => { startVersionGate(); startPublisher(); startTracker(); startPresence(); startSelfSync(); startMutes(); startHidesSync(); watchBlockedSpectation(); startCalibration(); void useCyberspace.getState().initSigner(); useHyperspace.getState().startSync(); watchMyAvatar(); void useSecrets.getState().load(); void useInventory.getState().load(); void useShardFolders.getState().load(); void useFound.getState().load(); startPersonalLists(); watchFocus(); watchNearbyReturn(); watchDoorReturn() }, [])
+  // onosendai.tech/C/<hex>: a place or a region to open on, and Back and
+  // Forward over the ones the View box opens (store/useCoordRoute.ts).
+  useEffect(() => {
+    const stop = startCoordRoute()
+    const unwatch = watchCoordRouteHistory()
+    return () => { stop(); unwatch() }
+  }, [])
   // onosendai.tech/demo (or /demo/<step>): the guided tour (store/useDemo.ts).
   useEffect(() => {
     const step = parseDemoRoute(window.location.pathname)
@@ -123,6 +163,16 @@ export default function App(): JSX.Element {
     window.addEventListener('popstate', onPop)
     return () => window.removeEventListener('popstate', onPop)
   }, [])
+  // The first-arrival tutorial (store/useTutorial.ts): with this device's
+  // switch on (tutorial/gate.ts, on by default since 2026-11-13), a
+  // brand-new identity gets the tutorial and a player who left one
+  // unfinished resumes it.
+  useEffect(() => watchFirstArrival(), [])
+  // ?mode=view or ?mode=region on arrival: the mode wins over the first
+  // arrival on that load, never over a run already going (store/arrivalMode.ts).
+  useEffect(() => watchArrivalMode(), [])
+  // The tutorial toast for a returning player who has not finished it (tutorial/toast.ts).
+  useEffect(() => watchTutorialToast(), [])
   // onosendai.tech/tv: Cyberspace TV (store/useTv.ts). Back off /tv turns
   // it off, Forward onto /tv turns it on, as loading that address would.
   useEffect(() => {
@@ -135,6 +185,7 @@ export default function App(): JSX.Element {
       try { window.history.replaceState(null, '', '/') } catch { /* no history here */ }
     }
     if (isTvPath(window.location.pathname)) open()
+    setTvLanding(false)
     const onPop = (): void => {
       const at = isTvPath(window.location.pathname)
       const tv = useTv.getState()
@@ -162,18 +213,14 @@ export default function App(): JSX.Element {
   // Back from the wallet: a phone suspends the tab while another app is up,
   // so the invoice poll's timer is still counting when the tab returns. Ask
   // HOSAKA at once instead of waiting the interval out; harmless otherwise.
-  useEffect(() => {
-    const back = (): void => {
-      if (document.visibilityState !== 'visible') return
-      const s = useCyberspace.getState()
-      s.wakeSigner()
-      s.checkCloudPayment()
-    }
-    document.addEventListener('visibilitychange', back)
-    window.addEventListener('pageshow', back)
-    window.addEventListener('focus', back)
-    return () => { document.removeEventListener('visibilitychange', back); window.removeEventListener('pageshow', back); window.removeEventListener('focus', back) }
-  }, [])
+  // After a real absence (not a focus: an extension's DENY gives the focus
+  // back), a relay whose AUTH failed while the signer was away signs in
+  // again, and the lists it refused read again once it does (useLoot).
+  useEffect(() => watchTabReturn(() => {
+    const s = useCyberspace.getState()
+    s.wakeSigner()
+    s.checkCloudPayment()
+  }), [])
 
   const isMobile = useIsMobile()
   // Spectating locks the panels: they describe you, and the scene is not about
@@ -183,8 +230,13 @@ export default function App(): JSX.Element {
   // Panels start open on a desktop and closed on a phone, and after that the
   // hamburger owns it on both. It used to be derived from the breakpoint, which
   // was necessary while the hamburger only existed on mobile: a stored `false`
-  // would have stranded a desktop HUD with no control to bring it back.
-  const [panelsOpen, setPanelsOpen] = useState(!isMobile)
+  // would have stranded a desktop HUD with no control to bring it back. With
+  // the hamburger on both, open or closed is kept across a refresh, and the
+  // default above is only for a first visit (hooks/useMenuOpen.ts).
+  const [panelsOpen, setPanelsOpen] = useMenuOpen(!isMobile)
+  // The HUD slides inside the menu's columns as it opens and closes on a
+  // wide screen, but not as the page loads with it open (hooks/useMenuInset).
+  useEffect(armMenuSlide, [])
   const showPanels = panelsOpen && !spectating
 
   // Reading a hidden thing owns the screen: the top-aligned modal sits where
@@ -214,6 +266,15 @@ export default function App(): JSX.Element {
   // where building happens, so on a phone the panels fold away.
   const building = useBuilder((s) => s.active)
   const touring = useDemo((s) => s.active)
+  // The first-arrival tutorial hides the top-left chips to cut clutter, save
+  // the few a step teaches with by name (feedback item 3). They all come back
+  // when it is exited or finished.
+  const tutorialActive = useTutorial((s) => s.active)
+  const tutorialKeep = useTutorial((s) => (s.active ? (s.script.steps[s.index]?.keepChips ?? EMPTY_KEEP) : EMPTY_KEEP))
+  const keepsChip = (name: 'found' | 'chain'): boolean => !tutorialActive || tutorialKeep.includes(name)
+  const versionBlocked = useVersionGate((s) => s.verdict === 'blocked')
+  // Region mode (store/useRegion.ts) clears the stack under its chip the same way.
+  const regionOn = useRegion((s) => s.active)
   // The question bubble lives in the menu; on a phone the menu covers the
   // scene, so starting the tour from it closes it. Only on the start:
   // opening the menu during the tour (its menu step) leaves it open.
@@ -285,6 +346,9 @@ export default function App(): JSX.Element {
     // A tap while the view menu is up dismisses that first, so one gesture never
     // has two meanings.
     if (viewMenuOpen) { setViewMenuOpen(false); return }
+    // While the tutorial runs the controls stay out, so a stray tap never
+    // folds them and COMMIT is always there to press (feedback item 5).
+    if (useTutorial.getState().active && usePad.getState().open) return
     // With the chat open over the controls, this folds the chat (usePad).
     tapScene()
   }, [viewMenuOpen])
@@ -294,7 +358,7 @@ export default function App(): JSX.Element {
   const tv = useTv((s) => s.on)
   useCanvasTap(onSceneTap, !crowded && !tv)
 
-  if (tv) {
+  if (tv || tvLanding) {
     return (
       <div className="app">
         <WorldScans />
@@ -321,26 +385,41 @@ export default function App(): JSX.Element {
               <FocusBar />
               {/* BUILD mode, where the free view's bar would be: it rides that view. */}
               <BuildBar />
+              {/* Region mode's readout, under RETURN (hud/RegionChip.tsx):
+                  null unless region mode is on (arkinox, 2026-11-11). */}
+              <RegionChip />
             </>,
-            status: <>
+            status: tutorialActive ? <>
+              {/* During the tutorial only what is needed shows (feedback item
+                  3): RELOAD TO MOVE, a broken chain and a game you are in,
+                  which each stop you; then the chips a step names, FOUND HERE
+                  while opening a chest, the chain chip while spectating a friend. */}
+              {versionBlocked && <VersionChip />}
+              <BrokenChainChip stopsOnly />
+              <GameChip />
+              {keepsChip('found') && <KeyFoundChip />}
+              {keepsChip('chain') && <ChainExplorer />}
+            </> : <>
               {/* A newer deploy, first of all when it requires a RELOAD to move (lib/versionGate.ts). */}
               <VersionChip />
               {/* A broken chain first: nothing else moves you until you respawn.
                   It stays in BUILD mode too; building is not moving. */}
               <BrokenChainChip />
+              {/* Your head is inside a game ONOSENDAI plays, off screen: tap to go back in (DECK-0002 §7). */}
+              <GameChip />
               {/* The trip GOAL planned, until it is cleared (useGoal.ts). */}
               <GoalChip />
               {/* BUILD mode keeps the stack to what building needs (arkinox,
                   2026-10-08): the line and XOR BITS step aside and come back
-                  on exit. */}
+                  on exit. Region mode does the same (arkinox, 2026-11-11). */}
               {/* Not during the /demo tour (arkinox, 2026-10-15). */}
-              {!building && !touring && <LineScrubber />}
+              {!building && !touring && !regionOn && <LineScrubber />}
               <HyperspaceBar />
-              {/* In BUILD mode too (arkinox, 2026-10-08): scrubbing a chain,
-                  yours or a spectated avatar's, aims the build cursor at the
-                  action instead of going into history (useBuilder walkChain). */}
+              {/* Not in BUILD mode, and neither is NEARBY (arkinox,
+                  2026-11-02); each chip stands down itself. [ ] Home End
+                  still aim the build cursor along a chain (useBuilder walkChain). */}
               <ChainExplorer />
-              {!building && <BitReadout />}
+              {!building && !regionOn && <BitReadout />}
               {/* Under XOR BITS while anything is unread (arkinox, 2026-09-28). */}
               <NotificationsToast />
               {/* What was just found, what is open to you here, then the scan. */}
@@ -351,13 +430,20 @@ export default function App(): JSX.Element {
               <SoundChip />
               <NowPlayingChip />
             </>,
-            toast: <ToastChip />,
+            toast: <>
+              {/* A remote signer that let a move run out of time: LOG OUT or PAIR AGAIN from here (SignerControls.tsx). */}
+              <SignerStuckChip />
+              <ToastChip />
+              {/* Haven't finished the tutorial yet? START or LATER (tutorial/toast.ts). */}
+              <TutorialToast />
+            </>,
           }} />
         </div>
       )}
       {showPanels && !offerUp && <CrashNote where="the menu"><Hud menuOpen={crowded} /></CrashNote>}
       <SpectateBar />
-      {!crowded && !offerUp && !deploying && <Compass3D onTap={() => setViewMenuOpen((open) => !open)} />}
+      {/* Hidden, never unmounted, while out of the way: each mount is a new WebGL context (scene/Compass3D). */}
+      <Compass3D hidden={crowded || offerUp || deploying} onTap={() => setViewMenuOpen((open) => !open)} />
       {/* Not while spectating: the spectate bar owns the bottom of the screen,
           and on a foldable's wide screen the folded CHAT chip sat on top of
           it. You cannot speak from someone else's head anyway. */}
@@ -371,10 +457,15 @@ export default function App(): JSX.Element {
             (arkinox, 2026-10-12), and placing moves no avatar, so there is
             no route to show. */}
         {showPad && !offerUp && !deploying && <RouteOverlay />}
-        {/* WALK's look ball, above the menu button (WalkLookSphere.tsx). Not
-            tied to the pad, which a tap on the scene folds; not while the
-            menu covers the scene or the deploy bar holds this corner. */}
+        {/* WALK's look ball, in the bottom right over JUMP and DOWN
+            (WalkLookSphere.tsx). Not tied to the pad, which a tap on the scene
+            folds; not while the menu covers the scene or while placing. */}
         {!crowded && !offerUp && !deploying && <WalkLookSphere />}
+        {/* VIEW's fly, forward and back, in the dock above the menu button
+            (ViewFlyButtons.tsx). */}
+        {!crowded && !offerUp && !deploying && <ViewFlyButtons />}
+        {/* SCAN's height and SCAN button, in the fly buttons' place (ScanControls.tsx). */}
+        {!crowded && !offerUp && !deploying && <ScanControls />}
       </div>
       {/* Off-head too: tapping a block hides the pad like any scene tap, and
           without this there was no way to bring it back while viewing. */}
@@ -388,10 +479,14 @@ export default function App(): JSX.Element {
       )}
       {/* The /demo tour's caption panel, only while the tour runs. */}
       <DemoCoach />
+      {/* The first-arrival tutorial's caption panel, only while it runs. */}
+      <TutorialCoach />
       {/* WALK's lag, centered over everything and touching nothing. */}
       <SyncWarning />
       {crowded && <div className="mobile-overlay" />}
       <Workshop />
+      {/* In-game mode: the game's world over everything, while you play one (DECK-0002 §2.3). */}
+      <GameView />
       {/* The one hidden canvas that draws every list's shard pictures, there only while it has some to draw. */}
       <ThumbHost />
       {/* Docked in the lower left, a gap short of the pad while the pad is on
@@ -399,9 +494,12 @@ export default function App(): JSX.Element {
       <DeployBar pad={showPad && !offerUp && !modalUp} />
       {/* One boundary for the record and its neighbors: a crash in one modal
           shows its error where the modal was, and the scene stays up. */}
-      <CrashNote where="a modal">
+      <CrashNote where="a modal" closesCard>
         <StashModals />
+        {/* LOG OUT's confirm and PAIR AGAIN's QR, from the Identity panel or the chip. */}
+        <SignerUiHost />
         <SecretModal />
+        <PublicShardModal />
         <ActionModal />
         <NotificationsModal />
         <AgentTalkHost />
@@ -424,13 +522,17 @@ export default function App(): JSX.Element {
       <ChainConflictPrompt />
       {/* The explanation behind the chain status strip under the LIVE/LOCAL switch. */}
       <ChainStatusModal />
+      <ChainStoreTrial />
       {/* Which action broke your chain, why, and RESPAWN behind its warning. */}
       <BrokenChainModal />
+      {/* A brought key that needs its password, over everything: nothing signs until it is answered (hud/KeyLock.tsx). */}
+      <KeyLockGate />
       <button
         className="hamburger-menu"
         onContextMenu={(e) => e.preventDefault()}
         onClick={() => setPanelsOpen((open) => !open)}
         disabled={spectating}
+        aria-expanded={showPanels}
         aria-label={spectating ? 'Panels locked while spectating' : panelsOpen ? 'Hide panels' : 'Show panels'}
       >
         <span className={`hamburger-icon ${panelsOpen ? 'hamburger-icon--open' : ''}`}>

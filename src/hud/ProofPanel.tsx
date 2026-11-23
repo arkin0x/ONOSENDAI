@@ -13,14 +13,16 @@ import { CloudUpload, Footprints, OctagonAlert } from 'lucide-react'
 import { Explanation } from './Explanation'
 import { ItemIcon } from './ItemIcon'
 import { SecretsModal } from './SecretsModal'
+import { useRoomKeys } from '../store/useKeyring'
 import { useSecrets } from '../store/useSecrets'
 import { useCalibration } from '../lib/calibration'
 import { satsOf } from '../lib/cloud'
 import { previewWindow, routeLabel, useRoutePreview } from './routePreview'
 import { formatMs, formatOps } from '../lib/space'
-import { BROKEN_CHAIN_MESSAGE, FORKED_CHAIN_MESSAGE, MAX_COMPUTE_HEIGHT, brokenChainMessage, useCyberspace, type CloudState, type MovePlan, type MoveMode, type ProofState } from '../store/useCyberspace'
-import { useBrokenChain } from './BrokenChain'
+import { BROKEN_CHAIN_MESSAGE, FORKED_CHAIN_MESSAGE, MAX_COMPUTE_HEIGHT, RELAY_STOPPED_MESSAGE, brokenChainMessage, useCyberspace, type CloudState, type MovePlan, type MoveMode, type ProofState } from '../store/useCyberspace'
+import { useChainStop } from '../hooks/useChainStop'
 import { useChainUi } from '../store/useChainUi'
+import { CopyValue } from './ui/CopyValue'
 
 const MOVE_MODES: Array<[MoveMode, string, string]> = [
   ['single', 'SINGLE ACTION', 'One action per press'],
@@ -60,7 +62,7 @@ function StatusLabel({ status }: { status: string }): JSX.Element {
  */
 export function noticeWhileAimed(previewing: boolean, proof: Pick<ProofState, 'message'>, broken: boolean): string | null {
   if (!previewing || proof.message === null) return null
-  if (broken && (proof.message === BROKEN_CHAIN_MESSAGE || proof.message === FORKED_CHAIN_MESSAGE)) return null
+  if (broken && (proof.message === BROKEN_CHAIN_MESSAGE || proof.message === FORKED_CHAIN_MESSAGE || proof.message === RELAY_STOPPED_MESSAGE)) return null
   return proof.message
 }
 
@@ -71,7 +73,8 @@ export function ProofPanel(): JSX.Element {
   const hopCeil = useCalibration((s) => s.hopHeight)
   const sidestepCeil = useCalibration((s) => s.sidestepHeight)
   const moveMode = useCyberspace((s) => s.moveMode)
-  const heldCount = useSecrets((s) => Object.keys(s.keys).length)
+  // Every key on the KEYRING: regions held and rooms opened.
+  const heldCount = useSecrets((s) => Object.keys(s.keys).length) + useRoomKeys().length
   // In the store, so RETURN from a region can bring the list back.
   const secrets = useSecrets((s) => s.open)
   // This machine's hop ceiling as the commit attempts it: the protocol cap,
@@ -100,9 +103,10 @@ export function ProofPanel(): JSX.Element {
   // A broken chain refuses every move (store whyNoMove). Said here whatever
   // the panel is showing, since a preview of a move that cannot be signed
   // would otherwise stand in for the reason, with the way to the notice.
-  const brokenAt = useBrokenChain()
-  const broken = brokenAt !== null
-  const brokenLine = brokenAt ? brokenChainMessage(brokenAt) : null
+  // A rejected proof's stop refuses them too (lib/chainStop.ts); a hop above the relay's ceiling does not.
+  const stop = useChainStop()
+  const brokenLine = stop?.source === 'rules' ? brokenChainMessage(stop.broken) : stop?.source === 'relay' && stop.stop.kind === 'broken' ? RELAY_STOPPED_MESSAGE : null
+  const broken = brokenLine !== null
 
   const previewing = preview !== null && proof.status !== 'computing' && plan === null
   const aimedNotice = noticeWhileAimed(previewing, proof, broken)
@@ -267,7 +271,7 @@ export function ProofPanel(): JSX.Element {
           {proof.proofHash && (
             <div className="hash">
               <span className="hash__label">proof</span>
-              <code>{proof.proofHash}</code>
+              <code><CopyValue value={proof.proofHash} /></code>
             </div>
           )}
 
@@ -278,7 +282,7 @@ export function ProofPanel(): JSX.Element {
       {/* Every region you hold the key to, and what it cost to get there. */}
       <div className="proof__secrets">
         <button className="avatars__go" onClick={() => useSecrets.getState().setOpen(true)}>
-          <ItemIcon type="key" size={12} /> REGION KEYS{heldCount > 0 ? ` (${heldCount})` : ''}
+          <ItemIcon type="key" size={12} /> KEYRING{heldCount > 0 ? ` (${heldCount})` : ''}
         </button>
       </div>
       {secrets && <SecretsModal onClose={() => useSecrets.getState().setOpen(false)} />}
@@ -340,10 +344,26 @@ const CLOUD_STAGE: Record<string, string> = {
   error: 'cloud error',
 }
 
+/** What the running route is doing right now, in a few words: what it waits on, when it says. */
+export function routeDoing(plan: MovePlan, proof: { progress: number; message: string | null }, cloud: CloudState): string {
+  const step = plan.step
+  return plan.status === 'paused'
+    ? plan.awaiting ? 'proof done, waiting for your signature' : 'paused'
+    : plan.status === 'failed'
+      ? 'failed'
+      : plan.status === 'funding'
+        ? CLOUD_STAGE[cloud.status] ?? 'quoting the route'
+        : proof.message
+          ? proof.message
+        : step.source === 'cloud'
+          ? `${CLOUD_STAGE[cloud.status] ?? cloud.status}${cloud.progress !== null ? ` ${Math.round(cloud.progress * 100)}%` : ''}`
+          : `${step.kind === 'sidestep' ? 'hashing' : 'computing'} ${Math.round(proof.progress * 100)}%`
+}
+
 /** The running route: where it is, what it is doing, and the two buttons. */
 function RouteView({ plan, proof, cloud, onResume, onCancel }: {
   plan: MovePlan
-  proof: { progress: number; elapsedMs: number }
+  proof: { progress: number; elapsedMs: number; message: string | null }
   cloud: CloudState
   onResume: () => void
   onCancel: () => void
@@ -356,16 +376,7 @@ function RouteView({ plan, proof, cloud, onResume, onCancel }: {
     step.kind === 'sidestep'
       ? `1 gibson through the 2^${step.maxHeight} boundary`
       : `up to the ${step.maxHeight === 0 ? 'same block' : `2^${step.maxHeight} block edge`}`
-  const doing =
-    plan.status === 'paused'
-      ? plan.awaiting ? 'proof done, waiting for your signature' : 'paused'
-      : plan.status === 'failed'
-        ? 'failed'
-        : plan.status === 'funding'
-          ? CLOUD_STAGE[cloud.status] ?? 'quoting the route'
-          : step.source === 'cloud'
-            ? `${CLOUD_STAGE[cloud.status] ?? cloud.status}${cloud.progress !== null ? ` ${Math.round(cloud.progress * 100)}%` : ''}`
-            : `${step.kind === 'sidestep' ? 'hashing' : 'computing'} ${Math.round(proof.progress * 100)}%`
+  const doing = routeDoing(plan, proof, cloud)
   const routeCost = cloud.quote?.route ? satsOf(cloud.quote.costMsats) : null
   return (
     <>

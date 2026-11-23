@@ -24,6 +24,7 @@
 
 import { CHEST_KIND, HIDDEN_KIND, KEY_KIND, MESSAGE_KIND, SHARD_KIND, type HiddenType } from './hidden'
 import { AUDIO_KIND } from './audioItem'
+import { DNA_KIND, SEED_KIND } from './seeds/seedItem'
 import type { EventTemplate, NostrEvent } from './events'
 import { CLIENT_TAG } from './client'
 import { decryptForRegion, encryptForRegion } from './shardCrypto'
@@ -55,6 +56,16 @@ export interface CommentSubject {
   /** Where the bag is hidden and the height it is encrypted to: what the region key derives from. */
   at: Position
   height: number
+  /**
+   * The key that opened the bag, as hex, which is the key that seals its
+   * comments (DECK-0006): the region key at `at` and `height`, or, for
+   * something in a room, the room key (DECK-0004 §3.7.2), so a reader at the
+   * place who has not opened the door cannot read them. Every bag this device
+   * hid or found holds it. With it nothing is derived; without it the region
+   * key is derived from `at` and `height`, off the main thread, and only up
+   * to this machine's limit (hooks/useComments).
+   */
+  bagKeyHex?: string
 }
 
 /** What a comment answers: the item, or another comment. */
@@ -134,7 +145,7 @@ export function bagAddress(subject: Pick<CommentSubject, 'author' | 'lookupId'>)
 }
 
 export function itemKind(type: HiddenType): number {
-  return type === 'shard' ? SHARD_KIND : type === 'key' ? KEY_KIND : type === 'chest' ? CHEST_KIND : type === 'audio' ? AUDIO_KIND : MESSAGE_KIND
+  return type === 'shard' ? SHARD_KIND : type === 'key' ? KEY_KIND : type === 'chest' ? CHEST_KIND : type === 'audio' ? AUDIO_KIND : type === 'seed' ? SEED_KIND : type === 'dna' ? DNA_KIND : MESSAGE_KIND
 }
 
 /** The item as a parent: a top-level comment answers the item, or for a LIVE LINK the bag only. */
@@ -255,8 +266,11 @@ export function threadComments(events: NostrEvent[], subject: Pick<CommentSubjec
  * The comments under one thing, threaded, whatever the root scope: `root` is
  * what the comments' `A` or `E` tag names, `itemId` (or `itemAddress`) what a
  * top-level comment answers. For an action (social.ts) both are its id.
+ * `rootKind`: an addressable thing's (a published shard), whose top-level
+ * comments may name any version of it by `e` alone: any parent of that kind
+ * under the root is the thing.
  */
-export function threadUnder(events: NostrEvent[], root: string, itemId: string, itemAddress?: string, opened: ReadonlyMap<string, string> = new Map(), sealedItem?: string): Comment[] {
+export function threadUnder(events: NostrEvent[], root: string, itemId: string, itemAddress?: string, opened: ReadonlyMap<string, string> = new Map(), sealedItem?: string, rootKind?: number): Comment[] {
   const address = root
   const byId = new Map<string, Comment & { parentKind: number; parentAddress: string | null }>()
   for (const ev of events) {
@@ -272,7 +286,7 @@ export function threadUnder(events: NostrEvent[], root: string, itemId: string, 
   const roots: Comment[] = []
   const ordered = [...byId.values()].sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id))
   for (const c of ordered) {
-    if (c.parentKind !== COMMENT_KIND && ((!!itemId && c.parentId === itemId) || (!!itemAddress && c.parentAddress === itemAddress))) roots.push(c)
+    if (c.parentKind !== COMMENT_KIND && ((!!itemId && c.parentId === itemId) || (!!itemAddress && c.parentAddress === itemAddress) || (rootKind !== undefined && c.parentKind === rootKind))) roots.push(c)
     else if (c.parentKind === COMMENT_KIND) byId.get(c.parentId)?.replies.push(c)
   }
   const placed = new Set<string>()

@@ -7,7 +7,7 @@
  */
 import { beforeEach, describe, expect, it } from 'vitest'
 import { useCyberspace } from '../useCyberspace'
-import { closeScrubber, exitHyperspaceView, ownHyperspaceView, useHyperspace } from '../useHyperspace'
+import { closeScrubber, exitHyperspaceView, ownHyperspaceView, useHyperspace, viewHyperspace } from '../useHyperspace'
 
 const PK = 'ab'.repeat(32)
 
@@ -62,26 +62,40 @@ describe('exitHyperspaceView', () => {
   })
 })
 
-describe('closing the overlay gives the camera back', () => {
+describe('RETURN always goes home (arkinox, 2026-11-11, D1)', () => {
   beforeEach(() => {
-    useHyperspace.setState({ scrubHeight: null, viewOwned: false, returnScaleExp: null, returnFocus: null, viewedStop: null })
+    useHyperspace.setState({ scrubHeight: null, viewOwned: false, viewedStop: null })
     useCyberspace.setState({ focus: null, focusReturnScale: null, spectate: null, scaleExp: 10 })
   })
 
-  it('returns to the place you were viewing, at the zoom you were at', () => {
-    // arkinox's repro: type a place, zoom out to find a block, tap it, close.
-    const place = { x: 5n, y: 6n, z: 7n }
-    useCyberspace.getState().focusOn(place, 0, '44.97, -93.27', 38, true)
-    useCyberspace.setState({ scaleExp: 46 }) // zoomed out to find a block
-    ownHyperspaceView()
-    useCyberspace.getState().focusOn({ x: 99n, y: 99n, z: 99n }, 0, 'BLOCK 60908 · LANDFALL')
+  it('goes home from a block viewed out of a place, at the zoom from before any look', () => {
+    // Type a place, zoom out to find a block, tap it, RETURN: home, not back to the place.
+    useCyberspace.getState().viewAt({ x: 5n, y: 6n, z: 7n }, 0, '44.97, -93.27', 38)
+    useCyberspace.setState({ scaleExp: 46 })
+    viewHyperspace({ x: 99n, y: 99n, z: 99n }, 0, 'BLOCK 60908 · LANDFALL', 52, 60908)
+    expect(useHyperspace.getState().viewedStop).toBe(60908)
     exitHyperspaceView()
     const s = useCyberspace.getState()
-    expect(s.focus?.label).toBe('44.97, -93.27')
-    expect(s.focus?.position).toEqual(place)
-    expect(s.focus?.drive).toBe(true)
-    // Not 10, which is where the session began and where it used to land.
-    expect(s.scaleExp).toBe(46)
+    expect(s.focus).toBeNull()
+    expect(s.scaleExp).toBe(10)
+  })
+
+  it('RECALL ends the hyperspace view with the focus: no bar, block or scrubber left', () => {
+    useHyperspace.setState({ scrubHeight: 42 })
+    viewHyperspace({ x: 5n, y: 6n, z: 7n }, 0, 'BLOCK 42 · PORT', 34, 42)
+    expect(useCyberspace.getState().viewing()).toBe(true)
+    useCyberspace.getState().cancel()
+    expect(useCyberspace.getState().focus).toBeNull()
+    expect(useHyperspace.getState()).toMatchObject({ viewOwned: false, viewedStop: null, scrubHeight: null })
+  })
+
+  it('another VIEW taking its place drops the ownership; the next block takes it again', () => {
+    viewHyperspace({ x: 5n, y: 6n, z: 7n }, 0, 'BLOCK 1 · PORT', 34, 1)
+    viewHyperspace({ x: 8n, y: 6n, z: 7n }, 0, 'BLOCK 2 · PORT', 34, 2)
+    expect(useHyperspace.getState()).toMatchObject({ viewOwned: true, viewedStop: 2 })
+    useCyberspace.getState().viewAt({ x: 1n, y: 1n, z: 1n }, 0, 'GRAND CANYON')
+    expect(useHyperspace.getState()).toMatchObject({ viewOwned: false, viewedStop: null })
+    expect(useCyberspace.getState().focus?.label).toBe('GRAND CANYON')
   })
 
   it('still goes home when hyperspace took the camera from nobody', () => {
@@ -104,15 +118,6 @@ describe('closing the overlay gives the camera back', () => {
     expect(useCyberspace.getState().scaleExp).toBe(20)
   })
 
-  it('takes the focus it borrowed from, not one from earlier in the session', () => {
-    useCyberspace.getState().focusOn({ x: 1n, y: 1n, z: 1n }, 0, 'A SHARD', 20)
-    useCyberspace.getState().focusOn({ x: 2n, y: 2n, z: 2n }, 0, 'A PLACE', 44, true)
-    ownHyperspaceView()
-    useCyberspace.getState().focusOn({ x: 3n, y: 3n, z: 3n }, 0, 'BLOCK 9 · LANDFALL')
-    exitHyperspaceView()
-    expect(useCyberspace.getState().focus?.label).toBe('A PLACE')
-    expect(useCyberspace.getState().scaleExp).toBe(44)
-  })
 })
 
 describe('closing the hyperspace chip (arkinox, 2026-10-15)', () => {

@@ -1,0 +1,267 @@
+/**
+ * fluidWalk.ts: the numbers and the pure math of fluid WALK (arkinox,
+ * 2026-11-16: "WALK mode does not snap to gibsons at all, but just anchors
+ * move events to the nearest gibson as needed ... the walk buttons become
+ * acceleration buttons instead of step buttons").
+ *
+ * The walker has a smooth position and a velocity. The keys and the pad
+ * accelerate it up to a walking speed, and it slows to a stop when they are
+ * let go. Its nearest gibson is the anchor: each time that changes, one
+ * legal step to it goes through the walk's own move path
+ * (store/useWalk.ts fluidCross), so the chain still only ever holds whole
+ * gibsons. Everything stateful is in store/walkFluid.ts; this file is the
+ * arithmetic, so it can be tested on its own.
+ *
+ * | Number | Value | Why |
+ * |---|---|---|
+ * | FLUID_MAX_SPEED | 12.5 steps/s | the one number for how fast WALK goes (arkinox, 2026-11-18: "my walk speed seems slow ... maybe we should increase it"); it was 9.09, the step WALK's held key (one step every WALK_HOLD_MS, 110 ms) |
+ * | FLUID_ACCEL | FLUID_MAX_SPEED / 0.2 s (62.5 steps/s^2) | full speed in 0.2 s: quick, but you feel it pick up |
+ * | FLUID_DECEL | FLUID_MAX_SPEED / 0.15 s (83 steps/s^2) | stops from full speed in 0.15 s, coasting under a step (0.94) |
+ * | FLUID_AIR_ACCEL / FLUID_AIR_DECEL | 30 / 8 steps/s^2 | steering in the air is softer, and a running jump keeps its speed (so it goes as much further as the walk is faster) |
+ * | FLUID_NUDGE_STEPS / FLUID_NUDGE_MS | 0.78 of a step / 119 ms | a tap pushes just long enough to go about three quarters of a step, into the next gibson from the middle of one and never two on (140 ms at 9.09) |
+ *
+ * A step is 2^zoom gibsons, the length a press walked: at the usual 2^0 it
+ * is one gibson.
+ */
+
+import type { AxisDirection, AxisName, Position } from './space'
+
+/**
+ * The walking speed, in steps per second, straight or diagonal alike (the
+ * way to go is never longer than 1: wishOf). The one number to change for a
+ * faster or slower walk: the pick-up, the stop and the drawn feet's drop
+ * (store/walkFluid.ts FOOT_DROP_SPEED) follow it, so the walk feels the same,
+ * only faster.
+ *
+ * 12.5 since 2026-11-18 (arkinox: "my walk speed seems slow ... maybe we
+ * should increase it"), 37.5% faster than the 9.09 it was (1000 / 110, the
+ * step WALK's held key, one step every store/walkHold.ts WALK_HOLD_MS).
+ * Measured with phone proof times (300 ms a proof, more for a long hop), a
+ * walk that goes straight, turns or zigzags stays well under FLUID_EASE_FROM
+ * events ahead, so neither the fluid pause nor the parked slowdown comes into a normal walk
+ * (store/__tests__/walkFluid.test.ts, the speed tests). A running jump keeps its speed in the air, so it goes 37.5%
+ * further too: about 9.7 gibsons on the flat, from 7.
+ */
+export const FLUID_MAX_SPEED = 12.5
+
+/** How fast the walk picks up, in steps per second per second: full speed in 0.2 s. */
+export const FLUID_ACCEL = FLUID_MAX_SPEED / 0.2
+
+/** How fast it slows with nothing held, in steps per second per second: from full speed to a stop in 0.15 s. */
+export const FLUID_DECEL = FLUID_MAX_SPEED / 0.15
+
+/** Steering in the air: softer than on the ground. */
+export const FLUID_AIR_ACCEL = 30
+
+/** Slowing in the air with nothing held: a running jump mostly keeps its speed. */
+export const FLUID_AIR_DECEL = 8
+
+/** How far a tap goes, in steps: a short nudge, about three quarters of a step, into the next gibson from the middle of one and never two gibsons on. */
+export const FLUID_NUDGE_STEPS = 0.78
+
+/**
+ * How long a tap pushes, in ms: just long enough to go FLUID_NUDGE_STEPS,
+ * picking up at FLUID_ACCEL for that long and then coasting to rest at
+ * FLUID_DECEL (it never reaches full speed), so a tap goes as far whatever
+ * FLUID_MAX_SPEED is: about 119 ms at 12.5 steps a second, 140 at 9.09.
+ */
+export const FLUID_NUDGE_MS = 1000 * Math.sqrt(FLUID_NUDGE_STEPS / (FLUID_ACCEL / 2 + (FLUID_ACCEL * FLUID_ACCEL) / (2 * FLUID_DECEL)))
+
+/**
+ * How near a corner both ways have to be for a crossing to be one diagonal
+ * step: within this much of a step of the second boundary, moving toward
+ * it. A walk at about 45 degrees then makes diagonal steps, round the open
+ * side of a corner and along a diagonal walkway, as the 8-direction walk did
+ * (lib/walkSlide.ts), instead of a zigzag that steps off it.
+ */
+export const FLUID_DIAGONAL_ZONE = 0.25
+
+/**
+ * How far into its gibson the smooth position may go toward a face that
+ * holds it, in steps from the middle: the eye stops this far short of the
+ * gibson's edge (and FLUID_FACE_GAP short of the face itself, when that is
+ * nearer). The anchor never moves into the wall: only the eye goes this
+ * close.
+ */
+export const FLUID_WALL_REACH = 0.3
+
+/** Never nearer a face than this, in gibsons, measured along the way you go. */
+export const FLUID_FACE_GAP = 0.15
+
+/** How far toward a ledge the edge safety lets the eye go, in steps from the middle. */
+export const FLUID_EDGE_REACH = 0.45
+
+/**
+ * The longest line a segment may stray from, in gibsons: the gibsons walked
+ * since the segment began must all be within this of the straight hop that
+ * publishes it. Under 1, so a turn round a corner more than a gibson each
+ * way is two hops, never one that cuts it (a one-gibson L, 0.71 off its
+ * line, is one hop, as a diagonal step always was); over half a gibson, so
+ * a walk at any angle (the gibsons it crosses zigzag round its line) is
+ * still one hop.
+ */
+export const FLUID_LINE_SLACK = 0.75
+
+/**
+ * Queue honesty: how fluid WALK keeps from running too far ahead of the
+ * chain. It counts the events ahead (store/walkAhead.ts eventsAhead): the
+ * moves made here not yet proven onto your chain, that is the segments
+ * queued for proof, the one still open, and a fall's mid-air hops and
+ * landing (the relay send after a proof lands is not counted). The smooth
+ * position is never more than about 0.75 of a step from its anchor (the
+ * diagonal zone at a corner), so it can never run ahead of what is queued:
+ * only the queue can, and that is what this caps.
+ *
+ * The fluid pause (arkinox, 2026-11-22: "on the 21st action ahead, we could
+ * automatically switch off fluid walk mode (and always turn it back on (if
+ * it was on before) when the chain queue drops to 15 or lower"): at
+ * FLUID_PAUSE_AT events ahead fluid WALK switches itself off and the walk
+ * goes on as the step WALK, which makes fewer, longer, straighter moves
+ * (one segment per 8-way heading), so the queue drains; at FLUID_RESUME_AT
+ * or fewer it comes back on (store/fluidSwitch.ts fluidPauseCheck). The gap
+ * between the two keeps it from flapping.
+ *
+ * The slowdown and the LOSING SYNC warning (arkinox, 2026-11-17: "start
+ * slowdown when the user is 15 events ahead and stop at 20") are parked
+ * since 2026-11-22 (arkinox: "lets turn off the slowdown and LOSING SYNC
+ * features for now and just see how this iteration feels"), behind
+ * store/walkLimits.ts SYNC_SLOWDOWN_ON. Switched back on, they are:
+ *
+ * | Events ahead | Speed | LOSING SYNC |
+ * |---|---|---|
+ * | 14 or fewer | full | hidden |
+ * | 15 to 19 | 5/6 down to 1/6 | 1/6 up to 5/6 |
+ * | 20 | 1/6, the slowest (no longer a stop: the fluid pause at 21 took its place) | fully shown |
+ *
+ * It was full speed to 5, a quarter less for each one more, held at 9, and
+ * the warning on at 10 closed segments (2026-11-14 to 16); stopped at 20
+ * from 2026-11-17 to 22.
+ */
+export const FLUID_EASE_FROM = 14
+/** See FLUID_EASE_FROM: the slowdown reaches its slowest here, and the LOSING SYNC warning is fully shown. */
+export const FLUID_HOLD_AT = 20
+/** See FLUID_EASE_FROM: this many events ahead, fluid WALK pauses itself, and the walk goes on as the step WALK. */
+export const FLUID_PAUSE_AT = 21
+/** See FLUID_EASE_FROM: this many events ahead or fewer, a paused fluid WALK comes back on. */
+export const FLUID_RESUME_AT = 15
+
+/** The slowest the slowdown goes, at FLUID_HOLD_AT and past: the share it allowed one before (1/6), so the walk can still reach FLUID_PAUSE_AT. */
+export const FLUID_SLOWEST = 1 / (FLUID_HOLD_AT - FLUID_EASE_FROM)
+
+/** The share of the walking speed allowed `ahead` events ahead: 1 up to FLUID_EASE_FROM, falling in a straight line to FLUID_SLOWEST at FLUID_HOLD_AT - 1, and FLUID_SLOWEST from there on. */
+export function syncSpeedFactor(ahead: number): number {
+  if (ahead <= FLUID_EASE_FROM) return 1
+  return Math.max(FLUID_SLOWEST, (FLUID_HOLD_AT - ahead) / (FLUID_HOLD_AT - FLUID_EASE_FROM))
+}
+
+/** How shown the LOSING SYNC warning is `ahead` events ahead, 0 to 1: 0 at FLUID_EASE_FROM, rising in a straight line to 1 at FLUID_HOLD_AT. */
+export function syncWarnOpacity(ahead: number): number {
+  return Math.max(0, Math.min(1, (ahead - FLUID_EASE_FROM) / (FLUID_HOLD_AT - FLUID_EASE_FROM)))
+}
+
+/** Three plain numbers by cyberspace axis. */
+export interface Vec { x: number; y: number; z: number }
+
+export const AXES: readonly AxisName[] = ['x', 'y', 'z']
+
+/** A zero vector. */
+export const zero = (): Vec => ({ x: 0, y: 0, z: 0 })
+
+/** The length of `v`. */
+export const len = (v: Vec): number => Math.hypot(v.x, v.y, v.z)
+
+/**
+ * `v` laid flat across `up` (the walk's up axis), or zero.
+ */
+export function flatten(v: Vec, up: AxisName | null): Vec {
+  return up ? { ...v, [up]: 0 } : { ...v }
+}
+
+/**
+ * The way the held keys ask to go, as a vector of length at most 1, in
+ * cyberspace axes: `forward` and `right` are the camera's, laid flat across
+ * `up` (under GRAVITY the axis of the walker's gravity, else the screen's
+ * up), so forward never digs into the floor; `vertical` is the screen's up
+ * (gravity off only: under gravity Up and Down are a jump and Down, never a
+ * push). Forward with a side is 45 degrees to that side, no faster than
+ * forward alone.
+ */
+export function wishOf(forward: Vec, right: Vec, up: AxisName, fwd: number, strafe: number, vertical: AxisDirection | null, vert: number): Vec {
+  const f = unit(flatten(forward, up))
+  const r = unit(flatten(right, up))
+  const w: Vec = { x: f.x * fwd + r.x * strafe, y: f.y * fwd + r.y * strafe, z: f.z * fwd + r.z * strafe }
+  if (vertical && vert !== 0) w[vertical.axis] += vertical.dir * vert
+  const n = len(w)
+  return n > 1 ? { x: w.x / n, y: w.y / n, z: w.z / n } : w
+}
+
+function unit(v: Vec): Vec {
+  const n = len(v)
+  return n > 1e-9 ? { x: v.x / n, y: v.y / n, z: v.z / n } : zero()
+}
+
+/**
+ * One frame of the velocity `v` (steps/s), toward `wish` (length up to 1)
+ * times `max`, by at most `accel * dt` while something is held, or toward
+ * rest by `decel * dt` with nothing held. Over `max` (the speed cap just
+ * tightened), it slows at `decel`. In place.
+ */
+export function accelerate(v: Vec, wish: Vec, max: number, accel: number, decel: number, dt: number): void {
+  const held = len(wish) > 1e-9
+  const target: Vec = held ? { x: wish.x * max, y: wish.y * max, z: wish.z * max } : zero()
+  const speed = len(v)
+  // The cap came down under you: slow at the braking rate, not the push.
+  const rate = !held || speed > max + 1e-9 ? decel : accel
+  const d: Vec = { x: target.x - v.x, y: target.y - v.y, z: target.z - v.z }
+  const n = len(d)
+  const k = n > rate * dt ? (rate * dt) / n : 1
+  v.x += d.x * k
+  v.y += d.y * k
+  v.z += d.z * k
+}
+
+/**
+ * Whether the straight hop from `from` to `to` stays within `slack` gibsons
+ * of every gibson in `cells` (the ones walked since `from`): then one hop is
+ * an honest account of the walk, and the segment can grow to `to`. With
+ * `ignore`, that axis is left out (in the air, the arc's height is the
+ * fall's, as a press's hop in the air always ignored it).
+ */
+export function onLine(from: Position, cells: readonly Position[], to: Position, slack = FLUID_LINE_SLACK, ignore: AxisName | null = null): boolean {
+  const flat = (p: Position): Vec => ({ x: ignore === 'x' ? 0 : Number(p.x - from.x), y: ignore === 'y' ? 0 : Number(p.y - from.y), z: ignore === 'z' ? 0 : Number(p.z - from.z) })
+  const d = flat(to)
+  const dd = d.x * d.x + d.y * d.y + d.z * d.z
+  for (const c of cells) {
+    const w = flat(c)
+    const t = dd > 0 ? Math.max(0, Math.min(1, (w.x * d.x + w.y * d.y + w.z * d.z) / dd)) : 0
+    const e = Math.hypot(w.x - t * d.x, w.y - t * d.y, w.z - t * d.z)
+    if (e > slack) return false
+  }
+  return true
+}
+
+/**
+ * Which crossing a smooth position `frac` (steps from its anchor's middle)
+ * moving at `v` is due, or null: the axis furthest past the half-step
+ * boundary, in the way it is moving (or at rest there), and a second level
+ * axis when that one is within FLUID_DIAGONAL_ZONE of its own boundary and
+ * moving toward it (one diagonal step). `level` lists the axes a diagonal
+ * may use: the two across gravity, or all three with gravity off.
+ */
+export function dueCrossing(frac: Vec, v: Vec, level: readonly AxisName[]): { main: AxisDirection; side: AxisDirection | null } | null {
+  let best: AxisName | null = null
+  for (const a of AXES) {
+    if (Math.abs(frac[a]) <= 0.5 || frac[a] * v[a] < 0) continue
+    if (best === null || Math.abs(frac[a]) > Math.abs(frac[best])) best = a
+  }
+  if (best === null) return null
+  const main: AxisDirection = { axis: best, dir: frac[best] > 0 ? 1 : -1 }
+  let side: AxisDirection | null = null
+  if (level.includes(best)) {
+    for (const b of level) {
+      if (b === best) continue
+      if (Math.abs(frac[b]) > 0.5 - FLUID_DIAGONAL_ZONE && frac[b] * v[b] > 0 && (side === null || Math.abs(frac[b]) > Math.abs(frac[side.axis]))) side = { axis: b, dir: frac[b] > 0 ? 1 : -1 }
+    }
+  }
+  return { main, side }
+}

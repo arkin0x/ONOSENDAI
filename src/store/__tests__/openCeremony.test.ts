@@ -30,7 +30,9 @@ import { openChestHere } from '../../hud/ItemRows'
 import { useCyberspace } from '../useCyberspace'
 import { useShards } from '../useShards'
 import { openedByHand, openedKey, resetOpenedChests } from '../useOpenedChests'
-import { celebrateOpen, setDrawnLooks, useOpenCeremony } from '../useOpenCeremony'
+import { celebrateOpen, setDrawnLooks, takeAndVanish, useOpenCeremony, useTakeVanish } from '../useOpenCeremony'
+import { useInventory } from '../useInventory'
+import { VANISH_MS } from '../../lib/ceremony'
 
 const hider = generateSecretKey()
 const at = { x: 1n, y: 2n, z: 3n }
@@ -112,5 +114,44 @@ describe('a chest the world does not draw', () => {
     expect(plan).toEqual({ yieldCards: false, ceremony: false, feedback: true })
     expect(useShards.getState().selectedSecret).toBe(CHEST)
     expect(useOpenCeremony.getState().playing).toEqual({})
+  })
+})
+
+describe('TAKE on an item where it stands', () => {
+  const key = openedKey(ME, lockEvent.id)
+  const found = { eventId: lockEvent.id, inner: lockEvent, keyHex: 'aa'.repeat(32), bagId: 'b', lookupId: 'l', author: lockEvent.pubkey, at, plane: 0 as const, height: 4, createdAt: 1, type: 'key' as const, key: lock }
+
+  beforeEach(() => {
+    useTakeVanish.setState({ playing: {} })
+    useInventory.setState({ owner: ME, items: {}, storage: 'memory' })
+    useShards.setState({ discovered: { [lockEvent.id]: found } as never, mine: [], nearbyOpen: true })
+    useShards.getState().selectSecret(lockEvent.id)
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+  })
+
+  it('holds it, closes the list and the card, and plays for four seconds, then ends', () => {
+    takeAndVanish(lockEvent.id, false)
+    expect(useInventory.getState().has(lockEvent.id)).toBe(true)
+    expect(useShards.getState().nearbyOpen).toBe(false)
+    expect(useShards.getState().selectedSecret).toBeNull()
+    expect(useTakeVanish.getState().playing[key]).toBeDefined()
+    vi.advanceTimersByTime(VANISH_MS - 1)
+    expect(useTakeVanish.getState().playing[key]).toBeDefined()
+    vi.advanceTimersByTime(60)
+    expect(useTakeVanish.getState().playing[key]).toBeUndefined()
+  })
+
+  it('plays nothing and closes nothing when there was nothing to take', () => {
+    useInventory.getState().holdFinds([found])
+    takeAndVanish(lockEvent.id, false)
+    expect(useTakeVanish.getState().playing[key]).toBeUndefined()
+    expect(useShards.getState().nearbyOpen).toBe(true)
+  })
+
+  it('is never kept: a fresh page has nothing playing', async () => {
+    takeAndVanish(lockEvent.id, false)
+    vi.resetModules()
+    const fresh = await import('../useOpenCeremony')
+    expect(fresh.useTakeVanish.getState().playing).toEqual({})
   })
 })

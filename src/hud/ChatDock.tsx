@@ -29,10 +29,10 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { nip19 } from 'nostr-tools'
 import { MessageSquare, SendHorizontal, Trash2, Volume2, VolumeX, ChevronDown, Bot, AtSign } from 'lucide-react'
-import { useChat, sendKey, type ChatLine } from '../store/useChat'
+import { linesInPlane, listeningPlane, useChat, sendKey, type ChatLine } from '../store/useChat'
 import { useCyberspace } from '../store/useCyberspace'
 import { useSecrets } from '../store/useSecrets'
-import { ProfilePic } from './ProfileBadge'
+import { ProfilePic, ProfileTap } from './ProfileBadge'
 import { pressGuard } from './pressGuard'
 import { useProfile } from '../hooks/useProfile'
 import { formatCellSize } from 'sno-core/scale'
@@ -82,10 +82,10 @@ function Line({ line, now, here, revealed }: { line: ChatLine; now: number; here
   const forMe = mentionsMe(line, me)
   return (
     <li data-line={line.id} className={`chat__line ${line.mine ? 'is-mine' : ''} ${here ? '' : 'is-elsewhere'} ${forMe ? 'is-for-me' : ''} ${revealed ? 'is-revealed' : ''}`} title={forMe ? 'Mentions you' : undefined}>
-      <ProfilePic pubkey={line.from} size={22} />
+      <ProfileTap pubkey={line.from}><ProfilePic pubkey={line.from} size={22} /></ProfileTap>
       <div className="chat__body">
         <span className="chat__meta">
-          <span className="chat__who">{name}</span>
+          <ProfileTap pubkey={line.from} className="chat__who">{name}</ProfileTap>
           <span className="chat__when">{whenLabel(line.at, now)}</span>
         </span>
         <LineText text={line.text} me={me} />
@@ -190,7 +190,9 @@ export function ChatDock(): JSX.Element {
   const key = useMemo(() => sendKey(), [current])
   const room = key ? `2^${key.height} · ${formatCellSize(key.height)}` : 'no region yet'
   // Lines kept from before a block are not shown either (store/useMutes).
-  const shown = useMemo(() => lines.filter((l) => !hidesThing(hidden, { authors: [l.from], ids: [l.id] }, me)).slice(-SHOWN), [lines, hidden, me])
+  // Only the talk of the plane chat listens in (DECK-0005 §3.2, The plane): a room is shared with its twin in the other plane.
+  const plane = useCyberspace((s) => listeningPlane(s))
+  const shown = useMemo(() => linesInPlane(lines, plane).filter((l) => !hidesThing(hidden, { authors: [l.from], ids: [l.id] }, me)).slice(-SHOWN), [lines, plane, hidden, me])
 
   // Unfolding puts the caret in the line, and the newest line in view.
   useEffect(() => {

@@ -68,17 +68,23 @@ export function offerNeed(): OfferView | null {
   return verdict ? { verdict, cursorKey: cursorKeyOf(s.cursor, s.plane), machineCeiling, localFeasible: localFeasibleFor(s.position, s.cursor, machineCeiling, cal.sidestepHeight) } : null
 }
 
-/** The same, for a component: recomputed as the cursor, the caps or the ceilings change. */
-export function useOfferNeed(): OfferView | null {
-  const home = useCyberspace((s) => s.atHead())
-  const position = useCyberspace((s) => s.position)
-  const cursor = useCyberspace((s) => s.cursor)
-  const plane = useCyberspace((s) => s.plane)
-  const limits = useCyberspace((s) => s.cloud.limits)
-  const hopCeil = useCalibration((s) => s.hopHeight)
-  const sidestepCeil = useCalibration((s) => s.sidestepHeight)
+/**
+ * The same, for a component: recomputed as the cursor, the caps or the
+ * ceilings change. With `on` false it reads none of them and answers null,
+ * so a component that has no use for the verdict now is not re-rendered at
+ * every cursor move (useOfferView).
+ */
+export function useOfferNeed(on = true): OfferView | null {
+  const home = useCyberspace((s) => on && s.atHead())
+  const position = useCyberspace((s) => (on ? s.position : null))
+  const cursor = useCyberspace((s) => (on ? s.cursor : null))
+  const plane = useCyberspace((s) => (on ? s.plane : 0))
+  const limits = useCyberspace((s) => (on ? s.cloud.limits : null))
+  const hopCeil = useCalibration((s) => (on ? s.hopHeight : 0))
+  const sidestepCeil = useCalibration((s) => (on ? s.sidestepHeight : 0))
   const machineCeiling = Math.min(MAX_COMPUTE_HEIGHT, hopCeil)
-  const verdict = !home ? null : offerVerdict(position, cursor, plane, {
+  if (!home || !position || !cursor) return null
+  const verdict = offerVerdict(position, cursor, plane, {
     hop: machineCeiling,
     sidestep: sidestepCeil,
     cloudHop: cloudHopsSold(limits),
@@ -183,7 +189,13 @@ export function useOfferView(hidden: boolean): OfferView | null {
   const busy = useCyberspace((s) => (s.plan !== null && s.plan.status !== 'funding') || (s.plan === null && s.cloud.status !== 'idle') || s.proof.status === 'computing')
   const dismissedFor = useOffer((s) => s.dismissedFor)
   const requestedFor = useOffer((s) => s.requestedFor)
-  const need = useOfferNeed()
+  // The card shows only for the cursor OFFLOAD was pressed for, so until the
+  // cursor is that one the verdict is not worked out, and a cursor moving
+  // anywhere else (a WALK, about nine times a second) re-renders nothing
+  // here. Only this flag follows the cursor; it changes when the cursor
+  // arrives at or leaves the asked-for one.
+  const asked = useCyberspace((s) => requestedFor !== null && requestedFor === cursorKeyOf(s.cursor, s.plane))
+  const need = useOfferNeed(asked)
 
   // The cloud mode is not a veto here: the card appears only when asked for,
   // and its mode control is how the cloud is turned on when a move needs it.

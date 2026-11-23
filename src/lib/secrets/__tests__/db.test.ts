@@ -18,7 +18,7 @@ import { getAllPaged, getMeta } from '../../idb'
 import { bytesOf } from '../budget'
 import {
   KEYS_STORE, LEGACY_KEY, MIGRATED_META, describeError, PLACES_STORE, PLACE_KEYS_STORE, TOTALS_META, evictPlaces, forgetPlace, forgetPlacesUpTo,
-  migrateFromLocalStorage, openSecretsDb, pagePlaces, parseLegacy, readTotals, recordPlace, writeKeys, type Totals,
+  migrateFromLocalStorage, openSecretsDb, pagePlaces, parseLegacy, readTotals, recordPlace, writeKeys, writeLocks, type Totals,
 } from '../db'
 import { placeOf, type ScanKey } from '../places'
 import type { HeldKey } from '../../../store/useSecrets'
@@ -224,6 +224,31 @@ describe('places in IndexedDB', () => {
     await forgetPlacesUpTo(db, 150)
     expect((await pagePlaces(db, null, 10)).map((p) => p.at)).toEqual([200])
     expect(await totalsOf(db)).toEqual(await measured(db))
+  })
+})
+
+describe('locks stored beside their keys (DECK-0004 §3.8.4)', () => {
+  it('a held key and a place key gain their lock; nothing is added; the totals still match a full count', async () => {
+    const db = await openSecretsDb()
+    await writeKeys(db, [key('aa')], [])
+    await stand(db, 1, 100)
+    const before = await totalsOf(db)
+    const placeKey = 'h5:' + `${(at(1).x >> 5n) << 5n},${(at(1).y >> 5n) << 5n},${(at(1).z >> 5n) << 5n}`
+    await writeLocks(db, [{ lookupId: 'aa'.repeat(32), lock: 'dd'.repeat(32) }, { lookupId: 'ee'.repeat(32), lock: 'ff'.repeat(32) }], [{ lookupId: placeKey, lock: '11'.repeat(32) }, { lookupId: 'nope', lock: '22'.repeat(32) }])
+    const keys = await rows<HeldKey>(db, KEYS_STORE, (r) => r.lookupId)
+    expect(keys).toHaveLength(1)
+    expect(keys[0].lock).toBe('dd'.repeat(32))
+    const pks = await rows<{ lookupId: string; lock?: string }>(db, PLACE_KEYS_STORE, (r) => r.lookupId)
+    expect(pks.find((r) => r.lookupId === placeKey)?.lock).toBe('11'.repeat(32))
+    expect(pks.some((r) => r.lookupId === 'nope')).toBe(false)
+    const after = await totalsOf(db)
+    expect(after?.places).toBe(before?.places)
+    expect(after?.placeKeys).toBe(before?.placeKeys)
+    expect(after).toEqual(await measured(db))
+    // Standing there again keeps the lock.
+    await stand(db, 1, 200)
+    const again = await rows<{ lookupId: string; lock?: string }>(db, PLACE_KEYS_STORE, (r) => r.lookupId)
+    expect(again.find((r) => r.lookupId === placeKey)?.lock).toBe('11'.repeat(32))
   })
 })
 

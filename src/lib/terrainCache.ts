@@ -35,7 +35,7 @@
  */
 
 import { DEFAULT_CELL_BITS } from 'cyberspace-core'
-import { getTerrainWorkers, postRun, setRunDropHandler } from './workers'
+import { postRun, setRunDropHandler, setRunResultHandler } from './workers'
 import type { AxisName } from './space'
 import type { Plane } from 'cyberspace-core'
 import type { RunRequest, RunResponse } from '../workers/terrain.worker'
@@ -185,22 +185,21 @@ function attachOnce(): void {
     }
   })
 
-  for (const worker of getTerrainWorkers()) {
-    worker.addEventListener('message', (event: MessageEvent<RunResponse>) => {
-      const { id, values } = event.data
-      const run = runsById.get(id)
-      if (!run) return
-      runsById.delete(id)
-      inflight.delete(run.key)
+  // The pool's one handler, not a listener on each worker: the pool lets idle workers go and starts new ones (lib/workers.ts TERRAIN_IDLE_MS).
+  setRunResultHandler((answer: RunResponse) => {
+    const { id, values } = answer
+    const run = runsById.get(id)
+    if (!run) return
+    runsById.delete(id)
+    inflight.delete(run.key)
 
-      for (let i = 0; i < run.keys.length; i++) {
-        writeKey(run.keys[i], values[i])
-        pendingBlocks.delete(run.keys[i])
-      }
+    for (let i = 0; i < run.keys.length; i++) {
+      writeKey(run.keys[i], values[i])
+      pendingBlocks.delete(run.keys[i])
+    }
 
-      for (const listener of listeners) listener()
-    })
-  }
+    for (const listener of listeners) listener()
+  })
 }
 
 /**

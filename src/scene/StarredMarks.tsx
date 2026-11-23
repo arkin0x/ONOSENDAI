@@ -33,6 +33,7 @@ import { useStarred } from '../store/useStarred'
 import { WorldLabel } from './WorldLabel'
 import { TapTarget } from './TapTarget'
 import { useReducedMotion } from '../hooks/useReducedMotion'
+import { useDrawReach } from './buildZoom'
 
 /** The reach the hidden messages are drawn to, in cells. The pin reads it
  * to know whether a star stands under it (EarthPin.tsx starNamesPin). */
@@ -153,9 +154,11 @@ export function StarredMarks({ axes }: { axes: ViewAxes }): JSX.Element | null {
   const scaleExp = useCyberspace((s) => s.scaleExp)
   const still = useReducedMotion()
 
+  // As far as the fog's end needs (buildZoom.ts).
+  const reach = useDrawReach((s) => Math.max(STAR_REACH, s.reach))
   const placed = useMemo(
-    () => placedStars(places, alignedOrigin(anchor, scaleExp), anchorPlane, scaleExp, axes, STAR_REACH),
-    [places, anchor, anchorPlane, scaleExp, axes],
+    () => placedStars(places, alignedOrigin(anchor, scaleExp), anchorPlane, scaleExp, axes, reach),
+    [places, anchor, anchorPlane, scaleExp, axes, reach],
   )
 
   if (placed.length === 0) return null

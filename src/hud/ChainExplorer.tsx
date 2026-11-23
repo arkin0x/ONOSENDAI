@@ -14,11 +14,13 @@
  * Off the head the controls are withdrawn, because nothing in history is a
  * place you can move from; LATEST brings them back.
  *
- * In BUILD mode it aims the build cursor instead (arkinox, 2026-10-08): a
- * step puts the build cursor on that action's place, in its plane, and the
- * scene stays on the build cursor rather than going into history, so the
- * mark is the Builder's `scrub` and nothing is withdrawn (store/useBuilder.ts
- * walkChain). It says LATEST, not LIVE,
+ * In BUILD mode it is not drawn (arkinox, 2026-11-02: the Nearby and Chain
+ * chips hidden while building). [ ] Home End still aim the build cursor
+ * along the chain there (store/useBuilder.ts walkChain): a step puts it on
+ * that action's place, in its plane, and the scene stays on the build cursor
+ * rather than going into history. The body below still reads the Builder's
+ * `scrub` as its mark in BUILD mode, from when the chip stood there
+ * (arkinox, 2026-10-08). It says LATEST, not LIVE,
  * because LIVE is the publishing setting: this is the newest action on the
  * chain, whether or not any of it has been sent to a relay.
  *
@@ -40,16 +42,23 @@
  * game's, and the place each one has inside the game is shown apart from
  * the coord, which stays where the identity entered. An action this client
  * does not recognize is a short quiet tick, labelled SKIPPED (§8.9).
+ *
+ * In WALK the chip also shows how far ahead of your chain the walk is: a
+ * bar of ticks in its bottom padding, on whichever face the chip has
+ * (ChainAhead.tsx; arkinox, 2026-11-17). Only on your own chain at its
+ * head, and the chip is the same size with it and without.
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { MessageCircle, TriangleAlert } from 'lucide-react'
 import { ItemIcon } from './ItemIcon'
 import { findLcaHeight } from 'cyberspace-core'
 import { keyStateForAction, useSecrets } from '../store/useSecrets'
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
+import { CopyValue } from './ui/CopyValue'
 import { formatAgo, formatStamp, shortHex } from '../lib/time'
-import { useCyberspace } from '../store/useCyberspace'
+import { useCyberspace, type CyberspaceState } from '../store/useCyberspace'
+import { useReleaseGate } from '../lib/release'
 import { actionKind, actionLabel } from '../lib/events'
 import { nip19 } from 'nostr-tools'
 import { ConfirmModal } from './ConfirmModal'
@@ -61,12 +70,16 @@ import { useEscape } from '../hooks/useEscape'
 import { useChainUi } from '../store/useChainUi'
 import { stepChain, useBuilder, walkChain } from '../store/useBuilder'
 import { everyWhileVisible } from '../lib/whileVisible'
+import { AheadChip } from './ChainAhead'
+import { FluidPauseNotice } from './FluidPauseNotice'
+import { hudFlags } from '../lib/hudFlags'
 
 // Spectating opens the chain explorer: the chain is the thing you came to
 // look at. What you had it set to is put back when the spectation ends, and
 // switching from one avatar to another keeps the first setting.
+// Not with ?nochip=1 (lib/hudFlags.ts): there is no chip to open.
 let openBefore: boolean | null = null
-useCyberspace.subscribe((s, prev) => {
+if (!hudFlags().nochip) useCyberspace.subscribe((s, prev) => {
   if ((s.spectate === null) === (prev.spectate === null)) return
   const ui = useChainUi.getState()
   if (s.spectate) {
@@ -87,9 +100,62 @@ const COUNT_AFTER_MS = 450
 /** How long an adoption stays on the chip: long enough to explain the move it caused. */
 const ADOPTED_MS = 8000
 
-export function ChainExplorer(): JSX.Element {
+/**
+ * The chain's chip and its body; not while BUILD mode is on (ChainExplorerChip).
+ * Not at all with ?nochip=1 (lib/hudFlags.ts): nothing below runs, the edge
+ * bar's hooks included.
+ */
+export function ChainExplorer(): JSX.Element | null {
+  return hudFlags().nochip ? null : <ChainExplorerUnlessBuilding />
+}
+
+function ChainExplorerUnlessBuilding(): JSX.Element | null {
+  const building = useBuilder((s) => s.active)
+  return building ? null : <ChainExplorerChip />
+}
+
+/** Unpublished events of the chain in hand, counted once per change of the chain or its publish states. */
+let keptMemo: { events: unknown; published: unknown; count: number } | null = null
+function keptHere(events: CyberspaceState['events'], published: CyberspaceState['published']): number {
+  if (keptMemo && keptMemo.events === events && keptMemo.published === published) return keptMemo.count
+  let count = 0
+  for (const e of events) if (published[e.id] !== 'ok') count++
+  keptMemo = { events, published, count }
+  return count
+}
+
+/**
+ * What the chip says about your own chain beyond its count, as one string so
+ * the chip renders only when it changes (owner, 2026-11-21):
+ *
+ * | State | Chip |
+ * |---|---|
+ * | the page's first look at the relays is out | CHECKING YOUR CHAIN |
+ * | the relays could not be asked | CHAIN NOT CHECKED |
+ * | LOCAL, moves kept on this device | LOCAL: n KEPT HERE |
+ * | LIVE, moves unsent and the release gate shut (made LOCAL before the flip, read back on a load or a switch) | n KEPT HERE: PUBLISH (a tap publishes them) |
+ * | anything else | '' (the usual CHAIN i/N) |
+ *
+ * A held chain or a pending choice says so under the LIVE switch instead
+ * (ChainStatus.tsx), and is not repeated here. With the gate open, unsent
+ * moves are on their way, and a failed send says so there too.
+ */
+export function chainChipState(s: Pick<CyberspaceState, 'identity' | 'chainSync' | 'events' | 'published' | 'live' | 'held' | 'chainConflict'>, gateOpen = false): string {
+  if (s.events.length === 0 || s.held || s.chainConflict) return ''
+  const sync = s.chainSync?.pubkey === s.identity.pubkey ? s.chainSync.status : null
+  if (sync === 'checking') return 'checking'
+  if (sync === 'unreachable') return 'unchecked'
+  if (s.live && gateOpen) return ''
+  const kept = keptHere(s.events, s.published)
+  if (kept > 0) return s.live ? `kept:${kept}` : `local:${kept}`
+  return ''
+}
+
+function ChainExplorerChip(): JSX.Element {
   const events = useCyberspace((s) => s.events)
   const fork = useCyberspace((s) => s.forkNotice)
+  const gateOpen = useReleaseGate((g) => g.open)
+  const chipState = useCyberspace((s) => chainChipState(s, gateOpen))
   const [showFork, setShowFork] = useState(false)
   // An adoption explains itself and goes; a drop is work that vanished and
   // stays on the chip until somebody reads it.
@@ -112,20 +178,36 @@ export function ChainExplorer(): JSX.Element {
   const index = marked === null ? last : Math.min(marked, last)
   const action = actions[index]
   const atHead = marked === null
+  // How far ahead of this chain the walk is: yours, at its head, only. The
+  // count itself is read inside the chip's button (ChainAhead.tsx AheadChip),
+  // so a step renders the button, not all of this.
+  const own = spectate === null && atHead && !building
   const secretKeys = useSecrets((s) => s.keys)
   const key = useMemo(
     () => (action ? keyStateForAction(action, actions[index - 1] ?? null, secretKeys, findLcaHeight) : { state: 'none' as const, height: null }),
     [action, actions, index, secretKeys],
   )
 
-  // The action the mark has rested on, and its comment count.
+  // Counted only while the explorer is open, where the count is shown: closed,
+  // a count asked 450 ms after every landed move was one more question to
+  // every relay per WALK step, for a number nobody sees (arkinox,
+  // 2026-11-21: WALK stutters on his phone).
+  const shown = useChainUi((s) => s.explorerOpen)
+  // The action the mark has rested on, and its comment count. Followed only
+  // while the explorer is open: closed, the wait after every landed move was
+  // one more render of all this per WALK step for nothing. Opening counts the
+  // action under the mark at once, as it did when the wait had run closed.
   const [settled, setSettled] = useState<string | null>(null)
+  const wasShown = useRef(false)
   useEffect(() => {
-    const t = window.setTimeout(() => setSettled(action?.id ?? null), COUNT_AFTER_MS)
+    if (!shown) { wasShown.current = false; return }
+    const opened = !wasShown.current
+    wasShown.current = true
+    const t = window.setTimeout(() => setSettled(action?.id ?? null), opened ? 0 : COUNT_AFTER_MS)
     return () => window.clearTimeout(t)
-  }, [action?.id])
-  const counted = useActionComments(action && settled === action.id ? { id: action.id, pubkey: action.pubkey, kind: ACTION_KIND } : null)
-  const commentCount = action && settled === action.id && !counted.loading ? countComments(counted.comments) : null
+  }, [action?.id, shown])
+  const counted = useActionComments(shown && action && settled === action.id ? { id: action.id, pubkey: action.pubkey, kind: ACTION_KIND } : null)
+  const commentCount = shown && action && settled === action.id && !counted.loading ? countComments(counted.comments) : null
   // Counted again when the modal closes: something may have been said there.
   const modalOpen = useSocialUi((s) => s.action !== null)
   const wasOpen = useRef(false)
@@ -144,6 +226,17 @@ export function ChainExplorer(): JSX.Element {
     const ui = useChainUi.getState()
     ui.setExplorerOpen(typeof next === 'function' ? next(ui.explorerOpen) : next)
   }
+  // The chip's presses, made once: the chip's button (AheadChip) is memoized,
+  // so a render of all this for its own reasons (a clock, a comment count)
+  // leaves the button alone.
+  const pressForkChip = useCallback((e: React.PointerEvent) => { e.preventDefault(); e.stopPropagation(); setShowFork(true) }, [])
+  // A deliberate tap: what was kept goes out, after the publisher's look at the relays (lib/publisher.ts).
+  const pressPublish = useCallback((e: React.PointerEvent) => { e.preventDefault(); e.stopPropagation(); useCyberspace.getState().publishNow() }, [])
+  const pressChip = useCallback((e: React.PointerEvent) => {
+    e.preventDefault(); e.stopPropagation()
+    const ui = useChainUi.getState()
+    ui.setExplorerOpen(!ui.explorerOpen)
+  }, [])
   // The open body is a chip on the Escape stack (arkinox, 2026-10-01). Not
   // while there are no actions: then nothing but the chip is drawn.
   useEscape('chip', open && actions.length > 0, () => setOpen(false))
@@ -179,49 +272,91 @@ export function ChainExplorer(): JSX.Element {
 
   return (
     <div className="explorer">
+      {/* The chip and, beside it, the fluid pause's word (hud/FluidPauseNotice.tsx):
+          a row the chip's own size, the word absolutely placed, so nothing moves. */}
+      <div className="explorer__chiprow">
       {/* The chain is the thing that forks, so the chain's own chip is where a
           fork is reported: what another device added, and what it cost. */}
       {fork && fork.replaced ? (
         // The case the generic counts used to hide: the whole chain
         // superseded by a newer spawn (arkinox, 2026-10-01). It stays on the
         // chip until read, like any drop.
-        <button
+        <AheadChip
+          own={own}
           className="chip explorer__toggle explorer__toggle--dropped"
           {...noCallout}
-          onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); setShowFork(true) }}
-          aria-label="Your chain was replaced by a new spawn from another device. Tap to read why."
-        >
-          CHAIN REPLACED BY A NEW SPAWN
-        </button>
+          onPointerDown={pressForkChip}
+          label="Your chain was replaced by a new spawn from another device. Tap to read why."
+          words="CHAIN REPLACED BY A NEW SPAWN"
+        />
       ) : fork && fork.dropped > 0 ? (
-        <button
+        <AheadChip
+          own={own}
           className="chip explorer__toggle explorer__toggle--dropped"
           {...noCallout}
-          onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); setShowFork(true) }}
-          aria-label={`${fork.dropped} actions from this device were dropped. Tap to read why.`}
-        >
-          {fork.dropped} ACTION{fork.dropped === 1 ? '' : 'S'} DROPPED
-        </button>
+          onPointerDown={pressForkChip}
+          label={`${fork.dropped} actions from this device were dropped. Tap to read why.`}
+          words={[fork.dropped, ' ACTION', fork.dropped === 1 ? '' : 'S', ' DROPPED']}
+        />
       ) : fork && fork.adopted > 0 && fresh ? (
-        <button
+        <AheadChip
+          own={own}
           className="chip explorer__toggle explorer__toggle--adopted"
           {...noCallout}
-          onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); setShowFork(true) }}
-          aria-label={`${fork.adopted} actions arrived from another device. Tap to read why.`}
-        >
-          {fork.adopted} FROM ANOTHER DEVICE
-        </button>
+          onPointerDown={pressForkChip}
+          label={`Caught up: ${fork.adopted} ${fork.adopted === 1 ? 'move' : 'moves'} from another device. Tap to read why.`}
+          words={['CAUGHT UP: ', fork.adopted, fork.adopted === 1 ? ' MOVE' : ' MOVES', ' FROM ANOTHER DEVICE']}
+        />
+      ) : own && chipState === 'checking' ? (
+        <AheadChip
+          own={own}
+          className="chip explorer__toggle explorer__toggle--syncing"
+          {...noCallout}
+          onPointerDown={pressChip}
+          label="Checking your chain on the relays. A move waits until this is done."
+          words="CHECKING YOUR CHAIN"
+        />
+      ) : own && chipState === 'unchecked' ? (
+        <AheadChip
+          own={own}
+          className="chip explorer__toggle explorer__toggle--unchecked"
+          {...noCallout}
+          onPointerDown={pressChip}
+          label="The relays did not answer, so this device could not check for moves made elsewhere. Nothing is signed until they answer."
+          words="CHAIN NOT CHECKED"
+        />
+      ) : own && chipState.startsWith('local:') ? (
+        <AheadChip
+          own={own}
+          className="chip explorer__toggle explorer__toggle--local"
+          {...noCallout}
+          onPointerDown={pressChip}
+          label={`LOCAL: ${chipState.slice(6)} ${chipState.slice(6) === '1' ? 'move' : 'moves'} kept on this device. Switch to LIVE, then move or tap PUBLISH, to publish.`}
+          words={['LOCAL: ', chipState.slice(6), ' KEPT HERE']}
+        />
+      ) : own && chipState.startsWith('kept:') ? (
+        <AheadChip
+          own={own}
+          className="chip explorer__toggle explorer__toggle--local"
+          {...noCallout}
+          onPointerDown={pressPublish}
+          label={`${chipState.slice(5)} ${chipState.slice(5) === '1' ? 'move' : 'moves'} kept on this device. Tap to publish, or they go with your next move.`}
+          words={[chipState.slice(5), ' KEPT HERE: PUBLISH']}
+        />
       ) : (
-        <button
+        <AheadChip
+          own={own}
           className="chip explorer__toggle"
           {...noCallout}
-          onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); setOpen((v) => !v) }}
-          aria-label={open ? 'Hide chain explorer' : 'Show chain explorer'}
+          onPointerDown={pressChip}
+          label={open ? 'Hide chain explorer' : 'Show chain explorer'}
+          sep="."
           aria-pressed={open}
-        >
-          CHAIN {index + 1}/{actions.length}{atHead || building ? '' : ' HISTORY'}
-        </button>
+          words={['CHAIN ', index + 1, '/', actions.length, atHead || building ? '' : ' HISTORY']}
+        />
       )}
+      <FluidPauseNotice own={own} />
+      </div>
 
       {showFork && fork && (fork.replaced ? (
         <ConfirmModal
@@ -327,24 +462,30 @@ export function ChainExplorer(): JSX.Element {
             {atHead ? (
               <span className="explorer__live">{spectate ? 'THEIR HEAD' : 'LATEST'}</span>
             ) : (
-              <button className="explorer__return" {...noCallout}
-                onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); go(null) }}>{spectate ? 'TO THEIR HEAD' : 'RETURN TO LATEST'}</button>
+              <>
+                {/* VIEW HERE: this action's place becomes your VIEW (arkinox, 2026-11-11). */}
+                {!building && <button className="explorer__return" title="VIEW from here: move the cursor, pick a region; RECALL goes home" {...noCallout}
+                  onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); useCyberspace.getState().viewHere() }}>VIEW HERE</button>}
+                <button className="explorer__return" {...noCallout}
+                  onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); go(null) }}>{spectate ? 'TO THEIR HEAD' : 'RETURN TO LATEST'}</button>
+              </>
             )}
           </div>
 
           {/* One field per line, labelled in words, so the block stays narrow
               rather than running a wide C … S … row across the scene. */}
-          <div className="explorer__detail" title={action.coordHex}>
-            <span className="explorer__key">coord </span>{shortHex(action.coordHex, 8, 6)}
+          {/* Each value a tap to copy, the whole of it however it is shown (owner, 2026-11-16). */}
+          <div className="explorer__detail">
+            <span className="explorer__key">coord </span><CopyValue value={action.coordHex} shown={shortHex(action.coordHex, 8, 6)} />
           </div>
-          <div className="explorer__detail" title={action.sector}>
-            <span className="explorer__key">sector </span>{action.sector}
+          <div className="explorer__detail">
+            <span className="explorer__key">sector </span><CopyValue value={action.sector} />
           </div>
           {/* Inside a game the coord above is where the identity entered from
               and still is; this is where the action puts it in the game. */}
           {(action.role === 'enter' || action.role === 'virtual') && action.declared && (
-            <div className="explorer__detail explorer__detail--game" title={action.declared.coordHex}>
-              <span className="explorer__key">in game </span>{shortHex(action.declared.coordHex, 8, 6)}
+            <div className="explorer__detail explorer__detail--game">
+              <span className="explorer__key">in game </span><CopyValue value={action.declared.coordHex} shown={shortHex(action.declared.coordHex, 8, 6)} />
             </div>
           )}
           {/* Not a game's: what the action itself claimed, where that is not
@@ -352,18 +493,18 @@ export function ChainExplorer(): JSX.Element {
               first broken one on, where you are frozen at the last valid
               position (arkinox, 2026-10-07). */}
           {action.role !== 'enter' && action.role !== 'virtual' && action.declared && (
-            <div className="explorer__detail explorer__detail--claimed" title={action.declared.coordHex}>
-              <span className="explorer__key">claimed </span>{shortHex(action.declared.coordHex, 8, 6)}
+            <div className="explorer__detail explorer__detail--claimed">
+              <span className="explorer__key">claimed </span><CopyValue value={action.declared.coordHex} shown={shortHex(action.declared.coordHex, 8, 6)} />
             </div>
           )}
           {action.game && (
-            <div className="explorer__detail explorer__detail--game" title={nip19.npubEncode(action.game.pubkey)}>
-              <span className="explorer__key">game </span>{shortHex(nip19.npubEncode(action.game.pubkey), 10, 6)}
+            <div className="explorer__detail explorer__detail--game">
+              <span className="explorer__key">game </span><CopyValue value={nip19.npubEncode(action.game.pubkey)} shown={shortHex(nip19.npubEncode(action.game.pubkey), 10, 6)} />
             </div>
           )}
           {action.proofHash && (
-            <div className="explorer__detail" title={action.proofHash}>
-              <span className="explorer__key">proof </span>{shortHex(action.proofHash, 8, 6)}
+            <div className="explorer__detail">
+              <span className="explorer__key">proof </span><CopyValue value={action.proofHash} shown={shortHex(action.proofHash, 8, 6)} />
             </div>
           )}
           <button className="explorer__comments" {...noCallout}

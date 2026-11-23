@@ -12,6 +12,7 @@
 
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { NostrEvent } from '../events'
+import { chainHolders } from '../chainHolders'
 
 const sent: string[] = []
 /**
@@ -19,25 +20,64 @@ const sent: string[] = []
  * (as publish reports them); `canonicalFailsLeft` is how many more times the
  * canonical relay refuses a retry of its own; `toCanonical` logs each retry.
  */
-const pub = vi.hoisted(() => ({ acceptedBy: null as string[] | null, canonicalFailsLeft: 0, toCanonical: [] as string[] }))
+const pub = vi.hoisted(() => ({ acceptedBy: null as string[] | null, canonicalFailsLeft: 0, toCanonical: [] as string[], hold: null as Promise<void> | null, rest: null as null | { slow: Promise<void>; late: string[] }, firstAsked: 0 }))
 vi.mock('../relay', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../relay')>()),
-  publish: (e: NostrEvent) => { sent.push(e.id); return Promise.resolve(pub.acceptedBy ? { ok: true as const, accepted: pub.acceptedBy } : { ok: true as const }) },
-  publishMany: (relays: string[], e: NostrEvent) => {
+  publish: async (e: NostrEvent, opts?: { first?: boolean }) => {
+    sent.push(e.id)
+    if (opts?.first) pub.firstAsked++
+    if (pub.hold) await pub.hold
+    // `rest`: the first relay took it now, the others (`late`) only once `slow` settles.
+    if (pub.rest) {
+      const rest = pub.rest
+      const first = pub.acceptedBy ?? ['wss://relay.onosendai.tech/']
+      return { ok: true as const, accepted: first, all: rest.slow.then(() => ({ ok: true as const, accepted: [...first, ...rest.late] })) }
+    }
+    return pub.acceptedBy ? { ok: true as const, accepted: pub.acceptedBy } : { ok: true as const }
+  },
+  // The canonical relay's background check by id (publisher.ts
+  // reconcileCanonical): it answers, holding none of them.
+  countRelay: () => Promise.resolve(null),
+  askRelay: (url: string) => Promise.resolve({ url, outcome: 'answered' as const, events: [] }),
+  // And its re-send of what it lacks.
+  publishOnceTo: (url: string, e: NostrEvent) => {
     pub.toCanonical.push(e.id)
     if (pub.canonicalFailsLeft > 0) { pub.canonicalFailsLeft--; return Promise.resolve({ ok: false as const, reason: 'timeout' }) }
-    return Promise.resolve({ ok: true as const, accepted: relays })
+    return Promise.resolve({ ok: true as const, accepted: [url] })
   },
+}))
+
+// Whether an action has landed on this device (lib/chainStore.ts): true unless a test says it lost.
+const landing = vi.hoisted(() => ({ lost: new Set<string>(), asked: [] as string[] }))
+vi.mock('../chainStore', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../chainStore')>()),
+  chainLanded: async (_pubkey: string, id: string) => { landing.asked.push(id); return !landing.lost.has(id) },
 }))
 
 // The look at the relays before a backlog finds nothing here: no relay.
 // `canonical.answers` says whether the canonical relay answers it.
-const canonical = vi.hoisted(() => ({ answers: true }))
+const canonical = vi.hoisted(() => ({ answers: true, asked: 0 }))
 vi.mock('../chains', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../chains')>()),
   fetchChainEvents: () => Promise.resolve([]),
   askChainEvents: async () => [{ url: (await import('../../store/useRelays')).DEFAULT_RELAY, outcome: 'answered' as const, events: [] }],
-  confirmChainEvents: () => Promise.resolve(canonical.answers ? [] : null),
+  confirmChainEvents: () => { canonical.asked++; return Promise.resolve(canonical.answers ? [] : null) },
+}))
+
+// What this page signed (useCyberspace signedOnThisPage, takeFreshHead): every
+// fixture action stands for one signed on this page, except those a test says
+// were read from storage (a reload, an identity switched back to); an
+// appended one is an action just taken, and opens the gate the first time it
+// becomes the head.
+const storage = vi.hoisted(() => new Set<string>())
+const fresh = vi.hoisted(() => new Set<string>())
+// Moves signed while LIVE (useCyberspace meantToGoOut), as a test says.
+const outbound = vi.hoisted(() => new Set<string>())
+vi.mock('../../store/useCyberspace', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../store/useCyberspace')>()),
+  signedOnThisPage: (id: string) => !storage.has(id),
+  takeFreshHead: (id: string) => fresh.delete(id),
+  meantToGoOut: (_pk: string, id: string) => outbound.has(id),
 }))
 
 // A retry needs window.setTimeout; nothing here fails, but a stub costs one
@@ -46,10 +86,10 @@ if (typeof (globalThis as { window?: unknown }).window === 'undefined') {
   ;(globalThis as { window?: unknown }).window = { setTimeout: (f: () => void, ms: number) => setTimeout(f, ms) }
 }
 
-import { startPublisher } from '../publisher'
+import { MARK_WINDOW_MS, flushPublishMarks, startPublisher } from '../publisher'
 import { mayMove, movementBlocked, resetVersionGateForTests, useVersionGate } from '../versionGate'
 import { CHAIN_RULES_EPOCH, versionFileOf } from '../chainRulesEpoch'
-import { useCyberspace, type PublishStatus } from '../../store/useCyberspace'
+import { adoptMayReadMarks, useCyberspace, type PublishStatus } from '../../store/useCyberspace'
 
 const PUBKEY = 'a'.repeat(64)
 const ev = (id: string): NostrEvent =>
@@ -70,6 +110,7 @@ function setChain(ids: string[], statuses: Record<string, PublishStatus> = {}): 
 function append(id: string): void {
   const s = useCyberspace.getState()
   const e = ev(id)
+  fresh.add(e.id)
   useCyberspace.setState({
     events: [...s.events, e],
     prevEventId: e.id,
@@ -94,7 +135,64 @@ describe('the publisher and the release gate', () => {
     // Local first: that is what shuts the gate, whatever the last test left.
     useCyberspace.setState({ live: false, held: false, chainConflict: null })
     await idle()
+    // The last test's marks, written before this one reuses its ids.
+    flushPublishMarks()
     sent.length = 0
+    storage.clear()
+    fresh.clear()
+    outbound.clear()
+  })
+
+  it('marks nothing and sends nothing more inside the relay\'s OK; the marks reach the store together, within the window (owner\'s phone diag, 2026-11-21)', async () => {
+    setChain(['a1'], { [ev('a1').id]: 'ok' })
+    useCyberspace.setState({ live: true })
+    await idle()
+    let release: () => void = () => {}
+    pub.hold = new Promise<void>((r) => { release = r })
+    const changes: string[] = []
+    const stop = useCyberspace.subscribe((st, prev) => { if (st.published !== prev.published) changes.push('published') })
+    try {
+      append('b2')
+      append('c3')
+      await until(() => sent.includes(ev('b2').id))
+      changes.length = 0
+      // The OK arrives, and every promise it settles runs, as within one socket message.
+      pub.hold = null
+      release()
+      for (let i = 0; i < 20; i++) await Promise.resolve()
+      expect(changes).toEqual([])
+      expect(sent).not.toContain(ev('c3').id)
+      // The next one goes out in a task of its own, and the marks land within the window, together.
+      await until(() => sent.includes(ev('c3').id))
+      await until(() => useCyberspace.getState().published[ev('b2').id] === 'ok' && useCyberspace.getState().published[ev('c3').id] === 'ok')
+      expect(changes.length).toBeLessThanOrEqual(2)
+    } finally {
+      stop()
+      pub.hold = null
+    }
+  })
+
+  it('a kept ack is written before a fold that may read the marks, never for an echo of a move in hand, and a late \'sending\' never takes an \'ok\' back', async () => {
+    setChain(['a1'], { [ev('a1').id]: 'ok' })
+    useCyberspace.setState({ live: true })
+    await idle()
+    append('b2')
+    await until(() => sent.includes(ev('b2').id))
+    // Within the window: a relay pushing back a move already in hand decides nothing with the marks, and leaves them kept.
+    const me = useCyberspace.getState().identity.pubkey
+    const echo = { ...ev('b2'), pubkey: me }
+    const s0 = { chainConflict: null, held: false, identity: { pubkey: me }, events: [...useCyberspace.getState().events, echo] }
+    expect(adoptMayReadMarks(s0, [echo])).toBe(false)
+    // Something new of this identity's, or a choice waiting, may read them: they are written first.
+    expect(adoptMayReadMarks(s0, [{ ...ev('n9'), pubkey: me }])).toBe(true)
+    expect(adoptMayReadMarks({ ...s0, chainConflict: { kind: 'branch' } }, [echo])).toBe(true)
+    // Another identity's events decide nothing here.
+    expect(adoptMayReadMarks(s0, [ev('n9')])).toBe(me === ev('n9').pubkey)
+    // A fold that may read them writes them first.
+    flushPublishMarks()
+    expect(useCyberspace.getState().published[ev('b2').id]).toBe('ok')
+    useCyberspace.getState().setPublishStatuses([[ev('b2').id, 'sending']])
+    expect(useCyberspace.getState().published[ev('b2').id]).toBe('ok')
   })
 
   it('sends nothing when the switch goes Live with a backlog waiting', async () => {
@@ -103,6 +201,20 @@ describe('the publisher and the release gate', () => {
     await idle()
     expect(sent).toEqual([])
     expect(useCyberspace.getState().published[ev('a1').id]).toBe('queued')
+  })
+
+  it('an action another tab beat to the head is never sent, and asks nothing of a relay', async () => {
+    setChain(['a1'])
+    useCyberspace.setState({ live: true })
+    await idle()
+    const lost = ev('b2').id
+    landing.lost.add(lost)
+    append('b2')
+    await idle()
+    expect(landing.asked).toContain(lost)
+    expect(sent).not.toContain(lost)
+    expect(useCyberspace.getState().published[lost]).not.toBe('sending')
+    landing.lost.delete(lost)
   })
 
   it('sends the whole backlog, oldest first, once an action is taken while Live', async () => {
@@ -116,9 +228,8 @@ describe('the publisher and the release gate', () => {
     // Chain order, spawn first: the new action goes last, so every prefix the
     // relay holds is a chain that reads from the spawn.
     expect(sent).toEqual([ev('a1').id, ev('b2').id, ev('c3').id, ev('d4').id])
-    for (const id of ['a1', 'b2', 'c3', 'd4']) {
-      expect(useCyberspace.getState().published[ev(id).id]).toBe('ok')
-    }
+    // Marked published within the window after the last relay's OK, never before it.
+    await until(() => ['a1', 'b2', 'c3', 'd4'].every((id) => useCyberspace.getState().published[ev(id).id] === 'ok'))
   })
 
   it('sends no backlog when the look did not count: no relay answered that holds the chain (review of #236, item 9; option B)', async () => {
@@ -137,6 +248,159 @@ describe('the publisher and the release gate', () => {
     }
   })
 
+  it('one waiting move this page did not sign (read from storage: a reload, an identity switched back to) gets the look first, and no answer sends nothing (review of the per-identity LIVE switch, 2026-11-21)', async () => {
+    canonical.answers = false
+    try {
+      storage.add(ev('b2').id)
+      setChain(['a1', 'b2'])
+      useCyberspace.setState({ live: true, published: { [ev('a1').id]: 'ok', [ev('b2').id]: 'queued' } })
+      await idle()
+      useCyberspace.getState().publishNow()
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      expect(sent).toEqual([])
+    } finally {
+      canonical.answers = true
+      useCyberspace.setState({ live: false })
+      await idle()
+    }
+  })
+
+  it('LIVE, moves kept from before (read from storage) wait for an action here: their arrival opens nothing, and the next action sends them all, oldest first (owner, 2026-11-21)', async () => {
+    setChain(['k0'], { [ev('k0').id]: 'ok' })
+    useCyberspace.setState({ live: true })
+    await idle()
+    // The saved chain arrives, a load or a switch back: two moves kept while LOCAL, as a new head.
+    for (const id of ['k1', 'k2']) storage.add(ev(id).id)
+    setChain(['k0', 'k1', 'k2'], { [ev('k0').id]: 'ok' })
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(sent).toEqual([])
+    // An action taken here: the gate opens, and the backlog goes with it.
+    append('k3')
+    await until(() => sent.length === 3)
+    expect(sent).toEqual([ev('k1').id, ev('k2').id, ev('k3').id])
+  })
+
+  it('a move this page signed while LOCAL, read back after a switch away and back on LIVE, waits too: an action opens the gate once (review, 2026-11-21)', async () => {
+    const me = useCyberspace.getState().identity
+    try {
+      setChain(['m0'], { [ev('m0').id]: 'ok' })
+      await idle()
+      // LOCAL: the move is taken here, and becomes the head.
+      append('m1')
+      await idle()
+      useCyberspace.setState({ live: true })
+      await idle()
+      expect(sent).toEqual([])
+      // Away to X and back: the chain arrives after the switch, in a later update.
+      useCyberspace.setState({ identity: { pubkey: 'c'.repeat(64), npub: 'npub-x' } })
+      useCyberspace.setState({ identity: me, events: [], prevEventId: '', published: {} })
+      setChain(['m0', 'm1'], { [ev('m0').id]: 'ok' })
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      expect(sent).toEqual([])
+    } finally {
+      useCyberspace.setState({ live: false, identity: me })
+      await idle()
+    }
+  })
+
+  it('LIVE, a move signed while LIVE whose send never landed, read back after a reload, goes out again by itself after the look (owner, 2026-11-22)', async () => {
+    setChain(['r0'], { [ev('r0').id]: 'ok' })
+    useCyberspace.setState({ live: true })
+    await idle()
+    // A LOCAL move kept behind it, and the LIVE move on top that hit a blip.
+    for (const id of ['r1', 'r2']) storage.add(ev(id).id)
+    outbound.add(ev('r2').id)
+    setChain(['r0', 'r1', 'r2'], { [ev('r0').id]: 'ok' })
+    await until(() => sent.length === 2)
+    expect(sent).toEqual([ev('r1').id, ev('r2').id])
+  })
+
+  it('the same with the relays silent: nothing goes out until they answer', async () => {
+    canonical.answers = false
+    try {
+      setChain(['s0'], { [ev('s0').id]: 'ok' })
+      useCyberspace.setState({ live: true })
+      await idle()
+      storage.add(ev('s1').id)
+      outbound.add(ev('s1').id)
+      canonical.asked = 0
+      setChain(['s0', 's1'], { [ev('s0').id]: 'ok' })
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      expect(sent).toEqual([])
+      // It was released, and held back only by the look that got no answer.
+      expect(canonical.asked).toBeGreaterThan(0)
+    } finally {
+      canonical.answers = true
+      useCyberspace.setState({ live: false })
+      await idle()
+    }
+  })
+
+  it('a LIVE move this page signed, whose send failed, read back after a switch away and back, still gets the look first: no answer, nothing sent (review, 2026-11-22)', async () => {
+    const me = useCyberspace.getState().identity
+    canonical.answers = false
+    try {
+      setChain(['v0'], { [ev('v0').id]: 'ok' })
+      useCyberspace.setState({ live: true })
+      await idle()
+      // Signed on this page while LIVE (not from storage), meant to go out, never landed.
+      outbound.add(ev('v1').id)
+      useCyberspace.setState({ identity: { pubkey: 'd'.repeat(64), npub: 'npub-x' } })
+      useCyberspace.setState({ identity: me, events: [], prevEventId: '', published: {} })
+      setChain(['v0', 'v1'], { [ev('v0').id]: 'ok' })
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      expect(sent).toEqual([])
+    } finally {
+      canonical.answers = true
+      useCyberspace.setState({ live: false, identity: me })
+      await idle()
+    }
+  })
+
+  it('LIVE, moves kept from before go out on PUBLISH, with no move', async () => {
+    setChain(['p0'], { [ev('p0').id]: 'ok' })
+    useCyberspace.setState({ live: true })
+    await idle()
+    storage.add(ev('p1').id)
+    setChain(['p0', 'p1'], { [ev('p0').id]: 'ok' })
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(sent).toEqual([])
+    useCyberspace.getState().publishNow()
+    await until(() => sent.length === 1)
+    expect(sent).toEqual([ev('p1').id])
+  })
+
+  it('a look at one identity\'s backlog does not count for the next: Y mid-drain, a switch to X, X\'s one kept move waits for its own look (review, 2026-11-21)', async () => {
+    const me = useCyberspace.getState().identity
+    let release!: () => void
+    pub.hold = new Promise((r) => { release = r })
+    try {
+      // Y: a backlog, released by an action, looked at, and its first send in flight.
+      setChain(['a1', 'b2', 'c3'])
+      useCyberspace.setState({ live: true })
+      await idle()
+      append('d4')
+      await until(() => sent.length === 1)
+      // The switch to X, LIVE, then X's saved chain arriving with one kept move, then PUBLISH.
+      const x = 'b'.repeat(64)
+      useCyberspace.setState({ identity: { pubkey: x, npub: 'npub-x' } })
+      storage.add(ev('x2').id)
+      setChain(['x1', 'x2'], { [ev('x1').id]: 'ok' })
+      canonical.answers = false
+      useCyberspace.getState().publishNow()
+      pub.hold = null
+      release()
+      await new Promise((resolve) => setTimeout(resolve, 60))
+      expect(sent).not.toContain(ev('x2').id)
+    } finally {
+      pub.hold = null
+      release?.()
+      canonical.answers = true
+      useCyberspace.setState({ live: false, identity: me })
+      await idle()
+    }
+  })
+
   it('a move only one of the player\'s relays took counts as published, and the canonical relay is asked again in the background until it takes it (option B)', async () => {
     pub.acceptedBy = ['wss://mine.example/']
     pub.canonicalFailsLeft = 1
@@ -147,7 +411,8 @@ describe('the publisher and the release gate', () => {
       useCyberspace.setState({ live: true })
       await vi.advanceTimersByTimeAsync(10)
       append('b2')
-      await vi.advanceTimersByTimeAsync(10)
+      // Marked published within the window after the OK (publisher.ts MARK_WINDOW_MS).
+      await vi.advanceTimersByTimeAsync(MARK_WINDOW_MS + 10)
       expect(useCyberspace.getState().published[ev('b2').id]).toBe('ok')
       expect(pub.toCanonical).toEqual([])
       // First background try: the canonical relay still refuses.
@@ -189,6 +454,30 @@ describe('the publisher and the release gate', () => {
       vi.useRealTimers()
       pub.acceptedBy = null
       pub.canonicalFailsLeft = 0
+      useCyberspace.setState({ live: false })
+      await idle()
+    }
+  })
+
+  it('sends the next move once one relay took the last, while the others have still not answered; their late answers are kept (owner, 2026-11-22)', async () => {
+    let answer!: () => void
+    pub.rest = { slow: new Promise<void>((r) => { answer = r }), late: ['wss://slow.example/'] }
+    pub.firstAsked = 0
+    try {
+      setChain(['a1'], { [ev('a1').id]: 'ok' })
+      useCyberspace.setState({ live: true })
+      append('b2')
+      await until(() => sent.length === 1)
+      append('c3')
+      // c3 goes out with the slow relay's answer to b2 still out.
+      await until(() => sent.length === 2)
+      expect(sent).toEqual([ev('b2').id, ev('c3').id])
+      expect(pub.firstAsked).toBe(2)
+      expect(chainHolders(ev('b2').pubkey).has('wss://slow.example/')).toBe(false)
+      answer()
+      await until(() => chainHolders(ev('b2').pubkey).has('wss://slow.example/'))
+    } finally {
+      pub.rest = null
       useCyberspace.setState({ live: false })
       await idle()
     }

@@ -16,7 +16,9 @@
  * Its walls carry the WALK grid (Rooms.tsx): the same shader, the same slow
  * breath, in the region's green, at the pitch WALK gives a wall of that
  * height, so the box reads as a volume you are placing into rather than one
- * more outline among the lattice's.
+ * more outline among the lattice's. The grid and the ZOOM OUT walls are kept
+ * out of the bloom, so they never wash what is being lined up; the outline
+ * is a line like the lattice's and glows as they do (owner, 2026-11-16).
  *
  * Not drawn for a shard being aimed into a chest (useShards `intoChest`): the
  * content has no region of its own, only the chest's, and a box here would
@@ -31,6 +33,7 @@ import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { useShards } from '../store/useShards'
 import { ClipWalls, type ClipFace } from './ClipWalls'
 import { UNIT_BOX, WALL_RENDER_ORDER, gridMaterial, setGrid, tickWallClock } from './Rooms'
+import { NO_BLOOM_BLEND } from './shardFaces'
 
 /** The green of "found here", the same as the LIVE tag. */
 const REGION = '#52e39f'
@@ -66,10 +69,15 @@ export interface DrawnRegion {
  * `maxCells` across, else the part of it within `maxCells / 2` cells of the
  * cursor on each axis, with the faces it was cut at. Null when it is too
  * small to see.
+ *
+ * `about` is the point a big region is clipped around, the cursor unless
+ * given: a door's room is clipped about the viewer while the viewer stands in
+ * it (DoorRooms). It must lie in the region.
  */
 export function drawnRegion(
   cursor: { x: bigint; y: bigint; z: bigint }, origin: { x: bigint; y: bigint; z: bigint },
   height: number, scaleExp: number, axes: ViewAxes, maxCells: number,
+  about: { x: bigint; y: bigint; z: bigint } = cursor,
 ): DrawnRegion | null {
   const exp = height - scaleExp
   const centre: [number, number, number] = [0, 0, 0]
@@ -102,7 +110,7 @@ export function drawnRegion(
     let from = lo
     let to = hi
     if (side > maxCells) {
-      const c = cellDelta(alignTo(cursor[a.axis], scaleExp), origin[a.axis], scaleExp)
+      const c = cellDelta(alignTo(about[a.axis], scaleExp), origin[a.axis], scaleExp)
       from = Math.max(lo, c - half)
       to = Math.min(hi, c + half)
       // In render space the low world side is the -dir side.
@@ -133,7 +141,12 @@ export function DeployRegionBox({ axes }: Props): JSX.Element | null {
   // The grid on its walls: one material while a deploy is up, its numbers
   // written in place as the box moves (as Rooms keeps its walls' materials).
   const showing = box !== null
-  const material = useMemo(() => (showing ? gridMaterial() : null), [showing])
+  // Kept out of the bloom (shardFaces.ts NO_BLOOM_BLEND): blended ordinarily,
+  // each grid line over a shard face wrote alpha, the face lost its bloom tag,
+  // and the walls washed a castle courtyard white-green while it was being
+  // lined up (owner, 2026-11-16). Now the lines tint what is behind, and glow
+  // nowhere.
+  const material = useMemo(() => (showing ? Object.assign(gridMaterial(), NO_BLOOM_BLEND) : null), [showing])
   useEffect(() => () => material?.dispose(), [material])
   const walls = useRef<Mesh>(null)
   useLayoutEffect(() => {
@@ -156,7 +169,7 @@ export function DeployRegionBox({ axes }: Props): JSX.Element | null {
       {material && box.whole && (
         <mesh ref={walls} geometry={UNIT_BOX} material={material} frustumCulled={false} renderOrder={WALL_RENDER_ORDER} />
       )}
-      <ClipWalls centre={box.centre} size={box.size} faces={box.faces} color={REGION} hideNear />
+      <ClipWalls centre={box.centre} size={box.size} faces={box.faces} color={REGION} hideNear bloom={false} />
     </group>
   )
 }

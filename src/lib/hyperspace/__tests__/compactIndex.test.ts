@@ -21,7 +21,9 @@ import {
   adoptSnapshot,
   appendColumns,
   appendStops,
+  blockHashByHeight,
   createStopIndex,
+  firstHeightWithoutHash,
   hasPending,
   keyHexAtSorted,
   mergeAll,
@@ -359,5 +361,25 @@ describe('snapshot serialize / adopt', () => {
       expect(adoptSnapshot(fresh, snap)).toBe(true)
       expect(fresh.size).toBe(index.size)
     }
+  })
+})
+
+describe('block hashes read over a whole ride (2026-11-16)', () => {
+  it('reads hashes and finds the first gap from the columns, caching no Stop', () => {
+    const rng = mulberry32(517354)
+    const stops = Array.from({ length: 40 }, (_, i) => syntheticStop(100 + i, rand85(rng), i === 25 ? null : hex64(rng)))
+    const index = createStopIndex()
+    appendStops(index, stops.filter((s) => s.height !== 130))
+    mergeAll(index)
+    index.stopCache.clear()
+    expect(blockHashByHeight(index, 110)).toBe(stops[10].blockHash)
+    expect(blockHashByHeight(index, 125)).toBeNull() // present, no hash
+    expect(blockHashByHeight(index, 130)).toBeNull() // absent
+    expect(blockHashByHeight(index, 99)).toBeNull()
+    expect(firstHeightWithoutHash(index, 100, 124)).toBeNull()
+    expect(firstHeightWithoutHash(index, 101, 139)).toBe(125)
+    expect(firstHeightWithoutHash(index, 126, 139)).toBe(130)
+    expect(firstHeightWithoutHash(index, 131, 140)).toBe(140) // past the end
+    expect(index.stopCache.size).toBe(0)
   })
 })

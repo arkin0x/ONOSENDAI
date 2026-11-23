@@ -34,6 +34,12 @@
  * (D5), and that is applied where an object is read from its event
  * (lib/carried.ts keepOwnTable), which also says whose the model is, so every
  * draw passes that pubkey on (authorOf); a model made here is yours.
+ *
+ * A placed object that is a hidden object (DECK-0003 §3.4) is a SEALED PIECE
+ * of a split build (lib/pieceKeys.ts): opened here with the key of the bag
+ * its parent was read from, when this device opened that bag, and otherwise
+ * a placeholder, as for any reader that cannot open it. Your own pieces
+ * signed while LOCAL are read from here before any relay.
  */
 
 import { createContext, useContext, useEffect, useRef, useState } from 'react'
@@ -44,6 +50,8 @@ import { chargeByTrust } from './trust'
 import { fromPayload, type Ref, type ShardModel } from 'sno-core/shards'
 import { GENERAL_RELAYS } from './contacts'
 import { queryAny, relaySet } from './relay'
+import { onRescan } from './rescanSignal'
+import { localPiece, onPieceKeys, onPiecesForgotten, readSealedPiece, setPieceCache } from './pieceKeys'
 
 const SNO_KIND = 33331
 /** How long one reference waits on the relays before it is drawn as a placeholder. */
@@ -129,10 +137,17 @@ export function fetchRef(ref: Ref): Promise<unknown> {
       if (!a) return null
       filter = { kinds: [a.kind], authors: [a.pubkey], '#d': [a.d] }
     } else filter = { ids: [ref[1]] }
-    const found = await queryAny(relays, filter, FETCH_WAIT_MS)
+    // A piece of yours signed while LOCAL is on no relay yet: read from here.
+    const own = ref[0] === 'a' ? localPiece(ref[1]) : undefined
+    const found = own ? [own] : await queryAny(relays, filter, FETCH_WAIT_MS)
     // Several relays may each hold a different edit; the newest is the object.
     const ev = found.sort((x, y) => y.created_at - x.created_at)[0]
     if (!ev || ev.kind !== SNO_KIND) return null
+    // A hidden object: a sealed piece, opened with its parent's bag key, or nothing (lib/pieceKeys.ts).
+    if (ref[0] === 'a') {
+      const sealed = await readSealedPiece(ev, ref[1])
+      if (sealed !== undefined) return sealed
+    }
     let payload: unknown
     try { payload = JSON.parse(ev.content) } catch { return null }
     // By `e`, whose event it is goes with it, so what it carries counts under
@@ -158,6 +173,10 @@ export function fetchRef(ref: Ref): Promise<unknown> {
 export function fetchSettled(ref: Ref): Promise<unknown> {
   return Promise.resolve(settled.get(refKey(ref)) ?? null)
 }
+
+// Pieces opened with the keys of an identity that signed out are dropped (lib/pieceKeys.ts forgetPieceKeys).
+onPiecesForgotten((addresses) => { for (const a of addresses) forgetRef(['a', a]) })
+setPieceCache({ prime: (a, payload) => primeRef(['a', a], payload), drop: (a) => forgetRef(['a', a]) })
 
 /** Answer a reference from here instead of a relay: for tests and the dev harness. */
 export function primeRef(ref: Ref, payload: unknown): void {
@@ -192,6 +211,18 @@ function cutForReads(placed: readonly Placed[]): boolean {
   return placed.some(function short(p): boolean { return p.missing === 'objects' || p.children.some(short) })
 }
 
+/**
+ * Whether anything a resolve placed, at any depth, found nothing on the relays:
+ * the one reason a scan finding its object again can cure. A part's own part
+ * counts as much as a top one (review of #567: A carries B, B places C, and C,
+ * missing at first, was never asked again until a reload). A loop, the depth,
+ * the scale or the budget is the table's own and stays; a bad payload stays in
+ * fetchRef's cache; reads running out wake it themselves (onReadsBack).
+ */
+function partUnreachable(placed: readonly Placed[]): boolean {
+  return placed.some(function gone(p): boolean { return p.missing === 'unreachable' || p.children.some(gone) })
+}
+
 /** A share of a read pool one resolve reads from, and how much of what it read it has given back. */
 interface Held { pool: ReadPool; meter: Metered; back: number }
 
@@ -221,6 +252,25 @@ export function useResolved(shard: ShardModel | null, pool?: ReadPool): Map<stri
       for (const k of changed) if (touched.current.has(k)) { setAgain((n) => n + 1); return }
     })
   }, [listens])
+  // A draw with a table and a part still missing asks again when a scan finds its
+  // object again: as it did when every scan parsed a new table (lib/rescanSignal).
+  const missing = useRef(false)
+  useEffect(() => {
+    if (!carried) return
+    return onRescan(() => { if (missing.current && !pending.current) setAgain((n) => n + 1) })
+  }, [carried])
+  // A part missing for want of its key asks again once a bag read here notes
+  // one for it (lib/pieceKeys.ts): a split build's pieces open as its bag is
+  // read. Only a draw that placed that address, at any depth, asks again.
+  const placesAny = refs.length > 0
+  useEffect(() => {
+    if (!placesAny) return
+    return onPieceKeys((noted) => {
+      if (!missing.current) return
+      if (pending.current) { dirty.current = true; return }
+      for (const a of noted) if (touched.current.has(`a:${a}`)) { setAgain((n) => n + 1); return }
+    })
+  }, [placesAny])
   // The read pools this draw was cut short by, for want of reads in them (not
   // by its own share's ceiling): resolved again when reads come back to one.
   const starvedOf = useRef<Set<ReadPool>>(new Set())
@@ -276,6 +326,7 @@ export function useResolved(shard: ShardModel | null, pool?: ReadPool): Map<stri
       const wake = [...starvedOf.current].some((p) => readsLeft(p) > 0)
       pending.current = false
       touched.current = touchedKeys(placed, new Set(refs.map(refKey)))
+      missing.current = partUnreachable(placed)
       const m = new Map<string, Resolved>()
       placed.forEach((p) => m.set(refKey(p.ref), { model: p.model, missing: p.missing, children: p.children, ...(p.carried ? { carried: p.carried } : {}) }))
       setByRef(m)

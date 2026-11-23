@@ -111,6 +111,14 @@ describe('a canvas that fails is made again (review of #560)', () => {
     expect(CONTEXT_BACK_MS).toBeGreaterThanOrEqual(1000)
   })
 
+  it('the pieces tested above are wired in: the move, its trigger, the lost context, the crash', () => {
+    const text = fs.readFileSync(path.join(SRC, 'scene/CardSpin.tsx'), 'utf8')
+    expect(text).toMatch(/moveHost\(host, topClaim\(/)
+    expect(text).toMatch(/useSpinStack\.subscribe\(place\)/)
+    expect(text).toMatch(/if \(gl\.isContextLost\(\)\) remake\(\)/)
+    expect(text).toMatch(/broken = true/)
+  })
+
   it('with a coarse pointer the canvas goes after the same wait as the pictures\' stage', () => {
     const text = fs.readFileSync(path.join(SRC, 'scene/CardSpin.tsx'), 'utf8')
     expect(text).toMatch(/\(pointer: fine\)/)

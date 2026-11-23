@@ -1,9 +1,16 @@
 /**
  * ShardGhost.tsx — the thing about to be placed, at the cursor.
  *
- * While deploying, this draws what you are aiming, dimmed, where and at the
- * size it would land: a shard at 2^(unit - scaleExp) cells per model unit, or a
- * message as a note. Moving the cursor moves it, so you place by looking.
+ * While deploying, this draws what you are aiming, see-through, where and at
+ * the size it would land: a shard at 2^(unit - scaleExp) cells per model unit,
+ * or a message as a note. Moving the cursor moves it, so you place by looking.
+ * A shard looks as it will once placed (its own colours and the headlamp's
+ * shading, at GHOST_OPACITY), with thin crisp edges (ShardMesh GHOST_EDGES)
+ * and no bloom, so it lines up with what stands around it (owner, 2026-11-16:
+ * "its hard to line up what we are placing"). A shard that is only fog, glow
+ * or points has no faces to edge, so it is outlined instead: its box, thin
+ * and white, drawn over everything, so it shows where it goes from inside or
+ * behind other shards (scene/softPick.tsx; arkinox, 2026-11-22).
  *
  * The unit is the deploy bar's `deployUnit`, not the workshop model's, because
  * the two can differ: SCALE MULTIPLIER changes the size this deployment goes
@@ -39,13 +46,18 @@ import { deployPoint, itemCentre, type ViewAxes } from '../lib/space'
 import { buildPlane, buildStepOf } from '../lib/buildCursor'
 import { bearingOf, csDirection, frameOf, placedPose, snapOffered, type V3 } from '../lib/pose'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
-import { useShards } from '../store/useShards'
+import { lookModelOf, sealingDoor, useShards } from '../store/useShards'
+import { seedDraftName } from '../store/plantSeed'
+import { seedSnapOffered, standArrows } from '../lib/seeds/orientation'
+import { SeedArrows } from './SeedArrows'
 import { messagePreview } from '../lib/hidden'
 import { ShardMesh } from './ShardMesh'
 import { regionBox } from '../lib/clip'
 import { WorldLabel } from './WorldLabel'
 import { AudioSphereGhost } from './AudioSphereGhost'
 import { turnShard } from '../lib/turn'
+import { GhostGlow } from './PointBillboards'
+import { softModel } from './softPick'
 
 interface Props {
   axes: ViewAxes
@@ -53,10 +65,17 @@ interface Props {
 
 export function ShardGhost({ axes }: Props): JSX.Element | null {
   const pending = useShards((s) => s.pending)
-  const model = useShards((s) => (s.pending?.type === 'shard' ? s.pendingShard() : null))
+  // A chest ghosts as the model it wears (the hide bar's model row), placed
+  // as a shard is, so the ghost shows exactly where it lands (D2).
+  const look = useShards((s) => (s.pending?.type === 'chest' ? s.pending.look ?? null : null))
+  const lookModel = useMemo(() => (look ? lookModelOf(look) : null), [look])
+  const shardModel = useShards((s) => (s.pending?.type === 'shard' ? s.pendingShard() : null))
+  const model = shardModel ?? lookModel
   // What will land: the model turned by the deploy bar's TURN row, the same function the deploy uses.
   const deployTurn = useShards((s) => s.deployTurn)
   const shard = useMemo(() => (model ? turnShard(model, deployTurn) : null), [model, deployTurn])
+  // Only fog, glow or points: its glow drawn whatever the Settings switch says, and its outline over everything (softPick.tsx).
+  const soft = useMemo(() => (shard ? softModel(shard) : false), [shard])
   const scaleExp = useCyberspace((s) => s.scaleExp)
   const unit = useShards((s) => s.deployUnit)
   const group = useRef<Group>(null)
@@ -81,7 +100,16 @@ export function ShardGhost({ axes }: Props): JSX.Element | null {
   const plane = useCyberspace(buildPlane)
   const up = useShards((s) => s.deployUp)
   const spin = useShards((s) => s.deploySpin)
-  const standing = up && snapOffered(plane, deployHeight)
+  // A seed stands on Earth wherever it is planted in dataspace (orientation.ts seedSnapOffered).
+  const standing = up && (pending?.type === 'seed' ? seedSnapOffered(plane) : snapOffered(plane, deployHeight))
+  // A seed's arrows: which way its bloom will stand, after TURN, SNAP TO EARTH and FINE ROTATION (DECK-0008 §5.7).
+  const seedScale = pending?.type === 'seed' ? pending.seed.scale : null
+  const seedArrows = useMemo(
+    () => (seedScale === null ? null : standArrows(deployTurn, placedPose(axes, standing ? { at, spin } : undefined))),
+    [seedScale, deployTurn, standing, at, spin, axes],
+  )
+  // About the size of a bloom (some sixteen units of its scale), never smaller than a cell or past a few.
+  const arrowLength = seedScale === null ? 1 : Math.min(6, Math.max(1.2, 16 * 2 ** (seedScale - scaleExp)))
   // In the view frame either way, exactly as WorldShards draws what lands
   // (pose.ts placedPose): after a compass turn the ghost turns with its place.
   const pose = useMemo(
@@ -96,16 +124,20 @@ export function ShardGhost({ axes }: Props): JSX.Element | null {
   // from the stores each frame like the cursor cube, not from a React commit.
   const landingAt = (): [number, number, number] => {
     const st = useCyberspace.getState()
-    const p = deployPoint(st.cursor, buildStepOf(st), useShards.getState().deployHeight)
+    // A chest placed first (R18) stays where PLACE CHEST put it while its modal is filled.
+    const pd = useShards.getState().pending
+    const spot = pd?.type === 'chest' ? pd.spot : undefined
+    const p = spot?.at ?? deployPoint(st.cursor, buildStepOf(st), useShards.getState().deployHeight)
     return itemCentre(p, alignedOrigin(st.anchor, st.scaleExp), st.scaleExp, axes)
   }
 
   // Ride the live cursor, like the cursor cube does, rather than a React commit.
   useFrame((state) => {
     const g = group.current
-    if (!g) return
+    // A seed has no mesh group (its ghost is its label and arrows), but its FINE ROTATION follows the camera all the same.
+    if (!g && pending?.type !== 'seed') return
     const b = landingAt()
-    g.position.set(b[0], b[1], b[2])
+    g?.position.set(b[0], b[1], b[2])
 
     // FINE ROTATION: the camera owns the spin. The direction from the camera
     // to the ghost is the way you are looking; read into cyberspace axes and
@@ -120,16 +152,23 @@ export function ShardGhost({ axes }: Props): JSX.Element | null {
   })
 
 
+  // The door's name under what is sealed to it (4.3); its X is on the bar's chip.
+  const me = useCyberspace((s) => s.identity.pubkey)
+  const sealing = useShards((s) => (s.pending ? sealingDoor(s, me, (s.pending.type === 'chest' && s.pending.spot?.at) || at, plane, deployHeight)?.name ?? null : null))
+  const sealed = sealing !== null && <WorldLabel text={sealing} color="#ff3b4e" follow={landingAt} align="center" px={11} />
+
   // A message ghosts as a dim note that follows the cursor; a key, a chest
   // and hidden audio ghost as their mark and name, the way the world draws
   // them once hidden.
-  if (pending?.type === 'message' || pending?.type === 'key' || pending?.type === 'chest' || pending?.type === 'audio') {
+  if (pending?.type === 'message' || pending?.type === 'key' || (pending?.type === 'chest' && !shard) || pending?.type === 'audio' || pending?.type === 'seed') {
     return (
       <>
       {/* Hidden audio's sphere: full volume inside, a one-shot's trigger zone (AudioSphereGhost). */}
       {pending.type === 'audio' && <AudioSphereGhost landingAt={landingAt} />}
+      {seedArrows && <SeedArrows follow={landingAt} up={seedArrows.up} front={seedArrows.front} length={arrowLength} />}
+      {sealed}
       <WorldLabel
-        text={pending.type === 'message' ? messagePreview(pending.text, 40) : pending.type === 'key' ? `⚷ ${pending.key.name}` : pending.type === 'audio' ? `AUDIO · ${pending.audio.title}` : `▣ ${pending.name}`}
+        text={pending.type === 'message' ? messagePreview(pending.text, 40) : pending.type === 'key' ? `⚷ ${pending.key.name}` : pending.type === 'audio' ? `AUDIO · ${pending.audio.title}` : pending.type === 'seed' ? `SEED · ${seedDraftName(pending.seed)}` : `▣ ${pending.name}`}
         color="#ffd27d"
         follow={landingAt}
         align="center"
@@ -140,11 +179,19 @@ export function ShardGhost({ axes }: Props): JSX.Element | null {
     )
   }
 
-  if (!shard || pending?.type !== 'shard' || !Number.isFinite(scale)) return null
+  if (!shard || (pending?.type !== 'shard' && pending?.type !== 'chest') || !Number.isFinite(scale)) return null
 
   return (
-    <group ref={group}>
-      <ShardMesh shard={shard} scale={scale} ghost headlamp clip={clip} pose={pose} />
-    </group>
+    <>
+      <group ref={group}>
+        {/* As the world draws what lands: its own colours and shading, see-through, crisp edges, no bloom (shardFaces.ts GHOST_OPACITY). */}
+        {/* Only fog, glow or points: its glow always drawn, and its outline over everything (ShardMesh SoftOutline). */}
+        <GhostGlow always={soft}>
+          <ShardMesh shard={shard} scale={scale} ghost headlamp world noBloom edges clip={clip} pose={pose} />
+        </GhostGlow>
+      </group>
+      {sealed}
+      {pending.type === 'chest' && pending.name && <WorldLabel text={`▣ ${pending.name}`} color="#ffd27d" follow={landingAt} align="center" px={13} opacity={0.5} />}
+    </>
   )
 }

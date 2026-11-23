@@ -11,7 +11,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
-  DEFAULT_ORDER, PANEL_IDS, PANEL_LAYOUT_KEY, columnOf, defaultOrder, mergeOrder, moveBefore, normalizeLayout, toggleCollapsed,
+  DEFAULT_ORDER, LAYOUT_VERSION, PANEL_IDS, PANEL_LAYOUT_KEY, columnOf, tutorialWrote, defaultOrder, mergeOrder, moveBefore, normalizeLayout, toggleCollapsed,
   type PanelId, type PanelOrder,
 } from '../usePanelLayout'
 import { CONTROL, foldsAt, type ElementLike } from '../../hud/PanelSlot'
@@ -43,11 +43,18 @@ function saved(order: PanelOrder, collapsed: Partial<Record<PanelId, boolean>> =
 }
 
 describe('the default order', () => {
-  it('is the menu as it was, every panel once, in one column', () => {
-    expect(DEFAULT_ORDER.left).toEqual(['identity', 'agents', 'hidden', 'discovered', 'items', 'create', 'avatars', 'targets', 'links'])
-    expect(DEFAULT_ORDER.right).toEqual(['scale', 'position', 'proof', 'cloud', 'chain', 'hyperspace', 'view', 'legend', 'controls', 'derezz', 'relays'])
+  it('leads with IDENTITY, then ITEMS right under it (owner, 2026-11-15), every panel once, in one column', () => {
+    // GAMES right under ITEMS (owner, 2026-11-13), then the rest of 2026-11-11's lead: AGENTS, AVATARS, CREATE.
+    expect(DEFAULT_ORDER.left).toEqual(['identity', 'items', 'games', 'agents', 'avatars', 'create', 'hidden', 'discovered', 'targets', 'links'])
+    // TUTORIAL last of all: the foot of the right column, which a phone stacks under the left (item 17).
+    expect(DEFAULT_ORDER.right).toEqual(['scale', 'position', 'viewat', 'proof', 'cloud', 'chain', 'hyperspace', 'view', 'legend', 'controls', 'derezz', 'relays', 'tutorial'])
     expect(new Set(PANEL_IDS).size).toBe(PANEL_IDS.length)
-    expect(PANEL_IDS).toHaveLength(20)
+    expect(PANEL_IDS).toHaveLength(23)
+  })
+
+  it('a fresh key (nothing saved) opens on IDENTITY first and ITEMS second', () => {
+    expect(normalizeLayout(null).order.left.slice(0, 2)).toEqual(['identity', 'items'])
+    expect(mergeOrder(undefined).left.slice(0, 2)).toEqual(['identity', 'items'])
   })
 
   it('comes as a fresh copy each time', () => {
@@ -107,7 +114,7 @@ describe('moveBefore', () => {
 
 describe('mergeOrder: a saved order against the defaults', () => {
   it('keeps a complete saved order as it is', () => {
-    const o: PanelOrder = { left: ['links', 'identity', 'agents', 'hidden', 'discovered', 'items', 'create', 'avatars', 'targets', 'scale'], right: ['position', 'proof', 'cloud', 'chain', 'hyperspace', 'view', 'legend', 'controls', 'derezz', 'relays'] }
+    const o: PanelOrder = { left: ['links', 'identity', 'agents', 'hidden', 'discovered', 'items', 'games', 'create', 'avatars', 'targets', 'scale'], right: ['position', 'viewat', 'proof', 'cloud', 'chain', 'hyperspace', 'view', 'legend', 'controls', 'derezz', 'relays', 'tutorial'] }
     expect(mergeOrder(o)).toEqual(o)
   })
 
@@ -124,7 +131,7 @@ describe('mergeOrder: a saved order against the defaults', () => {
     const o = defaultOrder()
     o.right = o.right.filter((id) => id !== 'view' && id !== 'hyperspace')
     o.left.push('hyperspace')
-    expect(mergeOrder(o).right).toEqual(['scale', 'position', 'proof', 'cloud', 'chain', 'view', 'legend', 'controls', 'derezz', 'relays'])
+    expect(mergeOrder(o).right).toEqual(['scale', 'position', 'viewat', 'proof', 'cloud', 'chain', 'view', 'legend', 'controls', 'derezz', 'relays', 'tutorial'])
   })
 
   it('puts a missing panel at the top of its column when nothing above it in the defaults is there', () => {
@@ -167,6 +174,55 @@ describe('mergeOrder: a saved order against the defaults', () => {
 
   it('an empty saved order is the defaults', () => {
     expect(mergeOrder({ left: [], right: [] })).toEqual(defaultOrder())
+  })
+})
+
+/**
+ * The View panel came on 2026-11-03 under the id `viewat`, because `view`
+ * was already saved for the panel now titled Settings. Every saved layout
+ * before it is one of these.
+ */
+describe('a layout saved before the View panel (viewat)', () => {
+  /** The defaults as they were the day before: no viewat. */
+  const before = (): { left: string[]; right: string[] } => ({
+    left: ['identity', 'agents', 'hidden', 'discovered', 'items', 'create', 'avatars', 'targets', 'links'],
+    right: ['scale', 'position', 'proof', 'cloud', 'chain', 'hyperspace', 'view', 'legend', 'controls', 'derezz', 'relays', 'tutorial'],
+  })
+
+  it('gets the View panel right under Position, and Settings (view) where it was', () => {
+    const merged = mergeOrder(before())
+    expect(merged.right).toEqual(['scale', 'position', 'viewat', 'proof', 'cloud', 'chain', 'hyperspace', 'view', 'legend', 'controls', 'derezz', 'relays', 'tutorial'])
+    // GAMES came later still (a layout saved before it: below).
+    expect(merged.left.filter((id) => id !== 'games')).toEqual(before().left)
+  })
+
+  it('follows Position wherever it was dragged in the right column, and keeps every other saved place', () => {
+    const o = before()
+    o.right = ['tutorial', 'relays', 'view', 'scale', 'legend', 'proof', 'cloud', 'chain', 'hyperspace', 'controls', 'derezz', 'position']
+    expect(mergeOrder(o).right).toEqual([...o.right, 'viewat'])
+    const o2 = before()
+    o2.right = ['view', 'position', 'relays', 'scale', 'legend', 'proof', 'cloud', 'chain', 'hyperspace', 'controls', 'derezz']
+    expect(mergeOrder(o2).right.slice(0, 3)).toEqual(['view', 'position', 'viewat'])
+  })
+
+  it('with Position dragged to the left column, goes to its own column under the nearest panel above it there', () => {
+    const o = before()
+    o.right = o.right.filter((id) => id !== 'position')
+    o.left.push('position')
+    const merged = mergeOrder(o)
+    expect(merged.left.filter((id) => id !== 'games')).toEqual(o.left)
+    expect(merged.right.slice(0, 2)).toEqual(['scale', 'viewat'])
+  })
+
+  it('keeps a fold saved on Settings (view) on Settings, and the View panel opens', async () => {
+    mem.clear()
+    g.localStorage = working
+    mem.set(PANEL_LAYOUT_KEY, JSON.stringify({ order: before(), collapsed: { view: true, position: true } }))
+    const S = await load()
+    expect(S.getState().order.right.slice(1, 3)).toEqual(['position', 'viewat'])
+    expect(S.getState().order.right.indexOf('view')).toBe(S.getState().order.right.indexOf('hyperspace') + 1)
+    expect(S.getState().collapsed).toEqual({ view: true, position: true })
+    expect(S.getState().collapsed.viewat).toBeUndefined()
   })
 })
 
@@ -273,7 +329,7 @@ describe('the store over localStorage', () => {
   it('writes a fold at once, and the next load has it', async () => {
     const S = await load()
     S.getState().toggle('avatars')
-    expect(JSON.parse(mem.get(PANEL_LAYOUT_KEY)!)).toEqual({ order: defaultOrder(), collapsed: { avatars: true } })
+    expect(JSON.parse(mem.get(PANEL_LAYOUT_KEY)!)).toEqual({ v: LAYOUT_VERSION, order: defaultOrder(), collapsed: { avatars: true } })
     expect((await load()).getState().collapsed).toEqual({ avatars: true })
     S.getState().toggle('avatars')
     expect(JSON.parse(mem.get(PANEL_LAYOUT_KEY)!).collapsed).toEqual({})
@@ -328,5 +384,130 @@ describe('the store over localStorage', () => {
     const S = await load()
     expect(S.getState().order).toEqual(defaultOrder())
     expect(() => S.getState().toggle('hidden')).not.toThrow()
+  })
+})
+
+describe('a layout saved before the TUTORIAL panel (item 17)', () => {
+  it('gets TUTORIAL at the foot of the right column, the bottom of the menu', () => {
+    const o = defaultOrder()
+    o.right = o.right.filter((id) => id !== 'tutorial')
+    expect(mergeOrder(o).right.at(-1)).toBe('tutorial')
+    expect(mergeOrder(o).left).not.toContain('tutorial')
+  })
+})
+
+describe('a layout saved before the GAMES panel (owner, 2026-11-13)', () => {
+  const before = (): PanelOrder => {
+    const o = defaultOrder()
+    o.left = o.left.filter((id) => id !== 'games')
+    return o
+  }
+
+  it('gets GAMES right under ITEMS, every other saved place kept', () => {
+    const merged = mergeOrder(before())
+    expect(merged).toEqual(defaultOrder())
+    expect(merged.left.slice(1, 3)).toEqual(['items', 'games'])
+  })
+
+  it('follows ITEMS wherever it was dragged in the left column', () => {
+    const o = before()
+    o.left = ['links', 'items', 'identity', 'agents', 'avatars', 'create', 'hidden', 'discovered', 'targets']
+    expect(mergeOrder(o).left).toEqual(['links', 'items', 'games', 'identity', 'agents', 'avatars', 'create', 'hidden', 'discovered', 'targets'])
+    expect(mergeOrder(o).right).toEqual(o.right)
+  })
+
+  it('with ITEMS dragged to the right column, stays in the left under the nearest panel above ITEMS there', () => {
+    const o = before()
+    o.left = o.left.filter((id) => id !== 'items')
+    o.right.push('items')
+    const merged = mergeOrder(o)
+    expect(merged.left.slice(0, 4)).toEqual(['identity', 'games', 'agents', 'avatars'])
+    expect(merged.right).toEqual(o.right)
+  })
+})
+
+/**
+ * From 2026-11-11 to 2026-11-15 the tutorial's inventory and build steps
+ * moved ITEMS to the top of the menu and saved it as the player's order, so
+ * a fresh key on that device opened on ITEMS over IDENTITY (owner,
+ * 2026-11-15). That exact order, from a layout saved before the fix, goes back
+ * to the default; anything a player changed is kept.
+ */
+describe('the order the tutorial wrote (2026-11-11 to 2026-11-15)', () => {
+  /** The left column's default each day the tutorial ran, and what its ITEMS-to-the-top move saved from it. */
+  const days: PanelId[][] = [
+    ['identity', 'agents', 'hidden', 'discovered', 'items', 'create', 'avatars', 'targets', 'links'],
+    ['identity', 'agents', 'avatars', 'items', 'create', 'hidden', 'discovered', 'targets', 'links'],
+    ['identity', 'agents', 'avatars', 'items', 'games', 'create', 'hidden', 'discovered', 'targets', 'links'],
+  ]
+  const wrote = (day: PanelId[]): PanelId[] => ['items', ...day.filter((id) => id !== 'items')]
+  const right = (): PanelId[] => [...DEFAULT_ORDER.right]
+
+  beforeEach(() => { mem.clear(); g.localStorage = working })
+
+  it('is told by its exact shape: ITEMS first, the rest that day\'s default', () => {
+    for (const day of days) expect(tutorialWrote(mergeOrder({ left: wrote(day), right: right() }).left), day.join()).toBe(true)
+    // The defaults themselves, and the new one, are not it.
+    for (const day of days) expect(tutorialWrote(mergeOrder({ left: day, right: right() }).left)).toBe(false)
+    expect(tutorialWrote(defaultOrder().left)).toBe(false)
+  })
+
+  it('is told on a device that saved an older order before the tutorial ran under a later default', () => {
+    // Saved before #677 (a fold), the tutorial run after GAMES came: GAMES went in after ITEMS, then ITEMS was lifted.
+    expect(tutorialWrote(mergeOrder({ left: ['items', 'identity', 'agents', 'hidden', 'discovered', 'games', 'create', 'avatars', 'targets', 'links'], right: right() }).left)).toBe(true)
+    // Saved before AGENTS (2026-10-10), the tutorial run on 2026-11-12: AGENTS went in after IDENTITY, then ITEMS was lifted.
+    expect(tutorialWrote(mergeOrder({ left: ['items', 'identity', 'agents', 'hidden', 'discovered', 'create', 'avatars', 'targets', 'links'], right: right() }).left)).toBe(true)
+    // The first run's order, a reload under GAMES (GAMES after ITEMS) and a fold saving it.
+    expect(tutorialWrote(mergeOrder({ left: ['items', 'games', 'identity', 'agents', 'hidden', 'discovered', 'create', 'avatars', 'targets', 'links'], right: right() }).left)).toBe(true)
+  })
+
+  it('goes back to the default on load (IDENTITY first, ITEMS second), folds and the right column kept', async () => {
+    for (const day of days) {
+      const customRight = moveBefore({ left: [], right: right() }, 'relays', 'scale', 'right').right
+      mem.set(PANEL_LAYOUT_KEY, JSON.stringify({ order: { left: wrote(day), right: customRight }, collapsed: { avatars: true } }))
+      const S = await load()
+      expect(S.getState().order.left, day.join()).toEqual(defaultOrder().left)
+      expect(S.getState().order.left.slice(0, 2)).toEqual(['identity', 'items'])
+      expect(S.getState().order.right).toEqual(customRight)
+      expect(S.getState().collapsed).toEqual({ avatars: true })
+    }
+  })
+
+  it('keeps a custom saved order: any other change in the left column, ITEMS first or not', async () => {
+    const custom: PanelId[][] = [
+      // ITEMS first, but the player also dragged LINKS up.
+      ['items', 'links', 'identity', 'agents', 'avatars', 'games', 'create', 'hidden', 'discovered', 'targets'],
+      // ITEMS first, a left panel dragged to the right column.
+      ['items', 'identity', 'agents', 'avatars', 'games', 'create', 'hidden', 'discovered', 'targets'],
+      // IDENTITY moved down, ITEMS left alone.
+      ['agents', 'avatars', 'identity', 'items', 'games', 'create', 'hidden', 'discovered', 'targets', 'links'],
+    ]
+    for (const left of custom) {
+      const r = left.includes('links') ? right() : [...right(), 'links' as PanelId]
+      mem.set(PANEL_LAYOUT_KEY, JSON.stringify({ order: { left, right: r }, collapsed: {} }))
+      const S = await load()
+      expect(S.getState().order, left.join()).toEqual({ left, right: r })
+    }
+  })
+
+  it('a saved order from the old default (a fold saved it, nothing moved) is kept as it was', async () => {
+    mem.set(PANEL_LAYOUT_KEY, JSON.stringify({ order: { left: days[2], right: right() }, collapsed: { hidden: true } }))
+    expect((await load()).getState().order.left).toEqual(days[2])
+  })
+
+  it('a layout saved by any later version is the player\'s too', async () => {
+    mem.set(PANEL_LAYOUT_KEY, JSON.stringify({ v: LAYOUT_VERSION + 1, order: { left: wrote(days[2]), right: right() }, collapsed: {} }))
+    expect((await load()).getState().order.left).toEqual(wrote(days[2]))
+  })
+
+  it('a layout saved since the fix is the player\'s, ITEMS first or not', async () => {
+    mem.set(PANEL_LAYOUT_KEY, JSON.stringify({ v: LAYOUT_VERSION, order: { left: wrote(days[2]), right: right() }, collapsed: {} }))
+    expect((await load()).getState().order.left).toEqual(wrote(days[2]))
+    // A player who drags ITEMS to the top now keeps it across a reload.
+    mem.clear()
+    const S = await load()
+    S.getState().move('items', 'identity', 'left')
+    expect(JSON.parse(mem.get(PANEL_LAYOUT_KEY)!).v).toBe(LAYOUT_VERSION)
+    expect((await load()).getState().order.left[0]).toBe('items')
   })
 })

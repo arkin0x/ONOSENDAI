@@ -730,6 +730,45 @@ function marked(ev: NostrEvent, marker: string): string | undefined {
 }
 
 /**
+ * A hop's `mp` already known to be lowercase hex, per event object, as the very
+ * string that was checked (arkinox, 2026-11-22: "its like 8 seconds til
+ * something is painted"). A v2 hop's `mp` is 8,192 characters, so on a long
+ * chain the check is tens of megabytes of text, and a load builds the chain
+ * more than once (authenticStretch, then the explorer's parse): it was about
+ * half the time the first draw waited on the chain. Checked once per event,
+ * and not at all for a row whose structural verdict under today's rules is
+ * already valid (lib/eventDb/chainRows.ts readChain `ruled`, rulesHeld): a
+ * malformed `mp` breaks its action, so such a row cannot carry one. Kept by
+ * the string itself, so a tag changed after the check is checked again.
+ *
+ * A verdict carries this rule from build to build: a change to what a
+ * well-formed `mp` is must raise CHAIN_RULES_REVISION, or rows judged under
+ * the old rule would pass the new one unchecked.
+ */
+const mpChecked = new WeakMap<NostrEvent, string>()
+
+/** Whether `ev`'s `mp` is lowercase hex: once per event and string (above). */
+function mpFormHeld(ev: NostrEvent, mp: string): boolean {
+  if (mpChecked.get(ev) === mp) return true
+  if (!/^[0-9a-f]+$/.test(mp)) return false
+  mpChecked.set(ev, mp)
+  return true
+}
+
+/**
+ * Events read from rows whose structural verdict under the running rules is
+ * valid (lib/eventDb/chainVerdicts.ts): their `mp` form held when the verdict
+ * was reached, on these very bytes, so it is not checked again (mpFormHeld).
+ */
+export function rulesHeld(events: readonly NostrEvent[]): void {
+  for (const ev of events) {
+    if (ev.kind !== ACTION_KIND) continue
+    const mp = tag(ev, 'mp')
+    if (mp !== undefined) mpChecked.set(ev, mp)
+  }
+}
+
+/**
  * Read a kind:3333 event as a recognized action, or refuse it.
  *
  * Strict about shape and silent about everything else: a malformed event is
@@ -866,7 +905,7 @@ export function parseAction(ev: NostrEvent): ActionEvent | null {
     // never the parser's, so it parses exactly as before. An `mp` with any
     // character outside 0-9 and a-f is malformed at any width (§8.4).
     const mp = tag(ev, 'mp')
-    if (mp !== undefined && !/^[0-9a-f]+$/.test(mp)) return null
+    if (mp !== undefined && !mpFormHeld(ev, mp)) return null
     return { ...base, type, ...links, proofHash, ...(mn !== undefined ? { mn } : {}), ...(mp !== undefined ? { mp } : {}) }
   }
   return { ...base, type, ...links, proofHash }
@@ -906,6 +945,19 @@ export interface ActionLink {
 }
 
 /**
+ * actionLink's answers, by event object: the same event is read again at
+ * every head confirmation, every page of a chain fetch and every parse, and
+ * reading an event's tags (its A, genesis and previous, two patterns) for
+ * each of a 2,600-action chain was a long task per WALK step on a phone
+ * (chainGap, owner's walk of 2026-11-21). An entry stands only while the
+ * fields it was read from are the same objects and values (tags array and
+ * its length, id, kind, pubkey, created_at): an event object is not changed
+ * once signed, and one that were would be read afresh, unless a tag was
+ * rewritten in place, which no code here does to a signed event.
+ */
+const links = new WeakMap<NostrEvent, { tags: string[][]; n: number; id: string; kind: number; pubkey: string; createdAt: number; link: Readonly<ActionLink> | null }>()
+
+/**
  * The links of an event, recognized or not: what buildChain needs to follow
  * a chain through an action it cannot read (spec §8.9 rule 1). Null for
  * another kind, a spawn (which names no previous event, wherever it is
@@ -917,7 +969,17 @@ export interface ActionLink {
  * chain, or make a fork beside another event, and it is then where the
  * chain stops being valid (§8.8), not a gap the chain quietly ends at.
  */
-export function actionLink(ev: NostrEvent): ActionLink | null {
+export function actionLink(ev: NostrEvent): Readonly<ActionLink> | null {
+  const kept = links.get(ev)
+  if (kept && kept.tags === ev.tags && kept.n === ev.tags.length && kept.id === ev.id && kept.kind === ev.kind && kept.pubkey === ev.pubkey && kept.createdAt === ev.created_at) return kept.link
+  // Frozen: every caller now shares the one answer.
+  const read = readLink(ev)
+  const link = read ? Object.freeze(read) : null
+  if (Array.isArray(ev.tags)) links.set(ev, { tags: ev.tags, n: ev.tags.length, id: ev.id, kind: ev.kind, pubkey: ev.pubkey, createdAt: ev.created_at, link })
+  return link
+}
+
+function readLink(ev: NostrEvent): ActionLink | null {
   if (ev.kind !== ACTION_KIND) return null
   if (carriesSpawn(ev)) return null
   const name = tag(ev, 'A') ?? ''
@@ -1124,6 +1186,12 @@ export function buildChain(events: NostrEvent[], pubkey?: string): ActionEvent[]
   return chain
 }
 
+/** Every id an `e` tag of `events` names: what extendChain asks of a new event, gathered once (namedIds) and grown as events are added. */
+export function namedIds(events: readonly NostrEvent[], into: Set<string> = new Set()): Set<string> {
+  for (const e of events) for (const t of e.tags) if (t[0] === 'e' && typeof t[1] === 'string') into.add(t[1])
+  return into
+}
+
 /**
  * buildChain(events.concat(ev)), from `chain`, which is buildChain(events), in
  * the one case that cannot change any row already there: `ev` names the head
@@ -1144,8 +1212,14 @@ export function buildChain(events: NostrEvent[], pubkey?: string): ActionEvent[]
  * the head has exactly one, `ev`, read against the head and the bracket open
  * at it by the same placeInChain and rideBreak; nothing before it moves, and
  * with no event naming `ev` the walk ends there.
+ *
+ * `named`, when given, is namedIds(events), or makes it when asked: every id an
+ * `e` tag of `events` names, so whether one already names `ev` is one lookup
+ * rather than a pass over every tag of the chain, which on a 2,600-action
+ * chain was a long task per WALK step on a phone (owner, 2026-11-21). Made
+ * only past the refusals that need no tags.
  */
-export function extendChain(chain: ActionEvent[], events: NostrEvent[], ev: NostrEvent): ActionEvent[] | null {
+export function extendChain(chain: ActionEvent[], events: NostrEvent[], ev: NostrEvent, named?: ReadonlySet<string> | (() => ReadonlySet<string>)): ActionEvent[] | null {
   if (chain.length === 0 || ev.kind !== ACTION_KIND || carriesSpawn(ev)) return null
   const spawn = chain[0]
   if (spawn.fork !== undefined || chain.some((a) => a.breaks)) return null
@@ -1155,7 +1229,8 @@ export function extendChain(chain: ActionEvent[], events: NostrEvent[], ev: Nost
   const head = chain[chain.length - 1]
   if (link.previousId !== head.id || link.id === head.id) return null
   // An event already here that names `ev` (any e tag, so a child of every kind): the walk would go on.
-  for (const e of events) for (const t of e.tags) if (t[0] === 'e' && t[1] === ev.id) return null
+  if (named) { if ((typeof named === 'function' ? named() : named).has(ev.id)) return null }
+  else for (const e of events) for (const t of e.tags) if (t[0] === 'e' && t[1] === ev.id) return null
   let open: ActionEvent | null = null
   for (let i = chain.length - 1; i >= 0; i--) {
     if (chain[i].role === 'exit') break

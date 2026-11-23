@@ -47,7 +47,6 @@ import { newestId, useWorkshop } from '../useWorkshop'
 
 const S = () => useShards.getState()
 const F = () => useShardFolders.getState()
-const me = () => useCyberspace.getState().identity.pubkey
 
 function model(id: string, updatedAt: number): ShardModel {
   return {
@@ -92,7 +91,7 @@ beforeEach(async () => {
   useCyberspace.setState({ live: false })
   // Newest edited first: A, then B and C in the folder, then D.
   useWorkshop.setState({ shards: [model('D', 500), model('C', 1000), model('B', 2000), model('A', 3000)], currentId: 'A' })
-  await F().load(me())
+  await F().load()
   useShardFolders.setState({ tree: EMPTY_TREE })
   const kit = F().createFolder('kit', null)!
   F().assignToFolder(['B', 'C'], kit)
@@ -223,7 +222,7 @@ function sources(dir: string): string[] {
 describe('every list of your shards', () => {
   it('is sorted through the one helper, so the lists cannot drift apart', () => {
     const lists = sources(join(__dirname, '..', '..')).filter((p) => /<ShardFolders\b/.test(readFileSync(p, 'utf8')) && !p.endsWith('ShardFolders.tsx'))
-    expect(lists.map((p) => p.split(/[\\/]/).pop()).sort()).toEqual(['ChestCompose.tsx', 'ObjectPicker.tsx', 'PlaceObjectPicker.tsx', 'Workshop.tsx'])
+    expect(lists.map((p) => p.split(/[\\/]/).pop()).sort()).toEqual(['ChestCompose.tsx', 'LookPicker.tsx', 'MenuSheet.tsx', 'ObjectPicker.tsx', 'PlaceObjectPicker.tsx'])
     for (const p of lists) {
       const text = readFileSync(p, 'utf8')
       // The items it hands the folders are the helper's.

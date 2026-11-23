@@ -19,9 +19,10 @@ import { placedBounds, resolveParts, type Placed } from 'sno-core/parts'
 import { OwnPartsContext, fetchOwnFirst, fetchRef } from '../lib/parts'
 import { authorOf } from '../lib/carried'
 import { keepPrograms } from '../lib/keepPrograms'
-import { ShardMesh } from './ShardMesh'
+import { ShardMeshBody } from './ShardMesh'
 import { ShardLights } from './shardLight'
 import { useThumbs, type ThumbJob } from '../store/useThumbs'
+import { drawsItself } from '../lib/pointLook'
 
 /** The picture's size in pixels; tiles show it at about half that, so it stays sharp on a phone. */
 export const THUMB_PX = 160
@@ -78,10 +79,33 @@ export function frameOfBounds(b: { min: number[]; max: number[] } | null): Thumb
  * its parts arrived it came out blank, and stayed blank (review of #233).
  */
 export async function frameOf(shard: ShardModel, own = false): Promise<ThumbFrame> {
-  if (!shard.refs?.length || !shard.parts?.length) return frameOfBounds(placedBounds(shard, []))
+  return (await framedParts(shard, own)).frame
+}
+
+/**
+ * The frame, and what the object places as resolved: `placed` is null when
+ * the parts did not arrive within PARTS_WAIT_MS (or failed), so nobody can
+ * say yet what the picture would show.
+ */
+export async function framedParts(shard: ShardModel, own = false): Promise<{ frame: ThumbFrame; placed: Placed[] | null }> {
+  if (!shard.refs?.length || !shard.parts?.length) return { frame: frameOfBounds(placedBounds(shard, [])), placed: [] }
   const timeout = new Promise<Placed[] | null>((resolve) => setTimeout(() => resolve(null), PARTS_WAIT_MS))
   const placed = await Promise.race([resolveParts(shard, own ? fetchOwnFirst : fetchRef, { author: authorOf(shard) }).catch(() => null), timeout])
-  return frameOfBounds(placedBounds(shard, placed ?? []))
+  return { frame: frameOfBounds(placedBounds(shard, placed ?? [])), placed }
+}
+
+/**
+ * Whether a picture of `shard` is rightly blank: it draws nothing itself
+ * (lib/pointLook.ts drawsItself), and what it places was resolved (not timed
+ * out) and draws nothing either, at any depth. A placeholder cube draws. Not
+ * known (parts still out) is not blank: the picture waits and is tried again.
+ */
+export function knownBlank(shard: ShardModel, placed: readonly Placed[] | null): boolean {
+  if (drawsItself(shard)) return false
+  if (!(shard.parts?.length)) return true
+  if (placed === null) return false
+  const draws = (list: readonly Placed[]): boolean => list.some((p) => !p.model || drawsItself(p.model) || draws(p.children))
+  return !draws(placed)
 }
 
 /** How far these cameras draw, which every object fitted until a grid could grow past 64 units. */
@@ -111,11 +135,14 @@ function Capture({ job }: { job: ThumbJob }): JSX.Element | null {
   const frames = useRef(0)
   // The frame, once the parts (if any) are in hand; nothing is drawn before.
   const [frame, setFrame] = useState<ThumbFrame | null>(null)
+  // Whether the picture is rightly blank, once the parts are known (knownBlank).
+  const blankOk = useRef(false)
   const wait = job.shard.parts?.length ? PARTS_SETTLE_FRAMES : SETTLE_FRAMES
   useEffect(() => {
     let live = true
     setFrame(null)
-    void frameOf(job.shard, !!job.own).then((f) => { if (live) setFrame(f) })
+    blankOk.current = false
+    void framedParts(job.shard, !!job.own).then((f) => { if (!live) return; blankOk.current = knownBlank(job.shard, f.placed); setFrame(f.frame) })
     return () => { live = false }
   }, [job.key, job.shard, job.own])
 
@@ -151,7 +178,11 @@ function Capture({ job }: { job: ThumbJob }): JSX.Element | null {
     // frame counts only when the context is there and something was drawn
     // in it; until then the job waits, and the watchdog (ThumbHost) makes the
     // stage again.
-    if (gl.getContext().isContextLost() || gl.info.render.calls === 0) return
+    // An object that draws nothing by design (opacity 0 with no glow, POINTS at point size 0, and every
+    // part it places resolved and the same) is rightly blank (knownBlank). Anything else that drew nothing
+    // waits, as before, and the watchdog tries again: parts still on their way are not a blank picture.
+    if (gl.getContext().isContextLost()) return
+    if (gl.info.render.calls === 0 && !blankOk.current) return
     frames.current += 1
     if (frames.current < wait || taken.current) return
     taken.current = true
@@ -168,7 +199,8 @@ function Capture({ job }: { job: ThumbJob }): JSX.Element | null {
   return (
     <group position={[-frame.centre[0], -frame.centre[1], -frame.centre[2]]}>
       <OwnPartsContext.Provider value={!!job.own}>
-        <ShardMesh key={job.key} shard={job.shard} lit />
+        {/* The body, not ShardMesh: StageBoundary must see a throw, so a bad shard fails at once and is not retried. */}
+        <ShardMeshBody key={job.key} shard={job.shard} lit still />
       </OwnPartsContext.Provider>
     </group>
   )

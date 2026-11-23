@@ -21,13 +21,15 @@ import { queryAny, relaySet } from '../lib/relay'
 import { isHttpUrl, newest, parseContent } from '../lib/profileEdit'
 import { shortHex } from '../lib/time'
 import { useProfile } from '../hooks/useProfile'
-import { useEscape } from '../hooks/useEscape'
+import { Stacked, useModalStack } from './modalStack'
 import { operatorOf, profileLabel } from '../store/useProfiles'
 import { useCyberspace } from '../store/useCyberspace'
 import { useProfileView } from '../store/useProfileView'
 import { ProfilePic, ProfileTap } from './ProfileBadge'
 import { EventData } from './EventData'
 import { BlockButton } from './BlockButton'
+import { ModalClose } from './ui/ModalClose'
+import { copyText } from '../lib/copyText'
 
 /** How long to wait on the relays for the kind 0, as the editor does. */
 const FETCH_WAIT_MS = 5000
@@ -40,9 +42,10 @@ function profileRelays(): string[] {
 export function ProfileView(): JSX.Element | null {
   const pubkey = useProfileView((s) => s.pubkey)
   const close = useProfileView((s) => s.close)
-  useEscape('modal', pubkey !== null, close)
+  // Over whatever it was opened from, which is there again when it closes (modalStack).
+  useModalStack(pubkey !== null, close)
   if (!pubkey) return null
-  return <ProfileCard key={pubkey} pubkey={pubkey} onClose={close} />
+  return <Stacked><ProfileCard key={pubkey} pubkey={pubkey} onClose={close} /></Stacked>
 }
 
 /** A field of the kind 0's content, as a non-empty string, or null. */
@@ -89,9 +92,12 @@ function ProfileCard({ pubkey, onClose }: { pubkey: string; onClose: () => void 
   const mine = pubkey === me
 
   const copy = (what: string, value: string): void => {
-    navigator.clipboard?.writeText(value).catch(() => {})
-    setCopied(what)
-    window.setTimeout(() => setCopied((c) => (c === what ? null : c)), COPIED_MS)
+    // The clipboard, or the old copy command where it is refused (lib/copyText).
+    void copyText(value).then((ok) => {
+      if (!ok) return
+      setCopied(what)
+      window.setTimeout(() => setCopied((c) => (c === what ? null : c)), COPIED_MS)
+    })
   }
 
   return (
@@ -101,7 +107,7 @@ function ProfileCard({ pubkey, onClose }: { pubkey: string; onClose: () => void 
           <span className="secret__badge">PROFILE</span>
           {bot && <span className="person__bot" title="This profile says it is a bot (NIP-24)"><Bot size={11} strokeWidth={2.25} aria-hidden />AGENT</span>}
           {mine && <span className="secret__mine">YOU</span>}
-          <button className="secret__close" onClick={onClose} aria-label="Close">✕</button>
+          <ModalClose onClose={onClose} />
         </div>
 
         {showBanner && (

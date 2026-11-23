@@ -9,17 +9,18 @@
  * other, and XOR's town at block 101, all one tan, read as a tan mess. The
  * headlamp lights them from the eye, like a flashlight:
  *
- * - FACING. A face square to the view shows its full colour, and darkens as it
- *   turns away, down to FACE_FLOOR at edge on. The normal is the face's own,
- *   flat, taken from the screen-space derivatives of its position, and it is
- *   compared with the view axis rather than the ray to each pixel, so a flat
- *   face is one shade. Both sides shade alike (the world draws both).
+ * - FACING. A face square to the view shows its full colour, and darkens
+ *   a little as it turns away, down to FACE_FLOOR at edge on. The normal is
+ *   the face's own, flat, taken from the screen-space derivatives of its
+ *   position, and it is compared with the view axis rather than the ray to
+ *   each pixel, so a flat face is one shade. Both sides shade alike (the world draws both).
  * - DISTANCE. Full colour out to NEAR_SHARE of the reach, then an easy fall
  *   toward DISTANCE_FLOOR. The reach is the camera's distance from what it
  *   orbits, held between REACH_MIN and REACH_MAX, so the falloff keeps its
  *   shape at every zoom (render coordinates are cells at the current 2^N) and
  *   every dolly, and WALK, whose eye sits on the avatar, gets REACH_MIN. It
- *   dims toward black, as the scene's fog already does further out.
+ *   only dims gently: the fog takes things to black far off, its distances
+ *   following the zoom (scene/fog.ts).
  *
  * Lines and points have no face to turn, so they take the distance only.
  *
@@ -31,25 +32,43 @@
  * skips the multiply on a uniform, so the picture is exactly the unlit one
  * and nothing compiles again when the switch is turned.
  *
- * The bloom does not see a face's colour at all (Scene.tsx WorldBloom reads a
+ * The bloom does not see a face's colour at all (worldBloom.tsx WorldBloom reads a
  * tagged face as dark), so shading a face cannot make it flare or go dull
  * there; the points and lines it does see only ever get dimmer.
  */
 
 import type { WebGLProgramParametersWithUniforms } from 'three'
 import { GRID_RADIUS } from '../lib/space'
+import { lineFade, patchNearFade } from './nearFade'
 
-/** The share of its colour a face keeps edge on to the view: never black. */
-export const FACE_FLOOR = 0.4
-/** The share of its colour anything keeps far off, before the fog takes it. */
-export const DISTANCE_FLOOR = 0.3
+/**
+ * The share of its colour a face keeps edge on to the view: never black.
+ * It was 0.4 (arkinox, 2026-11-15, of a Landscape Kit plains tile at 2^0:
+ * "we need to reduce the darkness by a lot. maybe 10% of this."). The
+ * ground under a third-person camera is close to edge on, so 0.4 took
+ * nearly half of every tile's colour right in front of the camera. 0.9 is
+ * a sixth of the old darkening (0.1 of a face's colour at most, from 0.6).
+ * The facing exists to tell two faces of one colour at different angles
+ * apart (the drain coil's walls, XOR's town), and a little of that stays,
+ * but it is faint: the multiply is in linear colour, so edge on is about 5%
+ * darker to the eye (it was about a third). Lower it toward 0.75 if shapes
+ * of one colour merge again.
+ */
+export const FACE_FLOOR = 0.9
+/**
+ * The share of its colour anything keeps far off, before the fog takes it.
+ * It was 0.3, a fall of 0.7 (the same request): far faces read as black
+ * well before the fog's end. A fall of 0.07, a tenth, keeps a gentle cue
+ * of distance and leaves the colour.
+ */
+export const DISTANCE_FLOOR = 0.93
 /** Full colour out to this share of the reach. */
 export const NEAR_SHARE = 0.75
 /** Past NEAR_SHARE, the colour's step toward DISTANCE_FLOOR falls by e every FALL_SHARE of the reach. */
 export const FALL_SHARE = 1.6
 /** The least reach, in render cells: WALK's eye is on the avatar, a reach of nothing. */
 export const REACH_MIN = 8
-/** The most reach: the orbit's own limit (Scene.tsx). */
+/** The most reach outside BUILD: the orbit's usual limit (Scene.tsx). BUILD pulled back passes its own (buildZoom.ts). */
 export const REACH_MAX = GRID_RADIUS * 4
 
 /**
@@ -64,9 +83,14 @@ export const headlampUniforms = {
 /** Off for whatever does not wear the headlamp: the bench's and thumbnails' point discs. */
 export const HEADLAMP_NEVER = { value: 0 }
 
-/** The reach for a camera `distance` cells from what it looks at. */
-export function headlampReach(distance: number): number {
-  return Math.min(REACH_MAX, Math.max(REACH_MIN, Number.isFinite(distance) ? distance : REACH_MIN))
+/**
+ * The reach for a camera `distance` cells from what it looks at, held under
+ * `max`: the orbit's own limit, so in BUILD pulled back (up to 1280 cells at
+ * 2^0, buildZoom.ts) what the camera looks at keeps full colour as it does
+ * at the usual orbit, rather than sitting ten reaches out on the floor.
+ */
+export function headlampReach(distance: number, max = REACH_MAX): number {
+  return Math.min(Math.max(REACH_MAX, max), Math.max(REACH_MIN, Number.isFinite(distance) ? distance : REACH_MIN))
 }
 
 /** The share of its colour a face keeps when its normal's view-space z (toward the camera) is `nz`. Mirrors the shader. */
@@ -156,8 +180,12 @@ export const HEADLAMP_FACES = {
   customProgramCacheKey: () => 'headlamp-faces-1',
 } as const
 
-/** The same for a line material: distance only. */
+/**
+ * The same for a line material: distance only. A world line also fades out
+ * as the camera comes right up to it (scene/nearFade.ts), the tutorial's box
+ * among them: same hook, same one program.
+ */
 export const HEADLAMP_LINES = {
-  onBeforeCompile: (shader: WebGLProgramParametersWithUniforms) => { patchHeadlamp(shader, false) },
-  customProgramCacheKey: () => 'headlamp-lines-1',
+  onBeforeCompile: (shader: WebGLProgramParametersWithUniforms) => { patchHeadlamp(shader, false); patchNearFade(shader, lineFade.range, lineFade.on) },
+  customProgramCacheKey: () => 'headlamp-lines-2',
 } as const

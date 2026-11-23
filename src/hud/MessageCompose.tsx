@@ -1,8 +1,7 @@
 /**
  * MessageCompose.tsx - writing a message to hide, before aiming it.
  *
- * One composer, used in two places: inline in the Stash panel, and in the
- * Builder's HIDE MESSAGE modal (StashModals). PLACE MESSAGE hands the text to
+ * The composer in the BUILD bar's MESSAGE modal (StashModals). PLACE MESSAGE hands the text to
  * the deploy (useShards `startDeployMessage`), which happens in BUILD mode
  * at the build cursor (store/useBuilder.ts). A message whose deploy BUILD
  * mode had to end comes back into the composer that opens next.
@@ -18,6 +17,7 @@ import { useSettled } from './useSettled'
 import { MAX_MESSAGE_LENGTH } from '../lib/hidden'
 import { useShards } from '../store/useShards'
 import { useBuilder } from '../store/useBuilder'
+import { GoArrow } from './ui/GoArrow'
 
 /** `onDone` runs on CANCEL and once the message has been handed to the deploy. */
 export function MessageCompose({ onDone }: { onDone: () => void }): JSX.Element {
@@ -52,7 +52,7 @@ export function MessageCompose({ onDone }: { onDone: () => void }): JSX.Element 
       {verdict.note && <span className={`shards__compose-note shards__compose-note--${verdict.tone}`} role="status">{verdict.note}</span>}
       <div className="shards__actions">
         <button className="avatars__go" onClick={() => { setMessage(''); onDone() }}>CANCEL</button>
-        <button className="avatars__go" disabled={!message.trim() || !verdict.ready} onClick={place}>PLACE MESSAGE ▸</button>
+        <button className="avatars__go" disabled={!message.trim() || !verdict.ready} onClick={place}>PLACE MESSAGE<GoArrow /></button>
       </div>
     </div>
   )

@@ -11,7 +11,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { threadUnder, type CommentParent } from '../lib/comments'
 import type { NostrEvent } from '../lib/events'
 import { publishTo, relaysFor } from '../lib/inbox'
-import { queryAny } from '../lib/relay'
+import { onCanonicalSignIn, queryAny, queryAnyChecked, type ReadTrouble } from '../lib/relay'
 import { actionCommentTemplate, deletedBy, groupReactions, reactionTemplate, unreactTemplate, REACTION_KIND, type ReactionGroup, type SocialTarget } from '../lib/social'
 import { COMMENT_KIND } from '../lib/comments'
 import { useCyberspace } from '../store/useCyberspace'
@@ -99,22 +99,28 @@ export function useActionComments(action: SocialTarget | null): CommentsState {
   const [events, setEvents] = useState<NostrEvent[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [trouble, setTrouble] = useState<ReadTrouble | null>(null)
   const [posting, setPosting] = useState(false)
   const [tick, setTick] = useState(0)
   const id = action?.id ?? null
   const author = action?.pubkey ?? null
+  // An addressable thing (a published shard): its thread is its address, across its edits.
+  const address = action?.address ?? null
 
   useEffect(() => {
     if (!id || !author) { setEvents([]); return }
     let alive = true
     setLoading(true); setError(null); setEvents([])
     relaysFor([author])
-      .then((relays) => queryAny(relays, { kinds: [COMMENT_KIND], '#E': [id], limit: 500 }))
-      .then((found) => { if (alive) setEvents(found) })
+      .then((relays) => queryAnyChecked(relays, address ? { kinds: [COMMENT_KIND], '#A': [address], limit: 500 } : { kinds: [COMMENT_KIND], '#E': [id], limit: 500 }))
+      .then(({ events: found, trouble: why }) => { if (alive) { setEvents(found); setTrouble(why) } })
       .catch((err: unknown) => { if (alive) setError(err instanceof Error ? err.message : String(err)) })
       .finally(() => { if (alive) setLoading(false) })
     return () => { alive = false }
-  }, [id, author, tick])
+  }, [id, author, address, tick])
+
+  // Refused for want of AUTH: read again once the relay signs this visit in.
+  useEffect(() => (trouble ? onCanonicalSignIn(() => setTick((t) => t + 1)) : undefined), [trouble])
 
   const post = useCallback(async (text: string, parent?: CommentParent): Promise<boolean> => {
     if (!action) return false
@@ -136,6 +142,6 @@ export function useActionComments(action: SocialTarget | null): CommentsState {
   // A comment by someone blocked is not shown, nor others' replies under it; yours stay (store/useMutes).
   const muted = useMutes((s) => s.muted)
   const me = useCyberspace((s) => s.identity.pubkey)
-  const comments = id ? pruneThread(threadUnder(events, id, id), muted, me) : []
-  return { comments, loading, error, posting, post, refresh: () => setTick((t) => t + 1) }
+  const comments = id ? pruneThread(address ? threadUnder(events, address, id, address, undefined, undefined, action?.kind) : threadUnder(events, id, id), muted, me) : []
+  return { comments, loading, error, trouble, posting, post, refresh: () => setTick((t) => t + 1) }
 }

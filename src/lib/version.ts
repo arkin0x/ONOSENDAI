@@ -90,3 +90,47 @@ export async function resolveVersion(env: Record<string, string | undefined>, me
     return UNVERSIONED
   }
 }
+
+/**
+ * The app's simple version, the one people see (arkinox, 2026-11-12): bumped
+ * by one each time an UPGRADE ANNOUNCEMENT goes out (2.1, 2.2, ... 2.10),
+ * and the `d` of that announcement (lib/tv/announceFeed). Its source is
+ * package.json `version`, kept three parts so npm takes it ("2.1.0"); a
+ * patch of 0 is not written ("2.1"), any other is ("2.1.1", a hotfix). The
+ * build stamp above (2.YYYYMMDD.N.PR) stays, for debugging.
+ *
+ * Null for a version that is not plain numbers (a prerelease such as
+ * "2.0.0-mvp.0"): no simple version rather than a wrong one.
+ */
+export function simpleVersion(pkgVersion: string | null | undefined): string | null {
+  const m = /^(\d+)\.(\d+)\.(\d+)$/.exec((pkgVersion ?? '').trim())
+  if (!m) return null
+  const [major, minor, patch] = m.slice(1).map(Number)
+  return patch === 0 ? `${major}.${minor}` : `${major}.${minor}.${patch}`
+}
+
+/** Plain numbers with dots, two to four parts: what a simple version looks like. */
+export const SIMPLE_VERSION_RE = /^\d{1,6}(?:\.\d{1,6}){1,3}$/
+
+/**
+ * Two simple versions compared part by part as numbers, a missing part as 0
+ * (2.10 is above 2.9; 2.1 and 2.1.0 are the same): negative when `a` is
+ * lower, positive when higher, 0 when the same.
+ */
+export function compareVersions(a: string, b: string): number {
+  const pa = a.split('.').map(Number)
+  const pb = b.split('.').map(Number)
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pa[i] ?? 0) - (pb[i] ?? 0)
+    if (d !== 0) return d
+  }
+  return 0
+}
+
+/** The higher of two simple versions; either may be missing, or not a simple version (it is then passed over). */
+export function higherVersion(a: string | null | undefined, b: string | null | undefined): string | null {
+  const ok = (v: string | null | undefined): v is string => typeof v === 'string' && SIMPLE_VERSION_RE.test(v)
+  if (!ok(a)) return ok(b) ? b : null
+  if (!ok(b)) return a
+  return compareVersions(b, a) > 0 ? b : a
+}

@@ -22,8 +22,8 @@ import { coordToHex, coordToXyz, hexToCoord, xyzToCoord, type Plane } from 'cybe
 import { coordToLatLon } from '../lib/hyperspace/landfall'
 import { EARTH_SCALE_EXP } from '../lib/hyperspace/interest'
 import { formatLatLonDeg } from '../lib/earthSurface'
-import { expectedPricePairs, expectedRidePairs, lineStateOf, rideBlocks, zeroLengthRideRefusal } from '../lib/hyperspace/ride'
-import { calibrate, computeRideProof, leafBenchmarkMs, rideFraction, type RideProgress } from '../lib/hyperspace/ridePool'
+import { expectedPricePairs, expectedRidePairs, lineStateOf, zeroLengthRideRefusal } from '../lib/hyperspace/ride'
+import { calibrate, computeRideProof, rideBenchmark, rideEstimateMs, rideFraction, type RideBench, type RideProgress } from '../lib/hyperspace/ridePool'
 import { findStation } from '../lib/hyperspace/station'
 import { stopCoordExact, type Stop } from '../lib/hyperspace/stops'
 import { formatMs, formatOps, type Position } from '../lib/space'
@@ -42,11 +42,13 @@ function formatDuration(ms: number): string {
   if (h < 48) return `${h.toFixed(1)} h`
   return `${(h / 24).toFixed(1)} d`
 }
-import { GAME_HOLDS_MESSAGE, STALE_CONFIRMATION, useCyberspace, whyNoMove, type CompletedRide } from '../store/useCyberspace'
-import { setRideDestination } from '../store/destination'
-import { closeScrubber, exitHyperspaceView, markViewedStop, ownHyperspaceView, getStopByHeight, getStopIndex, stopCount, useHyperspace } from '../store/useHyperspace'
+import { GAME_HOLDS_MESSAGE, IN_GAME_HERE_MESSAGE, RELAY_STOPPED_MESSAGE, STALE_CONFIRMATION, useCyberspace, whyNoMove, type CompletedRide } from '../store/useCyberspace'
+import { useV1HopList } from '../hooks/useChainStop'
+import { closeScrubber, exitHyperspaceView, firstUnhashedHeight, getBlockHash, markViewedStop, ownHyperspaceView, getStopByHeight, getStopIndex, stopCount, stopScale, useHyperspace, viewHyperspace } from '../store/useHyperspace'
 import { Explanation } from './Explanation'
 import { useChainUi } from '../store/useChainUi'
+import { setRideDestination } from '../store/destination'
+import { runTutorialEffect } from '../store/useTutorial'
 
 /**
  * Where a stop sits, for the camera. The float64-approximate coordinate is
@@ -67,6 +69,11 @@ export function stopPlane(stop: Stop): Plane {
   return coordToXyz(stop.coordApprox).plane
 }
 
+/** VIEW a block: the standard VIEW on it, marked as the viewed block, at stopScale. */
+export function viewStop(stop: Stop, label = `BLOCK ${stop.height} · ${stop.kind === 'port' ? 'PORT' : 'LANDFALL'}`, scaleExp = stopScale(stop)): void {
+  viewHyperspace(stopPosition(stop), stopPlane(stop), label, scaleExp, stop.height)
+}
+
 /** A landfall as a place on Earth: "31.6°N 98.8°W". */
 export function formatLatLon(stop: Stop): string {
   const { lat, lon } = coordToLatLon(stop.coordApprox)
@@ -84,11 +91,13 @@ interface RideRun {
   hosaka: boolean
   /** The endpoints of the ride being proven, for the scene's transit ghost. */
   path: { fromHeight: number; toHeight: number } | null
-  /** Why the last attempt did not produce a signed hyperjump. */
+  /** Why the last attempt did not produce a signed hyperjump, or a BOARD that did not board. */
   error: string | null
+  /** True from a press of BOARD until it boarded or said why not. */
+  boarding: boolean
 }
 
-export const useRideRun = create<RideRun>(() => ({ progress: null, hosaka: false, path: null, error: null }))
+export const useRideRun = create<RideRun>(() => ({ progress: null, hosaka: false, path: null, error: null, boarding: false }))
 
 let riding = false
 let rideAbort: AbortController | null = null
@@ -115,7 +124,6 @@ interface PlannedRide {
   asOf: number | undefined
   destination: number
   destStop: Stop
-  blocks: Array<{ height: number; blockHash: string }>
 }
 
 /**
@@ -217,17 +225,33 @@ async function planRide(): Promise<PlannedRide | null> {
   }
   // Every passed block's hash seeds its leaf work (§5.3); a gap means the
   // sync has not covered that stretch of the line yet. A ride via HOSAKA
-  // needs them too: its proof is checked here against these hashes.
+  // needs them too: its proof is checked here against these hashes. Checked
+  // on the index columns, never by materializing a Stop per block: that put
+  // every block of the ride into the stop cache for good, and a ride of
+  // 500,000 blocks froze or killed the tab before HOSAKA was ever asked
+  // (2026-11-16, a player's ride of 517,354 blocks).
+  const gap = firstUnhashedHeight(Math.min(fromHeight, destination) + 1, Math.max(fromHeight, destination))
+  if (gap !== null) {
+    useRideRun.setState({ error: `Block ${gap} has no hash in the index yet; let the sync finish` })
+    return null
+  }
+  return { previousId, fromHeight, asOf, destination, destStop }
+}
+
+/**
+ * The blocks a ride computed here passes, with their hashes, for the worker
+ * pool. Read from the index columns (getBlockHash), so nothing is cached per
+ * block; only RIDE HERE needs them all, and planRide has already checked
+ * every one is there.
+ */
+function rideBlocksWithHashes(fromHeight: number, toHeight: number): Array<{ height: number; blockHash: string }> {
   const blocks: Array<{ height: number; blockHash: string }> = []
-  for (const height of rideBlocks(fromHeight, destination)) {
-    const blockHash = getStopByHeight(height)?.blockHash
-    if (!blockHash) {
-      useRideRun.setState({ error: `Block ${height} has no hash in the index yet; let the sync finish` })
-      return null
-    }
+  for (let height = Math.min(fromHeight, toHeight) + 1, hi = Math.max(fromHeight, toHeight); height <= hi; height++) {
+    const blockHash = getBlockHash(height)
+    if (!blockHash) throw new Error(`Block ${height} has no hash in the index yet; let the sync finish`)
     blocks.push({ height, blockHash })
   }
-  return { previousId, fromHeight, asOf, destination, destStop, blocks }
+  return blocks
 }
 
 /**
@@ -244,10 +268,23 @@ export function returnToAvatarForRide(): void {
   if (useCyberspace.getState().focus !== null) useCyberspace.getState().clearFocus()
 }
 
-/** BOARD: back to your avatar from any view, then board from your chain head. */
+/**
+ * BOARD: back to your avatar from any view, then board from your chain head.
+ * Every press ends boarded or with the reason on the panel, never silent: a
+ * BOARD that did nothing read as a broken game (2026-11-16).
+ */
 export async function boardFromAnywhere(): Promise<void> {
+  if (useRideRun.getState().boarding) return
   returnToAvatarForRide()
-  await useCyberspace.getState().boardHyperspace()
+  useRideRun.setState({ boarding: true, error: null })
+  try {
+    const refusal = await useCyberspace.getState().boardHyperspace()
+    if (refusal) useRideRun.setState({ error: refusal })
+  } catch (err) {
+    useRideRun.setState({ error: err instanceof Error ? err.message : String(err) })
+  } finally {
+    useRideRun.setState({ boarding: false })
+  }
 }
 
 /**
@@ -259,7 +296,18 @@ export async function startRide(): Promise<void> {
   if (riding || useRideRun.getState().hosaka) return
   const planned = await planRide()
   if (planned === null) return
-  const { previousId, fromHeight, asOf, destination, destStop, blocks } = planned
+  const { previousId, fromHeight, asOf, destination, destStop } = planned
+  const kept = keptRide && keptRide.previousId === previousId && keptRide.fromHeight === fromHeight && keptRide.toHeight === destination ? keptRide : null
+  // Only a proof still to compute needs every block's hash.
+  let blocks: Array<{ height: number; blockHash: string }> = []
+  if (!kept) {
+    try {
+      blocks = rideBlocksWithHashes(fromHeight, destination)
+    } catch (err) {
+      useRideRun.setState({ error: err instanceof Error ? err.message : String(err) })
+      return
+    }
+  }
   const { plane } = useCyberspace.getState()
   riding = true
   const controller = new AbortController()
@@ -268,7 +316,7 @@ export async function startRide(): Promise<void> {
   if (useCyberspace.getState().cloud.rideError !== null) useCyberspace.setState({ cloud: { ...useCyberspace.getState().cloud, rideError: null } })
   useRideRun.setState({
     error: null,
-    progress: { done: 0, total: blocks.length, etaMs: null, price: null },
+    progress: { done: 0, total: Math.abs(destination - fromHeight), etaMs: null, price: null },
     path: { fromHeight, toHeight: destination },
   })
   // The ride is a spectacle: pull back to the whole cube so the path can be
@@ -283,8 +331,7 @@ export async function startRide(): Promise<void> {
     81,
   )
   try {
-    const kept = keptRide
-    const ride: CompletedRide = kept && kept.previousId === previousId && kept.fromHeight === fromHeight && kept.toHeight === destination
+    const ride: CompletedRide = kept
       ? kept
       : {
           previousId,
@@ -386,14 +433,19 @@ export function HyperspacePanel(): JSX.Element {
   // gate's verdict is read here so a block shows at once, not at the next
   // change of chain.
   const versionVerdict = useVersionGate((s) => s.verdict)
+  // The 5.13 list arriving can stop the chain (lib/chainStop.ts): read again then too.
+  const hopList = useV1HopList()
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const noMove = useMemo(() => whyNoMove(useCyberspace.getState().actions()), [events, versionVerdict])
+  const noMove = useMemo(() => whyNoMove(useCyberspace.getState().actions()), [events, versionVerdict, hopList])
   const inGame = noMove !== null
   const atStop = line !== null && line.fromHeight !== null
   const onLine = transit !== null || line !== null
   const progress = useRideRun((s) => s.progress)
   const rideError = useRideRun((s) => s.error)
   const hosakaPlanning = useRideRun((s) => s.hosaka)
+  const boarding = useRideRun((s) => s.boarding)
+  // A tap on a stop in the scene picks the destination right now (the tour's pick and board steps).
+  const tapPicks = useStopTapPicks((s) => s.on)
   const cloud = useCyberspace((s) => s.cloud)
   const profile = useCyberspace((s) => s.cloudPrefs.profile)
   const ready = sync.status === 'ready'
@@ -405,13 +457,13 @@ export function HyperspacePanel(): JSX.Element {
   const hosakaRiding = hosakaPlanning || (hosakaJob !== null && cloudBusy)
   const now = useNow(hosakaRiding ? 1000 : 0)
 
-  // The per-leaf benchmark prices a ride in wall-clock time before you commit
-  // to it. Calibrated once; until the number exists the estimate says so
-  // rather than guessing.
-  const [benchMs, setBenchMs] = useState<number | null>(() => leafBenchmarkMs())
+  // The pool's measured throughput prices a ride in wall-clock time before
+  // you commit to it. Calibrated once, on every worker the ride uses; until
+  // the number exists the estimate says so rather than guessing.
+  const [bench, setBench] = useState<RideBench | null>(() => rideBenchmark())
   useEffect(() => {
     let alive = true
-    calibrate().then((ms) => { if (alive) setBenchMs(ms) }).catch(() => {})
+    calibrate().then((b) => { if (alive) setBench(b) }).catch(() => {})
     return () => { alive = false }
   }, [])
 
@@ -435,13 +487,13 @@ export function HyperspacePanel(): JSX.Element {
     if (destination === null) return null
     // From a stop, the ride starts at the stop; no station is involved.
     if (line !== null && line.fromHeight !== null) {
-      return { from: line.fromHeight, fromLabel: 'At block', length: rideBlocks(line.fromHeight, destination).length }
+      return { from: line.fromHeight, fromLabel: 'At block', length: Math.abs(destination - line.fromHeight) }
     }
     const here = xyzToCoord(position.x, position.y, position.z, plane)
     const asOf = useHyperspace.getState().tipHeight
     const station = findStation(getStopIndex(), here, Math.max(asOf ?? destination, destination))
     if (station === null) return null
-    return { from: station.stop.height, fromLabel: 'Station', length: rideBlocks(station.stop.height, destination).length }
+    return { from: station.stop.height, fromLabel: 'Station', length: Math.abs(destination - station.stop.height) }
   }, [destination, position, plane, indexVersion, line])
 
   // A destination that is where the ride would start: refused before RIDE
@@ -449,9 +501,7 @@ export function HyperspacePanel(): JSX.Element {
   const zeroRide = estimate && destination !== null ? zeroLengthRideRefusal(estimate.from, destination, atStop) : null
 
   // This device's own wait for the ride, as the Est. time row shows it.
-  const localMs = estimate && benchMs !== null
-    ? (estimate.length + expectedPricePairs(estimate.length) / expectedRidePairs(1)) * benchMs
-    : null
+  const localMs = estimate && bench !== null ? rideEstimateMs(estimate.length, bench) : null
   // HOSAKA's price beside it, when the provider sells rides and this one
   // fits (useRideQuote); hidden otherwise, and never for a zero-length ride.
   const quote = useRideQuote(estimate && !zeroRide ? estimate.from : null, estimate && !zeroRide ? destination : null)
@@ -483,7 +533,7 @@ export function HyperspacePanel(): JSX.Element {
           <button
             className="tag tag--tap"
             title="Open the Hyperspace overlay (H)"
-            onClick={() => { const hs = useHyperspace.getState(); if (hs.scrubHeight === null) hs.setScrubHeight(hs.tipHeight ?? 0); else closeScrubber() }}
+            onClick={() => { const hs = useHyperspace.getState(); if (hs.scrubHeight === null) hs.setScrubHeight(hs.viewedStop ?? hs.tipHeight ?? 0); else closeScrubber() }}
           >{tag}</button>
         ) : (
           <span className={`tag ${sync.status === 'error' ? 'tag--danger' : ''}`}>{tag}</span>
@@ -516,14 +566,9 @@ export function HyperspacePanel(): JSX.Element {
             </dl>
             <button
               className="hyper__btn hyper__btn--view"
-              onClick={() => { ownHyperspaceView(); markViewedStop(nearest.stop.height); useCyberspace.getState().focusOn(
-                stopPosition(nearest.stop),
-                stopPlane(nearest.stop),
-                `STATION · BLOCK ${nearest.stop.height}`,
-                // 2^34: one render cell is 2 meters, the spec's h34 human
-                // scale, so the stop reads as a place you could stand at.
-                34,
-              ) }}
+              // 2^34: one render cell is 2 meters, the spec's h34 human
+              // scale, so the stop reads as a place you could stand at.
+              onClick={() => viewStop(nearest.stop, `STATION · BLOCK ${nearest.stop.height}`, 34)}
             >VIEW STATION</button>
           </>
         ) : (
@@ -534,7 +579,8 @@ export function HyperspacePanel(): JSX.Element {
       <div className="hyper__group">
         <span className="legend__label hyper__kicker hyper__kicker--destination">Destination</span>
         {destination === null ? (
-          <p className="legend__note">None set. Open the Hyperspace overlay (H) to see any block or tap one in the HUD.</p>
+          // How to pick one is BOARD's reason line, with PICK ONE (and SHOW EARTH in the tour), so it is said once.
+          <p className="legend__note">None set.</p>
         ) : (
           <>
             <dl className="stats">
@@ -558,7 +604,7 @@ export function HyperspacePanel(): JSX.Element {
                   </div>
                   <div>
                     <dt>Est. time</dt>
-                    {/* The benchmark is per average block; the price is priced in blocks by its pairings. */}
+                    {/* The pool's wall-clock per average block; the price is priced in blocks by its pairings. */}
                     <dd>{localMs === null ? 'CALIBRATING' : formatDuration(localMs)}</dd>
                   </div>
                   {quote.status !== 'hidden' && (
@@ -580,7 +626,10 @@ export function HyperspacePanel(): JSX.Element {
               it to the destination; all of the per-block work runs locally
               and resumes if interrupted. A re-roll price of about one
               thirty-second more follows the blocks, so a proof that skipped
-              some cannot cheaply retry its samples.
+              some cannot cheaply retry its samples. Est. time is measured on
+              this device, working the same way the ride does. A phone slows
+              or pauses a tab that is hidden or behind another app, so keep
+              this tab open and in front until the ride is done.
               {quote.status !== 'hidden' && (
                 <>
                   {' '}RIDE VIA HOSAKA buys the same proof from HOSAKA, computed on
@@ -639,10 +688,10 @@ export function HyperspacePanel(): JSX.Element {
               demand one. */}
           {!onLine && (
             <button
-              className="hyper__btn"
-              disabled={inGame || !ownChain || !ready || destination === null}
+              className="hyper__btn hyper__btn--board"
+              disabled={inGame || !ownChain || !ready || destination === null || boarding}
               onClick={() => void boardFromAnywhere()}
-            >BOARD</button>
+            >{boarding ? 'BOARDING' : 'BOARD'}</button>
           )}
           {hosakaRiding ? (
             <>
@@ -672,7 +721,7 @@ export function HyperspacePanel(): JSX.Element {
       {offer !== null && progress === null && !hosakaRiding && (
         <div className="hyper__choice">
           <button
-            className={`hyper__btn hyper__choicebtn ${best === 'local' ? 'hyper__btn--ride' : ''}`}
+            className={`hyper__btn hyper__choicebtn hyper__choicebtn--here ${best === 'local' ? 'hyper__btn--ride' : ''}`}
             title="Compute the ride's proof on this device. Free; it resumes if interrupted"
             disabled={rideDisabled}
             onClick={() => void startRide()}
@@ -702,17 +751,29 @@ export function HyperspacePanel(): JSX.Element {
         ? <p className="hyper__why">NEW VERSION: RELOAD TO BOARD OR RIDE</p>
         : noMove === GAME_HOLDS_MESSAGE
         ? <p className="hyper__why">A GAME HOLDS YOUR AVATAR: LEAVE THE GAME IN THE CLIENT YOU ENTERED IT WITH, OR RESPAWN, TO BOARD OR RIDE</p>
+        : noMove === IN_GAME_HERE_MESSAGE
+        ? <p className="hyper__why">IN A GAME: EXIT GAME TO BOARD OR RIDE</p>
         : (
           <p className="hyper__why">
-            YOUR CHAIN IS BROKEN: NOTHING MOVES UNTIL YOU RESPAWN
+            {noMove === RELAY_STOPPED_MESSAGE ? 'YOUR CHAIN STOPS' : 'YOUR CHAIN IS BROKEN'}: NOTHING MOVES UNTIL YOU RESPAWN
             <button className="tag tag--tap hyper__whybtn" onClick={() => useChainUi.getState().setBrokenView('notice')}>WHY</button>
           </p>
         ))}
       {!inGame && zeroRide && progress === null && <p className="notice">{zeroRide}</p>}
+      {/* Every gate that holds BOARD dark says so (new-user feedback, 2026-11-21:
+          "The board button was never available, so I couldn't ride"). A
+          destination missing used to say nothing at all. */}
       {!inGame && !onLine && progress === null && (
         !ready ? (
-          <p className="hyper__why">BOARD UNLOCKS WHEN THE LINE FINISHES SYNCING</p>
-        ) : destination === null ? null : !ownChain ? (
+          <p className="hyper__why">{boardLoadingLine(sync)}</p>
+        ) : destination === null ? (
+          <p className="hyper__why">
+            {tapPicks > 0 ? BOARD_TAP_A_STOP : BOARD_NEEDS_DESTINATION}
+            {/* The tour's Earth view again, to tap a stop on; and, everywhere, the overlay's list with SET DESTINATION, for when taps miss. */}
+            {tapPicks > 0 && <button className="tag tag--tap hyper__whybtn" onClick={() => runTutorialEffect('view-earth')}>SHOW EARTH</button>}
+            <button className="tag tag--tap hyper__whybtn" onClick={openOverlayToPick}>PICK ONE</button>
+          </p>
+        ) : !ownChain ? (
           <p className="hyper__why">BOARD STARTS FROM YOUR OWN CHAIN: STOP SPECTATING OR LEAVE HISTORY FIRST</p>
         ) : null
       )}
@@ -740,17 +801,69 @@ export function HyperspacePanel(): JSX.Element {
 }
 
 
+const stopTapListeners = new Set<(height: number) => void>()
+
+/** What BOARD says while no destination is set and a tap on a stop picks one (the tour's Earth route). */
+export const BOARD_TAP_A_STOP = 'PICK A STOP FIRST: TAP A GLOWING DOT ON EARTH'
+/** What BOARD says while no destination is set anywhere else: a tap only views a stop there (arkinox, 2026-11-11), so the overlay's SET DESTINATION is the way. */
+export const BOARD_NEEDS_DESTINATION = 'BOARD NEEDS A DESTINATION: PICK A STOP, THEN SET DESTINATION'
+
+/** What BOARD says while the stops are still loading, with how far along. Pure. */
+export function boardLoadingLine(sync: { status: string; loaded: number; total: number }): string {
+  if (sync.status === 'error') return 'THE STOPS DID NOT LOAD YET: TRYING AGAIN. BOARD OPENS WHEN THEY ARE IN'
+  const pct = sync.total > 0 ? Math.min(99, Math.floor((sync.loaded / sync.total) * 100)) : 0
+  return `LOADING THE STOPS: ${pct}%. BOARD OPENS WHEN THEY ARE ALL IN`
+}
+
+/** How many places make a tap on a stop pick the destination now (pickStopByTap); the panel's reason line follows it. */
+export const useStopTapPicks = create<{ on: number }>(() => ({ on: 0 }))
+
 /**
- * Click-select a stop in the scene: it becomes the destination and the
- * camera flies to it. With the scrubber open the height goes through the
- * scrubber so its readout follows the click; closed, the focus is set
- * directly at the current zoom so a click never yanks the scale.
+ * While it is on, a tap on a stop in the scene also makes it the ride's
+ * destination when none is set (the tour's pick and board steps: a tap only
+ * views a stop everywhere else, arkinox 2026-11-11), through
+ * setRideDestination as every other way to set one is. A destination
+ * already set is kept. Returns what turns it off.
+ */
+export function pickStopByTap(): () => void {
+  const off = onSceneStopTap((height) => {
+    if (useHyperspace.getState().destination === null) setRideDestination(height)
+  })
+  useStopTapPicks.setState((s) => ({ on: s.on + 1 }))
+  let done = false
+  return () => {
+    if (done) return
+    done = true
+    off()
+    useStopTapPicks.setState((s) => ({ on: Math.max(0, s.on - 1) }))
+  }
+}
+
+/** PICK ONE on BOARD's reason line: the Hyperspace overlay, where any block can be found and SET DESTINATION picks it. */
+export function openOverlayToPick(): void {
+  const hs = useHyperspace.getState()
+  if (hs.scrubHeight === null) hs.setScrubHeight(hs.viewedStop ?? hs.tipHeight ?? 0)
+}
+
+/**
+ * Hear each tap on a stop in the scene (selectStopInScene), by height, before
+ * it is viewed: the first-arrival tutorial's pick step makes it the ride's
+ * destination (tutorial/earthRoute.ts). Returns what stops the hearing.
+ */
+export function onSceneStopTap(listener: (height: number) => void): () => void {
+  stopTapListeners.add(listener)
+  return () => { stopTapListeners.delete(listener) }
+}
+
+/**
+ * Click a stop in the scene: VIEW it, nothing more (arkinox, 2026-11-11: a
+ * view only views; the destination is set on purpose, with SET DESTINATION
+ * in the Hyperspace overlay). With the scrubber open the height goes through
+ * the scrubber so its readout follows the click.
  */
 export function selectStopInScene(height: number): void {
+  for (const l of [...stopTapListeners]) { try { l(height) } catch (err) { console.warn('[hyperspace] stop tap listener failed:', err) } }
   const hs = useHyperspace.getState()
-  // The stop becomes the destination only when none is set; with one set, a
-  // tap only flies to the stop (arkinox, 2026-10-15: clear before setting).
-  setRideDestination(height, { quiet: true })
   // With the scrubber open the height goes through it (its effect flies and
   // marks); a click on the very block it is parked on falls through to the
   // direct path, because a no-op set would fire no effect and no fly.
@@ -759,14 +872,7 @@ export function selectStopInScene(height: number): void {
     return
   }
   const stop = getStopByHeight(height)
-  if (!stop) return
-  ownHyperspaceView()
-  markViewedStop(stop.height)
-  useCyberspace.getState().focusOn(
-    stopPosition(stop),
-    stopPlane(stop),
-    `BLOCK ${stop.height} · ${stop.kind === 'port' ? 'PORT' : 'LANDFALL'}`,
-  )
+  if (stop) viewStop(stop)
 }
 
 /**
@@ -782,12 +888,10 @@ export function selectStopInScene(height: number): void {
  * that means the planet, so it means the planet unconditionally.
  */
 export function viewEarth(): void {
-  ownHyperspaceView()
-  markViewedStop(null)
   // Earth is a dataspace thing (§9.1): looking at it lines up dataspace, so
   // that RETURN, and the next commit, stay in the plane the planet is in.
   useCyberspace.getState().setPlane(0)
-  useCyberspace.getState().focusOn({ x: 1n << 84n, y: 1n << 84n, z: 1n << 84n }, 0, 'EARTH', EARTH_SCALE_EXP)
+  viewHyperspace({ x: 1n << 84n, y: 1n << 84n, z: 1n << 84n }, 0, 'EARTH', EARTH_SCALE_EXP, null)
 }
 
 /**
@@ -796,8 +900,5 @@ export function viewEarth(): void {
  * current plane; the lattices take that plane's colors.
  */
 export function viewCyberspace(scaleExp = 82): void {
-  ownHyperspaceView()
-  markViewedStop(null)
-  const plane = useCyberspace.getState().plane
-  useCyberspace.getState().focusOn({ x: 1n << 84n, y: 1n << 84n, z: 1n << 84n }, plane, 'CYBERSPACE', scaleExp)
+  viewHyperspace({ x: 1n << 84n, y: 1n << 84n, z: 1n << 84n }, useCyberspace.getState().plane, 'CYBERSPACE', scaleExp, null)
 }

@@ -20,6 +20,7 @@ const fake = vi.hoisted(() => ({
   eoseMs: 20,
   challenge: undefined as string | undefined,
   signerMs: 0,
+  authTimesOutMs: 0,
   signed: 0,
   closed: [] as string[],
   relays: new Map<string, unknown>(),
@@ -33,6 +34,10 @@ vi.mock('nostr-tools/abstract-pool', () => {
     auth(signer: (t: { kind: number; created_at: number; tags: string[][]; content: string }) => Promise<unknown>): Promise<string> {
       // As nostr-tools does: one AUTH per socket, the same promise to every caller.
       if (this.authPromise) return this.authPromise
+      if (fake.authTimesOutMs) {
+        this.authPromise = new Promise((_, refuse) => { setTimeout(() => refuse(new Error('auth timed out')), fake.authTimesOutMs) })
+        return this.authPromise
+      }
       this.authPromise = (async () => { await signer({ kind: 22242, created_at: 0, tags: [['relay', this.url], ['challenge', this.challenge ?? '']], content: '' }); return 'ok' })()
       return this.authPromise
     }
@@ -55,7 +60,8 @@ vi.mock('../../store/useCyberspace', () => ({
   useCyberspace: { getState: () => ({ signEvent: async (t: unknown) => { fake.signed++; await new Promise((r) => setTimeout(r, fake.signerMs)); return t } }) },
 }))
 
-import { authPending, queryEachSettled } from '../relay'
+import { authForRead, authPending, dropRelays, noteRelayGates, publishMany, queryEachSettled } from '../relay'
+import { AUTH_STALLED } from '../relayOutcome'
 
 /** Hold the main thread, as drawing and checking a long chain does. */
 const busy = (ms: number): void => { const end = Date.now() + ms; while (Date.now() < end) { /* busy */ } }
@@ -77,6 +83,8 @@ describe('an AUTH waiting on the signer (verification of #236, finding 4)', () =
   it('is known while the signer works, and a second ask rides on it: one AUTH, one prompt', async () => {
     fake.relays.clear(); fake.challenge = 'c1'; fake.eoseMs = 10; fake.signerMs = 300; fake.signed = 0
     const url = 'ws://relay.two/'
+    // It gates what this client does there, so its challenge is signed up front (relay.ts relayGates).
+    noteRelayGates(url)
     const first = queryEachSettled([url], { kinds: [3333] }, 2_000, url, [])
     await new Promise((r) => setTimeout(r, 100))
     expect(authPending(url)).toBe(true)
@@ -86,5 +94,56 @@ describe('an AUTH waiting on the signer (verification of #236, finding 4)', () =
     expect(b[0].outcome).toBe('answered')
     expect(fake.signed).toBe(1)
     expect(authPending(url)).toBe(false)
+  })
+})
+
+describe('an AUTH the relay never answers (review of #556)', () => {
+  it('two callers sharing one AUTH that times out are one timeout: the relay is not left alone', async () => {
+    fake.relays.clear(); fake.challenge = 'c4'; fake.authTimesOutMs = 1_100
+    const url = 'ws://relay.four/'
+    // It gates what this client does there, so its challenge is signed up front (relay.ts relayGates).
+    noteRelayGates(url)
+    await Promise.all([authForRead(url), authForRead(url)])
+    const result = await publishMany([url], { id: 'e'.repeat(64) } as never)
+    expect(!result.ok && /left alone/.test(result.reason)).toBe(false)
+    fake.authTimesOutMs = 0
+  })
+
+  it('counts once per real wait, however often its rejection comes back, and one is not enough to leave the relay alone', async () => {
+    fake.relays.clear(); fake.challenge = 'c3'; fake.authTimesOutMs = 1_100
+    const url = 'ws://relay.three/'
+    // It gates what this client does there, so its challenge is signed up front (relay.ts relayGates).
+    noteRelayGates(url)
+    const leftAlone = async (): Promise<boolean> => {
+      const result = await publishMany([url], { id: 'e'.repeat(64) } as never)
+      return !result.ok && /left alone/.test(result.reason)
+    }
+    await authForRead(url)
+    // nostr-tools keeps the rejected promise: these come back at once, and are not another wait.
+    await authForRead(url)
+    await authForRead(url)
+    expect(await leftAlone()).toBe(false)
+    // A new socket, and a second real wait.
+    fake.relays.clear()
+    await authForRead(url)
+    expect(await leftAlone()).toBe(true)
+    fake.authTimesOutMs = 0
+  })
+})
+
+describe('an AUTH on an old socket ending (review of #570)', () => {
+  it('does not clear the wait of a newer socket\'s AUTH, so that relay is not read before its signer answers', async () => {
+    const url = 'ws://relay.five/'
+    // It gates what this client does there, so its challenge is signed up front (relay.ts relayGates).
+    noteRelayGates(url)
+    fake.relays.clear(); fake.challenge = 'c5'; fake.eoseMs = 10; fake.signerMs = 0; fake.authTimesOutMs = 1_500
+    const old = authForRead(url)
+    await new Promise((r) => setTimeout(r, 100))
+    dropRelays([url])
+    fake.authTimesOutMs = 0; fake.signerMs = 4_000
+    const [answer] = await queryEachSettled([url], { kinds: [3333] }, 1_000, url, [])
+    await old
+    expect(answer).toMatchObject({ outcome: 'refused', reason: AUTH_STALLED })
+    fake.signerMs = 0
   })
 })

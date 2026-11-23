@@ -5,7 +5,8 @@
  *
  * Shared by the two places the feed is shown: the FEED tab of PLACE OBJECT,
  * where a tap lines the object up at the build cursor, and the SHARD FEED
- * window, where each tile carries DEPLOY AN INSTANCE and REMIX. The data is
+ * window, where each tile carries DEPLOY AN INSTANCE and REMIX, and a tap on
+ * the tile opens the shard's card (usePublicShard, arkinox 2026-11-14). The data is
  * useFeed's (sno-core's read); the pictures are ShardThumb's, as in every
  * other list of shards.
  *
@@ -26,13 +27,16 @@ import { useFeed } from '../store/useFeed'
 import { useProfile } from '../hooks/useProfile'
 import { profileLabel } from '../store/useProfiles'
 import { ShardThumb } from './ShardThumb'
+import { Chamfer, THUMB_PX } from './ui/Chamfer'
 import { useMutes } from '../store/useMutes'
 import { useCyberspace } from '../store/useCyberspace'
 import { withoutMuted } from '../lib/muteList'
+import { matches, searchKey } from '../lib/shardSearch'
+import { Highlight } from './ui/SearchField'
 
-/** A tile's picture, at the size a listing's GIF is shown. */
+/** A tile's picture, at the size a listing's GIF is shown, in the chamfered frame every row picture has (owner, 2026-11-15). */
 function FeedThumb({ object }: { object: FeedObject }): JSX.Element {
-  return <div className="feed__thumb"><ShardThumb shard={object.shard} size={80} /></div>
+  return <Chamfer className="feed__thumb"><ShardThumb shard={object.shard} size={THUMB_PX} /></Chamfer>
 }
 
 /** Who made it: their name from the profile cache, or their npub, shortened. */
@@ -41,13 +45,13 @@ function Author({ pubkey }: { pubkey: string }): JSX.Element {
   return <>{profileLabel(profile, nip19.npubEncode(pubkey))}</>
 }
 
-function Tile({ object, onPick, actions }: { object: FeedObject; onPick?: (o: FeedObject) => void; actions?: (o: FeedObject) => ReactNode }): JSX.Element {
+function Tile({ object, onPick, onOpen, actions, query = '' }: { object: FeedObject; onPick?: (o: FeedObject) => void; onOpen?: (o: FeedObject) => void; actions?: (o: FeedObject) => ReactNode; query?: string }): JSX.Element {
   const s = object.shard
   const body = (
     <>
       <FeedThumb object={object} />
       <span className="feed__text">
-        <span className="feed__name">{s.name}</span>
+        <span className="feed__name"><Highlight text={s.name} query={query} /></span>
         <span className="feed__by"><Author pubkey={object.pubkey} /></span>
         <span className="feed__meta">{s.vertices.length} v · {s.faces.length} f{s.parts?.length ? ` · ${s.parts.length} obj` : ''}</span>
       </span>
@@ -57,7 +61,9 @@ function Tile({ object, onPick, actions }: { object: FeedObject; onPick?: (o: Fe
     <li className="feed__tile">
       {onPick
         ? <button className="feed__pick" onClick={() => onPick(object)} title={`Place "${s.name}" at the build cursor`}>{body}</button>
-        : <div className="feed__pick">{body}</div>}
+        : onOpen
+          ? <button className="feed__pick" onClick={() => onOpen(object)} title={`Open "${s.name}": who made it, reactions and comments`}>{body}</button>
+          : <div className="feed__pick">{body}</div>}
       {actions && <div className="feed__acts">{actions(object)}</div>}
     </li>
   )
@@ -72,16 +78,16 @@ function ListingPic({ listing }: { listing: FeedListing }): JSX.Element {
   const [tried, setTried] = useState(0)
   const src = pictures[tried]
   return (
-    <div className="feed__thumb">
+    <Chamfer className="feed__thumb" decorative={false}>
       {src
-        ? <img src={src} alt={listing.alt ?? ''} width={80} height={80} loading="lazy" decoding="async" referrerPolicy="no-referrer" onError={() => setTried((n) => n + 1)} />
+        ? <img src={src} alt={listing.alt ?? ''} width={THUMB_PX} height={THUMB_PX} loading="lazy" decoding="async" referrerPolicy="no-referrer" onError={() => setTried((n) => n + 1)} />
         : <LockKeyhole size={22} strokeWidth={2} className="feed__lock" aria-hidden />}
-    </div>
+    </Chamfer>
   )
 }
 
 /** An object for sale: never placed (no shape until bought), bought from its seller's page. */
-export function ListingTile({ listing }: { listing: FeedListing }): JSX.Element {
+export function ListingTile({ listing, query = '' }: { listing: FeedListing; query?: string }): JSX.Element {
   const title = listing.title || 'Untitled'
   const link = useSellerLink(listing)
   return (
@@ -89,7 +95,7 @@ export function ListingTile({ listing }: { listing: FeedListing }): JSX.Element 
       <div className="feed__pick" title="For sale: its shape is sealed until bought">
         <ListingPic listing={listing} />
         <span className="feed__text">
-          <span className="feed__name">{title}</span>
+          <span className="feed__name"><Highlight text={title} query={query} /></span>
           <span className="feed__by"><Author pubkey={listing.pubkey} /></span>
           <span className="feed__price">{satsLabel(listing.priceSats)}</span>
         </span>
@@ -108,7 +114,18 @@ export function ListingTile({ listing }: { listing: FeedListing }): JSX.Element 
   )
 }
 
-export function FeedList({ onPick, actions }: { onPick?: (o: FeedObject) => void; actions?: (o: FeedObject) => ReactNode }): JSX.Element {
+/** A feed entry's name, as the search matches it: an object's name, a listing's title. */
+export function feedName(o: FeedObject | FeedListing): string {
+  return isListing(o) ? o.title || 'Untitled' : o.shard.name
+}
+
+/**
+ * `query` is the search typed under the list (PLACE OBJECT, the hide bar's
+ * Model): only entries whose name holds it are shown, the matched part
+ * marked. Pages keep coming while the end of the list is in view, so a
+ * search reaches past the first page.
+ */
+export function FeedList({ onPick, onOpen, actions, query = '' }: { onPick?: (o: FeedObject) => void; onOpen?: (o: FeedObject) => void; actions?: (o: FeedObject) => ReactNode; query?: string }): JSX.Element {
   const allObjects = useFeed((s) => s.objects)
   const allListings = useFeed((s) => s.listings)
   // Less what the mute list hides: someone blocked, or one muted by its id (store/useMutes).
@@ -117,7 +134,9 @@ export function FeedList({ onPick, actions }: { onPick?: (o: FeedObject) => void
   const objects = useMemo(() => withoutMuted(allObjects, muted, me), [allObjects, muted, me])
   const listings = useMemo(() => withoutMuted(allListings, muted, me), [allListings, muted, me])
   // Objects and listings, newest first, merged once per change (not per render).
-  const items = useMemo(() => feedItems({ objects, listings }), [objects, listings])
+  const all = useMemo(() => feedItems({ objects, listings }), [objects, listings])
+  const key = searchKey(query)
+  const items = useMemo(() => (key === '' ? all : all.filter((o) => matches(feedName(o), key))), [all, key])
   const loading = useFeed((s) => s.loading)
   const exhausted = useFeed((s) => s.exhausted)
   const end = useRef<HTMLLIElement>(null)
@@ -145,13 +164,13 @@ export function FeedList({ onPick, actions }: { onPick?: (o: FeedObject) => void
     <div className="feed">
       <ul className="feed__list" ref={setList}>
         {items.map((o) => isListing(o)
-          ? <ListingTile key={o.address} listing={o} />
-          : <Tile key={o.address} object={o} onPick={onPick} actions={actions} />)}
+          ? <ListingTile key={o.address} listing={o} query={key} />
+          : <Tile key={o.address} object={o} onPick={onPick} onOpen={onOpen} actions={actions} query={key} />)}
         <li className="feed__end" ref={end}>
           {loading || (items.length === 0 && !exhausted)
-            ? 'Reading the relays…'
+            ? key !== '' && items.length === 0 ? 'No matches yet. Reading the relays…' : 'Reading the relays…'
             : items.length === 0
-              ? 'No published objects found on these relays yet.'
+              ? key !== '' ? 'No matches' : 'No published objects found on these relays yet.'
               : exhausted ? 'That is everything on these relays.' : ''}
         </li>
       </ul>

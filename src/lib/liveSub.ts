@@ -57,12 +57,27 @@ export interface Live {
   opening: boolean
 }
 
-/** The filter to reissue with: `since` moved up to just before the last event seen. */
+/**
+ * The filter to reissue with: `since` moved up to just before the last event
+ * seen. A filter that bounds its stored answer by `limit` instead of
+ * `since` is reissued as it was: it asks for every new event whatever its
+ * created_at, as the own-chain watch does (chains.ts watchOwnChain), and a
+ * `since` added here would drop the moves another device signed while LOCAL
+ * and publishes later. `limit` already keeps the repeat it costs small.
+ */
 export function resumedFilter(filter: Filter, lastSeen: number | null): Filter {
-  if (lastSeen === null) return filter
+  if (lastSeen === null || (filter.since === undefined && filter.limit !== undefined)) return filter
   const since = Math.max(filter.since ?? 0, lastSeen - RESUME_OVERLAP_S)
   return { ...filter, since }
 }
+
+/**
+ * How long a reopen waits while the relay is held up by a failed sign-in
+ * (`held`): the relay would only refuse it again. The sign-in, when it
+ * comes, reopens what waits at once (retryWaiting), and so does a return to
+ * the tab (resumeAll); this is the floor for neither happening.
+ */
+export const HELD_BACKOFF_MS = 5 * 60_000
 
 export function backoffFor(attempts: number): number {
   return BACKOFF_MS[Math.min(Math.max(0, attempts - 1), BACKOFF_MS.length - 1)]
@@ -72,7 +87,12 @@ export class LiveRegistry {
   private records = new Map<number, Live>()
   private nextId = 1
 
-  constructor(private transport: Transport) {}
+  /**
+   * `held`, when given, says the relay cannot be read now for want of a
+   * sign-in: a reopen then waits HELD_BACKOFF_MS. While not signed in, the
+   * feeds were about 20 refused REQs a minute (the real-bunker run, 2026-11-04).
+   */
+  constructor(private transport: Transport, private held: () => boolean = () => false) {}
 
   /** Open a subscription that will be kept open. Returns its closer. */
   subscribe(filter: Filter, handlers: Handlers): () => void {
@@ -107,6 +127,22 @@ export class LiveRegistry {
       // the socket being replaced is not mistaken for the new one dying.
       live.closer = null
       live.attempts = 0
+      live.reopens++
+      void this.open(live)
+    }
+  }
+
+  /**
+   * Reopen now the subscriptions waiting out a backoff, and leave the open
+   * ones be: the relay that kept closing them can now be asked (it signed
+   * this visit in). Their backoff stands, so a relay that closes them again
+   * is asked no faster than before.
+   */
+  retryWaiting(): void {
+    for (const live of this.records.values()) {
+      if (live.closed || !live.timer) continue
+      clearTimeout(live.timer)
+      live.timer = null
       live.reopens++
       void this.open(live)
     }
@@ -160,7 +196,7 @@ export class LiveRegistry {
       live.timer = null
       live.reopens++
       void this.open(live)
-    }, backoffFor(live.attempts))
+    }, this.held() ? HELD_BACKOFF_MS : backoffFor(live.attempts))
   }
 
   private close(live: Live): void {

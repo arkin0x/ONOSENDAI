@@ -7,9 +7,13 @@
  * and turn at any zoom. Each object is scaled to fit inside the chest
  * (LOOT_SIDE, its longest side), rises out of the mouth one after another
  * as the lid comes up, and hovers in a row above the chest, bobbing and
- * turning slowly. A reload shows it hovering, with no rise. On the calm path
- * (reduced motion) nothing rises, bobs or turns: the loot fades in where it
- * hovers and holds still.
+ * turning slowly. The row runs across the chest's front, the side its lid
+ * opens toward, and each object faces that front at rest (lib/looks.ts
+ * lookFacing): a chest TURNed on the hide bar has its front turned with it,
+ * and the row and the objects follow (arkinox, 2026-11-09: "the items should
+ * be in a line facing the front of the chest"). A reload shows it hovering,
+ * with no rise. On the calm path (reduced motion) nothing rises, bobs or
+ * turns: the loot fades in where it hovers and holds still.
  *
  * What each is: the scroll for messages, the generic item or the item's own
  * model (fetched as an item's model is, the generic item while it loads),
@@ -38,7 +42,7 @@ import { breatheMaterial } from './WorldShards'
 export const LOOT_SIDE = 0.46
 /** How high the row hovers: its middle, above the chest's base, clear of the open lid's top (1.4). */
 export const HOVER_Y = 1.72
-/** How far forward of the chest's middle (toward its lock plate, +Z) the row hovers, clear of the lid leaning back. */
+/** How far forward of the chest's middle (toward its lock plate, +Z before the chest's facing) the row hovers, clear of the lid leaning back. */
 export const HOVER_Z = 0.22
 /** How far apart along the row. */
 export const LOOT_GAP = 0.58
@@ -67,10 +71,12 @@ export function openChestBounds(): LookBounds {
 }
 
 /**
- * Where object `i` of `n` hovers, in the chest's units: a row across X, a
- * gentle arc toward the viewer, and wholly above the open chest wherever the
- * turning object could reach over it, so none touches the lid from any side
- * (review of the ceremony: one at the end of a row of three dipped into it).
+ * Where object `i` of `n` hovers, in the chest's units and its front's frame
+ * (the frame TREASURE is built in: front +Z, width X; ChestLoot turns it to
+ * the chest's facing): a row across X, a gentle arc toward the viewer, and
+ * wholly above the open chest wherever the turning object could reach over
+ * it, so none touches the lid from any side (review of the ceremony: one at
+ * the end of a row of three dipped into it).
  */
 export function hoverAt(i: number, n: number): [number, number, number] {
   const x = (i - (n - 1) / 2) * LOOT_GAP
@@ -88,13 +94,23 @@ interface Props {
   ceremony?: { at: number; calm: boolean }
   /** The viewer asked for less motion: hovering loot holds still. */
   still: boolean
+  /** Which way the chest faces, radians about Y from +Z (lib/looks.ts lookFacing): the row runs across it and each object faces it. */
+  facing?: number
+  /**
+   * The chest's own dim while it stands between the camera and the build
+   * cursor (BuildOccluders): the loot hovers inside the chest's drawn group,
+   * which the dim's fade writes onto, so it must be drawn at the same dim or
+   * the fade's last step leaves it five times too bright (review of #618).
+   */
+  dim?: number
 }
 
-export function ChestLoot({ loot, ceremony, still }: Props): JSX.Element {
+export function ChestLoot({ loot, ceremony, still, dim = 1, facing = 0 }: Props): JSX.Element {
+  // The row is laid out in the front's frame and turned whole to the chest's facing, about its middle, where the mouth is.
   return (
-    <>
-      {loot.map((o, i) => <Loot key={o.key} o={o} i={i} n={loot.length} ceremony={ceremony} still={still} />)}
-    </>
+    <group rotation={[0, facing, 0]}>
+      {loot.map((o, i) => <Loot key={o.key} o={o} i={i} n={loot.length} ceremony={ceremony} still={still} dim={dim} />)}
+    </group>
   )
 }
 
@@ -146,7 +162,7 @@ function useFit(model: ShardModel, known: ModelExtent | null): { k: number; cent
   return useMemo(() => lootFit(known ?? own ?? (measured?.model === model ? measured.extent : null)), [known, own, measured, model])
 }
 
-function Loot({ o, i, n, ceremony, still }: { o: LootObject; i: number; n: number; ceremony?: Props['ceremony']; still: boolean }): JSX.Element | null {
+function Loot({ o, i, n, ceremony, still, dim }: { o: LootObject; i: number; n: number; ceremony?: Props['ceremony']; still: boolean; dim: number }): JSX.Element | null {
   const { model, extent } = useLootModel(o)
   const fit = useFit(model, extent)
   const home = useMemo(() => hoverAt(i, n), [i, n])
@@ -191,7 +207,7 @@ function Loot({ o, i, n, ceremony, still }: { o: LootObject; i: number; n: numbe
         <group ref={fading} scale={fit.k}>
           <group position={fit.centre}>
             {/* A ghost only while it fades in on the calm path: its opacity is real then. */}
-            <ShardMesh shard={model} world ghost={calm && !!ceremony} />
+            <ShardMesh shard={model} world ghost={calm && !!ceremony} dim={dim} />
           </group>
         </group>
       </group>

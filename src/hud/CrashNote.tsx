@@ -14,10 +14,14 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react'
 import { useLootView } from '../store/useLootView'
 import { useShards } from '../store/useShards'
+import { ModalClose } from './ui/ModalClose'
 
 interface Props {
   /** Which part of the screen this guards, for the note's title. */
   where: string
+  /** Whether CLOSE also closes the open card: true for the modal boundary,
+   * where the card is one of the modals; a HUD or menu crash leaves it open. */
+  closesCard?: boolean
   children: ReactNode
 }
 
@@ -51,9 +55,15 @@ export class CrashNote extends Component<Props, State> {
   }
 
   private close = (): void => {
-    // Leave whatever was open, so the same render is not tried again at once.
+    // Leave whatever was open, so the same render is not tried again at once:
+    // a card that crashed and stayed selected crashed again on CLOSE, a loop
+    // only RELOAD left (2026-11-09).
     useLootView.getState().select(null)
     useShards.getState().setNearbyOpen(false)
+    // Only a crash in the modal boundary closes the card: the card is one of its
+    // modals. A HUD or menu crash leaves it open, with any unsent comment draft
+    // (review of #622).
+    if (this.props.closesCard) useShards.getState().selectSecret(null)
     this.setState({ error: null, stack: '', copied: false })
   }
 
@@ -67,6 +77,7 @@ export class CrashNote extends Component<Props, State> {
           <header className="panel__head">
             <h2>Crashed</h2>
             <span className="tag tag--warn">{this.props.where}</span>
+            <ModalClose onClose={this.close} />
           </header>
           <p className="crash__message">{error.name}: {error.message}</p>
           <pre className="crash__stack">{lines}</pre>

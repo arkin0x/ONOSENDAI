@@ -8,18 +8,24 @@ import { create } from 'zustand'
 import { formatBig, formatStep } from '../lib/space'
 import { formatCellSizeLong } from 'sno-core/scale'
 import { geocode } from '../lib/geocode'
-import { onEarthSurface } from '../lib/hyperspace/interest'
-import { canonicalViewAt, forgetView, parseViewAt, readRecentViews, rememberView, RECENT_VIEWS_EVENT, RECENT_VIEWS_KEY, type RecentView, type ViewTarget } from '../lib/viewAt'
-import { coordLink, placeHex } from '../lib/coordRoute'
-import { useCyberspace } from '../store/useCyberspace'
+import { canonicalViewAt, forgetView, parseViewAt, readRecentViews, rememberView, RECENT_VIEWS_EVENT, RECENT_VIEWS_SHOWN, saveRecentViews, type RecentView, type ViewTarget } from '../lib/viewAt'
+import { coordLink, placeHex, typedCoordRoute } from '../lib/coordRoute'
+import { openCoordLink } from '../store/useCoordRoute'
+import { useCyberspace, type CyberspaceState } from '../store/useCyberspace'
+import { sectorTag, xyzToSectorId, type Plane } from 'cyberspace-core'
+import type { Position } from '../lib/space'
 import { useBuilder } from '../store/useBuilder'
+import { padMode } from '../store/padMode'
+import { useScan } from '../store/useScan'
 import { shortHex } from '../lib/time'
-import { ProfilePic } from './ProfileBadge'
+import { ProfilePic, ProfileTap } from './ProfileBadge'
 import { AskBubble } from './AskBubble'
 import { TvButton } from './TvScreen'
 import { useProfile } from '../hooks/useProfile'
+import { useMenuInset } from '../hooks/useMenuInset'
 import { profileLabel } from '../store/useProfiles'
 import { LoginModal } from './LoginModal'
+import { LogoutButton, SignerStatus } from './SignerControls'
 import { NotificationsButton } from './Notifications'
 import { useProfileView } from '../store/useProfileView'
 import { AvatarsPanel } from './AvatarsPanel'
@@ -31,6 +37,8 @@ import { DerezzPanel } from './DerezzPanel'
 import { HyperspacePanel } from './HyperspacePanel'
 import { useHyperspace } from '../store/useHyperspace'
 import { RelaysPanel } from './RelaysPanel'
+import { TutorialPanel } from './TutorialPanel'
+import { GamesPanel } from './GamesPanel'
 import { TargetsPanel } from './TargetsPanel'
 import { ShardsPanel } from './ShardsPanel'
 import { Legend } from './Legend'
@@ -39,6 +47,7 @@ import { ScaleLadder } from './ScaleLadder'
 import { ProofPanel } from './ProofPanel'
 import { CloudPanel } from './CloudPanel'
 import { Explanation } from './Explanation'
+import { LinksPanel } from './LinksPanel'
 import { StarredPlaces } from './StarredPlaces'
 import { PanelSlot } from './PanelSlot'
 import { usePanelLayout, type Column, type PanelId } from '../store/usePanelLayout'
@@ -46,6 +55,15 @@ import { jobInProgress } from '../lib/cloud'
 import { useMutes } from '../store/useMutes'
 import { MuteListModal } from './MuteListModal'
 import { useCover } from '../hooks/useCover'
+import { SpeakeasyLine } from './SpeakeasyLine'
+import { appVersion } from '../lib/tv/upgradeAnnounce'
+import { CopyValue } from './ui/CopyValue'
+import { copyText } from '../lib/copyText'
+import { randomCoordHex } from '../lib/randomCoord'
+import { Dices } from 'lucide-react'
+
+/** The menu footer's version: VERSION 2.1, or the build stamp for a build with no simple version. */
+const SHOWN_VERSION = ((v) => (v ? `VERSION ${v}` : __ONOSENDAI_VERSION__))(appVersion())
 
 const AXIS_LABEL: Record<string, string> = { x: 'X', y: 'Y', z: 'Z' }
 
@@ -81,10 +99,11 @@ const COPIED_MS = 1200
 function useCopied(): [string | null, (key: string, text: string) => void] {
   const [copied, setCopied] = useState<string | null>(null)
   const copy = (key: string, text: string): void => {
-    navigator.clipboard?.writeText(text).then(
-      () => { setCopied(key); window.setTimeout(() => setCopied((c) => (c === key ? null : c)), COPIED_MS) },
-      () => { /* no clipboard here: the value stays selectable */ },
-    )
+    // The clipboard, or the old copy command where it is refused (lib/copyText).
+    void copyText(text).then((ok) => {
+      if (ok) { setCopied(key); window.setTimeout(() => setCopied((c) => (c === key ? null : c)), COPIED_MS) }
+      // Neither worked: the value stays selectable.
+    })
   }
   return [copied, copy]
 }
@@ -108,17 +127,19 @@ function IdentityPanel(): JSX.Element {
       </header>
 
       <div className="identity__who">
-        <ProfilePic pubkey={identity.pubkey} size={38} />
+        <ProfileTap pubkey={identity.pubkey}><ProfilePic pubkey={identity.pubkey} size={38} /></ProfileTap>
         <div className="identity__who-text">
           <span className="identity__name">{name}</span>
           <span className="identity__signer">{SIGNER_LABEL[signerKind] ?? signerKind}</span>
-          <span className="secret__npub" title={identity.npub}>{shortHex(identity.npub, 14, 8)}</span>
+          <CopyValue className="secret__npub" value={identity.npub} shown={shortHex(identity.npub, 14, 8)} />
         </div>
         <div className="identity__acts">
           <button className="identity__change" onClick={() => useProfileView.getState().edit()}>PROFILE</button>
           <button className="identity__change" onClick={() => setLoginOpen(true)}>CHANGE</button>
+          <LogoutButton />
         </div>
       </div>
+      <SignerStatus />
       <div className="identity__row">
         <NotificationsButton />
         <button className="identity__change identity__blocked" onClick={() => setMutesOpen(true)} title="Who you blocked and what you muted, on your nostr mute list">
@@ -130,7 +151,11 @@ function IdentityPanel(): JSX.Element {
         Your spawn location is equal to your public key. Use the generated key or
         sign in with your nostr keypair. LIVE indicates your proofs are being
         published so other identities can see your movements. LOCAL means proofs
-        are stored on this device until you switch to LIVE.
+        are stored on this device until you switch to LIVE. LOG OUT leaves the
+        signer in use and goes back to this device's own key; everything stays
+        here, and logging in again picks up where you left off. With a remote
+        signer, SIGNER says when it last answered, TEST SIGNER asks it now, and
+        PAIR AGAIN pairs it with a fresh QR code.
       </Explanation>
 
       {loginOpen && <LoginModal onClose={() => setLoginOpen(false)} />}
@@ -139,16 +164,14 @@ function IdentityPanel(): JSX.Element {
   )
 }
 
-const RECENT_KEY = RECENT_VIEWS_KEY
-// Every pinned place (an End of Chain) and three others (viewAt readRecentViews).
+// Every pinned place (an End of Chain) and three others (viewAt readRecentViews),
+// the identity signed in's own (store/recentViewsList.ts).
 const loadRecent = readRecentViews
-function saveRecent(list: RecentView[]): void {
-  try { localStorage.setItem(RECENT_KEY, JSON.stringify(list)) } catch { /* private mode */ }
-}
+const saveRecent = saveRecentViews
 
 /**
- * What is typed into the Position panel's VIEW field, kept outside the panel:
- * BUILD mode moves the panel to the top of the menu and back (Hud below),
+ * What is typed into the View panel's VIEW field, kept outside the panel:
+ * BUILD and VIEW move the panel to the top of the menu and back (Hud below),
  * which mounts it afresh, and a coordinate half typed when DEPLOY turned
  * BUILD on was lost with it (review of #235).
  */
@@ -157,17 +180,105 @@ export const useViewDraft = create<{ text: string; setText: (text: string) => vo
   setText: (text) => set({ text }),
 }))
 
+/**
+ * A place as Position and View both show it: X, Y, Z and the sector, each
+ * copied raw on a tap (the grouping commas are for reading, not for pasting
+ * into a filter or a script), then its coordinate and its /C/ link.
+ */
+function PlaceReadout({ position, sector, coordHex, linkHex }: { position: Position; sector: string; coordHex: string; linkHex: string }): JSX.Element {
+  const [copied, copy] = useCopied()
+  const readout = (key: string, label: string, shown: string, raw: string): JSX.Element => (
+    <div key={key}>
+      <dt className={copied === key ? 'is-copied' : ''}>{copied === key ? 'Copied' : label}</dt>
+      <dd><button className="copy" onClick={() => copy(key, raw)} title="Tap to copy">{shown}</button></dd>
+    </div>
+  )
+  return (
+    <>
+      <dl className="stats stats--axes">
+        {readout('x', 'X', formatBig(position.x), position.x.toString())}
+        {readout('y', 'Y', formatBig(position.y), position.y.toString())}
+        {readout('z', 'Z', formatBig(position.z), position.z.toString())}
+        {readout('sector', 'Sector', sector, sector)}
+      </dl>
+
+      <button className="hash copy" onClick={() => copy('coord', coordHex)} title="Tap to copy">
+        <span className={`hash__label ${copied === 'coord' ? 'is-copied' : ''}`}>{copied === 'coord' ? 'copied' : 'coord'}</span>
+        <code>{coordHex}</code>
+      </button>
+      <button className="hash copy" onClick={() => copy('link', coordLink(window.location.origin, linkHex))} title="Copy a link that opens ONOSENDAI looking at this place">
+        <span className={`hash__label ${copied === 'link' ? 'is-copied' : ''}`}>{copied === 'link' ? 'copied' : 'link'}</span>
+        <code>/C/{linkHex}</code>
+      </button>
+    </>
+  )
+}
+
+function PlaneTag({ plane }: { plane: Plane }): JSX.Element {
+  return <span className={`plane plane--${plane}`}>{plane === 0 ? 'DATASPACE' : 'IDEASPACE'}</span>
+}
+
+/**
+ * Where your avatar is. Its link is your chain head's place, always (arkinox,
+ * 2026-11-02): it used to follow a view, and that link now lives in the View
+ * panel. Looking somewhere else is the View panel's too.
+ */
 export function PositionPanel(): JSX.Element {
   const position = useCyberspace((s) => s.position)
   const plane = useCyberspace((s) => s.plane)
+  const coordHex = useCyberspace((s) => s.coordHex())
+  const sector = useCyberspace((s) => s.sector())
+
+  return (
+    <section className="panel">
+      <header className="panel__head">
+        <h2>Position</h2>
+        <PlaneTag plane={plane} />
+      </header>
+      <PlaceReadout position={position} sector={sector} coordHex={coordHex} linkHex={coordHex} />
+      <SpeakeasyLine />
+      <Explanation>
+        Where your avatar stands: its X, Y and Z, the sector they fall in, and
+        the coordinate of your chain head. Tap any figure to copy it. LINK
+        copies a link that opens ONOSENDAI looking at your avatar. To look
+        somewhere else without moving, use the View panel. While LIVE,
+        SPEAKEASY shows up when you are inside one: a private relay for that
+        region. ADD RELAY adds it to your relays. The relay goes by the last
+        point of your chain it accepts, so if your chain stops before your
+        head, it shows where, with RESPAWN when only a respawn gets you in.
+      </Explanation>
+    </section>
+  )
+}
+
+/**
+ * The place the View panel reads: the place a /C/ link shares
+ * (lib/coordRoute.ts), which is what Position's link was until the two
+ * panels split. Yours at your head; in a free view, the view's cursor, which
+ * is what the pad and the fly move (and BUILD's build cursor); in any other
+ * look (a block, a spectated avatar, your history), what it looks at.
+ */
+export function viewedPlace(s: Pick<CyberspaceState, 'position' | 'plane' | 'cursor' | 'anchor' | 'anchorPlane' | 'focus' | 'atHead'>): { position: Position; plane: Plane } {
+  if (s.atHead()) return { position: s.position, plane: s.plane }
+  return { position: s.focus?.drive ? s.cursor : s.anchor, plane: s.anchorPlane }
+}
+
+/**
+ * The View panel (arkinox, 2026-11-02): exactly like Position, but its
+ * figures are the view's (viewedPlace), and it holds the ways to look
+ * somewhere: VIEW A COORDINATE, RECENT and STARRED PLACES, which were in
+ * Position. Its layout id is `viewat` (store/usePanelLayout.ts). It leads the
+ * menu while a free view or BUILD is up (Hud below).
+ */
+export function ViewAtPanel(): JSX.Element {
+  // Each a stable reference out of the store, so no selector makes a fresh object.
+  const position = useCyberspace((s) => viewedPlace(s).position)
+  const plane = useCyberspace((s) => viewedPlace(s).plane)
+  // At your head the coordinate is the chain's own, plane bit included (coordHex).
+  const coordHex = useCyberspace((s) => (s.atHead() ? s.coordHex() : placeHex(viewedPlace(s).position, viewedPlace(s).plane)))
+  const sector = sectorTag(xyzToSectorId(position.x, position.y, position.z))
   // Decimals go to the plane on show: yours at your head, the view's in a view.
   const lookedPlane = useCyberspace((s) => (s.atHead() ? s.plane : s.anchorPlane))
-  const coordHex = useCyberspace((s) => s.coordHex())
-  // The place a /C/ link shares (lib/coordRoute.ts): yours at your head;
-  // in a view, the view's cursor when it drives, else what it looks at.
-  const linkHex = useCyberspace((s) => (s.atHead() ? s.coordHex() : placeHex(s.focus?.drive ? s.cursor : s.anchor, s.anchorPlane)))
-  const sector = useCyberspace((s) => s.sector())
-  const [copied, copy] = useCopied()
   const viewText = useViewDraft((s) => s.text)
   const setViewText = useViewDraft((s) => s.setText)
   const [viewBad, setViewBad] = useState(false)
@@ -177,20 +288,22 @@ export function PositionPanel(): JSX.Element {
   // addRecentView): shown at once, with the list open so it is seen.
   useEffect(() => {
     const reload = (): void => { setRecent(loadRecent()); setRecentOpen(true) }
+    // Another identity's list, or this one's read back: shown, the panel as it was.
+    const shown = (): void => { setRecent(loadRecent()) }
     window.addEventListener(RECENT_VIEWS_EVENT, reload)
-    return () => window.removeEventListener(RECENT_VIEWS_EVENT, reload)
+    window.addEventListener(RECENT_VIEWS_SHOWN, shown)
+    return () => { window.removeEventListener(RECENT_VIEWS_EVENT, reload); window.removeEventListener(RECENT_VIEWS_SHOWN, shown) }
   }, [])
   const [finding, setFinding] = useState(false)
   const [viewNote, setViewNote] = useState<string | null>(null)
   const look = (typed: string, target: ViewTarget): void => {
-    useCyberspace.getState().focusOn(target.position, target.plane, target.label, target.scaleExp, true)
-    // A place on Earth gets the pin: marking the focal point is the whole
-    // purpose of typing a latitude and longitude or a place name. A
-    // coordinate or a triple of axes that is not on the ground gets none,
-    // and leaves any standing pin alone.
-    if (target.plane === 0 && onEarthSurface(target.position)) {
-      useCyberspace.getState().dropPin(target.position, target.label, target.scaleExp)
-    }
+    // Named when the label is more than the words its coordinate reads as:
+    // a place found by name, a star's name, a recent place's name. VIEWING
+    // then says it (FocusBar viewingLabel).
+    const named = target.label !== parseViewAt(typed, target.plane)?.label
+    // VIEW there. No pin: the cross marker is off (arkinox, 2026-11-11);
+    // the star marks a place.
+    useCyberspace.getState().viewAt(target.position, target.plane, target.label, target.scaleExp, { named })
     const next = rememberView(recent, { input: canonicalViewAt(typed), label: target.label, plane: target.plane })
     setRecent(next)
     saveRecent(next)
@@ -199,11 +312,19 @@ export function PositionPanel(): JSX.Element {
   // longitude. Anything else is taken as a place by name and looked up once
   // (geocode.ts); what comes back is a latitude and longitude, remembered as
   // such under the place's own name, so the recent entry never needs the
-  // lookup again.
-  const view = async (): Promise<void> => {
-    const typed = viewText.trim()
+  // lookup again. The dice hands its roll straight in, as if it were typed.
+  const view = async (text: string = viewText): Promise<void> => {
+    const typed = text.trim()
     const target = parseViewAt(typed, lookedPlane)
     if (target) { setViewBad(false); look(typed, target); return }
+    // A /C/ link, or its hex: a region opens as the link does, the address
+    // and all (openCoordLink); a whole coordinate is the point, as typed hex is.
+    // A link that names no coordinate is refused here, never sent to the lookup.
+    const link = typedCoordRoute(typed)
+    if (link?.kind === 'prefix') { setViewBad(false); setViewNote(null); openCoordLink(link.hex); return }
+    const point = link?.kind === 'full' ? parseViewAt(link.hex, lookedPlane) : null
+    if (link?.kind === 'full' && point) { setViewBad(false); setViewNote(null); look(link.hex, point); return }
+    if (link) { setViewBad(true); setViewNote(`No place found for "${typed}".`); return }
     if (!/[a-z]/i.test(typed)) { setViewBad(true); return }
     setFinding(true)
     setViewNote(null)
@@ -223,40 +344,25 @@ export function PositionPanel(): JSX.Element {
       setFinding(false)
     }
   }
-
-  // Every figure copies on a tap, raw: the grouping commas are for reading,
-  // not for pasting into a filter or a script.
-  const readout = (key: string, label: string, shown: string, raw: string): JSX.Element => (
-    <div key={key}>
-      <dt className={copied === key ? 'is-copied' : ''}>{copied === key ? 'Copied' : label}</dt>
-      <dd><button className="copy" onClick={() => copy(key, raw)} title="Tap to copy">{shown}</button></dd>
-    </div>
-  )
+  // The dice (arkinox, 2026-11-18): a completely random coordinate, written
+  // into the box so it can be seen and changed, then viewed exactly as if it
+  // had been typed and VIEW pressed. Every 256-bit number is a place
+  // (lib/randomCoord), so a roll never comes back refused.
+  const roll = (): void => {
+    const hex = randomCoordHex()
+    setViewText(hex)
+    setViewBad(false)
+    setViewNote(null)
+    void view(hex)
+  }
 
   return (
     <section className="panel">
       <header className="panel__head">
-        <h2>Position</h2>
-        <span className={`plane plane--${plane}`}>
-          {plane === 0 ? 'DATASPACE' : 'IDEASPACE'}
-        </span>
+        <h2>View</h2>
+        <PlaneTag plane={plane} />
       </header>
-
-      <dl className="stats stats--axes">
-        {readout('x', 'X', formatBig(position.x), position.x.toString())}
-        {readout('y', 'Y', formatBig(position.y), position.y.toString())}
-        {readout('z', 'Z', formatBig(position.z), position.z.toString())}
-        {readout('sector', 'Sector', sector, sector)}
-      </dl>
-
-      <button className="hash copy" onClick={() => copy('coord', coordHex)} title="Tap to copy">
-        <span className={`hash__label ${copied === 'coord' ? 'is-copied' : ''}`}>{copied === 'coord' ? 'copied' : 'coord'}</span>
-        <code>{coordHex}</code>
-      </button>
-      <button className="hash copy" onClick={() => copy('link', coordLink(window.location.origin, linkHex))} title="Copy a link that opens ONOSENDAI looking at this place">
-        <span className={`hash__label ${copied === 'link' ? 'is-copied' : ''}`}>{copied === 'link' ? 'copied' : 'link'}</span>
-        <code>/C/{linkHex}</code>
-      </button>
+      <PlaceReadout position={position} sector={sector} coordHex={coordHex} linkHex={coordHex} />
 
       {/* The free view: look at any place without walking there. Three axis
           values, or a coordinate as the tags carry it; the cursor comes along,
@@ -265,7 +371,7 @@ export function PositionPanel(): JSX.Element {
       <div className="viewat">
         <span className="legend__label">View a coordinate</span>
         <form
-          className="avatars__find"
+          className="avatars__find viewat__find"
           onSubmit={(e) => { e.preventDefault(); void view() }}
         >
           <input
@@ -279,6 +385,16 @@ export function PositionPanel(): JSX.Element {
             aria-invalid={viewBad}
           />
           <button className="avatars__go" type="submit" disabled={!viewText.trim() || finding} title="Look at this place without moving">{finding ? 'FINDING' : 'VIEW'}</button>
+          <button
+            className="avatars__go viewat__dice"
+            type="button"
+            onClick={roll}
+            disabled={finding}
+            title="Look at a completely random place"
+            aria-label="Random coordinate"
+          >
+            <Dices aria-hidden="true" />
+          </button>
         </form>
         {viewNote && <p className="notice">{viewNote}</p>}
         {recent.length > 0 && (
@@ -382,66 +498,106 @@ function ScalePanel(): JSX.Element {
   )
 }
 
-const OFFICIAL: Array<{ href: string; name: string; what: string }> = [
-  { href: 'https://github.com/arkin0x/cyberspace', name: 'Cyberspace v2 Specification', what: 'the core protocol documentation' },
-  { href: 'https://straylight.cafe', name: 'straylight.cafe', what: 'cyberspace enthusiast community hub' },
-  { href: 'https://cyberspace.international', name: 'cyberspace.international', what: 'education, proliferation, adoption of cyberspace' },
-  { href: 'https://snocrash.art', name: 'SnoCrash', what: 'SNO format 3D model builder' },
-  { href: 'https://github.com/arkin0x/ONOSENDAI/tree/v2', name: 'ONOSENDAI v2 Codebase', what: 'this client, on GitHub' },
-  { href: 'https://www.youtube.com/watch?v=e7uVFkwxKh8', name: 'Cyberspace TV', what: 'the 24/7 stream, live' },
+/**
+ * The keys for the mode the pad is in (arkinox, 2026-11-11: the Controls panel
+ * always showed HOP's; it shows the current mode's now). HOP lines up a move,
+ * VIEW is a free look that flies, WALK is first person, BUILD places things.
+ * Shared keys (Tab, Esc, P, H, the chain explorer) sit under every mode.
+ */
+const SHARED_ROWS: Array<[string, string]> = [
+  ['Tab', 'previous view'],
+  ['C', 'canonical view (facing the black sun)'],
+  ['P', 'toggle plane'],
+  ['H', 'hyperspace line scrubber'],
+  ['[ / ]', 'chain explorer: back / forward one action'],
+  ['Home / End', 'chain explorer: spawn / live head'],
+  ['Esc', 'close: dialog, then menu, then the latest chip'],
 ]
 
-function LinksPanel(): JSX.Element {
-  return (
-    <section className="panel panel--links">
-      <header className="panel__head">
-        <h2>Official</h2>
-      </header>
-      {OFFICIAL.map((l) => (
-        <p key={l.href} className="links__row">
-          <a href={l.href} target="_blank" rel="noopener noreferrer">{l.name}</a>
-          <span className="links__what"> - {l.what}</span>
-        </p>
-      ))}
-      <Explanation>
-        These are the official places to read about and build on Cyberspace, and
-        each one opens in a new tab. The Cyberspace v2 Specification is the
-        protocol itself: coordinates, movement and its proofs, region keys,
-        hyperspace and every event kind. straylight.cafe is the community hub for
-        people exploring cyberspace. cyberspace.international is for teaching
-        Cyberspace and bringing more people and apps to it. SnoCrash builds 3D
-        models in the SNO format that Cyberspace objects use. The ONOSENDAI v2
-        Codebase is the source code of this client on GitHub.
-      </Explanation>
-    </section>
-  )
+const MODE_ROWS: Record<'hop' | 'view' | 'walk' | 'build' | 'scan', { title: string; rows: Array<[string, string]>; hint: string }> = {
+  hop: {
+    title: 'Controls · HOP',
+    rows: [
+      ['W A S D', 'move cursor one step'],
+      ['R / F', 'cursor FAR / NEAR along the depth axis'],
+      ['Space', 'commit hop or sidestep (compute proof)'],
+      ['X', 'cancel proof / recall cursor'],
+      ['Q / E', 'scale step out / in (zoom)'],
+      ['Shift + W A S D', 'rotate view 90°'],
+      ['B', 'build mode in / out'],
+      ['N', 'scan mode in / out'],
+    ],
+    hint: 'HOP lines up a move with the cursor and commits it with Space, which computes its proof and signs it. W A S D move the cursor, R and F move it FAR and NEAR along the depth axis, and Q and E zoom. X recalls the cursor to your avatar. B goes into build mode. On the pad, WALK beside the mode button goes into WALK when the cursor is on your avatar and nothing is under way.',
+  },
+  view: {
+    title: 'Controls · VIEW',
+    rows: [
+      ['W A S D', 'move cursor one step'],
+      ['R / F', 'cursor FAR / NEAR along the depth axis'],
+      ['Space', 'fly the view forward (hold)'],
+      ['Shift', 'fly the view back (hold)'],
+      ['X', 'recall cursor and view to your avatar, still in VIEW (region mode: reset the cursor, collapse the region)'],
+      ['Q / E', 'scale step out / in (zoom)'],
+      ['Shift + W A S D', 'rotate view 90°'],
+      ['N', 'scan mode in / out'],
+    ],
+    hint: 'VIEW is a free look from your head: the cursor moves without lining up a hop. Space and Shift fly the view forward and back the way the camera faces; R and F are FAR and NEAR, a cell at a time. X, or RECALL on the pad, brings the cursor home and VIEW stays; Esc ends VIEW. The Region button picks a region for a private speakeasy.',
+  },
+  walk: {
+    title: 'Controls · WALK',
+    rows: [
+      ['W A S D', 'walk: forward, left, back, right'],
+      ['Space / R', 'jump (gravity on) or up a cell'],
+      ['C / F', 'down a cell, or absorb a bounce'],
+      ['Z', 'gravity on / off'],
+      ['X', 'stop the walk, or leave WALK for the mode you came from'],
+    ],
+    hint: 'WALK is first person: every press is a step, proved behind you. W A S D walk, Space jumps, C goes down, and Z switches gravity. X stops the steps still to prove, or leaves WALK for HOP, VIEW, BUILD or SCAN, whichever you came from; on the pad, so do WALK and the dim mode button.',
+  },
+  build: {
+    title: 'Controls · BUILD',
+    rows: [
+      ['W A S D', 'move the build cursor'],
+      ['R / F', 'build cursor FAR / NEAR'],
+      [', / .', 'build step finer / coarser'],
+      ['Space', 'place what is lined up'],
+      ['X', 'recall the build cursor to your avatar'],
+      ['B', 'leave build mode'],
+      ['N', 'scan mode, where the build cursor is'],
+    ],
+    hint: 'BUILD places things at a build cursor and never moves you. The movement keys and zoom move that cursor; , and . change the step it places at; Space places. X, or RECALL on the pad, brings the build cursor home and BUILD stays; B leaves.',
+  },
+  scan: {
+    title: 'Controls · SCAN',
+    rows: [
+      ['W A S D', 'move cursor one step'],
+      ['R / F', 'cursor FAR / NEAR along the depth axis'],
+      [', / .', 'scan height down / up'],
+      ['Space', 'scan the purple cube'],
+      ['X', 'cancel the scan, or recall the cursor'],
+      ['Q / E', 'scale step out / in (zoom)'],
+      ['Shift + W A S D', 'rotate view 90°'],
+      ['N', 'scan mode out, back to HOP'],
+    ],
+    hint: 'SCAN looks for things hidden at the scan height in the purple cube at the cursor. Up to your device limit it is free; above it HOSAKA computes it for the price shown, and only the SCAN button pays.',
+  },
 }
 
 function Controls(): JSX.Element {
-  const rows: Array<[string, string]> = [
-    ['W A S D', 'move cursor one step'],
-    ['Space', 'commit hop or sidestep (compute proof)'],
-    ['X', 'cancel proof / recall cursor (building: stop a move or route from before, else build cursor to your avatar)'],
-    ['B', 'build mode in / out: the movement keys and zoom then move the build cursor, never your avatar'],
-    ['Shift + W A S D', 'rotate view 90°'],
-    ['Tab', 'previous view'],
-    ['Esc', 'close: dialog, then menu, then the latest chip'],
-    ['C', 'canonical view (facing the black sun)'],
-    ['Q / E', 'scale step up / down (zoom out / in)'],
-    ['R / F', 'cursor along depth axis'],
-    ['P', 'toggle plane'],
-    ['H', 'hyperspace line scrubber'],
-    ['[ / ]', 'chain explorer: back / forward one action (building: the build cursor goes to it)'],
-    ['Home / End', 'chain explorer: spawn / live head (building: the same)'],
-  ]
+  const walking = useCyberspace((s) => s.walking)
+  const viewing = useCyberspace((s) => s.viewing())
+  const building = useBuilder((s) => s.active)
+  const scanning = useScan((s) => s.active)
+  const mode = padMode(walking, building, viewing, scanning)
+  const { title, rows, hint } = MODE_ROWS[mode]
 
   return (
     <section className="panel panel--controls">
       <header className="panel__head">
-        <h2>Controls</h2>
+        <h2>{title}</h2>
       </header>
       <dl className="keys">
-        {rows.map(([key, description]) => (
+        {[...rows, ...SHARED_ROWS].map(([key, description]) => (
           <div key={key}>
             <dt>
               <kbd>{key}</kbd>
@@ -451,19 +607,12 @@ function Controls(): JSX.Element {
         ))}
       </dl>
       <Explanation>
-        These are the keyboard keys; on a touch screen the pad and its buttons do
-        the moving, zooming and committing. W A S D move the cursor one step at
-        the current zoom, R and F move it along the depth axis, and Space commits
-        the move the cursor lines up, which computes its proof and signs it. X
-        cancels a proof in progress or brings the cursor back to your avatar. Q
-        and E zoom out and in by one power of two. Shift with W A S D turns the
-        view 90 degrees, Tab goes back to the view before, and C faces the black
-        sun. P switches the plane between dataspace and ideaspace, and H opens the
-        hyperspace line scrubber. [ and ] step through your chain one action at a
-        time, and Home and End jump to its spawn and its live head. B goes in and
-        out of build mode, where the movement keys and zoom move the build cursor
-        instead of your avatar. Esc closes the topmost thing: a dialog first, then
-        the menu, then the latest chip.
+        These are the keys for the mode you are in; the pad and its buttons do
+        the same on a touch screen. {hint} Tab goes back to the view before, C
+        faces the black sun, and P switches the plane. H opens the hyperspace
+        line scrubber. [ and ] step through your chain, Home and End jump to its
+        spawn and live head. Esc closes the topmost thing: a dialog, then the
+        menu, then the latest chip.
       </Explanation>
     </section>
   )
@@ -481,18 +630,20 @@ function Controls(): JSX.Element {
  * Hyperspace, View (what the scene draws, just above the Legend that decodes
  * it), Legend, Controls, Derezz and Relays.
  */
-const PANELS: Record<PanelId, () => JSX.Element> = {
+const PANELS: Record<PanelId, () => JSX.Element | null> = {
   identity: IdentityPanel,
   agents: AgentsPanel,
   hidden: HiddenPanel,
   discovered: DiscoveredPanel,
   items: InventoryPanel,
+  games: GamesPanel,
   create: ShardsPanel,
   avatars: AvatarsPanel,
   targets: TargetsPanel,
   links: LinksPanel,
   scale: ScalePanel,
   position: PositionPanel,
+  viewat: ViewAtPanel,
   proof: ProofPanel,
   cloud: CloudPanel,
   chain: ChainPanel,
@@ -502,6 +653,7 @@ const PANELS: Record<PanelId, () => JSX.Element> = {
   controls: Controls,
   derezz: DerezzPanel,
   relays: RelaysPanel,
+  tutorial: TutorialPanel,
 }
 
 /**
@@ -542,12 +694,16 @@ export function Hud({ menuOpen = false }: { menuOpen?: boolean }): JSX.Element {
   // the proof panel is the thing you are watching, so it takes the first
   // position and HOSAKA falls in behind it rather than above it.
   const proofLeads = useCyberspace((s) => s.proof.status === 'computing')
-  // BUILD mode puts the Position panel first, above even a move under way
-  // (arkinox, 2026-10-08): its VIEW, RECENT and starred places are how the
-  // build cursor jumps. The left column comes first on a phone too, where
-  // the columns stack, so it is the first panel on both. Back in its own
-  // place on exit.
+  // A free view puts the View panel first, above even a move under way
+  // (arkinox, 2026-11-02: "rises to position 1 while VIEW mode is active"):
+  // its figures are the view's cursor. BUILD mode does too: it put the
+  // Position panel first (arkinox, 2026-10-08) because VIEW, RECENT and the
+  // starred places there are how the build cursor jumps, and those moved to
+  // the View panel, whose figures are the build cursor. The left column
+  // comes first on a phone too, where the columns stack, so it is the first
+  // panel on both. Back in its own place when the view or the mode ends.
   const building = useBuilder((s) => s.active)
+  const freeView = useCyberspace((s) => s.focus?.drive === true && s.exploreIndex === null)
   // The saved layout (arkinox, 2026-10-10): read before the first render, so
   // a refresh shows the menu as it was left, and written on every fold and
   // move. A priority state above only rearranges what is drawn; it writes
@@ -562,17 +718,27 @@ export function Hud({ menuOpen = false }: { menuOpen?: boolean }): JSX.Element {
   // which covers the whole scene while it is open.
   const leftRef = useCover('left', !menuOpen)
   const rightRef = useCover('right', !menuOpen)
+  // Beside the scene the columns also cover the screen's edges, where the
+  // controls stand on a wide screen: the controls slide inboard of them
+  // while they are open (hooks/useMenuInset; owner, 2026-11-22).
+  useMenuInset(hudRef, !menuOpen)
 
-  const leads: PanelId[] = []
-  if (building) leads.push('position')
-  if (proofLeads) leads.push('proof')
-  if (cloudLeads) leads.push('cloud')
-  if (rideSet) leads.push('hyperspace')
+  // The tutorial's front panel (usePanelLayout front) outranks them all while
+  // it asks: the Earth route's HYPERSPACE, BOARD and RIDE at the very top.
+  const front = usePanelLayout((s) => s.front)
+  const leads: PanelId[] = front ? [front] : []
+  const lead = (id: PanelId): void => { if (!leads.includes(id)) leads.push(id) }
+  if (building || freeView) lead('viewat')
+  if (proofLeads) lead('proof')
+  if (cloudLeads) lead('cloud')
+  if (rideSet) lead('hyperspace')
   // AGENTS is drawn for everyone, as a BETA (arkinox, 2026-10-13: "ship it
   // so that we can make the agent panel public"). From 2026-10-10 it was
   // drawn only for someone a bot profile named as operator, while TALK and
   // the follow rule were missing; both have shipped. It sits in its saved
   // place, which the hidden days kept.
+  // The TUTORIAL panel (feedback item 17) is drawn for everyone, switched off
+  // too: its switch lives in it (owner, 2026-11-13), so it can be turned back on.
   const hidden = (id: PanelId): boolean => leads.includes(id)
   const left = [...leads, ...order.left.filter((id) => !hidden(id))]
   const right = order.right.filter((id) => !hidden(id))
@@ -629,9 +795,13 @@ export function Hud({ menuOpen = false }: { menuOpen?: boolean }): JSX.Element {
           <div>CODE <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="license noopener noreferrer">CC BY-SA 4.0</a></div>
           <div>LOGO © 2023-2026 ARKINOX <a href="https://creativecommons.org/licenses/by-nc-nd/4.0/" target="_blank" rel="license noopener noreferrer">CC BY-NC-ND 4.0</a></div>
         </div>
-        {/* The build, last thing in the menu: 2, the day it was merged, how
-            many PRs had merged that day, and which PR this is. */}
-        <div className="hud__version" title="2 . day merged . PRs merged that day . this PR">{__ONOSENDAI_VERSION__}</div>
+        {/* The version, last thing in the menu: the simple one people see
+            (2.1, 2.2, ...; owner, 2026-11-12), the build this page runs. The
+            build stamp (2, the day it was merged, how many PRs had merged
+            that day, and which PR this is) is in its title, for debugging. */}
+        <div className="hud__version" title={`build ${__ONOSENDAI_VERSION__} (2 . day merged . PRs merged that day . this PR)`}>
+          {SHOWN_VERSION}
+        </div>
       </div>
       <div ref={grabRef} className="hud__grab" onPointerMove={over} onPointerUp={drop} onPointerCancel={drop} onLostPointerCapture={drop} aria-hidden="true" />
     </div>

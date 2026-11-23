@@ -26,8 +26,10 @@ interface ChainUiState {
   brokenView: 'notice' | 'confirm' | null
   /**
    * The chain explorer's body is open under the CHAIN chip. Here rather than
-   * in the explorer so the Chain panel's ACTIONS tag can open and close it in
-   * BUILD mode, where a step along the chain would aim the build cursor.
+   * in the explorer so it outlives the chip: spectating opens it and puts
+   * back what it was when the spectation ends (hud/ChainExplorer.tsx), and
+   * BUILD mode, which hides the chip, leaves it as it found it (the Chain
+   * panel's ACTIONS tag stands down while building).
    */
   explorerOpen: boolean
   setExplorerOpen: (open: boolean) => void

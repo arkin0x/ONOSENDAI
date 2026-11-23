@@ -20,6 +20,8 @@ if (typeof localStorage === 'undefined') {
 const sent: { kind: number; tags: string[][]; id: string }[] = []
 /** Kinds every relay refuses in the current test. */
 const refused = new Set<number>()
+/** The bag kind, for a stand-in hoisted above the import of HIDDEN_KIND. */
+const HIDDEN = 33330
 /** What the relay holds for a bag query in the current test. */
 let relayBags: unknown[] = []
 vi.mock('../../lib/relay', () => ({
@@ -30,7 +32,7 @@ vi.mock('../../lib/relay', () => ({
   }),
   query: vi.fn(async () => relayBags),
   // What the relay holds at an address: the objects it took.
-  queryEach: vi.fn(async (f: { kinds: number[]; '#d': string[] }) => [{ url: 'wss://relay.test', outcome: 'answered', events: sent.filter((e) => f.kinds.includes(e.kind) && e.tags.some((t) => t[0] === 'd' && f['#d'].includes(t[1]))) }]),
+  queryEach: vi.fn(async (f: { kinds: number[]; '#d': string[] }) => [{ url: 'wss://relay.test', outcome: 'answered', events: f.kinds.includes(HIDDEN) ? relayBags : sent.filter((e) => f.kinds.includes(e.kind) && e.tags.some((t) => t[0] === 'd' && f['#d'].includes(t[1]))) }]),
   queryAny: vi.fn(async () => []),
   relaySet: () => ['wss://relay.test'],
 }))
@@ -164,7 +166,7 @@ describe('the review fixes', () => {
 
   it('a deployment keeps its reference across a reload', async () => {
     await deploy(3000)
-    const saved = JSON.parse(localStorage.getItem('onosendai:deployments') ?? '[]')
+    const saved = JSON.parse(localStorage.getItem(`onosendai:deployments:${useCyberspace.getState().identity.pubkey}`) ?? '[]')
     const stored = Array.isArray(saved) ? saved.find((d: { ref?: unknown }) => d.ref) : undefined
     expect(stored?.ref).toEqual(useShards.getState().mine[0].ref)
   })

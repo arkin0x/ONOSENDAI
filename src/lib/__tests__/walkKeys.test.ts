@@ -3,7 +3,7 @@
  * sideways, Space or R up, C or F down; nothing with a modifier, no Ctrl.
  */
 import { describe, expect, it } from 'vitest'
-import { walkMove, type WalkKeyEvent } from '../walkKeys'
+import { walkHeldDir, walkMove, type WalkKeyEvent } from '../walkKeys'
 
 const key = (code: string, more: Partial<WalkKeyEvent> = {}): WalkKeyEvent => ({
   code, ctrlKey: false, shiftKey: false, altKey: false, metaKey: false, ...more,
@@ -41,5 +41,16 @@ describe('walkMove', () => {
     expect(walkMove(key('KeyX'))).toBeNull()
     expect(walkMove(key('KeyQ'))).toBeNull()
     expect(walkMove(key('KeyE'))).toBeNull()
+  })
+})
+
+describe('walkHeldDir: what each WALK key holds (store/walkHold.ts combines them)', () => {
+  it('W and S forward and back, A and D the sides, up and down the vertical', () => {
+    expect(walkHeldDir('away')).toEqual({ fwd: 1, strafe: 0, vert: 0 })
+    expect(walkHeldDir('toward')).toEqual({ fwd: -1, strafe: 0, vert: 0 })
+    expect(walkHeldDir('right')).toEqual({ fwd: 0, strafe: 1, vert: 0 })
+    expect(walkHeldDir('left')).toEqual({ fwd: 0, strafe: -1, vert: 0 })
+    expect(walkHeldDir('up')).toEqual({ fwd: 0, strafe: 0, vert: 1 })
+    expect(walkHeldDir('down')).toEqual({ fwd: 0, strafe: 0, vert: -1 })
   })
 })

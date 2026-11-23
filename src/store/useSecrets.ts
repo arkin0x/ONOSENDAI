@@ -37,17 +37,20 @@
 
 import { create } from 'zustand'
 import type { Plane } from 'cyberspace-core'
-import { useCyberspace } from './useCyberspace'
+import { cloudClient, useCyberspace } from './useCyberspace'
+import { HosakaError, type HosakaJob } from '../lib/hosaka'
+import { describeCloudError } from '../lib/cloud'
 import { useShards } from './useShards'
 import type { Position } from '../lib/space'
 import { EVICT_PLACES_PER_PASS, EVICT_TO, SECRETS_BUDGET_BYTES, bytesOfAll, earnedToEvict, trimByCount } from '../lib/secrets/budget'
 import {
   describeError, evictPlaces, forgetPlace as forgetPlaceRow, forgetPlacesUpTo, migrateFromLocalStorage, openSecretsDb,
-  readKeys, readLegacyList, readTotals, recordPlace as recordPlaceRow, syncLegacy, writeKeys, type Totals,
+  readKeys, readLegacyList, readTotals, recordPlace as recordPlaceRow, repairKeyBases, syncLegacy, writeKeys, writeLocks, type Totals,
 } from '../lib/secrets/db'
-import { clearForgets, dropApplied, noteFallback, readBought, readFallback, updateBought } from '../lib/secrets/backstop'
+import { clearForgets, dropApplied, noteFallback, readBought, readFallback, repairBoughtBases, updateBought } from '../lib/secrets/backstop'
 import { attach, backendNow, fallBack, memory, run } from '../lib/secrets/vault'
 import { placeOf, type ScanKey } from '../lib/secrets/places'
+import { alignedBase, baseOf, cornerFromJob, repairBase } from '../lib/secrets/base'
 
 export { bytesOf } from '../lib/secrets/budget'
 export type { Place, PlaceKey, ScanKey } from '../lib/secrets/places'
@@ -75,13 +78,26 @@ export interface HeldKey {
   plane: Plane
   /**
    * How it was come by: a hop of your own, which grants the region it crossed;
-   * a scan that opened something where you stood; or a purchase from HOSAKA.
+   * a scan that opened something where you stood; a cube SCAN mode computed
+   * on this device (store/useScan.ts); or a purchase from HOSAKA, SCAN's
+   * above this device's ceiling included.
    */
-  source: 'hop' | 'scan' | 'cloud'
+  source: 'hop' | 'scan' | 'scanmode' | 'cloud'
   /** The action that bought it, for the chain overlay's key marker. */
   eventId?: string
   /** First held, in seconds since the epoch. */
   at: number
+  /**
+   * A bought key's HOSAKA job and its poll token, kept from the purchase on
+   * so the job's answer can be read again without signing (refetchCorner).
+   * Absent on keys bought before they were kept.
+   */
+  jobId?: string
+  pollToken?: string
+  /** The HOSAKA the job and its poll token belong to: the token is never sent anywhere else (review of #637). */
+  jobApiUrl?: string
+  /** Its lock (DECK-0004 §3.8.1), stored once derived (§3.8.4), so a reload does not derive it again. */
+  lock?: string
 }
 
 /** A key being bought: what it is for, and how far along. */
@@ -158,6 +174,12 @@ interface SecretsState {
    * reads them again. The places themselves are not held in memory.
    */
   placesVersion: number
+  /**
+   * Bumped whenever places are taken away (FORGET, FORGET ALL PLACES, or the
+   * budget's eviction), so the keyring drops their keys at once rather than at
+   * its next unhurried read (store/useKeyring).
+   */
+  placesForgotten: number
   rescan: RescanStatus | null
   setRescan: (rescan: RescanStatus | null) => void
   /**
@@ -226,8 +248,23 @@ interface SecretsState {
    * with nothing in it the purchase stops and says so, since topping up is the
    * Cloud panel's business and not a thing to do behind a modal.
    */
-  /** Buy the key from HOSAKA; resolves to the held key, or null with buyError set. */
-  buy: (at: { x: bigint; y: bigint; z: bigint }, plane: Plane, height: number) => Promise<HeldKey | null>
+  /** Buy the key from HOSAKA; resolves to the held key, or null with buyError set. `expect.lookupId`: the bag's lookup id, when buying to open a bag already seen; the key must hash to it. A key that fails any check reads HOSAKA RETURNED A WRONG KEY and is never held. */
+  buy: (at: { x: bigint; y: bigint; z: bigint }, plane: Plane, height: number, expect?: { lookupId?: string }) => Promise<HeldKey | null>
+  /**
+   * For a bought key whose corner is still not exact (stored rounded by an
+   * earlier build, and no deploy row to fix it from): read its HOSAKA job's
+   * answer again, now that big integers parse exactly, and take the corner
+   * from it if it holds up (lib/secrets/base cornerFromJob). With the job's
+   * poll token when it was kept, without signing; else the signed list of
+   * this pubkey's jobs. Reads only: nothing is bought or paid again. `fixed`
+   * when the corner is exact now, `gone` when HOSAKA no longer has the job
+   * (or cloud compute is off), `unchanged` when there was nothing to do,
+   * `failed` with a reason when asking did not work this time (the signer
+   * timed out or refused, the network, HOSAKA busy) and may work again.
+   * The poll token goes only to the HOSAKA it came from; under any other,
+   * the signed list is asked instead.
+   */
+  refetchCorner: (lookupId: string) => Promise<{ outcome: 'fixed' | 'gone' | 'unchanged' } | { outcome: 'failed'; reason: string }>
 }
 
 /** How the list is ordered. */
@@ -255,6 +292,7 @@ export const useSecrets = create<SecretsState>((set, get) => ({
   keys: {},
   storage: { mode: 'loading', reason: null, bytes: 0, places: 0, placeKeys: 0, budget: SECRETS_BUDGET_BYTES, persisted: 'unasked', error: null, backstopError: null },
   placesVersion: 0,
+  placesForgotten: 0,
   rescan: null,
   buying: null,
   buyError: null,
@@ -329,14 +367,14 @@ export const useSecrets = create<SecretsState>((set, get) => ({
   forgetPlace: async (id) => {
     if (backendNow() === 'idb') await persist((db) => forgetPlaceRow(db, id))
     else { memory.forget(id); memoryTotals() }
-    placesChanged()
+    placesChanged(true)
   },
 
   forgetAllPlaces: async () => {
     const now = Math.floor(Date.now() / 1000)
     if (backendNow() === 'idb') await persist((db) => forgetPlacesUpTo(db, now))
     else { memory.forgetUpTo(now); memoryTotals() }
-    placesChanged()
+    placesChanged(true)
   },
 
   setRescan: (rescan) => set({ rescan }),
@@ -351,13 +389,15 @@ export const useSecrets = create<SecretsState>((set, get) => ({
 
   setSort: (sort) => set({ sort }),
 
-  buy: async (at, plane, height) => {
-    if (get().buying) return null
+  buy: async (at, plane, height, expect) => {
+    // One purchase at a time (a SCAN's may be under way while a hide asks): said, not a stale error.
+    if (get().buying) { set({ buyError: 'HOSAKA is already computing a key for you. Try again when it is done.' }); return null }
     const cs = useCyberspace.getState()
     set({ buying: { height, status: 'submitting', costMsats: 0, estSeconds: null, startedAt: Date.now() }, buyError: null })
     // The store's job driver: a short balance gets the job's own invoice in
     // the invoice modal, and the job starts when it settles.
-    const outcome = await cs.buyRegionKey(at, plane, height)
+    // A key that fails its checks (lib/regionKeyCheck.ts) comes back as an error and is never held.
+    const outcome = await cs.buyRegionKey(at, plane, height, expect)
     if (!outcome.ok) {
       set({ buying: null, buyError: outcome.error })
       return null
@@ -366,21 +406,59 @@ export const useSecrets = create<SecretsState>((set, get) => ({
     const held: HeldKey = {
       lookupId: r.lookup_id,
       keyHex: r.secret_key,
-      height: r.height ?? height,
-      base: {
-        x: String(r.base?.x ?? (at.x >> BigInt(height)) << BigInt(height)),
-        y: String(r.base?.y ?? (at.y >> BigInt(height)) << BigInt(height)),
-        z: String(r.base?.z ?? (at.z >> BigInt(height)) << BigInt(height)),
-      },
+      // The cube asked for, computed here: HOSAKA's `base` came as bare JSON
+      // integers a Number rounded near 2^84, stored as "1.93...e+25", which
+      // then threw in every reader (lib/secrets/base.ts). Never from the answer.
+      height,
+      base: alignedBase(at, height),
       plane,
       source: 'cloud',
       at: Math.floor(Date.now() / 1000),
+      ...(outcome.job ? { jobId: outcome.job.id, pollToken: outcome.job.pollToken, jobApiUrl: outcome.job.apiUrl } : {}),
     }
     get().hold([held])
     set({ buying: null })
     // What was bought is worth looking in at once.
     void useShards.getState().rescan(r.lookup_id, r.secret_key)
     return held
+  },
+
+  refetchCorner: async (lookupId) => {
+    const k = get().keys[lookupId]
+    if (!k || k.source !== 'cloud' || baseOf(k.base, k.heights ?? k.height)) return { outcome: 'unchanged' }
+    const cs = useCyberspace.getState()
+    if (cs.cloudPrefs.mode === 'off') return { outcome: 'gone' }
+    const client = cloudClient(cs.cloudPrefs.apiUrl)
+    // The job no longer there: gone for good. Anything else may work next time, and says why.
+    const missing = (err: unknown): boolean => err instanceof HosakaError && err.status === 404
+    let jobs: HosakaJob[] | null = null
+    try {
+      // The poll token only to the HOSAKA it came from (review of #637).
+      if (k.jobId && k.pollToken && k.jobApiUrl === client.apiUrl) {
+        try {
+          jobs = [await client.getJob(k.jobId, k.pollToken)]
+        } catch (err) {
+          // A token HOSAKA no longer takes: the signed list may still have the job.
+          if (!(err instanceof HosakaError) || (err.status !== 401 && err.status !== 403)) throw err
+        }
+      }
+      if (!jobs) {
+        if (!client.listJobs) return { outcome: 'gone' }
+        jobs = (await client.listJobs()).jobs ?? []
+      }
+    } catch (err) {
+      return missing(err) ? { outcome: 'gone' } : { outcome: 'failed', reason: describeCloudError(err) }
+    }
+    // Read again after the wait: the deploy rows may have fixed it meanwhile (review of #637).
+    const now = get().keys[lookupId]
+    if (!now || baseOf(now.base, now.heights ?? now.height)) return { outcome: 'unchanged' }
+    for (const job of jobs) {
+      const base = cornerFromJob(job?.result, now)
+      if (!base) continue
+      applyBaseRepairs([{ ...now, base }])
+      return { outcome: 'fixed' }
+    }
+    return { outcome: 'gone' }
   },
 
   load: () => {
@@ -407,6 +485,9 @@ export const useSecrets = create<SecretsState>((set, get) => ({
           }
         }
       }
+      // Never the load's failure: a repair that cannot run leaves the keys as they were.
+      try { repairStoredBases() } catch (err) { console.warn('[secrets] could not repair stored corners:', describeError(err)) }
+      watchRowsForRepair()
       void checkPersisted()
     })()
     return loading
@@ -498,8 +579,27 @@ function memoryTotals(): void {
   useSecrets.setState((s) => ({ storage: { ...s.storage, bytes: keyBytes + places.bytes, places: places.places, placeKeys: places.placeKeys } }))
 }
 
-function placesChanged(): void {
-  useSecrets.setState((s) => ({ placesVersion: s.placesVersion + 1 }))
+function placesChanged(removed = false): void {
+  useSecrets.setState((s) => ({ placesVersion: s.placesVersion + 1, ...(removed ? { placesForgotten: s.placesForgotten + 1 } : {}) }))
+}
+
+/**
+ * Store derived locks beside their keys, held keys and place keys alike
+ * (DECK-0004 §3.8.4), so a reload takes them as they are. IndexedDB only:
+ * elsewhere the session's cache is enough. Never adds or drops a key.
+ */
+export async function saveLocks(held: Array<{ lookupId: string; lock: string }>, places: Array<{ lookupId: string; lock: string }>): Promise<void> {
+  if (held.length === 0 && places.length === 0) return
+  // The held rows in memory carry it too, so whatever writes them next writes it with them.
+  const keys = useSecrets.getState().keys
+  let next: Record<string, HeldKey> | null = null
+  for (const l of held) {
+    const k = keys[l.lookupId]
+    if (k && k.lock !== l.lock) { next ??= { ...keys }; next[l.lookupId] = { ...k, lock: l.lock } }
+  }
+  if (next) useSecrets.setState({ keys: next })
+  if (backendNow() !== 'idb') return
+  await persist((db) => writeLocks(db, held, places))
 }
 
 /**
@@ -520,7 +620,7 @@ async function evict(): Promise<void> {
       if (places > 0) {
         const { totals, removed } = await run((db) => evictPlaces(db, need, EVICT_PLACES_PER_PASS))
         useSecrets.setState((s) => ({ storage: { ...s.storage, bytes: totals.bytes, places: totals.places, placeKeys: totals.placeKeys } }))
-        placesChanged()
+        placesChanged(removed > 0)
         if (removed > 0) continue
       }
       const drop = earnedToEvict(useSecrets.getState().keys, need)
@@ -628,6 +728,71 @@ function fallBackToLocal(reason: string): void {
   setKeys(keys)
   // What this session did before the load settled is this session's to record.
   saveKeys(Object.values(early).filter((k) => keys[k.lookupId]), forgets)
+}
+
+/**
+ * Put right the corner of every held key stored inexact (lib/secrets/base.ts):
+ * a bought key from before the corner was computed here kept HOSAKA's rounded
+ * Number ("1.93...e+25"), which threw in every reader. From where it was
+ * hidden when a deploy row of this identity names it, else from the rounded
+ * value when only one aligned corner fits it; a corner that cannot be known
+ * is left as it is and ignored by every reader. Only `base` changes, in the
+ * list, in IndexedDB and in the bought-key backstop: no key is dropped.
+ */
+function repairStoredBases(): void {
+  const rows = useShards.getState().mine
+  const fixed: HeldKey[] = []
+  for (const k of Object.values(useSecrets.getState().keys)) {
+    // Each key on its own: one bad row or corner never stops the others (review of #629).
+    try {
+      if (baseOf(k.base, k.heights ?? k.height)) continue
+      const row = rows.find((d) => d.lookupId === k.lookupId && d.height === k.height && !k.heights)
+      let at: Position | undefined
+      try { at = row ? { x: BigInt(row.at.x), y: BigInt(row.at.y), z: BigInt(row.at.z) } : undefined } catch { at = undefined }
+      // repairBase takes the row's point only where it fits what was stored.
+      const base = repairBase(k.base, k.heights ?? k.height, at)
+      // The same strings back (a decimal held inexact that nothing can improve on): nothing to write (review of #637).
+      if (base && (base.x !== k.base.x || base.y !== k.base.y || base.z !== k.base.z)) fixed.push({ ...k, base })
+    } catch (err) {
+      console.warn('[secrets] could not repair a stored corner:', describeError(err))
+    }
+  }
+  applyBaseRepairs(fixed)
+}
+
+/** Whether any held key's corner is still not exact: what a later repair could still fix. */
+function anyCornerUnknown(): boolean {
+  return Object.values(useSecrets.getState().keys).some((k) => !baseOf(k.base, k.heights ?? k.height))
+}
+
+let watchingRows = false
+/**
+ * Run the repair again whenever this identity's deploy rows change: they may
+ * load after the keys do (another identity signing in, or the rows read
+ * later than the key store), and a row is the only exact source for a corner
+ * near 2^84 at the heights people buy (review of #629). Only while some
+ * corner is still unknown, so it costs nothing otherwise.
+ */
+function watchRowsForRepair(): void {
+  if (watchingRows) return
+  watchingRows = true
+  useShards.subscribe((s, prev) => {
+    if (s.mine === prev.mine || !anyCornerUnknown()) return
+    try { repairStoredBases() } catch (err) { console.warn('[secrets] could not repair stored corners:', describeError(err)) }
+  })
+}
+
+/** Put repaired corners in the list, IndexedDB and the bought-key backstop: only `base` changes. */
+function applyBaseRepairs(fixed: HeldKey[]): void {
+  if (fixed.length === 0) return
+  useSecrets.setState((s) => {
+    const keys = { ...s.keys }
+    for (const k of fixed) if (keys[k.lookupId]) keys[k.lookupId] = { ...keys[k.lookupId], base: k.base }
+    return { keys }
+  })
+  if (backendNow() === 'idb') void persist((db) => repairKeyBases(db, fixed))
+  const failed = repairBoughtBases(fixed)
+  if (failed) useSecrets.setState((s) => ({ storage: { ...s.storage, backstopError: failed } }))
 }
 
 function storageManager(): StorageManager | undefined {

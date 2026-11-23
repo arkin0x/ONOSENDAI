@@ -1,10 +1,16 @@
 /**
  * starred.test.ts: the Starred Places list (lib/starred.ts, useStarred.ts).
  *
- * A page load is a fresh copy of the store module over the same
- * localStorage, so persistence is checked by loading the module again.
+ * A page load is a fresh copy of the store module over the same IndexedDB
+ * and localStorage, signed in as an identity (starredList.setOwner), so
+ * persistence is checked by loading the module again. The list is each
+ * identity's own (owner ruling, 2026-11-19); the list builds before kept in
+ * localStorage once per device goes to the identity signed in when it is
+ * first read, and is left where it was.
  */
 
+import 'fake-indexeddb/auto'
+import { IDBFactory } from 'fake-indexeddb'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { MAX_STARRED, NICKNAME_MAX, STARRED_KEY, addPlace, placeName, removePlace, type StarSpot, type StarredPlace } from '../../lib/starred'
 
@@ -23,10 +29,22 @@ const broken = {
 }
 const g = globalThis as { localStorage?: unknown }
 
+const ME = 'ee'.repeat(32)
+const OTHER = 'dd'.repeat(32)
+
 type Mod = typeof import('../useStarred')
-async function load(): Promise<Mod['useStarred']> {
+let current: Mod | null = null
+/** A page load signed in as `owner`: what the last one wrote is on disk first. */
+let lists: typeof import('../personalLists') | null = null
+async function load(owner = ME): Promise<Mod['useStarred']> {
+  await current?.starredList.flush()
+  // The page before is closed, as a reload closes it.
+  lists?.stopHearingOtherTabs()
   vi.resetModules()
-  return (await import('../useStarred')).useStarred
+  current = await import('../useStarred')
+  lists = await import('../personalLists')
+  await current.starredList.setOwner(owner)
+  return current.useStarred
 }
 
 const spot = (x: bigint, plane: 0 | 1 = 0, label = `${x}, 2, 3`): StarSpot => ({
@@ -34,8 +52,13 @@ const spot = (x: bigint, plane: 0 | 1 = 0, label = `${x}, 2, 3`): StarSpot => ({
 })
 
 describe('Starred Places', () => {
-  beforeEach(() => { mem.clear(); g.localStorage = working })
-  afterEach(() => { g.localStorage = working })
+  beforeEach(() => {
+    lists?.stopHearingOtherTabs(); lists = null
+    mem.clear(); g.localStorage = working; current = null
+    ;(globalThis as { indexedDB?: unknown }).indexedDB = new IDBFactory()
+    vi.spyOn(console, 'warn').mockImplementation(() => { /* the tests check what happened */ })
+  })
+  afterEach(() => { g.localStorage = working; vi.restoreAllMocks() })
 
   it('adds a place at the top with when it was starred and the zoom', async () => {
     const S = await load()
@@ -79,19 +102,64 @@ describe('Starred Places', () => {
     expect(S.getState().places).toHaveLength(0)
   })
 
-  it('persists across a reload, shared under one device key', async () => {
+  it('persists across a reload, under the identity signed in, and never writes the old device-wide key', async () => {
     const S = await load()
     S.getState().add(spot(7n), 33)
-    expect(JSON.parse(mem.get(STARRED_KEY)!)).toHaveLength(1)
     const again = await load()
     expect(again.getState().places).toMatchObject([{ input: '7, 2, 3', plane: 0, scaleExp: 33 }])
+    expect(mem.has(STARRED_KEY)).toBe(false)
     again.getState().remove({ input: '7, 2, 3', plane: 0 })
     expect((await load()).getState().places).toEqual([])
+  })
+
+  it('a new identity starts with none, and each finds its own again (the switch the owner asked for)', async () => {
+    const S = await load(ME)
+    S.getState().add(spot(1n))
+    await current!.starredList.setOwner(OTHER)
+    expect(S.getState().places).toEqual([])
+    S.getState().add(spot(2n))
+    await current!.starredList.setOwner(ME)
+    expect(S.getState().places.map((p) => p.input)).toEqual(['1, 2, 3'])
+    expect((await load(OTHER)).getState().places.map((p) => p.input)).toEqual(['2, 2, 3'])
+  })
+
+  it('a star made while a switch is still reading is kept for the identity it was made for', async () => {
+    const S = await load(ME)
+    S.getState().add(spot(1n))
+    const switching = current!.starredList.setOwner(OTHER)
+    S.getState().add(spot(3n))
+    await switching
+    expect(S.getState().places.map((p) => p.input)).toEqual(['3, 2, 3'])
+    expect((await load(ME)).getState().places.map((p) => p.input)).toEqual(['1, 2, 3'])
+    expect((await load(OTHER)).getState().places.map((p) => p.input)).toEqual(['3, 2, 3'])
+  })
+
+  it('the list kept once per device goes to the identity signed in when first read, once, and stays in localStorage', async () => {
+    const old = JSON.stringify([{ input: '1, 2, 3', label: 'home', plane: 0, at: 1 }])
+    mem.set(STARRED_KEY, old)
+    expect((await load(ME)).getState().places.map((p) => p.label)).toEqual(['home'])
+    expect((await load(OTHER)).getState().places).toEqual([])
+    expect((await load(ME)).getState().places.map((p) => p.label)).toEqual(['home'])
+    expect(mem.get(STARRED_KEY)).toBe(old)
+  })
+
+  it('a move interrupted before the database took it is made again on the next load, from the untouched original', async () => {
+    mem.set(STARRED_KEY, JSON.stringify([{ input: '1, 2, 3', label: 'home', plane: 0, at: 1 }]))
+    const db = await import('../../lib/personalDb')
+    vi.resetModules()
+    vi.doMock('../../lib/personalDb', async () => ({ ...db, adopt: () => Promise.reject(new Error('AbortError: the page closed')) }))
+    const failed = await import('../useStarred')
+    await failed.starredList.setOwner(ME)
+    vi.doUnmock('../../lib/personalDb')
+    current = null
+    expect((await load(ME)).getState().places.map((p) => p.label)).toEqual(['home'])
   })
 
   it('drops malformed rows and unreadable JSON instead of failing', async () => {
     mem.set(STARRED_KEY, JSON.stringify([{ input: '1, 2, 3', label: 'ok', plane: 0, at: 1 }, { input: 5 }, null, { input: 'x', label: 'y', plane: 3, at: 1 }]))
     expect((await load()).getState().places.map((p) => p.label)).toEqual(['ok'])
+    ;(globalThis as { indexedDB?: unknown }).indexedDB = new IDBFactory()
+    current = null
     mem.set(STARRED_KEY, '{not json')
     expect((await load()).getState().places).toEqual([])
   })
@@ -144,7 +212,7 @@ describe('Starred Places', () => {
     S.getState().finishNaming('  Rooftop ')
     expect(S.getState().naming).toBeNull()
     expect(S.getState().places[0].nickname).toBe('Rooftop')
-    expect(useToast.getState().toast).toMatchObject({ label: 'Added to your Starred Places in the Position panel', meta: 'Rooftop', mark: 'star' })
+    expect(useToast.getState().toast).toMatchObject({ label: 'Added to your Starred Places in the View panel', meta: 'Rooftop', mark: 'star' })
   })
 
   it('keeps the place starred under its own label when the nickname is skipped', async () => {

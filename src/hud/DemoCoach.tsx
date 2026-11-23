@@ -18,7 +18,7 @@
  */
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Square, SquareMinus, SquarePlus, Volume2, X, type LucideIcon } from 'lucide-react'
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Square, SquareMinus, SquarePlus, Volume2, type LucideIcon } from 'lucide-react'
 import { CAPTION_LINKS, splitCaption } from '../demo/captionTokens'
 import { getEventHash, verifyEvent } from 'nostr-tools/pure'
 import type { NostrEvent } from 'nostr-tools'
@@ -36,6 +36,8 @@ import { ChainStatusStrip, useChainStatus } from './ChainStatus'
 import { GO_LIVE_BODY } from './TouchControls'
 import { useCover } from '../hooks/useCover'
 import { startTvInPlace } from '../store/useTv'
+import { ModalClose } from './ui/ModalClose'
+import { CopyValue } from './ui/CopyValue'
 
 /** The kinds the Built on Nostr chapter lists (onosendai/kinds.md). */
 const KINDS: Array<[number, string]> = [
@@ -112,7 +114,7 @@ function Verify({ waiting }: { waiting: boolean }): JSX.Element {
   if (!check) return <div className="demo__panel"><div className="demo__note">No signed event yet.</div></div>
   return (
     <div className="demo__panel demo__checks">
-      <div className={check.idOk ? 'is-ok' : 'is-bad'}>{check.idOk ? '✓' : '✗'} ID = sha256(fields) <code>{check.id.slice(0, 16)}…</code></div>
+      <div className={check.idOk ? 'is-ok' : 'is-bad'}>{check.idOk ? '✓' : '✗'} ID = sha256(fields) <code><CopyValue value={check.id} shown={`${check.id.slice(0, 16)}…`} /></code></div>
       <div className={check.sigOk ? 'is-ok' : 'is-bad'}>{check.sigOk ? '✓' : '✗'} Schnorr signature by your key <code>{check.sig.slice(0, 16)}…</code></div>
     </div>
   )
@@ -154,9 +156,9 @@ function Chain(): JSX.Element {
   const ok = prev === before.id
   return (
     <div className="demo__panel demo__checks">
-      <div>newest <code>{head.id.slice(0, 16)}…</code></div>
-      <div>names previous <code>{(prev ?? 'none').slice(0, 16)}…</code></div>
-      <div className={ok ? 'is-ok' : 'is-bad'}>{ok ? '✓' : '✗'} the event before it <code>{before.id.slice(0, 16)}…</code></div>
+      <div>newest <code><CopyValue value={head.id} shown={`${head.id.slice(0, 16)}…`} /></code></div>
+      <div>names previous <code>{prev ? <CopyValue value={prev} shown={`${prev.slice(0, 16)}…`} /> : 'none'}</code></div>
+      <div className={ok ? 'is-ok' : 'is-bad'}>{ok ? '✓' : '✗'} the event before it <code><CopyValue value={before.id} shown={`${before.id.slice(0, 16)}…`} /></code></div>
     </div>
   )
 }
@@ -221,6 +223,44 @@ function Panel({ panel, waiting }: { panel: DemoPanel; waiting: boolean }): JSX.
     case 'chain': return <Chain />
     case 'finish': return <Finish />
   }
+}
+
+/**
+ * Push the instrument stack and the compass down below a caption panel at the
+ * top while it shares their columns (styles.css .instruments, --demo-coach-h
+ * and --demo-coach-c): the /demo coach's, and the first-arrival tutorial's
+ * (hud/TutorialCoach.tsx).
+ */
+export function useCoachOffsets(ref: { current: HTMLDivElement | null }, active: boolean, minimized: boolean): void {
+  useLayoutEffect(() => {
+    const root = document.documentElement
+    // Idle, nothing to do: the active run's cleanup took the offsets away, and
+    // removing them here would clear the other coach's while it is up.
+    if (!active) return
+    const el = ref.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    // Only when the two share columns: on a desktop the coach sits top centre
+    // and the stack beside the panel column, and pushing the stack down there
+    // only made it jump on every step (rehearsal, 2026-10-15).
+    const put = (): void => {
+      const coach = el.getBoundingClientRect()
+      const below = (sel: string, prop: string): void => {
+        const r = document.querySelector(sel)?.getBoundingClientRect()
+        const shares = !r || r.width === 0 || (coach.left < r.right && r.left < coach.right)
+        if (shares) root.style.setProperty(prop, `${Math.ceil(coach.height)}px`)
+        else root.style.removeProperty(prop)
+      }
+      below('.instruments', '--demo-coach-h')
+      // The compass too: on a phone the coach spans the screen and covered
+      // the view controls for the whole tour (rehearsal, 2026-10-15).
+      below('.compass-3d', '--demo-coach-c')
+    }
+    put()
+    const ro = new ResizeObserver(put)
+    ro.observe(el)
+    window.addEventListener('resize', put)
+    return () => { ro.disconnect(); window.removeEventListener('resize', put); root.style.removeProperty('--demo-coach-h'); root.style.removeProperty('--demo-coach-c') }
+  }, [ref, active, minimized])
 }
 
 export function DemoCoach(): JSX.Element | null {
@@ -294,33 +334,7 @@ export function DemoCoach(): JSX.Element | null {
   }, [active])
 
   // The instrument stack starts below the panel (styles.css .instruments).
-  useLayoutEffect(() => {
-    const root = document.documentElement
-    if (!active) { root.style.removeProperty('--demo-coach-h'); root.style.removeProperty('--demo-coach-c'); return }
-    const el = ref.current
-    if (!el || typeof ResizeObserver === 'undefined') return
-    // Only when the two share columns: on a desktop the coach sits top centre
-    // and the stack beside the panel column, and pushing the stack down there
-    // only made it jump on every step (rehearsal, 2026-10-15).
-    const put = (): void => {
-      const coach = el.getBoundingClientRect()
-      const below = (sel: string, prop: string): void => {
-        const r = document.querySelector(sel)?.getBoundingClientRect()
-        const shares = !r || r.width === 0 || (coach.left < r.right && r.left < coach.right)
-        if (shares) root.style.setProperty(prop, `${Math.ceil(coach.height)}px`)
-        else root.style.removeProperty(prop)
-      }
-      below('.instruments', '--demo-coach-h')
-      // The compass too: on a phone the coach spans the screen and covered
-      // the view controls for the whole tour (rehearsal, 2026-10-15).
-      below('.compass-3d', '--demo-coach-c')
-    }
-    put()
-    const ro = new ResizeObserver(put)
-    ro.observe(el)
-    window.addEventListener('resize', put)
-    return () => { ro.disconnect(); window.removeEventListener('resize', put); root.style.removeProperty('--demo-coach-h'); root.style.removeProperty('--demo-coach-c') }
-  }, [active, minimized])
+  useCoachOffsets(ref, active, minimized)
 
   if (!active || !step) return null
   const caption = captionFor(step, hasChain, done, ownAvatar)
@@ -361,7 +375,7 @@ export function DemoCoach(): JSX.Element | null {
         <span className="demo__tag">TOUR</span>
         <span className="demo__chapter">{chapter?.title}</span>
         <button className="demo__icon" onClick={() => d.setMinimized(true)} aria-label="Fold the caption" title="Fold"><ChevronUp size={14} /></button>
-        <button className="demo__icon" onClick={d.exit} aria-label="Exit the tour" title="Exit the tour"><X size={14} /></button>
+        <ModalClose onClose={d.exit} label="Exit the tour" />
       </div>
       <div className="demo__bar-track" aria-hidden><div className="demo__bar-fill" style={{ width: `${((index + 1) / script.steps.length) * 100}%` }} /></div>
       {/* One scroll box per step, keyed by it: the same box kept from step to

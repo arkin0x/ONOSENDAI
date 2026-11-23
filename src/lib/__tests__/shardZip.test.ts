@@ -18,7 +18,7 @@ import type { ZipEntry } from '../zipRead'
 import { IMPORT_ACCEPT } from 'sno-core/importFile'
 import {
   NAME_MAX, ZIP_MAX_DEPTH, ZIP_MAX_ENTRY_BYTES, ZIP_MAX_SHARDS, ZIP_MAX_TOTAL_BYTES,
-  IMPORT_PICKER_ACCEPT, PLACEHOLDER_PUBKEY, ZIP_TYPES, blockedRows, cleanSegment, hasPlaceholders, offlinePicture, withoutPlaceholderHints, companionsFor, copyName, dupAction, dupKey, findDups, nameOf, planZip, refTargets, resolveRefs, splitPath, unresolved, isZipFile,
+  IMPORT_PICKER_ACCEPT, PLACEHOLDER_PUBKEY, ZIP_TYPES, blockedRows, cleanSegment, hasPlaceholders, offlinePicture, withoutPlaceholderHints, companionsFor, copyName, dupAction, dupKey, findDups, nameOf, planZip, refTargets, resolveRefs, splitPath, unresolved, isZipFile, isJsonFile,
 } from '../shardZip'
 
 let nextIndex = 0
@@ -301,6 +301,16 @@ describe("IMPORT's picker", () => {
   it('lists a zip by extension and by every type a zip is labelled with', () => {
     expect(accept).toContain('.zip')
     for (const t of ['application/zip', 'application/x-zip-compressed', 'application/x-zip', 'multipart/x-zip']) expect(accept).toContain(t)
+  })
+
+  it('offers a .json by extension and by type, so a phone offers an SNO object (arkinox, 2026-11-09)', () => {
+    expect(accept).toContain('.json')
+    expect(accept).toContain('application/json')
+    expect(isJsonFile({ name: 'blue-chicken.json', type: '' })).toBe(true)
+    expect(isJsonFile({ name: 'Blue-Chicken.JSON', type: '' })).toBe(true)
+    expect(isJsonFile({ name: 'blue-chicken', type: 'application/json' })).toBe(true)
+    expect(isJsonFile({ name: 'scene.gltf', type: 'model/gltf+json' })).toBe(false)
+    expect(isJsonFile({ name: 'kit.zip', type: 'application/zip' })).toBe(false)
   })
 
   it('keeps every 3D format IMPORT reads, with nothing empty or repeated', () => {

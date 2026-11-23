@@ -31,6 +31,10 @@ vi.mock('../relay', async (importOriginal) => {
     ...actual,
     publish: async () => ({ ok: true as const, accepted: net.accepted }),
     publishMany: async () => ({ ok: true as const, accepted: [actual.CYBERSPACE_RELAY] }),
+    // The canonical relay's background check and re-send (publisher.ts reconcileCanonical), never the real socket.
+    countRelay: async () => null,
+    askRelay: async (url: string) => ({ url, outcome: 'answered' as const, events: [] }),
+    publishOnceTo: async () => ({ ok: true as const, accepted: [actual.CYBERSPACE_RELAY] }),
   }
 })
 // The fixtures carry no real signatures; the background check takes them as authentic.
@@ -46,7 +50,10 @@ import { spawnTemplate } from '../events'
 import { hopEvent, nextId } from './chainFixtures'
 
 type Holders = typeof import('../chainHolders')
-const CANONICAL = normalizeURL('wss://cyberspace.nostr1.com')
+const CANONICAL = normalizeURL('wss://relay.onosendai.tech')
+/** The old relay, read only while it is retired (useRelays READ_FALLBACK_RELAY): it never holds a chain. */
+const SECOND = normalizeURL('wss://cyberspace.nostr1.com')
+const BASE = [CANONICAL]
 
 /** A fresh page: every module loaded again, storage as it was. */
 async function page(): Promise<{ holders: Holders; store: typeof import('../../store/useCyberspace'); pub: typeof import('../publisher') }> {
@@ -57,26 +64,27 @@ async function page(): Promise<{ holders: Holders; store: typeof import('../../s
 const event = (pubkey: string): NostrEvent => ({ ...spawnTemplate(pubkey, 1_000), id: nextId(), pubkey, sig: '0'.repeat(128) })
 
 describe('the relays that hold a chain', () => {
+  // 30 s: its first page() imports the store cold, about 5 s when this file runs alone (as on origin/v2).
   it('the canonical relay always; another only once it sent back one of the identity\'s events; saved per identity, and a reload still knows it', async () => {
     localStorage.clear()
     let { holders } = await page()
     const pk = 'a7'.repeat(32)
     const other = 'b8'.repeat(32)
-    expect([...holders.chainHolders(pk)]).toEqual([CANONICAL])
+    expect([...holders.chainHolders(pk)]).toEqual(BASE)
     holders.noteHoldersFrom(pk, [
       { url: 'wss://holds.example', outcome: 'answered', events: [event(pk)] },
       { url: 'wss://empty.example', outcome: 'answered', events: [] },
       { url: 'wss://someone-else.example', outcome: 'answered', events: [event(other)] },
       { url: 'wss://late.example', outcome: 'unreachable', reason: 'no answer in time', events: [event(pk)] },
     ])
-    const want = [CANONICAL, normalizeURL('wss://holds.example'), normalizeURL('wss://late.example')].sort()
+    const want = [...BASE, normalizeURL('wss://holds.example'), normalizeURL('wss://late.example')].sort()
     expect([...holders.chainHolders(pk)].sort()).toEqual(want)
-    expect([...holders.chainHolders(other)]).toEqual([CANONICAL])
+    expect([...holders.chainHolders(other)]).toEqual(BASE)
     // Reload.
     ;({ holders } = await page())
     expect([...holders.chainHolders(pk)].sort()).toEqual(want)
-    expect([...holders.chainHolders(other)]).toEqual([CANONICAL])
-  })
+    expect([...holders.chainHolders(other)]).toEqual(BASE)
+  }, 30_000)
 
   it('a retired relay leaves a saved set on the next page, on disk too, and the others stay', async () => {
     localStorage.clear()
@@ -84,8 +92,41 @@ describe('the relays that hold a chain', () => {
     const key = `onosendai:chain-holders:${pk}`
     localStorage.setItem(key, JSON.stringify(['wss://onosendai.feeds.relay.tools/', 'wss://holds.example/']))
     const { holders } = await page()
-    expect([...holders.chainHolders(pk)]).toEqual([CANONICAL, 'wss://holds.example/'])
+    expect([...holders.chainHolders(pk)]).toEqual([...BASE, 'wss://holds.example/'])
     expect(JSON.parse(localStorage.getItem(key)!)).toEqual(['wss://holds.example/'])
+  })
+
+  it('the read-only old relay never holds a chain: not by default, not from a set saved while it was pinned, not from its answer', async () => {
+    localStorage.clear()
+    const pk = 'e2'.repeat(32)
+    localStorage.setItem(`onosendai:chain-holders:${pk}`, JSON.stringify([SECOND, 'wss://holds.example/']))
+    const { holders } = await page()
+    expect([...holders.chainHolders(pk)]).toEqual([...BASE, 'wss://holds.example/'])
+    holders.noteHoldersFrom(pk, [{ url: 'wss://cyberspace.nostr1.com', outcome: 'answered', events: [event(pk)] }])
+    expect(holders.chainHolders(pk).has(SECOND)).toBe(false)
+  })
+
+  it('the self-check still waits on the old relay\'s AUTH: a chain only it holds is never read as none (a new live chain would start over it)', async () => {
+    localStorage.clear()
+    await page()
+    const { checkHolders } = await import('../selfSync')
+    const { decideSelfCheck } = await import('../chainHold')
+    const { AUTH_STALLED } = await import('../relayOutcome')
+    const pk = 'f3'.repeat(32)
+    expect(checkHolders(pk).has(SECOND)).toBe(true)
+    const verdict = decideSelfCheck([
+      { url: CANONICAL, outcome: 'answered', events: [] },
+      { url: SECOND, outcome: 'refused', reason: AUTH_STALLED, events: [] },
+    ], 'wss://relay.onosendai.tech', true, checkHolders(pk))
+    expect(verdict.status).toBe('unknown')
+  }, 30_000)
+
+  it('a bad string in a saved set does not hide the holders after it', async () => {
+    localStorage.clear()
+    const pk = 'd1'.repeat(32)
+    localStorage.setItem(`onosendai:chain-holders:${pk}`, JSON.stringify(['bad url', 'wss://holds.example/']))
+    const { holders } = await page()
+    expect([...holders.chainHolders(pk)]).toEqual([...BASE, 'wss://holds.example/'])
   })
 
   it('a relay that took one of the chain\'s actions holds it, saved beside the chain', async () => {
@@ -101,8 +142,11 @@ describe('the relays that hold a chain', () => {
       store.useCyberspace.setState({ live: true })
       await vi.advanceTimersByTimeAsync(10)
       expect(holders.chainHolders(pk).has(normalizeURL('wss://mine.example'))).toBe(false)
+      // The hop stands for a move taken here: only that opens the release gate.
+      store.noteSignedOnThisPage(hop.id)
       store.useCyberspace.setState({ events: [spawn, hop], prevEventId: hop.id, published: { [spawn.id]: 'ok', [hop.id]: 'queued' } })
-      await vi.advanceTimersByTimeAsync(10)
+      // Marked published within the publisher's window after the relay took it (publisher.ts MARK_WINDOW_MS).
+      await vi.advanceTimersByTimeAsync(pub.MARK_WINDOW_MS + 10)
       expect(store.useCyberspace.getState().published[hop.id]).toBe('ok')
       expect(holders.chainHolders(pk).has(normalizeURL('wss://mine.example'))).toBe(true)
       expect(JSON.parse(localStorage.getItem(`onosendai:chain-holders:${pk}`) ?? '[]')).toContain(normalizeURL('wss://mine.example'))

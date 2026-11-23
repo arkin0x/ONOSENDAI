@@ -242,18 +242,19 @@ export const DEMO_SCRIPT: DemoScript = {
     },
     {
       id: 'walk', chapter: 'work', title: 'Walk',
-      caption: 'Press the mode button under the pad until it reads WALK. You move first person, and the grid on the walls shows how hard each boundary is to cross.',
+      caption: 'Press WALK under the pad. You move first person, and the grid on the walls shows how hard each boundary is to cross.',
       scene: { target: 'self', scale: 0, layers: { boxes: true } },
       wait: 'walk',
-      hint: 'Tap the mode button until it reads WALK.',
+      hint: 'Tap WALK under the pad.',
     },
 
     // 5. Hidden in place
     {
       id: 'region-keys', chapter: 'hidden', title: 'Places have keys',
       caption: 'Every aligned region has a key derived from its Cantor root. The green boxes represent regions you have the keys for.',
-      // 2^0, where the regions of the tour's own small hops are drawn (SecretRegions).
-      scene: { target: 'self', scale: 0 },
+      // 2^0, where the regions of the tour's own small hops are drawn (SecretRegions),
+      // the cages shown on this step though Region keys is off by default.
+      scene: { target: 'self', scale: 0, regionKeys: true },
     },
     {
       id: 'district', chapter: 'hidden', title: 'The demo district',
@@ -329,7 +330,7 @@ export const DEMO_SCRIPT: DemoScript = {
     // 8. Others
     {
       id: 'avatars', chapter: 'others', title: 'Avatars',
-      caption: 'People choose shapes to be seen as. An avatar is an event with proof of work priced by the shape\'s size and detail.',
+      caption: 'People choose shapes to be seen as. An avatar is an event that carries the shape, up to 128 KB.',
       scene: { target: 'self', scale: 0 },
     },
     {

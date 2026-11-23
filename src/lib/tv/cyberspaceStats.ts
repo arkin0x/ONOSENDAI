@@ -14,12 +14,18 @@
  *
  * | Board | Rule |
  * |---|---|
- * | LONGEST CHAIN | chainLength: valid actions on the current chain, the spawn included (ruling 2026-10-31: the current chain; the CHAIN badge's best chain is bestChainLength, not shown here) |
+ * | LONGEST CHAIN | chainLength: valid actions on the current chain, the spawn included (ruling 2026-10-31: the current chain; the CHAIN badge's best chain is bestChainLength, not shown here), counted only up to where the relay's rules stop it (owner, 2026-11-13: lib/chainStop.ts countsThrough) |
  * | MOST BAGS HIDDEN | bagsHidden: live sealed bags, distinct d, at most 5 a UTC day |
  * | MOST RESPAWNS | respawnCount: spawns after the first whose chain went on to a valid hop |
  * | MOST OBJECTS PUBLISHED | objectsPublished: live public objects, each a new shape, 8+ vertices, at most 10 a UTC day |
  * | NEW ARRIVALS | keys whose first spawn is in the week to AS OF, and the week before |
  * | ACTIVE USERS | keys with a valid action in the week to AS OF, HUMANS and AGENTS apart, and the week before |
+ *
+ * No board counts an event tagged no-broadcast (spec §8.13: a tutorial's
+ * events; lib/countingRules): LONGEST CHAIN counts the current chain's
+ * untagged valid actions, the chain judged whole with its tagged ones; a
+ * tagged bag, object, respawn or action counts for nothing; a key whose
+ * spawn is tagged arrives with its first untagged action on that chain.
  *
  * Everyone with qualifying public activity can be on a board (ruling D4: no
  * opt-out), arkinox included, ranked like anyone, with no row of his own
@@ -117,12 +123,12 @@ export const BOARD_ORDER: BoardId[] = ['longest-chain', 'active-users', 'most-ba
 
 /** A ranking's title, its one qualifier line, and its card's colours. */
 export const BOARD_WORDS: Record<BoardId, { title: string; qualifier: string; theme: AdTheme }> = {
-  'longest-chain': { title: 'LONGEST CHAIN', qualifier: 'VALID ACTIONS SINCE LAST SPAWN', theme: 'teal' },
+  'longest-chain': { title: 'LONGEST CHAIN', qualifier: 'ACTIONS IN CYBERSPACE', theme: 'teal' },
   'active-users': { title: 'ACTIVE USERS', qualifier: 'LAST 7 DAYS', theme: 'night' },
-  'most-bags': { title: 'MOST BAGS HIDDEN', qualifier: 'BAGS SEALED, EACH IN ITS OWN PLACE', theme: 'magenta' },
+  'most-bags': { title: 'MOST BAGS HIDDEN', qualifier: 'CAN YOU FIND THEM ALL?', theme: 'magenta' },
   'new-arrivals': { title: 'NEW ARRIVALS', qualifier: 'THIS WEEK', theme: 'teal' },
-  'most-respawns': { title: 'MOST RESPAWNS', qualifier: 'RESPAWNED AND KEPT GOING', theme: 'night' },
-  'most-objects': { title: 'MOST OBJECTS PUBLISHED', qualifier: 'OBJECTS PUBLISHED, EACH A NEW SHAPE', theme: 'magenta' },
+  'most-respawns': { title: 'MOST RESPAWNS', qualifier: 'NEVER GIVE UP', theme: 'night' },
+  'most-objects': { title: 'MOST OBJECTS PUBLISHED', qualifier: 'CONTRIBUTING NEW GEOMETRY', theme: 'magenta' },
 }
 
 /** One row of a ranking: where, who, how many. Nothing else, ever (design 3.3 L1, L2). */
@@ -179,6 +185,12 @@ export interface StatsInput {
   objects: ObjectRecord[]
   deletions: Deletion[]
   arrivals: Map<string, number>
+  /**
+   * The 5.13 list, for LONGEST CHAIN's relay check (keyChains `relayList`);
+   * null or left out when it did not load, and then a hop only it can judge
+   * is taken as it stands.
+   */
+  v1Hops?: ReadonlySet<string> | null
 }
 
 /** The hour `nowS` is in, unix s: what a board is counted to and stamped with. */
@@ -201,7 +213,7 @@ export async function countStats(input: StatsInput, asOf: number, yieldEvery = 4
   const active: string[] = []
   let n = 0
   for (const [pk, evs] of by) {
-    const k = keyChains(evs, pk, asOf)
+    const k = keyChains(evs, pk, asOf, input.v1Hops ?? null)
     if (k.chainLength > 0) chain.set(pk, k.chainLength)
     if (k.respawns > 0) respawns.set(pk, k.respawns)
     if (k.activeWeek) active.push(pk)

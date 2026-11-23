@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { getEventHash } from 'nostr-tools/pure'
-import { avatarWork, verifyAvatarWork } from 'cyberspace-core'
+import { leadingZeroBits } from 'cyberspace-core'
 import { avatarTemplate } from '../avatar'
 import { blocksOf, describeDuration, eventId, leadingZeros, mineChunk, nonceTagged, serializeEvent, triesPerSec } from '../avatarMine'
-import { newShard, toPayload } from 'sno-core/shards'
+import { newShard } from 'sno-core/shards'
 
 const me = 'ab'.repeat(32)
 const wedge = () => {
@@ -39,18 +39,14 @@ describe('avatarMine', () => {
     expect(t.tags[0]).toEqual(['name', 'Wedge'])
   })
 
-  it('mines the floor for a one-gibson wedge, and the verdict is paid', () => {
+  it('mines 16 bits in the tags, and the id carries them', () => {
     const t = template()
-    const required = avatarWork(toPayload(wedge()))
-    expect(required).toBe(16)
     let found = null
-    for (let from = 0; found === null && from < 2 ** 22; from += 4096) found = mineChunk(t, required, from, 4096)
+    for (let from = 0; found === null && from < 2 ** 22; from += 4096) found = mineChunk(t, 16, from, 4096)
     expect(found).not.toBeNull()
-    const mined = nonceTagged(t, found!.nonce, required)
+    const mined = nonceTagged(t, found!.nonce, 16)
     expect(eventId(mined)).toBe(found!.id)
-    const verdict = verifyAvatarWork({ ...mined, id: found!.id })
-    expect(verdict).toMatchObject({ ok: true, required: 16, committed: 16 })
-    expect(verdict.zeros).toBeGreaterThanOrEqual(16)
+    expect(leadingZeroBits(found!.id)).toBeGreaterThanOrEqual(16)
   })
 
   it('the fast path and the plain path find the same nonce', () => {

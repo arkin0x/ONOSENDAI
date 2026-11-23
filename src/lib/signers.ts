@@ -18,14 +18,19 @@ import { v2 as nip44 } from 'nostr-tools/nip44'
 import * as nip04 from 'nostr-tools/nip04'
 import * as nip46 from 'nostr-tools/nip46'
 import * as nip49 from 'nostr-tools/nip49'
-import { getPool } from './relay'
+import { getSignerPool } from './relay'
+import type { AbstractSimplePool, SubscribeManyParams } from 'nostr-tools/abstract-pool'
+import type { Filter } from 'nostr-tools/filter'
 import type { EventTemplate, NostrEvent } from './events'
 import { attributed } from './client'
-import { DEFAULT_SIGNER_RELAY, normalizeSignerRelay, signerRelays } from './loginCredentials'
-export { BACKUP_SIGNER_RELAY, DEFAULT_SIGNER_RELAY, loginCredentialKind, normalizeSignerRelay, signerRelays } from './loginCredentials'
+import { guardRequestSize } from './signerRequestSize'
+import { trackActivity } from './signerActivity'
+import { DEFAULT_SIGNER_RELAY, normalizeSignerRelay, signerRelays, withoutRetiredSignerRelays } from './loginCredentials'
+export { BACKUP_SIGNER_RELAY, DEFAULT_SIGNER_RELAY, loginCredentialKind, normalizeSignerRelay, signerRelays, withoutRetiredSignerRelays } from './loginCredentials'
 
 export type SignerKind = 'local' | 'nip07' | 'nip46'
-export { SIGN_PATIENCE_MS, SignerTimeout, signWithin } from './signWithin'
+import { HANDSHAKE_PATIENCE_MS, HANDSHAKE_STEP_MS, SignerTimeout, handshakeWithin } from './signWithin'
+export { SIGN_PATIENCE_MS, HANDSHAKE_PATIENCE_MS, HANDSHAKE_STEP_MS, SignerTimeout, signWithin, handshakeWithin, lateSignsPending } from './signWithin'
 
 export interface Signer {
   kind: SignerKind
@@ -65,17 +70,47 @@ export interface Signer {
    * for a local key, which is always its own.
    */
   heldPubkey?: () => Promise<string>
-  /** Present only for local signers, so the key can be persisted. */
+  /** Present only for local signers, so the key can be signed with and exported. */
   secretKey?: Uint8Array
+  /**
+   * A local key as it is kept on this device: encrypted with the person's
+   * password (NIP-49). Set for a key someone brought (a pasted nsec, sealed
+   * at login, or a pasted ncryptsec as given), and the only form of it that
+   * prefOf will write. The plain key is never stored for one of these.
+   */
+  ncryptsec?: string
+  /**
+   * A local key this app generated on this device (a new visitor's key, NEW
+   * RANDOM KEY). It is kept as it always was, a full identity with no
+   * password to ask for (owner rule, 2026-11-11). Only a key with this mark
+   * is ever written in plain form.
+   */
+  minted?: boolean
   /** For a bunker: what to persist to reconnect it. */
   bunkerUri?: string
   clientSecretKey?: Uint8Array
   /** A client-initiated Nostr Connect session does not repeat the bunker connect handshake. */
   nostrConnectSession?: boolean
+  /**
+   * For a bunker: the session's client pubkey (hex), what its activity is
+   * kept under (signerActivity.ts). The same for a restored session's
+   * stand-in and the live signer it becomes, since both use one client key.
+   */
+  session?: string
   close?: () => Promise<void>
   /** For a deferred signer: force the reconnection and return the real one. */
   reconnect?: () => Promise<Signer>
+  /**
+   * For a deferred signer not yet live: a person asked again on purpose
+   * (RETRY), so a handshake that failed or never answered is given up and
+   * the next request starts a fresh one. Nothing else starts one after a
+   * failure but a signature (deferredReconnect).
+   */
+  retry?: () => void
 }
+
+/** A step of a bunker's handshake starting (null: it is done), so its wait can be bounded. */
+export type HandshakeStep = (step: 'connect' | 'get_public_key' | null) => void
 
 /** The browser extension, if one is installed. */
 interface WindowNostr {
@@ -153,9 +188,9 @@ export function localSigner(secretKey: Uint8Array): Signer {
   }
 }
 
-/** A fresh random local key. */
+/** A fresh random local key: one this app generated (`minted`). */
 export function randomSigner(): Signer {
-  return localSigner(generateSecretKey())
+  return { ...localSigner(generateSecretKey()), minted: true }
 }
 
 /** An nsec you paste. Throws a readable error if it is not a valid nsec. */
@@ -170,15 +205,20 @@ export function signerFromNsec(nsec: string): Signer {
   return localSigner(decoded.data)
 }
 
-/** An ncryptsec (NIP-49) plus its password. Throws a readable error if either is wrong. */
+/**
+ * An ncryptsec (NIP-49) plus its password. Throws a readable error if either
+ * is wrong. The signer keeps the ncryptsec as given, so that is what is
+ * stored for it, never the key it opened to.
+ */
 export function signerFromNcryptsec(ncryptsec: string, password: string): Signer {
+  const given = ncryptsec.trim()
   let sk
   try {
-    sk = nip49.decrypt(ncryptsec.trim(), password)
+    sk = nip49.decrypt(given, password)
   } catch {
     throw new Error('Could not decrypt. Wrong password, or not a valid ncryptsec.')
   }
-  return localSigner(sk)
+  return { ...localSigner(sk), ncryptsec: given }
 }
 
 /**
@@ -220,30 +260,118 @@ export async function nip07Signer(waitMs = 0): Promise<Signer> {
   }
 }
 
+/** How long a request to a bunker waits for its answer subscription to be in place. */
+export const ANSWERS_READY_MS = 3000
+
+/**
+ * A request a relay took but did not confirm in time (nostr-tools' "publish
+ * timed out", 4.4 s) may well have reached the signer: a slow relay, or a
+ * phone's slow link, confirms late. nostr-tools sends each request with
+ * Promise.any over the bunker's relays, so one such timeout on every relay
+ * failed the signature at once ("All promises were rejected") while its
+ * answer was on its way. Until 2026-11-19 a dead second relay in every saved
+ * session hid this: a relay that cannot be reached counts as sent. Now the
+ * request waits for its answer like any other, and a request truly lost runs
+ * into the signature's own time limit, which drops the sockets and asks again.
+ * A relay's refusal (an OK false) still fails it.
+ */
+function unconfirmed(err: unknown): string {
+  if (/timed out/i.test(String(err))) return `unconfirmed: ${String(err)}`
+  throw err
+}
+
+/** What one relay's refusal of a signer request says, in plain words: by NIP-01's OK prefixes first, then grain's own words. */
+function relayWhy(reason: unknown): string {
+  const text = reason instanceof Error ? reason.message : String(reason)
+  if (/^rate-limited:/i.test(text) || /rate.?limit|too fast|too many/i.test(text)) return `refused it as too fast (${text})`
+  if (/^(blocked|restricted|invalid|auth-required|pow|duplicate|error):/i.test(text)) return `refused it (${text})`
+  if (/size limit|too large|too big|max(imum)? (event|message|content) (size|length)/i.test(text)) return `refused it as too large (${text})`
+  if (/SendingOnClosedConnection|connection closed|closed connection|not connected/i.test(text)) return `had no open connection (${text})`
+  return `refused it (${text})`
+}
+
+/**
+ * nostr-tools sends a signer request with Promise.any over the bunker's
+ * relays, so when none takes it the error is a bare "All promises were
+ * rejected". Said instead: which relay answered what, in the order the
+ * session names them (Promise.any keeps that order). Still an
+ * AggregateError, so the store's lost-in-transit check (one retry over fresh
+ * sockets) sees it as before.
+ */
+export function explainUndelivered(err: unknown, relays: readonly string[]): unknown {
+  if (typeof AggregateError === 'undefined' || !(err instanceof AggregateError)) return err
+  const parts = err.errors.map((reason, i) => {
+    let host = relays[i] ?? `relay ${i + 1}`
+    try { host = new URL(host).host } catch { /* as named */ }
+    return `${host} ${relayWhy(reason)}`
+  })
+  return new AggregateError(err.errors, `No signer relay took the request: ${parts.join('; ')}.`)
+}
+
+/** A bunker request, with a failure to reach any relay said plainly (explainUndelivered). */
+function said<T>(bunker: { bp: { relays: string[] } }, request: Promise<T>): Promise<T> {
+  return request.catch((err: unknown) => { throw explainUndelivered(err, bunker.bp?.relays ?? []) })
+}
+
+/**
+ * The pool, as a bunker signer uses it, with each request held until the
+ * subscription its answer comes on is in place (its EOSE), at most
+ * ANSWERS_READY_MS. nostr-tools opens that subscription and sends the
+ * request at once, and a relay may handle the two in either order: a
+ * bunker that answers at once had its answer broadcast before anyone was
+ * listening, and the handshake waited for an answer already lost. Every
+ * fresh socket to the bunker's relay (a RETRY, a reconnect) ran that race
+ * (the real-bunker run, 2026-11-04).
+ */
+function answersFirst(): unknown {
+  const pool = getSignerPool()
+  let ready: Promise<void> = Promise.resolve()
+  const bounded = (p: Promise<void>): Promise<void> => Promise.race([p, new Promise<void>((r) => setTimeout(r, ANSWERS_READY_MS))])
+  return {
+    subscribe: (relays: string[], filter: Filter, params: SubscribeManyParams) => {
+      let heard: () => void = () => {}
+      ready = bounded(new Promise<void>((r) => { heard = r }))
+      return pool.subscribe(relays, filter, { ...params, oneose: () => { heard(); params?.oneose?.() } })
+    },
+    publish: (relays: string[], event: NostrEvent, params?: Parameters<AbstractSimplePool['publish']>[2]) => {
+      const waited = ready
+      return relays.map((url) => waited.then(() => pool.publish([url], event as never, params)[0]).catch(unconfirmed))
+    },
+  }
+}
+
 /**
  * A remote bunker (NIP-46). Takes a `bunker://…` URI (or a nostrconnect one),
  * and an optional client secret key so a reconnect keeps the same client
  * identity. Connects, learns the remote pubkey, and signs through it.
+ * `onStep` hears each step of the handshake start, so a caller can bound it.
  */
-export async function nip46Signer(bunkerUri: string, clientSecretKey?: Uint8Array): Promise<Signer> {
+export async function nip46Signer(bunkerUri: string, clientSecretKey?: Uint8Array, onStep?: HandshakeStep): Promise<Signer> {
   const clientSk = clientSecretKey ?? generateSecretKey()
   const bp = await nip46.parseBunkerInput(bunkerUri.trim())
   if (!bp) throw new Error('Not a valid bunker URI')
-  const bunker = nip46.BunkerSigner.fromBunker(clientSk, bp, { pool: getPool() as never })
-  await bunker.connect()
-  const pubkey = await bunker.getPublicKey()
+  const session = getPublicKey(clientSk)
+  // Every request watched for its answer (signerActivity.ts), then measured:
+  // past what the signer relay carries it is refused (signerRequestSize.ts).
+  const bunker = guardRequestSize(trackActivity(nip46.BunkerSigner.fromBunker(clientSk, bp, { pool: answersFirst() as never }), session), session)
+  onStep?.('connect')
+  await said(bunker, bunker.connect())
+  onStep?.('get_public_key')
+  const pubkey = await said(bunker, bunker.getPublicKey())
+  onStep?.(null)
   const signer: Signer = {
     kind: 'nip46',
     pubkey,
     bunkerUri,
     clientSecretKey: clientSk,
-    signEvent: (template) => bunker.signEvent(attributed(template)) as unknown as Promise<NostrEvent>,
-    nip44Decrypt: (pk, ct) => bunker.nip44Decrypt(pk, ct),
-    nip44Encrypt: (pk, pt) => bunker.nip44Encrypt(pk, pt),
-    nip04Decrypt: (pk, ct) => bunker.nip04Decrypt(pk, ct),
-    nip04Encrypt: (pk, pt) => bunker.nip04Encrypt(pk, pt),
+    session,
+    signEvent: (template) => said(bunker, bunker.signEvent(attributed(template))) as unknown as Promise<NostrEvent>,
+    nip44Decrypt: (pk, ct) => said(bunker, bunker.nip44Decrypt(pk, ct)),
+    nip44Encrypt: (pk, pt) => said(bunker, bunker.nip44Encrypt(pk, pt)),
+    nip04Decrypt: (pk, ct) => said(bunker, bunker.nip04Decrypt(pk, ct)),
+    nip04Encrypt: (pk, pt) => said(bunker, bunker.nip04Encrypt(pk, pt)),
     // Not bunker.getPublicKey(): nostr-tools keeps its first answer for good.
-    heldPubkey: () => bunker.sendRequest('get_public_key', []),
+    heldPubkey: () => said(bunker, bunker.sendRequest('get_public_key', [])),
     close: () => bunker.close(),
     // A phone that suspends the tab leaves its relay sockets half-open: the
     // browser still calls them connected, so the pool reuses them and a
@@ -253,11 +381,23 @@ export async function nip46Signer(bunkerUri: string, clientSecretKey?: Uint8Arra
     // request (nostr-tools re-subscribes when its subscription is gone), so
     // nothing is rebuilt and the bunker sees no new connect handshake.
     reconnect: async () => {
-      getPool().close([...bp.relays])
+      dropSignerSockets(bp.relays)
       return signer
     },
   }
   return signer
+}
+
+/**
+ * Drop the signer pool's sockets to a bunker's relays, so its next request
+ * opens fresh ones (and subscribes again: nostr-tools does once every part of
+ * its subscription has closed). The signer has a pool of its own
+ * (relay.ts getSignerPool), so this never closes a socket the app's own
+ * reads and writes use, even on ONOSENDAI's relay.
+ */
+export function dropSignerSockets(relays: readonly string[]): void {
+  if (relays.length === 0) return
+  try { getSignerPool().close([...relays]) } catch { /* nothing open */ }
 }
 
 function randomHex(bytes: Uint8Array): string {
@@ -277,7 +417,7 @@ async function waitForPublicKey(bunker: nip46.BunkerSigner, signal?: AbortSignal
     }
   })
   try {
-    return await Promise.race([bunker.getPublicKey(), stopped])
+    return await Promise.race([said(bunker, bunker.getPublicKey()), stopped])
   } finally {
     if (timeout) clearTimeout(timeout)
     if (signal && abort) signal.removeEventListener('abort', abort)
@@ -291,23 +431,28 @@ function wrapBunkerSigner(
   bunkerUri: string,
   nostrConnectSession = false,
 ): Signer {
+  const session = getPublicKey(clientSecretKey)
+  // Every request watched for its answer (signerActivity.ts), then measured:
+  // past what the signer relay carries it is refused (signerRequestSize.ts).
+  guardRequestSize(trackActivity(bunker, session), session)
   const signer: Signer = {
     kind: 'nip46',
     pubkey,
     bunkerUri,
     clientSecretKey,
     nostrConnectSession,
-    signEvent: (template) => bunker.signEvent(attributed(template)) as unknown as Promise<NostrEvent>,
-    nip44Decrypt: (pk, ct) => bunker.nip44Decrypt(pk, ct),
-    nip44Encrypt: (pk, pt) => bunker.nip44Encrypt(pk, pt),
-    nip04Decrypt: (pk, ct) => bunker.nip04Decrypt(pk, ct),
-    nip04Encrypt: (pk, pt) => bunker.nip04Encrypt(pk, pt),
+    session,
+    signEvent: (template) => said(bunker, bunker.signEvent(attributed(template))) as unknown as Promise<NostrEvent>,
+    nip44Decrypt: (pk, ct) => said(bunker, bunker.nip44Decrypt(pk, ct)),
+    nip44Encrypt: (pk, pt) => said(bunker, bunker.nip44Encrypt(pk, pt)),
+    nip04Decrypt: (pk, ct) => said(bunker, bunker.nip04Decrypt(pk, ct)),
+    nip04Encrypt: (pk, pt) => said(bunker, bunker.nip04Encrypt(pk, pt)),
     // Not bunker.getPublicKey(): nostr-tools keeps its first answer for good.
-    heldPubkey: () => bunker.sendRequest('get_public_key', []),
+    heldPubkey: () => said(bunker, bunker.sendRequest('get_public_key', [])),
     close: () => bunker.close(),
     reconnect: async () => {
       const bp = await nip46.parseBunkerInput(bunkerUri)
-      if (bp) getPool().close([...bp.relays])
+      if (bp) dropSignerSockets(bp.relays)
       return signer
     },
   }
@@ -345,9 +490,11 @@ export function createNostrConnectSession(relayInput = DEFAULT_SIGNER_RELAY): No
         // Automatic switch_relays interoperability varies between signers and
         // can strand the get_public_key response on a relay we never selected;
         // the QR names two relays by default so neither is a single point.
-        { pool: getPool() as never, skipSwitchRelays: true },
+        { pool: answersFirst() as never, skipSwitchRelays: true },
         signal ?? 300_000,
       )
+      // Its get_public_key is the session's first request: watched from there.
+      trackActivity(bunker, getPublicKey(clientSecretKey))
       onConnected?.()
       let pubkey: string
       try { pubkey = await waitForPublicKey(bunker, signal) }
@@ -374,7 +521,7 @@ export function createNostrConnectSession(relayInput = DEFAULT_SIGNER_RELAY): No
 async function nostrConnectSessionSigner(bunkerUri: string, clientSecretKey: Uint8Array, pubkey: string): Promise<Signer> {
   const bp = await nip46.parseBunkerInput(bunkerUri)
   if (!bp) throw new Error('The saved Nostr Connect session is invalid.')
-  const bunker = nip46.BunkerSigner.fromBunker(clientSecretKey, bp, { pool: getPool() as never })
+  const bunker = nip46.BunkerSigner.fromBunker(clientSecretKey, bp, { pool: answersFirst() as never })
   return wrapBunkerSigner(bunker, clientSecretKey, pubkey, bunkerUri, true)
 }
 
@@ -382,8 +529,14 @@ async function nostrConnectSessionSigner(bunkerUri: string, clientSecretKey: Uin
 export interface SignerPref {
   kind: SignerKind
   pubkey: string
-  /** local only. */
+  /** local only, and only for a key this app generated (Signer.minted). */
   nsec?: string
+  /**
+   * local only: a key someone brought, encrypted with their password
+   * (NIP-49). A reload asks for the password to open it. A local pref with
+   * neither this nor `nsec` remembers the identity but not its key.
+   */
+  ncryptsec?: string
   /** nip46 only. */
   bunkerUri?: string
   clientNsec?: string
@@ -392,7 +545,13 @@ export interface SignerPref {
 
 export function prefOf(signer: Signer): SignerPref {
   const base: SignerPref = { kind: signer.kind, pubkey: signer.pubkey }
-  if (signer.kind === 'local' && signer.secretKey) base.nsec = nip19.nsecEncode(signer.secretKey)
+  // A brought key is kept only encrypted; only a key this app generated is
+  // kept plain. A local key with neither mark is not written at all: it
+  // lasts for this visit, from memory.
+  if (signer.kind === 'local') {
+    if (signer.ncryptsec) base.ncryptsec = signer.ncryptsec
+    else if (signer.minted && signer.secretKey) base.nsec = nip19.nsecEncode(signer.secretKey)
+  }
   if (signer.kind === 'nip46') {
     base.bunkerUri = signer.bunkerUri
     if (signer.clientSecretKey) base.clientNsec = nip19.nsecEncode(signer.clientSecretKey)
@@ -402,8 +561,11 @@ export function prefOf(signer: Signer): SignerPref {
 }
 
 /** Rebuild a signer from a persisted preference. Local is instant; the others reconnect. */
-export async function signerFromPref(pref: SignerPref): Promise<Signer> {
-  if (pref.kind === 'local' && pref.nsec) return signerFromNsec(pref.nsec)
+export async function signerFromPref(pref: SignerPref, onStep?: HandshakeStep): Promise<Signer> {
+  // A local key is never reconnected: it is live from load (the store's
+  // pickInitialSigner), and an encrypted one opens only with its password
+  // (unlockKey). Rebuilt here it would lose what decides how it is kept.
+  if (pref.kind === 'local') throw new Error('A key on this device is not reconnected.')
   if (pref.kind === 'nip07') {
     const signer = await nip07Signer(NIP07_WAIT_MS)
     // Same guard as a bunker's: an extension switched to another account
@@ -417,7 +579,7 @@ export async function signerFromPref(pref: SignerPref): Promise<Signer> {
     // A bunker still does its handshake, and answers with the account it holds
     // now. Refuse one that is not the account saved here: signing as it would
     // continue this pubkey's chain under another key.
-    const signer = await nip46Signer(pref.bunkerUri, clientSk)
+    const signer = await nip46Signer(pref.bunkerUri, clientSk, onStep)
     if (signer.pubkey !== pref.pubkey) {
       await signer.close?.()
       throw new SignerAccountMismatch()
@@ -431,12 +593,23 @@ export async function signerFromPref(pref: SignerPref): Promise<Signer> {
 const PREF_KEY = 'onosendai:signer'
 
 export function loadSignerPref(): SignerPref | null {
+  let pref: SignerPref | null
   try {
     const raw = localStorage.getItem(PREF_KEY)
-    return raw ? (JSON.parse(raw) as SignerPref) : null
+    pref = raw ? (JSON.parse(raw) as SignerPref) : null
   } catch {
     return null
   }
+  // A bunker session saved while a relay it names was still running: drop
+  // the relays that no longer answer and keep the rest, here and on disk.
+  if (pref?.kind === 'nip46' && typeof pref.bunkerUri === 'string') {
+    const bunkerUri = withoutRetiredSignerRelays(pref.bunkerUri)
+    if (bunkerUri !== pref.bunkerUri) {
+      pref = { ...pref, bunkerUri }
+      saveSignerPref(pref)
+    }
+  }
+  return pref
 }
 
 export function saveSignerPref(pref: SignerPref): void {
@@ -454,22 +627,147 @@ export function saveSignerPref(pref: SignerPref): void {
  * memoised, and hands the live signer to onReady so the store can swap it in.
  */
 export function deferredReconnect(pref: SignerPref, onReady: (s: Signer) => void): Signer {
-  let pending: Promise<Signer> | null = null
-  const ensure = (): Promise<Signer> => {
-    // A failed reconnect is not kept: the next signature tries again. Kept,
-    // one early failure (an extension not injected yet, a bunker relay
-    // down) refused every signature until the page was reloaded.
-    if (!pending) {
-      const attempt = signerFromPref(pref).then((s) => { onReady(s); return s })
-      pending = attempt
-      attempt.catch(() => { if (pending === attempt) pending = null })
-    }
-    return pending
+  /** The live signer as handed out (signs through `queued` first), and as the handshake made it. */
+  let live: Signer | null = null
+  let liveRaw: Signer | null = null
+  interface Attempt {
+    done: Promise<Signer>
+    at: number
+    /** A step ran out of time (HANDSHAKE_STEP_MS), or RETRY gave it up: it may be replaced, and its answer is still taken. */
+    stale: boolean
+    /** Rejects when it goes stale: what a wake waits on besides the answer. */
+    gaveUp: Promise<never>
+    giveUp: () => void
   }
+  let attempt: Attempt | null = null
+  /**
+   * Why the last handshake failed (a refusal, a relay down), until another
+   * starts. Only a signature or a RETRY starts one after a failure: a wake
+   * does not. A refusing signer asked again on every return to the tab was
+   * a new approval prompt on every focus (the real-bunker run, 2026-11-04).
+   */
+  let failed: { err: unknown } | null = null
+  /** LOG OUT closed it: nothing more is asked, and a handshake that still answers is closed at once. */
+  let closed = false
+  // Whichever attempt answers first answers everyone, those waiting on an older one too.
+  let announce: (s: Signer) => void = () => {}
+  const arrived = new Promise<Signer>((resolve) => { announce = resolve })
+  /**
+   * Signatures asked for while the handshake ran, by template, until they
+   * settle. A signature that ran out of time waiting on the handshake was
+   * asked again by the store's retry, and both went out the moment the
+   * handshake answered: two prompts for one AUTH (the real-bunker run,
+   * 2026-11-04). The same template asked for while it still waits, or within
+   * SAME_REQUEST_MS of its going out, joins it. Later than that, asking
+   * again is the store's retry over fresh sockets, and goes out.
+   *
+   * A relay's AUTHs are one request per relay while they wait: each newer
+   * one (a real absence's, a RETRY's) takes the place of the one before, as
+   * a relay's newer challenge takes the place of its older one (NIP-42).
+   * Three of them waited on one lost handshake and went out together, three
+   * prompts at once, when the next handshake answered. Once one has gone
+   * out, only an AUTH for its own challenge joins it: a newer challenge is a
+   * newer socket (review of #603), and its signature would not sign it in.
+   */
+  type Send = (s: Signer) => Promise<NostrEvent>
+  interface Queued { signing: Promise<NostrEvent>; sentAt: number | null; send: Send; template: EventTemplate }
+  const queued = new Map<string, Queued>()
+  const challengeOf = (t: EventTemplate): string | undefined => t.tags.find((x) => x[0] === 'challenge')?.[1]
+  const joinable = (t: EventTemplate, send?: Send): Promise<NostrEvent> | null => {
+    const q = queued.get(keyOf(t))
+    if (!q) return null
+    // Still waiting: the newest of a relay's AUTHs is the one that goes out.
+    if (q.sentAt === null) { if (send) { q.send = send; q.template = t } return q.signing }
+    if (t.kind === 22242 && challengeOf(t) !== challengeOf(q.template)) return null
+    return Date.now() - q.sentAt < SAME_REQUEST_MS ? q.signing : null
+  }
+  /** Sign through the live signer, or wait for the handshake, joining what waits already (`queued`). */
+  const viaHandshake = (template: EventTemplate, send: Send): Promise<NostrEvent> => {
+    if (live) return send(live)
+    const waiting = joinable(template, send)
+    // Joined, it still asks for a handshake: the one it waited on may have
+    // been given up (RETRY, a lost step), and a fresh one answers it too.
+    if (waiting) { ensure().catch(() => { /* the joined request says why */ }); return waiting }
+    const key = keyOf(template)
+    const entry: Queued = { signing: Promise.resolve(null as unknown as NostrEvent), sentAt: null, send, template }
+    entry.signing = ensure().then(() => { entry.sentAt = Date.now(); return entry.send(liveRaw!) })
+    queued.set(key, entry)
+    const forget = (): void => { if (queued.get(key) === entry) queued.delete(key) }
+    entry.signing.then(forget, forget)
+    return entry.signing
+  }
+  // A relay's AUTH is the same request for the same relay, whatever its challenge and time.
+  const keyOf = (t: EventTemplate): string => t.kind === 22242
+    ? JSON.stringify([t.kind, t.tags.find((x) => x[0] === 'relay')?.[1]])
+    : JSON.stringify([t.kind, t.created_at, t.tags, t.content])
+  const adopt = (s: Signer): Signer => {
+    if (closed) {
+      void s.close?.()
+      throw new Error('This signer was logged out on this device.')
+    }
+    if (!live) {
+      liveRaw = s
+      live = { ...s, signEvent: (t) => joinable(t) ?? s.signEvent(t) }
+      failed = null
+      announce(live)
+      onReady(live)
+    } else {
+      onReady(s)
+    }
+    return live
+  }
+  const start = (): Attempt => {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let reject: (err: unknown) => void = () => {}
+    const gaveUp = new Promise<never>((_, r) => { reject = r })
+    gaveUp.catch(() => { /* only a wake waits on it */ })
+    const mine: Attempt = {
+      done: Promise.resolve(null as unknown as Signer),
+      at: Date.now(),
+      stale: false,
+      gaveUp,
+      giveUp: () => { clearTimeout(timer); if (!mine.stale) { mine.stale = true; reject(new SignerTimeout()) } },
+    }
+    // Each step of a bunker's handshake gets HANDSHAKE_STEP_MS: a request
+    // lost in transit is never answered, and nothing else would end the wait.
+    const step: HandshakeStep = (name) => {
+      clearTimeout(timer)
+      if (name) timer = setTimeout(mine.giveUp, HANDSHAKE_STEP_MS)
+    }
+    mine.done = signerFromPref(pref, step).then(adopt)
+    mine.done.then(() => clearTimeout(timer), (err: unknown) => {
+      clearTimeout(timer)
+      if (attempt === mine) { attempt = null; failed = { err } }
+    })
+    return mine
+  }
+  const ensure = (restart = true): Promise<Signer> => {
+    if (closed) return Promise.reject(new Error('This signer was logged out on this device.'))
+    if (live) return Promise.resolve(live)
+    // A failed reconnect is not kept for a signature: the next one tries
+    // again. Kept, one early failure (an extension not injected yet, a bunker
+    // relay down) refused every signature until the page was reloaded.
+    //
+    // A handshake that never answers must not hold anyone either (arkinox,
+    // 2026-11-01), so the limit is on each wait and not on the handshake: a
+    // bunker can answer minutes later, and that answer is still taken. Only
+    // something that wants a signature replaces one that went stale or is
+    // past the limit. A wake does not, or every return to the tab would
+    // stack another prompt; nor does a wake start one after a failure.
+    const replace = !attempt || attempt.stale || (restart && Date.now() - attempt.at >= HANDSHAKE_PATIENCE_MS)
+    if (replace && !restart && (failed || attempt?.stale)) return Promise.reject(failed ? failed.err : new SignerTimeout())
+    if (replace) { failed = null; attempt = start() }
+    const a = attempt!
+    // A signature waits for the handshake's answer, late or not, up to the
+    // limit. A wake (and the store's retry) stops waiting once it goes stale.
+    return handshakeWithin(Promise.race(restart ? [a.done, arrived] : [a.done, arrived, a.gaveUp]))
+  }
+  const session = sessionOfPref(pref)
   return {
     kind: pref.kind,
     pubkey: pref.pubkey,
-    signEvent: (template) => ensure().then((s) => s.signEvent(template)),
+    ...(session ? { session } : {}),
+    signEvent: (template) => viaHandshake(template, (s) => s.signEvent(template)),
     // Whether the live signer offers NIP-44 is known only once it is up.
     nip44Decrypt: (pk, ct) => ensure().then((s) => {
       if (!s.nip44Decrypt) throw new Error(NIP44_UNAVAILABLE)
@@ -488,8 +786,47 @@ export function deferredReconnect(pref: SignerPref, onReady: (s: Signer) => void
       return s.nip04Encrypt(pk, pt)
     }),
     heldPubkey: () => ensure().then((s) => (s.heldPubkey ? s.heldPubkey() : s.pubkey)),
-    reconnect: ensure,
+    reconnect: () => ensure(false),
+    // LOG OUT: the handshake in progress is given up, the live signer (if it
+    // came up) closed, and the sockets to the bunker's relays dropped.
+    close: async () => {
+      closed = true
+      if (attempt) { attempt.giveUp(); attempt = null }
+      const raw = liveRaw
+      live = null
+      liveRaw = null
+      dropSignerSockets(bunkerRelaysOf(pref))
+      await raw?.close?.()
+    },
+    retry: () => {
+      if (live || closed) return
+      failed = null
+      if (attempt) { attempt.giveUp(); attempt = null }
+      // Its sockets to the bunker's relays may be the half-open ones that
+      // lost the request: the fresh attempt opens its own.
+      dropSignerSockets(bunkerRelaysOf(pref))
+    },
   }
+}
+
+/** How soon after a signature goes out the same one asked again is the same request (deferredReconnect). */
+const SAME_REQUEST_MS = 1000
+
+/** The client pubkey of a saved bunker session (Signer.session), or undefined when it keeps none. */
+export function sessionOfPref(pref: SignerPref): string | undefined {
+  if (pref.kind !== 'nip46' || !pref.clientNsec) return undefined
+  try {
+    const { type, data } = nip19.decode(pref.clientNsec)
+    return type === 'nsec' ? getPublicKey(data as Uint8Array) : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** The relays a saved bunker login talks over, read without a lookup. */
+export function bunkerRelaysOf(pref: Pick<SignerPref, 'kind' | 'bunkerUri'>): string[] {
+  if (pref.kind !== 'nip46' || !pref.bunkerUri) return []
+  try { return new URL(pref.bunkerUri.trim()).searchParams.getAll('relay') } catch { return [] }
 }
 
 /**

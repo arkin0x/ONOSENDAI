@@ -15,7 +15,7 @@
  * a shard's name may have.
  *
  * It also says what IMPORT's picker offers and which picked or dropped file
- * is a zip, so the picker and the import agree.
+ * is a zip or a .json, so the picker and the import agree.
  */
 
 import { IMPORT_MAX_FILE_BYTES } from 'sno-core/mesh'
@@ -29,8 +29,16 @@ import type { ZipEntry } from './zipRead'
  * read does today, so this is a guard, not a fix for a known picker.
  */
 export const ZIP_TYPES = ['application/zip', 'application/x-zip-compressed', 'application/x-zip', 'multipart/x-zip'] as const
-/** IMPORT's picker: the 3D files one object comes in by, and a zip by extension and by type. */
-export const IMPORT_PICKER_ACCEPT = [IMPORT_ACCEPT, '.zip', ...ZIP_TYPES].join(',')
+/**
+ * IMPORT's picker: the 3D files one object comes in by, a .json (an SNO
+ * object, or a glTF) by extension and by type so a phone's picker offers it,
+ * and a zip by extension and by type.
+ */
+export const IMPORT_PICKER_ACCEPT = [IMPORT_ACCEPT, '.json', 'application/json', '.zip', ...ZIP_TYPES].join(',')
+/** A .json by its name or its type: an SNO object or a glTF, which store/useShardImport routeImport tells apart. */
+export function isJsonFile(file: { name: string; type: string }): boolean {
+  return /\.json$/i.test(file.name) || file.type === 'application/json'
+}
 /** A zip by its name or by any type a zip is labelled with: bulk import, not one 3D file. */
 export function isZipFile(file: { name: string; type: string }): boolean {
   return /\.zip$/i.test(file.name) || (ZIP_TYPES as readonly string[]).includes(file.type)

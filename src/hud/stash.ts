@@ -14,10 +14,13 @@
 
 import { create } from 'zustand'
 import type { ChestDraft, MyDeployment } from '../store/useShards'
-import { useShards } from '../store/useShards'
+import { fillingChest, useShards } from '../store/useShards'
 import { useCyberspace } from '../store/useCyberspace'
 import { hiddenLabel } from '../lib/hidden'
 import type { FeedObject } from 'sno-core/feed'
+import { useWorkshop } from '../store/useWorkshop'
+import { usePublished } from '../store/usePublished'
+import { ownObjectCredit } from '../lib/published'
 
 export interface Bag {
   lookupId: string
@@ -70,8 +73,34 @@ export function depName(d: MyDeployment): string {
 export function goToDeployment(d: MyDeployment): void {
   const unit = d.type === 'shard' ? d.shard?.unit ?? 0 : 0
   useStash.setState(NONE_OPEN)
-  useCyberspace.getState().focusItem({ x: BigInt(d.at.x), y: BigInt(d.at.y), z: BigInt(d.at.z) }, d.plane, depName(d), unit)
+  useCyberspace.getState().viewAt({ x: BigInt(d.at.x), y: BigInt(d.at.y), z: BigInt(d.at.z) }, d.plane, depName(d), unit, { item: true })
   useShards.getState().selectSecret(d.eventId)
+}
+
+/**
+ * A published object into your workshop: OPEN IN WORKSHOP for your own,
+ * REMIX for someone else's (the Shard Feed's tile and the published shard's
+ * card, arkinox 2026-11-14). Closes the Stash's modals; the caller closes
+ * any card stacked over them.
+ */
+export function openFeedObjectInWorkshop(object: FeedObject, me: string): void {
+  const ws = useWorkshop.getState()
+  let id: string
+  if (object.pubkey === me) {
+    // Your own object comes back under its `d`, as snocrash's adopt brings
+    // one back, so PUBLISH edits it in place rather than publishing a second
+    // copy beside it. The model already here is the one to edit: the relay's
+    // copy may be older than it. A remix of yours keeps the credit it was
+    // published with, so republishing it does not drop the original author
+    // (review of snocrash #35, 2026-10-15); a credit to yourself is not one.
+    const credit = ownObjectCredit(object.event.tags, me)
+    id = ws.shards.some((s) => s.id === object.d) ? object.d : ws.importShard(object.shard, credit, object.d)
+    usePublished.getState().learn([object.event])
+  } else {
+    id = ws.importShard(object.shard, { address: object.address, relay: object.seen?.[0] })
+  }
+  useStash.getState().close()
+  ws.openWorkshop(id)
 }
 
 interface StashModals {
@@ -83,10 +112,16 @@ interface StashModals {
   message: boolean
   /** The FORGE AN ITEM composer (Keys and Chests B1 §3.1; the item is a keypair, so the name says key). */
   key: boolean
-  /** The SEAL A CHEST composer. */
+  /** The chest modal for the chest just placed (SEAL A CHEST, then PLACE CHEST: useShards placeChest). */
   chest: boolean
+  /** The chest or door modal on one of yours already hidden: EDIT (its name and lock too) or ADD (a chest's contents). */
+  chestEdit: { eventId: string; fields: boolean } | null
+  /** SAVE on a chest of yours is running: the modal stays, so what it answers can be read. */
+  chestSaving: boolean
   /** The PLACE AUDIO composer (DECK-0007). */
   audio: boolean
+  /** The SEED composer (DECK-0008). */
+  seed: boolean
   /** The SHARD FEED window: everyone's published objects, outside the Builder. */
   feed: boolean
   /** A deploy was started from the Models modal: cancelling it reopens the modal. */
@@ -112,10 +147,12 @@ interface StashModals {
   openMessage: () => void
   /** Forge a key to hide at the build cursor. */
   openKey: () => void
-  /** Seal a chest to hide at the build cursor. */
-  openChest: () => void
+  /** EDIT or ADD on a chest of yours. */
+  openChestEdit: (eventId: string, fields: boolean) => void
   /** Hide audio at the build cursor (DECK-0007). */
   openAudio: () => void
+  /** Plant a seed at the build cursor (DECK-0008). */
+  openSeed: () => void
   /** Browse the Shard Feed. */
   openFeed: () => void
   close: () => void
@@ -126,7 +163,7 @@ interface StashModals {
 }
 
 /** Every modal closed: what each open sets before opening its own. */
-const NONE_OPEN = { models: false, bags: false, bag: null, message: false, key: false, chest: false, audio: false, feed: false }
+const NONE_OPEN = { models: false, bags: false, bag: null, message: false, key: false, chest: false, chestEdit: null, audio: false, seed: false, feed: false }
 
 export const useStash = create<StashModals>((set) => ({
   models: false,
@@ -135,7 +172,10 @@ export const useStash = create<StashModals>((set) => ({
   message: false,
   key: false,
   chest: false,
+  chestEdit: null,
+  chestSaving: false,
   audio: false,
+  seed: false,
   feed: false,
   returnToModels: false,
   returnToFeed: false,
@@ -146,8 +186,9 @@ export const useStash = create<StashModals>((set) => ({
   openBag: (lookupId) => set({ ...NONE_OPEN, bag: lookupId }),
   openMessage: () => set({ ...NONE_OPEN, message: true }),
   openKey: () => set({ ...NONE_OPEN, key: true }),
-  openChest: () => set({ ...NONE_OPEN, chest: true }),
+  openChestEdit: (eventId, fields) => set({ ...NONE_OPEN, chestEdit: { eventId, fields } }),
   openAudio: () => set({ ...NONE_OPEN, audio: true }),
+  openSeed: () => set({ ...NONE_OPEN, seed: true }),
   openFeed: () => set({ ...NONE_OPEN, feed: true }),
   close: () => set(NONE_OPEN),
   deployModel: (id) => {
@@ -174,6 +215,17 @@ export const useStash = create<StashModals>((set) => ({
 // in the world, and the chest is still to be hidden.
 // A placement lined up again (useShards `placedLast`) has placed: it forgets
 // too, so a CANCEL on the copy does not bring the modal back.
+// A chest placed first (R18): PLACE CHEST opens its modal, and the modal
+// goes when the chest is no longer being filled (sealed and hidden, MOVE
+// back to the bar, or canceled).
+useShards.subscribe((s, prev) => {
+  const now = fillingChest(s.pending)
+  const was = fillingChest(prev.pending)
+  // A seal that failed while being filled: its modal says why, whatever closed it meanwhile.
+  if ((now && !was) || (now && s.deployStatus === 'error' && prev.deployStatus !== 'error')) useStash.setState({ ...NONE_OPEN, chest: true })
+  else if (!now && was && useStash.getState().chest) useStash.setState({ chest: false })
+})
+
 useShards.subscribe((s, prev) => {
   if (s.pending !== null && s.deployStatus === 'done' && prev.deployStatus !== 'done') {
     useStash.setState({ returnToModels: false, returnToFeed: false })

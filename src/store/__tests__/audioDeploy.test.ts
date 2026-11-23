@@ -96,7 +96,7 @@ describe('hiding audio', () => {
     // An Earth tap ends BUILD under the lined-up deploy.
     useCyberspace.getState().focusOn(useCyberspace.getState().position, 0, 'EARTH · tap')
     expect(useBuilder.getState().active).toBe(false)
-    expect(useToast.getState().toast?.meta ?? '').toMatch(/Your audio is kept: PLACE AUDIO/)
+    expect(useToast.getState().toast).toMatchObject({ label: 'BUILD MODE ENDED', meta: '' })
     expect(useBuilder.getState().takeItemDraft('key')).toBeNull()
     expect(useBuilder.getState().takeItemDraft('audio')).toEqual({ type: 'audio', audio })
     expect(useBuilder.getState().itemDraft).toBeNull()

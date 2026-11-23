@@ -508,13 +508,21 @@ export interface ViewAxes {
  * axes, so this is the boundary where render space stops.
  */
 export function viewAxes(q: Quaternion): ViewAxes {
+  // Asked for several times a frame, and the view seldom changes. The last answer
+  // is kept: nine vectors and five objects a call, at 144 Hz, for the same three
+  // axes. It is frozen because every caller now shares it.
+  if (lastAxes && lastX === q.x && lastY === q.y && lastZ === q.z && lastW === q.w) return lastAxes
   const toCs = (v: Vector3) => snapToAxis(flipHandedness(v.applyQuaternion(q)))
-  return {
-    right: toCs(new Vector3(1, 0, 0)),
-    up: toCs(new Vector3(0, 1, 0)),
-    out: toCs(new Vector3(0, 0, 1)),
-  }
+  lastX = q.x; lastY = q.y; lastZ = q.z; lastW = q.w
+  lastAxes = Object.freeze({
+    right: Object.freeze(toCs(new Vector3(1, 0, 0))),
+    up: Object.freeze(toCs(new Vector3(0, 1, 0))),
+    out: Object.freeze(toCs(new Vector3(0, 0, 1))),
+  })
+  return lastAxes
 }
+let lastAxes: ViewAxes | null = null
+let lastX = 0, lastY = 0, lastZ = 0, lastW = 0
 
 /**
  * The render-space unit vector pointing along the POSITIVE direction of a given
@@ -562,59 +570,48 @@ export function renderDirection(axes: ViewAxes, axis: AxisName): [number, number
 export function claimScreenAxes(
   right: Vector3, up: Vector3, out: Vector3, local: ViewAxes,
 ): ViewAxes {
-  const slots = [local.right, local.up, local.out]
-  const taken = [false, false, false]
-  const claim = (v: Vector3): AxisDirection => {
-    const c = [v.x, v.y, v.z]
-    let i = -1
-    for (let k = 0; k < 3; k++) {
-      if (taken[k]) continue
-      if (i === -1 || Math.abs(c[k]) > Math.abs(c[i])) i = k
-    }
-    taken[i] = true
-    const dir = (slots[i].dir * (c[i] >= 0 ? 1 : -1)) as 1 | -1
-    return { axis: slots[i].axis, dir }
+  // Runs every frame, so it holds no arrays or closures of its own. Claimed in
+  // this order, so screen-right gets first pick of the three.
+  const ri = bestFree(right, 0)
+  const ui = bestFree(up, 1 << ri)
+  const oi = bestFree(out, (1 << ri) | (1 << ui))
+  return { right: claimed(right, ri, local), up: claimed(up, ui, local), out: claimed(out, oi, local) }
+}
+
+function component(v: Vector3, k: number): number {
+  return k === 0 ? v.x : k === 1 ? v.y : v.z
+}
+
+/** The slot of the largest component of `v` among those not in the bitmask `taken`. */
+function bestFree(v: Vector3, taken: number): number {
+  let i = -1
+  for (let k = 0; k < 3; k++) {
+    if (taken & (1 << k)) continue
+    if (i === -1 || Math.abs(component(v, k)) > Math.abs(component(v, i))) i = k
   }
-  // Claimed in this order, so screen-right gets first pick of the three.
-  const r = claim(right)
-  const u = claim(up)
-  const o = claim(out)
-  return { right: r, up: u, out: o }
+  return i
+}
+
+/** The axis in slot `i`, signed by which way `v` points along it. */
+function claimed(v: Vector3, i: number, local: ViewAxes): AxisDirection {
+  const slot = i === 0 ? local.right : i === 1 ? local.up : local.out
+  return { axis: slot.axis, dir: (slot.dir * (component(v, i) >= 0 ? 1 : -1)) as 1 | -1 }
 }
 
 /**
- * The level view nearest `q`, or null when `q` is level already: cyberspace
- * +Y up on screen, which WALK keeps while GRAVITY is on (store/useWalk.ts).
- * The four level views are the canonical one turned about +Y; the nearest is
- * the one the smallest turn reaches.
- */
-export function levelQuaternion(q: Quaternion): Quaternion | null {
-  const up = viewAxes(q).up
-  if (up.axis === 'y' && up.dir === 1) return null
-  let best: Quaternion | null = null
-  let bestDot = -1
-  let level = canonicalQuaternion()
-  for (let k = 0; k < 4; k++) {
-    const d = Math.abs(level.dot(q))
-    if (d > bestDot + 1e-9) { best = level; bestDot = d }
-    level = rotateView(level, 'left')
-  }
-  return best
-}
-
-/**
- * claimScreenAxes for a level walker (WALK under GRAVITY): up is cyberspace
- * +Y whatever the camera does, and right and out are the two level axes
+ * claimScreenAxes for a level walker (WALK under GRAVITY): up is against
+ * gravity `down` (lib/walkDown.ts: cyberspace -Y unless the view is turned)
+ * whatever the camera does, and right and out are the two level axes
  * nearest the camera's own, so A and D, W and S stay on the floor however
  * far you look up or down. `right`, `up` and `out` are the camera's basis
  * in the scene's local frame, as for claimScreenAxes, and are overwritten.
  */
-export function levelScreenAxes(right: Vector3, up: Vector3, out: Vector3, local: ViewAxes): ViewAxes {
-  // Cyberspace +Y in the local frame: the slot that holds y, signed.
+export function levelScreenAxes(right: Vector3, up: Vector3, out: Vector3, local: ViewAxes, down: AxisDirection = { axis: 'y', dir: -1 }): ViewAxes {
+  // Up, against gravity, in the local frame: the slot that holds its axis, signed.
   const slots = [local.right, local.up, local.out]
   let j = 0
-  while (j < 2 && slots[j].axis !== 'y') j++
-  LEVEL_UP.set(0, 0, 0).setComponent(j, slots[j].dir)
+  while (j < 2 && slots[j].axis !== down.axis) j++
+  LEVEL_UP.set(0, 0, 0).setComponent(j, -slots[j].dir * down.dir)
   // The camera's basis laid flat on it.
   right.addScaledVector(LEVEL_UP, -right.dot(LEVEL_UP))
   out.addScaledVector(LEVEL_UP, -out.dot(LEVEL_UP))

@@ -18,6 +18,7 @@ import { useNow } from '../hooks/useNow'
 import { useCyberspace } from '../store/useCyberspace'
 import { ConfirmModal } from './ConfirmModal'
 import { useEscape } from '../hooks/useEscape'
+import { ModalClose } from './ui/ModalClose'
 
 /** The quote, waiting for a PAY. */
 export function CloudApproval(): JSX.Element | null {
@@ -131,7 +132,7 @@ export function InvoiceModal(): JSX.Element | null {
       <div className="modal__card cloud invoice" onPointerDown={(e) => e.stopPropagation()}>
         <div className="login__head">
           <h2 className="modal__title">HOSAKA Offload for {satsLabel(invoice.amountMsats)}</h2>
-          <button className="secret__close" onClick={hide} aria-label="Hide">✕</button>
+          <ModalClose onClose={hide} label="Hide" />
         </div>
 
         <div className="invoice__qr-wrap">

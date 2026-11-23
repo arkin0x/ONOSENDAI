@@ -1,3 +1,4 @@
+import 'fake-indexeddb/auto'
 import { beforeEach, describe, expect, it } from 'vitest'
 
 if (typeof localStorage === 'undefined') {
@@ -12,11 +13,18 @@ if (typeof localStorage === 'undefined') {
 
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
 import { bagTemplate, chatInnerTemplate, CHAT_BAG_KIND } from '../../lib/hidden'
-import { mergeLines, sendKey, useChat, type ChatLine } from '../useChat'
+import { CHAT_CACHE_KEY, mergeLines, sendKey, useChat, type ChatLine } from '../useChat'
+import { readCached, WRITE_DELAY_MS } from '../../lib/deviceCache'
 import { useSecrets } from '../useSecrets'
 import { useCyberspace } from '../useCyberspace'
 
 const bytesToHex = (b: Uint8Array): string => Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('')
+
+/** The lines kept on the device, once the queued write has gone (IndexedDB, never localStorage). */
+async function kept(): Promise<unknown> {
+  await new Promise((r) => setTimeout(r, WRITE_DELAY_MS + 50))
+  return readCached(CHAT_CACHE_KEY)
+}
 
 const line = (id: string, at: number, over: Partial<ChatLine> = {}): ChatLine => ({ id, from: 'f'.repeat(64), text: id, at, region: 'r', height: 12, mine: false, ...over })
 
@@ -52,6 +60,7 @@ describe('receiving', () => {
   beforeEach(() => {
     useChat.setState({ lines: [], open: false, unread: 0, muted: true })
     useSecrets.setState({ current: { [region]: { keyHex: bytesToHex(regionKey), height: 12 } } })
+    useCyberspace.setState({ anchorPlane: 0, headPlane: 0 })
   })
 
   it('opens an envelope from someone else, unfolds the dock and keeps the line', async () => {
@@ -63,7 +72,8 @@ describe('receiving', () => {
     expect(s.lines).toHaveLength(1)
     expect(s.lines[0]).toMatchObject({ id: inner.id, from: getPublicKey(sk), text: 'anyone around?', region, height: 12, mine: false })
     expect(s.open).toBe(true)
-    expect(JSON.parse(localStorage.getItem('onosendai:chat') ?? '[]')).toHaveLength(1)
+    expect(await kept()).toHaveLength(1)
+    expect(localStorage.getItem('onosendai:chat')).toBeNull()
   })
 
   it('opens an envelope from a neighboring cube with that cube\'s key', async () => {
@@ -105,11 +115,40 @@ describe('receiving', () => {
     expect(useChat.getState().lines).toHaveLength(1)
   })
 
-  it('clear forgets everything on this device', () => {
+  // A room's key and d are the same in both planes (spec §7.6 Planes), so an
+  // envelope said at these X, Y and Z in the other plane opens with this key;
+  // only the line's C says which plane it was said in (DECK-0005 §3.2).
+  it('hears a line only in the plane its C names', async () => {
+    const sk = generateSecretKey()
+    const twin = finalizeEvent(chatInnerTemplate('from the twin plane', { x: 1n, y: 2n, z: 3n }, 1, 6, region), sk)
+    await useChat.getState().receive(finalizeEvent(await bagTemplate([twin], regionKey, region, 12, 6, CHAT_BAG_KIND), sk))
+    expect(useChat.getState().lines).toHaveLength(0)
+    expect(useChat.getState().open).toBe(false)
+    const here = finalizeEvent(chatInnerTemplate('from this plane', { x: 1n, y: 2n, z: 3n }, 0, 7, region), sk)
+    await useChat.getState().receive(finalizeEvent(await bagTemplate([here], regionKey, region, 12, 7, CHAT_BAG_KIND), sk))
+    expect(useChat.getState().lines.map((l) => l.text)).toEqual(['from this plane'])
+    // Listening from ideaspace, the same twin line is heard.
+    useCyberspace.setState({ anchorPlane: 1, headPlane: 1 })
+    await useChat.getState().receive(finalizeEvent(await bagTemplate([twin], regionKey, region, 12, 6, CHAT_BAG_KIND), sk))
+    expect(useChat.getState().lines.map((l) => l.text)).toContain('from the twin plane')
+  })
+
+  it('hears a line with no C in either plane', async () => {
+    const sk = generateSecretKey()
+    const bare = finalizeEvent({ kind: 23333, created_at: 8, content: 'no place said', tags: [['d', region]] }, sk)
+    for (const plane of [0, 1] as const) {
+      useChat.setState({ lines: [] })
+      useCyberspace.setState({ anchorPlane: plane, headPlane: plane })
+      await useChat.getState().receive(finalizeEvent(await bagTemplate([bare], regionKey, region, 12, 8, CHAT_BAG_KIND), sk))
+      expect(useChat.getState().lines.map((l) => l.text)).toEqual(['no place said'])
+    }
+  })
+
+  it('clear forgets everything on this device', async () => {
     useChat.setState({ lines: [line('a', 1)], unread: 3 })
     useChat.getState().clear()
     expect(useChat.getState().lines).toHaveLength(0)
     expect(useChat.getState().unread).toBe(0)
-    expect(localStorage.getItem('onosendai:chat')).toBe('[]')
+    expect(await kept()).toEqual([])
   })
 })

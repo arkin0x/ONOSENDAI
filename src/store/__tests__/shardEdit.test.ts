@@ -19,6 +19,8 @@ if (typeof localStorage === 'undefined') {
 }
 
 const sent: { kind: number; tags: string[][]; id: string; content?: string; created_at?: number }[] = []
+/** What the fake relay holds: everything it took, whatever a test clears from `sent`, its log. */
+const held: typeof sent = []
 /** Kinds every relay refuses in the current test. */
 const refused = new Set<number>()
 /** No relay answers a query while set. */
@@ -29,18 +31,19 @@ vi.mock('../../lib/relay', () => ({
   publishMany: vi.fn(async (_relays: string[], ev: { kind: number; tags: string[][]; id: string }) => {
     if (refused.has(ev.kind) || refuseIf?.(ev)) return { ok: false }
     sent.push(ev)
+    held.push(ev)
     return { ok: true }
   }),
   query: vi.fn(async () => []),
   // What the relay holds at an address: the objects it took.
-  queryEach: vi.fn(async (f: { kinds: number[]; '#d': string[] }) => silent ? [{ url: 'wss://relay.test', outcome: 'unreachable', reason: 'down', events: [] }] : [{ url: 'wss://relay.test', outcome: 'answered', events: sent.filter((e) => f.kinds.includes(e.kind) && e.tags.some((t) => t[0] === 'd' && f['#d'].includes(t[1]))) }]),
+  queryEach: vi.fn(async (f: { kinds: number[]; '#d': string[] }) => silent ? [{ url: 'wss://relay.test', outcome: 'unreachable', reason: 'down', events: [] }] : [{ url: 'wss://relay.test', outcome: 'answered', events: held.filter((e) => f.kinds.includes(e.kind) && e.tags.some((t) => t[0] === 'd' && f['#d'].includes(t[1]))) }]),
   queryAny: vi.fn(async () => []),
   relaySet: () => ['wss://relay.test'],
 }))
 
 import { newShard, type ShardModel } from 'sno-core/shards'
 import { useCyberspace } from '../useCyberspace'
-import { EDIT_STALE, EDIT_UNANSWERED, PUT_BACK_PENDING, editable, useShards, type MyDeployment } from '../useShards'
+import { EDIT_STALE, EDIT_UNANSWERED, MOVE_STALE, PUT_BACK_PENDING, editable, useShards, type MyDeployment } from '../useShards'
 import { useWorkshop } from '../useWorkshop'
 import { useBuilder } from '../useBuilder'
 import { bagEntries, dOf, HIDDEN_KIND, OBJECT_KIND } from '../../lib/hidden'
@@ -93,6 +96,7 @@ const realSign = useCyberspace.getState().signEvent
 
 beforeEach(() => {
   sent.length = 0
+  held.length = 0
   refused.clear()
   silent = false
   refuseIf = null
@@ -243,6 +247,18 @@ describe('the review of #369', () => {
     // And from a device that has only the stale row, EDIT refuses.
     useShards.setState({ mine: [stale], deleted: {} })
     expect(await failedMove(stale.eventId, at(17n))).toBe(EDIT_STALE)
+  })
+
+  it('a stale row of a moved inline shard cannot be edited: no second live copy (review of #595)', async () => {
+    await hide(3, at(2n))
+    const first = await hide(3, at(1n))
+    const before = useShards.getState().mine.map((d) => ({ ...d }))
+    // The old bag keeps the other shard, so it is rewritten without this one.
+    await move(first, at(9n))
+    useShards.setState({ mine: before, deleted: {} })
+    const mark = sent.length
+    expect(await failedMove(first, at(17n))).toBe(MOVE_STALE)
+    expect(sent.length).toBe(mark)
   })
 
   it('a reference move whose bag the signer refuses publishes nothing', async () => {

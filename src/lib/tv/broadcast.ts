@@ -228,6 +228,19 @@ export function reloadWait(recent: number): number {
 
 let reloading = false
 
+/** The reloads kept for the backoff that are within RELOAD_WINDOW_MS of `now`. */
+function recentReloads(now: number): number[] {
+  try {
+    const kept = JSON.parse(sessionStorage.getItem(RELOADS_KEY) ?? '[]') as unknown
+    return Array.isArray(kept) ? kept.filter((t): t is number => typeof t === 'number' && now - t < RELOAD_WINDOW_MS) : []
+  } catch { return [] }
+}
+
+/** Whether a reload asked for now would wait out the backoff (reloadBroadcast), or one is already on its way. */
+export function reloadWouldWait(now: number = Date.now()): boolean {
+  return reloading || reloadWait(recentReloads(now).length) > 0
+}
+
 /**
  * Reload the broadcast on the address it loaded on. One that keeps failing
  * straight after its load does not reload every few seconds for good: past
@@ -237,11 +250,7 @@ let reloading = false
 export function reloadBroadcast(go: (to: string) => void = (to) => window.location.replace(to), now: number = Date.now()): void {
   if (!isBroadcast() || reloading) return
   reloading = true
-  let recent: number[] = []
-  try {
-    const kept = JSON.parse(sessionStorage.getItem(RELOADS_KEY) ?? '[]') as unknown
-    if (Array.isArray(kept)) recent = kept.filter((t): t is number => typeof t === 'number' && now - t < RELOAD_WINDOW_MS)
-  } catch { /* none kept: at once */ }
+  const recent = recentReloads(now)
   const wait = reloadWait(recent.length)
   try { sessionStorage.setItem(RELOADS_KEY, JSON.stringify([...recent, now + wait])) } catch { /* the backoff is for this load only */ }
   setTimeout(() => go(address), wait)

@@ -55,30 +55,46 @@
  * at once, with no glide from wherever it last was. Driven per frame from
  * the store (lib/walkGhost.ts), not from React, so a landing cannot draw
  * one frame of it at the new head before a re-render hides it.
+ *
+ * In build mode it dims while it stands between the camera and the build
+ * cursor, as shards and other avatars do, and a tap passes through it then
+ * (BuildOccluders; arkinox, 2026-11-09). Only while the Builder is on: an
+ * avatar is otherwise never see-through (AvatarShape, DECK-0003 §3.3).
  */
 
 import { useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
-import { Group, Material, type Quaternion } from 'three'
-import { avatarTurn, facingPair } from '../lib/facing'
-import { anchorCentre, GRID_RADIUS, placeCentre, type Position } from '../lib/space'
+import { Group, Material, Vector3, type Quaternion } from 'three'
+import { facingTurn, headingPair } from '../lib/facing'
+import { anchorCentre, GRID_RADIUS, placeCentre, renderDirection, type Position } from '../lib/space'
+import { REST_FLOOR } from '../store/walkWalls'
+import { upOf } from '../lib/walkDown'
+import { walkDown } from '../store/useWalk'
+import { easeRest, useRestDrop } from './useRestDrop'
 import { nearGate } from '../lib/walkGate'
 import { committedAnchor } from '../lib/renderFrame'
 import { travelOffset } from '../lib/travel'
-import { walkEye } from '../lib/walkEye'
+import { walkBody, walkEye } from '../lib/walkEye'
 import { WalkGhost } from '../lib/walkGhost'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { useBuilder } from '../store/useBuilder'
 import { avatarInBuild } from '../lib/buildCursor'
 import { usePersonCard } from '../store/usePersonCard'
+import { useAvatarFace } from '../store/avatarFace'
 import { useLayers } from '../store/useLayers'
 import { AvatarShape } from './AvatarShape'
+import { useAvatarLift } from './avatarLift'
+import { useAvatarOccluder } from './BuildOccluders'
 import { TapTarget } from './TapTarget'
+import { useDrawReach } from './buildZoom'
 
 /** How far from the build cursor's field the avatar is still drawn in BUILD mode, as PresenceAvatars culls. */
 const REACH = GRID_RADIUS * 8
 /** The proven-head outline's opacity at full strength, as AvatarShape's outline draws it. */
 const GHOST_OPACITY = 0.3
+
+/** Scratch for the lift's direction, so a frame allocates nothing. */
+const upVec = new Vector3()
 
 export function Avatar(): JSX.Element | null {
   const group = useRef<Group>(null)
@@ -111,14 +127,18 @@ export function Avatar(): JSX.Element | null {
   const facingIndex = placed && spectating ? scrub : null
   // Whose shape: yours, or the spectated avatar's, whose marker this is then.
   const pubkey = useCyberspace((s) => s.focusPubkey())
+  // PATH or UPRIGHT, from the shape it wears (DECK-0003 §1.18).
+  const face = useAvatarFace(pubkey)
   // The last move on the chain drawn, as a key so a re-render costs nothing
   // until the chain grows; the avatar turns to face the way it went.
   const view = useCyberspace((s) => s.view)
   // Time decides the angle: the move that brought the avatar to the link on
   // show, which while scrubbing the chain is the link before the explored one
   // and this one, not the head's last move (lib/facing.ts facingPair).
+  // UPRIGHT keeps its heading on a move straight up or down your view, so
+  // its pair is the latest move that went across your up (headingPair).
   const moveKey = useCyberspace((s) => {
-    const pair = facingPair(s.focusChain(), placed ? facingIndex : s.exploreIndex)
+    const pair = headingPair(s.focusChain(), placed ? facingIndex : s.exploreIndex, face, s.axes())
     if (!pair) return null
     const a = pair[0].position, b = pair[1].position
     return `${a.x},${a.y},${a.z}>${b.x},${b.y},${b.z}`
@@ -126,13 +146,16 @@ export function Avatar(): JSX.Element | null {
   // The turn its group carries: the facing in world terms with the view frame
   // composed on, so a compass turn turns the avatar with the world, upside
   // down included (lib/facing.ts avatarTurn). With no move yet it still turns
-  // with the view, lying on cyberspace axes as built.
+  // with the view, lying on cyberspace axes as built. UPRIGHT is the same
+  // turn laid level about your view's up (render +Y), so it stands on its
+  // feet on your screen however the compass has turned the world
+  // (lib/facing.ts uprightTurn; arkinox, 2026-11-16).
   const facing = useMemo(() => {
     const s = useCyberspace.getState()
-    const pair = moveKey ? facingPair(s.focusChain(), placed ? facingIndex : s.exploreIndex) : null
-    return avatarTurn(s.axes(), pair ? [pair[0].position, pair[1].position] : null)
+    const pair = moveKey ? headingPair(s.focusChain(), placed ? facingIndex : s.exploreIndex, face, s.axes()) : null
+    return facingTurn(s.axes(), pair ? [pair[0].position, pair[1].position] : null, face)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [moveKey, view])
+  }, [moveKey, view, face])
   // The view the group was last snapped to. A view turn snaps, as the rest of
   // the world does; only a new heading within one view eases in.
   const turnedFor = useRef<Quaternion | null>(null)
@@ -140,19 +163,46 @@ export function Avatar(): JSX.Element | null {
   // range, your true position inside its cell in it.
   const anchor = useCyberspace((s) => s.anchor)
   const scaleExp = useCyberspace((s) => s.scaleExp)
+  // As far as the fog's end needs (buildZoom.ts).
+  const reach = useDrawReach((s) => Math.max(REACH, s.reach))
   const at = useMemo(() => {
     const axes = useCyberspace.getState().axes()
     return shownPosition === null
       ? anchorCentre(anchor, scaleExp, axes)
       : placeCentre(shownPosition, alignedOrigin(anchor, scaleExp), scaleExp, axes)
   }, [anchor, scaleExp, view, shownPosition])
+  // Whether it is drawn at all: not while looking at a shard, and in BUILD
+  // mode not in another plane than the one you build in, nor beyond the
+  // field, where it would be a speck a universe away.
+  const shown = !(focus && !placed) && !(placed && (shownPosition === null || shownPlane !== anchorPlane || Math.hypot(...at) > reach))
+  // Among what may block the build cursor while drawn with the Builder on;
+  // named only while drawn, so it registers once its group is there.
+  const { occluder, dim } = useAvatarOccluder(shown ? 'you' : undefined, drawn)
+
+  // Out of WALK, your avatar's origin stands on the surface under its
+  // gibson's centre, within a gibson of it, else on its gibson's floor
+  // (store/walkWalls.ts restDrop; arkinox, 2026-11-17: an avatar's origin is
+  // the point that touches the ground). Display only, eased so a hop or a
+  // wall arriving never pops it. In WALK, fluid WALK stands it
+  // (store/walkFluid.ts groundFluid).
+  const restAt = shownPosition ?? anchor
+  const restPlane = shownPlane ?? anchorPlane
+  const dropTo = useRestDrop(walking ? null : restAt, restPlane, scaleExp)
+  const dropNow = useRef(REST_FLOOR)
+  const wasWalking = useRef(false)
+  const lift = useAvatarLift(pubkey)
 
   useFrame(({ camera }, dt) => {
     const g = group.current
     const d = drawn.current
     if (!g || !d) return
+    const up = renderDirection(useCyberspace.getState().axes(), 'y')
     if (walking) {
-      g.position.copy(walkEye)
+      // Where WALK stands you (store/walkFluid.ts groundFluid), the icosahedron lifted onto it along your gravity.
+      const wu = upOf(walkDown())
+      const r = renderDirection(useCyberspace.getState().axes(), wu.axis)
+      g.position.copy(walkEye).addScaledVector(upVec.set(r[0] * wu.dir, r[1] * wu.dir, r[2] * wu.dir), lift)
+      wasWalking.current = true
       const p = proven.current
       if (p) {
         const s = useCyberspace.getState()
@@ -174,15 +224,28 @@ export function Avatar(): JSX.Element | null {
     } else {
       ghost.current.reset()
       g.position.set(at[0] + travelOffset.x, at[1] + travelOffset.y, at[2] + travelOffset.z)
+      // Out of WALK, already standing where WALK stood you: no settle.
+      if (wasWalking.current) { wasWalking.current = false; dropNow.current = dropTo.current }
+      // A hop under way keeps the height it left with; it settles once it lands.
+      const travelling = Math.abs(travelOffset.x) + Math.abs(travelOffset.y) + Math.abs(travelOffset.z) > 1e-3
+      if (!travelling) dropNow.current = easeRest(dropNow.current, dropTo.current, dt)
+      // Down cyberspace -Y onto the ground, in this view's render frame; the icosahedron lifted onto it.
+      const k = lift - dropNow.current
+      g.position.x += up[0] * k
+      g.position.y += up[1] * k
+      g.position.z += up[2] * k
     }
     // In WALK you face where you look, live as you turn (arkinox,
     // 2026-10-13), not the way your last move went. The model's nose (+Z)
     // draws as render -Z and its top as render +Y (pose.ts renderPose), which
-    // are exactly the camera's forward and up in its own frame, so the turn
-    // is the camera's own. Local only: everyone else sees the heading your
-    // chain gives. Leaving WALK eases back to that heading below.
+    // are the camera's forward and up in its own frame, so the turn is the
+    // camera's heading, about up only (lib/walkEye.ts walkBody): the camera
+    // tilts about the avatar's eye, and looking down no longer tips the
+    // avatar or swings its eye about the origin (arkinox, 2026-11-16). Local
+    // only: everyone else sees the heading your chain gives. Leaving WALK
+    // eases back to that heading below.
     if (walking) {
-      d.quaternion.copy(camera.quaternion)
+      d.quaternion.copy(walkBody)
       turnedFor.current = view
       return
     }
@@ -197,10 +260,7 @@ export function Avatar(): JSX.Element | null {
     d.quaternion.slerp(facing, 1 - Math.exp(-dt / 0.15))
   })
 
-  if (focus && !placed) return null
-  // In BUILD mode: not in another plane than the one you build in, and not
-  // beyond the field, where it would be a speck a universe away.
-  if (placed && (shownPosition === null || shownPlane !== anchorPlane || Math.hypot(...at) > REACH)) return null
+  if (!shown) return null
 
   return (
     <>
@@ -221,9 +281,9 @@ export function Avatar(): JSX.Element | null {
           ghost and the deploy box's walls at 10, so they lie over it on every
           frame rather than by distance (review of #494). */}
       <group ref={drawn}>
-        {!(walking && hiddenInWalk) && <AvatarShape pubkey={pubkey} color="#ff2323" renderOrder={9.5} depthTest={false} firstPerson={walking} />}
+        {!(walking && hiddenInWalk) && <AvatarShape pubkey={pubkey} color="#ff2323" renderOrder={9.5} depthTest={false} firstPerson={walking} dim={dim} />}
       </group>
-      {!walking && <TapTarget measure={drawn} yields onTap={() => usePersonCard.getState().open(pubkey)} />}
+      {!walking && <TapTarget measure={drawn} yields occluder={occluder} onTap={() => usePersonCard.getState().open(pubkey)} />}
     </group>
     </>
   )

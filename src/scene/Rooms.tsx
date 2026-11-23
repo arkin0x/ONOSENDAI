@@ -58,6 +58,7 @@ import { pickWall } from '../lib/walkWall'
 import { walkEye } from '../lib/walkEye'
 
 import { WorldLabel } from './WorldLabel'
+import { NEAR_FADE_LINES } from './nearFade'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 
 /**
@@ -438,7 +439,8 @@ export function Rooms({ axes }: Props): JSX.Element {
       {!walking && levels.map((l) => (
         <group key={l.height}>
           <lineSegments geometry={l.geometry} frustumCulled={false}>
-            <lineBasicMaterial color={l.color} toneMapped={false} transparent opacity={l.opacity} />
+            {/* Faded out right at the eye, as the world's lines are (scene/nearFade.ts). */}
+            <lineBasicMaterial color={l.color} toneMapped={false} transparent opacity={l.opacity} {...NEAR_FADE_LINES} />
           </lineSegments>
           {l.label !== null && (
             <WorldLabel

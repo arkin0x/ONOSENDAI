@@ -25,7 +25,8 @@ describe('toNotification', () => {
   it('a reaction to your hidden shard or object goes to the item, no lookup needed', () => {
     for (const kind of [3330, 33331]) {
       const n = toNotification(sign(reactionTemplate({ id: 'b'.repeat(64), pubkey: me, kind }, '+', 5), them), me)
-      expect(n?.on).toEqual({ type: 'item', id: 'b'.repeat(64), lookupId: undefined })
+      // With the reacted kind, so a shard only published is not called a hidden item (notificationsViewItem.test.ts).
+      expect(n?.on).toEqual({ type: 'item', id: 'b'.repeat(64), lookupId: undefined, kind })
     }
   })
 
@@ -101,12 +102,12 @@ describe('only ONOSENDAI traffic (arkinox, 2026-09-30)', () => {
     expect(c.n.on).toEqual({ type: 'action', id: move.id })
   })
 
-  it('a like with no k tag is placed by the target it finds, dropped for a note, kept when found nowhere', () => {
+  it('a like with no k tag is placed by the target it finds, dropped for a note, dropped when found nowhere (2026-11-14)', () => {
     const c = classify(like(null), me)!
     expect(c.lookup?.rule).toBe('unknown')
     expect(resolve(c, new Map([[note, { kind: 3333, tags: [] }]]))).toMatchObject({ on: { type: 'action', id: note }, guessed: false })
     expect(resolve(c, new Map([[note, { kind: 1, tags: [] }]]))).toBeNull()
-    expect(resolve(c, none)).toMatchObject({ guessed: true })
+    expect(resolve(c, none)).toBeNull()
   })
 
   it('a like on a comment counts only when that comment is in a move or bag thread', () => {
@@ -115,7 +116,8 @@ describe('only ONOSENDAI traffic (arkinox, 2026-09-30)', () => {
     expect(resolve(c, new Map([[note, { kind: 1111, tags: [['K', '3333']] }]]))).not.toBeNull()
     expect(resolve(c, new Map([[note, { kind: 1111, tags: [['K', '33330']] }]]))).not.toBeNull()
     expect(resolve(c, new Map([[note, { kind: 1111, tags: [['K', '30023']] }]]))).toBeNull()
-    expect(resolve(c, none)).not.toBeNull()
+    // Found nowhere: not shown to be Cyberspace's, so dropped (2026-11-14).
+    expect(resolve(c, none)).toBeNull()
   })
 
   it('a comment or reply in some other app\'s NIP-22 thread is dropped', () => {

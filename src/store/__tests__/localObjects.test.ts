@@ -55,6 +55,7 @@ import { useCyberspace } from '../useCyberspace'
 import { usePublished } from '../usePublished'
 import { changedIds, flushLocalObjects, ownThumbKey, wireLocalObjects } from '../localObjects'
 import { clearWalls, entryFor, type WallItem } from '../walkWalls'
+import { signalRescan } from '../../lib/rescanSignal'
 
 const ME = 'a'.repeat(64)
 const THEM = 'b'.repeat(64)
@@ -370,6 +371,44 @@ describe('carried objects (DECK-0003 §1.10 objects)', () => {
     await settle()
     expect(entryFor(it0).missingAt).toBeNull()
     expect(relay.asked).toEqual([])
+  })
+
+  it('a part missing below the top asks again when a scan finds its object again (review of #567)', async () => {
+    // A carries B; B places C by address, and no relay has C the first time.
+    const C = addr(ME, 'nest-c')
+    const B = `a:33331:${ME}:nest-b`
+    const a: ShardModel = { ...placing('Nest A', [addr(ME, 'nest-b')]), objects: { [`33331:${ME}:nest-b`]: toPayload(placing('Nest B', [C])) } }
+    forgetRef(C)
+    const h = mountHook(useResolved, a)
+    try {
+      await settle()
+      expect(h.current().get(B)?.missing).toBeUndefined()
+      expect(h.current().get(B)?.children[0].missing).toBe('unreachable')
+      // C is on a relay now; a scan finds A again, with the same table.
+      primeRef(C, toPayload(tri('Nest C')))
+      signalRescan()
+      await settle()
+      expect(h.current().get(B)?.children[0].model?.name).toBe('Nest C')
+    } finally {
+      await h.unmount()
+      forgetRef(C)
+    }
+  })
+
+  it('a part missing for good (a loop) is not resolved again at every scan', async () => {
+    // A carries L; L places itself, so its own part is a loop, the same at every scan.
+    const L = addr(ME, 'nest-loop')
+    const a: ShardModel = { ...placing('Loop holder', [L]), objects: { [`33331:${ME}:nest-loop`]: toPayload(placing('Loop', [L])) } }
+    const h = mountHook(useResolved, a)
+    try {
+      await settle()
+      expect(h.current().get(`a:${L[1]}`)?.children[0].missing).toBe('cycle')
+      const before = h.renders()
+      signalRescan()
+      await settle()
+      expect(h.renders()).toBe(before)
+      expect(relay.asked).toEqual([])
+    } finally { await h.unmount() }
   })
 
   it('draws the parts again when the table changes, though the references do not', async () => {

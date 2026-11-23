@@ -18,10 +18,15 @@ export const offlineRelay = {
   authForRead: async (_url: string): Promise<void> => {},
   publish: async (_event: NostrEvent) => ({ ok: true as const }),
   publishMany: async (relays: string[], _event: NostrEvent) => ({ ok: true as const, accepted: relays }),
+  // No count to be had: whoever asks falls back to a REQ, answered with nothing.
+  countRelay: async (_url: string, _filter: Filter, _maxWait?: number): Promise<number | null> => null,
+  publishOnceTo: async (url: string, _event: NostrEvent) => ({ ok: true as const, accepted: [normalizeURL(url)] }),
   publishLight: async (_event: NostrEvent): Promise<boolean> => true,
   query: async (_filter: Filter): Promise<NostrEvent[]> => [],
   queryAny: async (_relays: string[], _filter: Filter, _maxWait?: number): Promise<NostrEvent[]> => [],
   queryEach: async (_filter: Filter, _maxWait?: number): Promise<RelayAnswer[]> => [nothing('wss://offline.invalid')],
+  queryChecked: async (_filter: Filter): Promise<{ events: NostrEvent[]; trouble: null }> => ({ events: [], trouble: null }),
+  queryAnyChecked: async (_relays: string[], _filter: Filter, _maxWait?: number): Promise<{ events: NostrEvent[]; trouble: null }> => ({ events: [], trouble: null }),
   queryEachAt: async (relays: string[], _filter: Filter, _maxWait?: number): Promise<RelayAnswer[]> => relays.map(nothing),
   queryEachSettled: async (relays: string[], _filter: Filter, _maxWait: number, _primary: string, _waitFor: string[], opts: { onSent?: () => void } = {}): Promise<RelayAnswer[]> => {
     opts.onSent?.()
@@ -38,6 +43,9 @@ export const offlineRelay = {
     return () => clearTimeout(t)
   },
   probeLiveness: async (): Promise<'alive' | 'dead' | 'skipped'> => 'skipped',
+  signedIn: (_url: string): boolean => true,
+  signInOwed: (_url: string): boolean => false,
+  retryFailedAuth: (_only?: string): void => {},
   resumeLive: (): void => {},
   watchConnectivity: (): (() => void) => () => {},
 }

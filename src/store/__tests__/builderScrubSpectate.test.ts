@@ -371,7 +371,7 @@ describe('review of #235', () => {
     // What resolveHeldConflict('relay') writes: a new chain, and no view.
     useCyberspace.setState({ prevEventId: 'relay-head', genesisId: 'relay-genesis', position: dest, cursor: { ...dest }, anchor: { ...dest }, spectate: null, focus: null })
     expect(B().active).toBe(false)
-    expect(useToast.getState().toast?.meta).toMatch(/Your avatar was moved under it/)
+    expect(useToast.getState().toast).toMatchObject({ label: 'BUILD MODE ENDED', meta: '' })
   })
 
   it('PRE-EXISTING (a): in BUILD the cube is the build cursor, not a pending move\'s target', () => {
@@ -417,7 +417,7 @@ describe('the auto-exits that protect correctness still end BUILD mode while spe
     await spectate(pk)
     await S().respawn()
     expect(B().active).toBe(false)
-    expect(useToast.getState().toast?.meta).toMatch(/Your avatar was moved under it/)
+    expect(useToast.getState().toast).toMatchObject({ label: 'BUILD MODE ENDED', meta: '' })
     expect(S().focus).toBeNull()
   })
 
@@ -429,12 +429,12 @@ describe('the auto-exits that protect correctness still end BUILD mode while spe
   })
 
   // Last in the file: it replaces the identity the rest of it builds on.
-  it('an identity switch, with its own reason in the toast (review of #235, NIT 5)', async () => {
+  it('an identity switch', async () => {
     B().enter('build')
     await spectate(pk)
     await S().useNewKey()
     expect(B().active).toBe(false)
     expect(S().spectate).toBeNull()
-    expect(useToast.getState().toast?.meta).toMatch(/You switched identity/)
+    expect(useToast.getState().toast).toMatchObject({ label: 'BUILD MODE ENDED', meta: '' })
   })
 })

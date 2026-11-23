@@ -19,26 +19,37 @@
  * Used by the bag record (LootDetail), the nearby list (NearbyLootModal), the
  * item modal (SecretModal) and the ITEMS panel's taken chests, so a chest
  * opens the same way from every door. Opening is a local act: nothing is
- * published. An item's picture stands where its kind's icon would, in every
+ * published. An opened door has CLOSE instead (arkinox, 2026-11-01), local
+ * too: the door shuts and its room dissolves (store/rooms closeDoor), and its
+ * OPEN then needs no key, its secret being kept here. An item's picture stands where its kind's icon would, in every
  * row that draws one (ItemFace); the key line itself is the words.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react'
+import { createPortal } from 'react-dom'
 import { useProfile } from '../hooks/useProfile'
+import { isGuideAuthor } from '../tutorial/guideBags'
 import { cashuLabel, readCashuToken } from '../lib/cashu'
 import { chestSealer, openWithSecret, openWithSigner, openerFor, readContents, requiresLabel, revealedIn, type ChestEntry, type Opener } from '../lib/chests'
 import { positionOf, useShards } from '../store/useShards'
-import { hiddenLabel, type ChestItem } from '../lib/hidden'
-import { ItemFace } from './ItemIcon'
-import { ShardThumb } from './ShardThumb'
-import { holdsEntry, openingKeys, type HeldFrom, type HeldItem, type HeldPlace } from '../lib/inventory'
+import { BagUnreadable, hiddenLabel, itemLineage, keyItemOf, type ChestItem, type Hidden } from '../lib/hidden'
+import { ItemThumb } from './ItemThumb'
+import { OpensWith } from './KeyListingRow'
+import { holdsEntry, holdsItem, openingKeys, type HeldFrom, type HeldItem, type HeldPlace } from '../lib/inventory'
+import { carriedLabel } from '../lib/keyringLocks'
+import { useKeyringLookup } from '../store/useKeyring'
 import { safeNpub } from '../lib/npub'
 import { useCyberspace } from '../store/useCyberspace'
 import { useInventory } from '../store/useInventory'
 import { forgetRefusal, openedByHand, openedContents, openedKey, readRefused, refuseRead, rememberOpened, useOpenedChests } from '../store/useOpenedChests'
-import { celebrateOpen } from '../store/useOpenCeremony'
+import { celebrateClose, celebrateOpen, celebrateReopen, takeAndVanish } from '../store/useOpenCeremony'
 import { useCeremony } from '../store/useCeremony'
-import { lookOf } from '../lib/looks'
+import { isDoor, lookOf } from '../lib/looks'
+import { doorSecretWithKey, doorSecretWithSigner } from '../lib/doors'
+import { closeDoor, doorAsFound, doorSecret, fillRoom, ownOpenOwed, openDoorNow, reopenClosedDoor } from '../store/rooms'
+import { useToast } from '../store/useToast'
+import { closedByMe } from '../store/closedDoors'
+import { hiddenDecided, hiddenVersion, onHiddenChange, storageMode } from '../store/hiddenStorage'
 import { chestLoot } from '../lib/lootObjects'
 import { landedAt } from '../lib/ceremony'
 import { resumeAudio } from '../lib/audioContext'
@@ -46,6 +57,8 @@ import { prefersReducedMotion } from '../hooks/useReducedMotion'
 import { profileLabel } from '../store/useProfiles'
 import { useMutes } from '../store/useMutes'
 import { hidesThing, type Muted } from '../lib/muteList'
+import { isGuideKey, subjectOfHidden } from '../lib/commentSubjects'
+import { KeyInfo, type KeyInfoSource } from './KeyItemInfo'
 
 /** The mark on an item that carries no signature: its author is a claim, never a fact (spec §7.6). */
 export function Unsigned(): JSX.Element {
@@ -56,32 +69,39 @@ export function Unsigned(): JSX.Element {
 export function useWho(pubkey: string): string {
   const me = useCyberspace((s) => s.identity.pubkey)
   const profile = useProfile(pubkey || null)
+  if (isGuideAuthor(pubkey)) return 'the tutorial'
   return pubkey === me ? 'you' : profileLabel(profile, safeNpub(pubkey))
 }
 
 /**
  * A keypair item where it was found: its name, who forged it, and TAKE, or
  * IN YOUR ITEMS once it is held. `id` is the find's event id; without one,
- * or for a thing that is not among this device's finds (one of your own,
- * held since you forged it), there is nothing to take.
+ * or for a thing that is neither among this device's finds nor one of your
+ * own (deleted from ITEMS, it is yours to take again), there is nothing to
+ * take. TAKE closes the list and the item fades out where it stands.
  */
-export function KeyLine({ id, name, author }: { id?: string; name: string; author: string }): JSX.Element {
+export function KeyLine({ id, name, author, actionsIn }: { id?: string; name: string; author: string; actionsIn?: HTMLElement | null }): JSX.Element {
   const who = useWho(author)
-  const held = useInventory((s) => (id ? !!s.items[id] : false))
-  const found = useShards((s) => (id ? !!s.discovered[id] : false))
+  // Held by its own id, by the lineage a version its hider moved shares
+  // with the one held, or by its keypair, as another instance of a key held
+  // (lib/inventory.ts holdsItem): never TAKE twice.
+  const inner = useShards((s) => (id ? s.discovered[id]?.inner ?? s.mine.find((d) => d.eventId === id)?.inner : undefined))
+  const held = useInventory((s) => (id ? holdsItem(s.items, id, itemLineage(inner), inner?.pubkey, undefined, inner ? keyItemOf(inner)?.itemPubkey : null) : false))
+  const found = useShards((s) => (id ? !!s.discovered[id] || s.mine.some((d) => d.eventId === id && !!d.key && !!d.inner) : false))
   return (
     <span className="keyline">
       <span className="item__line">
         <span className="item__name" title={name}>{name}</span>
         <span className="item__meta">forged by {who}{held && <> · <span className="item__held" title="It is in your ITEMS">IN YOUR ITEMS</span></>}</span>
       </span>
-      {id && found && !held && (
-        <button className="chest__act chest__act--take" onClick={() => { useShards.getState().takeFound([id]) }} title="Put it in your ITEMS">TAKE</button>
-      )}
+      {/* In a DISCOVERED NEARBY row, TAKE is drawn beside VIEW (actionsIn), not beside the name. */}
+      {id && found && !held && (() => {
+        const take = <button className="chest__act chest__act--take" onClick={() => takeAndVanish(id, prefersReducedMotion())} title="Put it in your ITEMS">TAKE</button>
+        return actionsIn !== undefined ? actionsIn && createPortal(take, actionsIn) : take
+      })()}
     </span>
   )
 }
-
 
 /**
  * Whether this identity has a chest open here, by its id, under the lock it
@@ -123,7 +143,8 @@ export async function openChestHere(c: { id: string; chest: ChestItem; author: s
   const contents = readContents(raw, c.sealer)
   if (c.place) {
     // The room behind the door is drawn where the door stands.
-    const door = { eventId: c.id, bagId: c.place.bagId, lookupId: c.place.lookupId, author: c.author, at: positionOf(c.place), plane: c.place.plane, height: c.place.height }
+    // Its contents are in the bag the place names, by that bag's author when the place says it, even out of a chest inside a chest (lib/commentSubjects).
+    const door = { eventId: c.id, bagId: c.place.bagId, lookupId: c.place.lookupId, author: c.place.author ?? c.author, at: positionOf(c.place), plane: c.place.plane, height: c.place.height }
     const revealed = revealedIn(door, contents)
     useShards.getState().addDiscovered(revealed)
     // Behind a door, what is there appears as a scan's finds do, each settling
@@ -176,12 +197,22 @@ export function entryLabel(entry: ChestEntry): { label: string; coin: boolean } 
  * readContents); without it, the chest is looked up among this device's
  * finds and deployments by `id`, and rumors read as claims if it is not
  * there. Never the bag's author: a chest inside a chest may be another's.
+ * `actionsIn`, a door row of DISCOVERED NEARBY: OPEN or CLOSE is drawn there,
+ * beside VIEW, nothing until it is mounted (arkinox, 2026-11-12: "For doors, we
+ * should have an OPEN / CLOSE button here as well"), and a door with nothing
+ * held to open it shows OPEN disabled, what it requires as its title. A
+ * chest row of DISCOVERED NEARBY draws its OPEN there too, beside VIEW and
+ * the same size (tutorial feedback 2026-11-12, item 2).
+ * `actsBelow`, the chest's card: OPEN or CLOSE across the card's width,
+ * under what opens it (tutorial feedback 2026-11-12, item 3).
  */
-export function ChestBlock({ id, chest, author, verified, place, sealer: given }: { id: string; chest: ChestItem; author: string; verified: boolean; place: HeldPlace | null; sealer?: string }): JSX.Element {
+export function ChestBlock({ id, chest, author, verified, place, sealer: given, named = true, inChest = false, actionsIn, contentsIn, actsBelow = false }: { id: string; chest: ChestItem; author: string; verified: boolean; place: HeldPlace | null; sealer?: string; named?: boolean; inChest?: boolean; actionsIn?: HTMLElement | null; contentsIn?: HTMLElement | null; actsBelow?: boolean }): JSX.Element {
   const items = useInventory((s) => s.items)
   const me = useCyberspace((s) => s.identity.pubkey)
   const keys = useMemo(() => openingKeys(items), [items])
-  const opener = useMemo(() => openerFor(chest, keys, me), [chest, keys, me])
+  // A region or room key you carry opens it too (DECK-0004 §3.8): one lookup, on this device.
+  const keyring = useKeyringLookup()
+  const opener = useMemo(() => openerFor(chest, keys, me, keyring), [chest, keys, me, keyring])
   const found = useShards((s) => s.discovered[id])
   const ownInner = useShards((s) => s.mine.find((d) => d.eventId === id)?.inner)
   const sealer = chestSealer(given, found, ownInner)
@@ -191,19 +222,41 @@ export function ChestBlock({ id, chest, author, verified, place, sealer: given }
   const [busy, setBusy] = useState(false)
   const who = useWho(author)
   const from: HeldFrom = { chestId: id, chestName: chest.name }
+  // What is taken out of it keeps who OPEN names as its contents' author
+  // (openChestHere: the bag's author), so a key item taken from it
+  // opens the same comment thread in ITEMS as here (lib/commentSubjects).
+  // The bag's author when the place says it (a chest inside a chest is still in that bag; its own signer may be a claim), else this chest's hider.
+  const contentPlace = useMemo(() => (place ? { ...place, author: place.author ?? author } : null), [place, author])
   // What the mute list hides is neither listed nor held (store/useMutes); never in a chest of yours.
   const muted = useMutes((s) => s.muted)
   const shownOf = (list: ChestEntry[], m: Muted): ChestEntry[] => list.filter((e) => !hidesThing(m, { authors: [author, e.event.pubkey], ids: [e.id] }, me))
   const shown = entries ? shownOf(entries, muted) : null
+  // A door locks a room where it stands (DECK-0004 §3.7): OPEN reads its
+  // secret and opens the room. One found inside a chest never opens its room
+  // (§3.7.1: a chest's contents are taken, not placed), whichever list or card it is opened from.
+  const door = isDoor((found?.inner ?? ownInner)?.tags) && !inChest && !found?.chestId && !!place
   // Opened by hand before, under this lock: never OPEN again. What is inside
   // is read again once, as OPEN read it (readAgain); OPEN comes back only if
   // that fails, a signer refusing, and the refusal holds for the session
   // until OPEN is tapped (store/useOpenedChests readRefused).
   const handOpened = openedByHand(me, id, chest.lockPubkey)
+  // Open only because another door of its room was, and its own key is here now (§3.7.5).
+  const owed = door && handOpened && ownOpenOwed(me, id, chest, opener)
+  // The door secrets and closes are read from the hidden store, which may still be loading: drawn again when it is.
+  useSyncExternalStore(onHiddenChange, hiddenVersion, hiddenVersion)
+  // CLOSE (arkinox, 2026-11-01): a door open here, its secret kept, so OPEN can open it again with no key.
+  // One open only because another door of its room was ("owed") closes too, and closes the whole room.
+  const secretKept = door && !!doorSecret(me, id)
+  const canClose = secretKept && handOpened
+  // Closed with CLOSE: OPEN with no key, from the kept secret, and nothing else opens it.
+  // While the store is still loading, OPEN waits for it rather than guessing.
+  const closedRec = door && closedByMe(me, id, chest.lockPubkey)
+  const closedHere = closedRec && (secretKept || storageMode() === 'pending')
   const readKey = `${openedKey(me, id)}:${chest.lockPubkey}`
   const tried = useRef<string | null>(null)
   const [, setRefusals] = useState(0)
-  const rereading = handOpened && !entries && !!opener && !readRefused(me, id, chest.lockPubkey)
+  // Not a door: it holds no list to read again, and its room opens again from the kept secret (store/rooms reopenRoom).
+  const rereading = !door && handOpened && !entries && !!opener && !readRefused(me, id, chest.lockPubkey)
   useEffect(() => {
     if (!rereading || !opener || tried.current === readKey) return
     tried.current = readKey
@@ -214,25 +267,95 @@ export function ChestBlock({ id, chest, author, verified, place, sealer: given }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rereading, readKey])
 
+  const openDoor = async (first: boolean): Promise<void> => {
+    if (!opener) return
+    const secret = opener.by === 'key' ? doorSecretWithKey(chest, opener.key.secretHex) : await doorSecretWithSigner(chest, useCyberspace.getState().decryptSealed)
+    if (useCyberspace.getState().identity.pubkey !== me) return
+    if (!secret) { setStatus('This door holds nothing this client can read.'); return }
+    const at = doorAsFound(id)
+    if (!at) { setStatus('This door is no longer here.'); return }
+    // Open at once, before any relay is asked (his ruling: "OPEN closes the
+    // modal", WALK passes at once): remembered, the card yielding, the slab going.
+    openDoorNow(at, secret)
+    celebrateOpen({ me, chestId: id, kind: 'door', first, calm: prefersReducedMotion() })
+    // Then the room: what is behind it settles out of static where it stands
+    // (door A), the first time only.
+    await enterTheRoom(at, secret, first ? (items) => useCeremony.getState().mark(items) : undefined)
+  }
+
+  /**
+   * The room behind a door just opened, fetched as it is now. The card has gone by
+   * now, so what went wrong is said where it can be seen (§3.7.3: not found is not
+   * the same as empty).
+   */
+  const enterTheRoom = async (at: Hidden, secret: string, mark?: (items: Hidden[]) => void): Promise<void> => {
+    let unreadable = false
+    const opened = await fillRoom(at, secret, mark).catch((err: unknown) => { unreadable = err instanceof BagUnreadable; return undefined })
+    if (opened === null) return
+    // The relays have the room, but its bag does not open with its key: not missing, so not "may only be missing".
+    if (unreadable) { useToast.getState().show({ label: 'THE ROOM WILL NOT OPEN', meta: `${chest.name} is open. The room behind it is unreadable.`, mark: 'build' }); return }
+    if (!opened?.found) useToast.getState().show({ label: 'THE ROOM COULD NOT BE RETRIEVED', meta: `${chest.name} is open, but what is behind it did not come back from your relays. It may only be missing from them.`, mark: 'build' })
+  }
+
+  // OPEN on a door closed with CLOSE: no key (its secret is kept), at once, and the short reveal.
+  const reopenDoor = async (): Promise<void> => {
+    const at = doorAsFound(id)
+    if (!at) { setStatus('This door is no longer here.'); return }
+    const secret = reopenClosedDoor(at)
+    if (!secret) return
+    celebrateReopen({ me, chestId: id })
+    await enterTheRoom(at, secret)
+  }
+
+  // CLOSE: here only, nothing published. The door shuts and its room dissolves, sub doors with it.
+  // Kept before the world redraws it; a close not kept says so (store/closedDoors).
+  const shut = async (): Promise<void> => {
+    if (busy) return
+    const at = doorAsFound(id)
+    if (!at) { setStatus('This door is no longer here.'); return }
+    // Inside the tap, so a phone lets the close's tick out (lib/audioContext).
+    resumeAudio()
+    setStatus(null)
+    setBusy(true)
+    try {
+      await closeDoor(at)
+      celebrateClose({ me, chestId: id })
+    } finally { setBusy(false) }
+  }
+
   const open = async (): Promise<void> => {
-    if (!opener || busy) return
+    if (busy) return
+    if (closedRec) {
+      // Closed with CLOSE: the kept secret opens it, once the store has been read. Only a
+      // secret truly gone falls back to a first OPEN, with what opens it.
+      setBusy(true)
+      setStatus(null)
+      let reopened = false
+      try {
+        await hiddenDecided()
+        if (doorSecret(me, id)) { await reopenDoor(); reopened = true }
+      } finally { setBusy(false) }
+      if (reopened) return
+    }
+    if (!opener) return
     // Inside the tap, so a phone lets the ceremony's sound out (lib/audioContext).
     resumeAudio()
     // Once per chest, per identity, per device: a chest opened by hand before plays nothing.
-    const first = !openedByHand(me, id, chest.lockPubkey)
+    const first = !openedByHand(me, id, chest.lockPubkey) || owed
     forgetRefusal(me, id, chest.lockPubkey)
     setBusy(true)
     setStatus(null)
     try {
+      if (door) { await openDoor(first); return }
       const look = lookOf({ type: 'chest', event: found?.inner ?? ownInner })
-      const contents = await openChestHere({ id, chest, author, place, sealer, door: look?.name === 'door' && first }, opener)
+      const contents = await openChestHere({ id, chest, author, place, sealer, door: look?.kind === 'door' && first }, opener)
       if (contents) {
         // The card yields and the chest or door opens where it stands (store/useOpenCeremony).
-        if (look?.name === 'door') celebrateOpen({ me, chestId: id, kind: 'door', first, calm: prefersReducedMotion() })
-        else if (look?.name === 'treasure') {
+        if (look?.kind === 'door') celebrateOpen({ me, chestId: id, kind: 'door', first, calm: prefersReducedMotion() })
+        else if (look?.kind === 'chest') {
           // The chime sounds as the last loot object lands over the chest.
           // The same loot the world draws over it (scene/ChestLooks), so the chime lands with the last of it.
-          const loot = place ? chestLoot({ look: 'treasure', entries: shownOf(contents, useMutes.getState().muted), held: (e) => holdsEntry(useInventory.getState().items, e), chest: { at: positionOf(place), plane: place.plane, height: place.height }, itemsReady: true }) : []
+          const loot = place ? chestLoot({ look: 'chest', entries: shownOf(contents, useMutes.getState().muted), held: (e) => holdsEntry(useInventory.getState().items, e), itemsReady: true }) : []
           celebrateOpen({ me, chestId: id, kind: 'chest', first, calm: prefersReducedMotion(), landMs: loot.length > 0 ? landedAt(loot.length) : undefined })
         }
       }
@@ -246,27 +369,54 @@ export function ChestBlock({ id, chest, author, verified, place, sealer: given }
     }
   }
 
-  const opensWith = opener === null ? null : opener.by === 'self' ? 'your identity' : items[opener.key.id]?.name ?? 'an item you hold'
+  const carried = opener?.by === 'key' ? opener.key.carried : undefined
+  const opensWith = opener === null ? null : opener.by === 'self' ? 'your identity' : carried ? 'a key you carry' : items[opener.key.id]?.name ?? 'an item you hold'
+  // Neither open here nor closed with CLOSE: what it needs still stands in the way.
+  const locked = !closedHere && !(entries || rereading || canClose)
+  const offerOpen = closedHere || (opener && (!entries || owed) && (!canClose || owed))
+  const acts = (
+    <>
+      {canClose && (
+        <button className="chest__act" onClick={() => void shut()} disabled={busy} title="Close it here. Nothing is sent.">CLOSE</button>
+      )}
+      {offerOpen && (
+        <button className="chest__act" onClick={() => void open()} disabled={busy || rereading} title={closedHere ? 'Open it again here. Its secret is kept on this device.' : `Decrypt it here with ${opensWith}`}>{busy || rereading ? 'OPENING' : 'OPEN'}</button>
+      )}
+      {actionsIn !== undefined && door && !opener && !handOpened && !closedHere && (
+        <button className="chest__act" disabled title={`Requires ${requiresLabel(chest)}`}>OPEN</button>
+      )}
+    </>
+  )
   return (
     <div className="chest">
       <div className="chest__head">
         <span className="item__line">
-          <span className="item__name" title={chest.name}>{chest.name}</span>
+          {/* The card names it above its look (SecretModal); every list names it here. */}
+          {named && <span className="item__name" title={chest.name}>{chest.name}</span>}
           <span className="item__meta" title={opensWith ? `Opens with ${opensWith}` : 'The hider’s label of what opens it'}>
-            {entries || rereading ? 'OPEN' : `REQUIRES: ${requiresLabel(chest)}`} · hidden by {who}{!verified && <> · <Unsigned /></>}
+            {closedHere ? 'CLOSED' : !locked ? 'OPEN' : `REQUIRES: ${requiresLabel(chest)}`} · hidden by {who}{!verified && <> · <Unsigned /></>}
           </span>
         </span>
-        {opener && !entries && (
-          <button className="chest__act" onClick={() => void open()} disabled={busy || rereading} title={`Decrypt it here with ${opensWith}`}>{busy || rereading ? 'OPENING' : 'OPEN'}</button>
-        )}
+        {actionsIn !== undefined ? actionsIn && createPortal(acts, actionsIn) : !actsBelow && acts}
       </div>
+      {/* Locked: the listed key item its lock is sealed to, if anyone listed it (KeyListingRow OpensWith).
+          Across a DISCOVERED NEARBY or OTHER LOOT row's whole width (contentsIn), where an open one lists its contents. */}
+      {locked && (contentsIn !== undefined
+        ? contentsIn && createPortal(<OpensWith lock={chest.lockPubkey} opens={!!opener} />, contentsIn)
+        : <OpensWith lock={chest.lockPubkey} opens={!!opener} size={inChest || !actsBelow ? CHEST_INLINE_PX : undefined} />)}
+      {offerOpen && !closedHere && carried && <span className="chest__fits">A key you carry fits: {carriedLabel(carried, useCyberspace.getState().position)}</span>}
       {status && <span className="chest__status" role="status">{status}</span>}
-      {shown && shown.length > 0 && <ChestContents entries={shown} from={from} place={place} />}
+      {actsBelow && (offerOpen || canClose) && <div className="chest__below">{acts}</div>}
+      {/* A DISCOVERED NEARBY row draws what is inside across its whole width, under its words and VIEW (contentsIn). */}
+      {/* Inline in a narrow column (a bag's list, a chest inside a chest) its rows' pictures are smaller, so the names keep their room. */}
+      {shown && shown.length > 0 && (contentsIn !== undefined
+        ? contentsIn && createPortal(<ChestContents entries={shown} from={from} place={contentPlace} />, contentsIn)
+        : <ChestContents entries={shown} from={from} place={contentPlace} size={inChest || !actsBelow ? CHEST_INLINE_PX : undefined} />)}
     </div>
   )
 }
 
-/** What TAKE ALL takes: every content here not yet held. */
+/** What TAKE ALL takes: every content here not in ITEMS now (lib/inventory.ts holdsEntry). */
 export function takeableOf(entries: ChestEntry[], items: Record<string, HeldItem>): ChestEntry[] {
   return entries.filter((e) => !holdsEntry(items, e))
 }
@@ -276,16 +426,21 @@ export function takeableOf(entries: ChestEntry[], items: Record<string, HeldItem
  * ALL under the last. What is held is not listed (arkinox, 2026-10-30: "if
  * an item is in your inventory and in the chest, hide it on the chest so it
  * feels like you took it"), so a row leaves the list as it is taken, and its
- * loot leaves the chest in the world (scene/ChestLoot). With everything
- * held, the list says so.
+ * loot leaves the chest in the world (scene/ChestLoot). Checked against ITEMS
+ * as it is now (arkinox, 2026-11-09: "anything missing should appear
+ * again"): a row deleted from ITEMS, or cleared off TAKEN, comes back with
+ * TAKE, after a reload too. With everything held, the list says so.
  */
-export function ChestContents({ entries, from, place }: { entries: ChestEntry[]; from: HeldFrom; place: HeldPlace | null }): JSX.Element {
+/** A chest's contents' pictures where they share a narrow column with other things: a bag's list (LootDetail), a chest inside a chest. */
+export const CHEST_INLINE_PX = 48
+
+export function ChestContents({ entries, from, place, size }: { entries: ChestEntry[]; from: HeldFrom; place: HeldPlace | null; size?: number }): JSX.Element {
   const items = useInventory((s) => s.items)
   const takeable = useMemo(() => takeableOf(entries, items), [entries, items])
   if (takeable.length === 0) return <span className="chest__status" role="status">Everything here is in your ITEMS</span>
   return (
     <ul className="chest__contents">
-      {takeable.map((e) => <ContentRow key={e.id} entry={e} from={from} place={place} />)}
+      {takeable.map((e) => <ContentRow key={e.id} entry={e} from={from} place={place} size={size} />)}
       <li className="chest__all">
         <button className="chest__act chest__act--take" onClick={() => { useInventory.getState().take(takeable, from, place) }} title="Copy everything here into your ITEMS">TAKE ALL</button>
       </li>
@@ -293,25 +448,40 @@ export function ChestContents({ entries, from, place }: { entries: ChestEntry[];
   )
 }
 
-/** One thing inside an opened chest, with TAKE. */
-function ContentRow({ entry, from, place }: { entry: ChestEntry; from: HeldFrom; place: HeldPlace | null }): JSX.Element {
+/**
+ * One thing inside an opened chest, with TAKE: laid out as a row of ITEMS
+ * (owner, 2026-11-15), the chamfered picture at the Shard Feed's size, the
+ * name on one line, UNSIGNED as a chip, TAKE under the words on the right.
+ */
+function ContentRow({ entry, from, place, size }: { entry: ChestEntry; from: HeldFrom; place: HeldPlace | null; size?: number }): JSX.Element {
   // One shard per model (arkinox, 2026-10-11): a model already held, under any name, reads TAKEN too.
   const held = useInventory((s) => holdsEntry(s.items, entry))
   const { label, coin } = entryLabel(entry)
   const type = entry.body.type
   const take = (): void => { useInventory.getState().take([entry], from, place) }
+  // A key item's INFO: its thread as its card names it once OPEN revealed it here (lib/commentSubjects), and who hid it.
+  const found = useShards((s) => (type === 'key' ? s.discovered[entry.id] : undefined))
+  const info = useMemo((): KeyInfoSource | null => {
+    const key = entry.body.key
+    if (type !== 'key' || !key) return null
+    const hider = found?.author ?? place?.author ?? null
+    return { id: entry.id, event: entry.event, key, forger: entry.event.pubkey, verified: entry.verified, hider, guide: !!place?.guide || isGuideKey(hider), subject: found ? subjectOfHidden(found) : null }
+  }, [type, entry, found, place])
   return (
-    <li className="chest__row">
-      {type === 'shard' && entry.body.shard ? <ShardThumb shard={entry.body.shard} /> : <ItemFace className={`chest__glyph chest__glyph--${coin ? 'cashu' : type}`} type={type} coin={coin} image={entry.body.key?.image} />}
+    <li className="chest__row chest__row--thumb" style={size ? ({ '--chamfer-size': `${size}px` } as CSSProperties) : undefined}>
+      <ItemThumb type={type} coin={coin} shard={type === 'shard' ? entry.body.shard : undefined} image={entry.body.key?.image} model={entry.body.key?.model} size={size} />
       {type === 'chest' && entry.body.chest
-        ? <ChestBlock id={entry.id} chest={entry.body.chest} author={entry.event.pubkey} verified={entry.verified} place={place} sealer={entry.verified ? entry.event.pubkey : undefined} />
+        ? <ChestBlock id={entry.id} chest={entry.body.chest} author={entry.event.pubkey} verified={entry.verified} place={place} sealer={entry.verified ? entry.event.pubkey : undefined} inChest />
         : (
-          <span className="item__line">
+          <span className="item__line held__line">
             <span className="item__name" title={label}>{label}</span>
-            {!entry.verified && <Unsigned />}
+            {!entry.verified && <span className="held__chips"><Unsigned /></span>}
           </span>
         )}
-      <button className={`chest__act chest__act--take ${held ? 'is-on' : ''}`} onClick={take} disabled={held} title={held ? 'Already in your ITEMS' : 'Copy it into your ITEMS'}>{held ? 'TAKEN' : 'TAKE'}</button>
+      <span className="chest__row-acts">
+        {info && <KeyInfo info={info} />}
+        <button className={`chest__act chest__act--take ${held ? 'is-on' : ''}`} onClick={take} disabled={held} title={held ? 'Already in your ITEMS' : 'Copy it into your ITEMS'}>{held ? 'TAKEN' : 'TAKE'}</button>
+      </span>
     </li>
   )
 }

@@ -256,6 +256,16 @@ function refusal(s: string): '#url' | '#' | null {
 }
 
 /**
+ * The biggest localStorage keys, as [name, characters], largest first: names
+ * through safeLabel, so a pubkey in a key reads `#`, and never a value. What
+ * fills the origin's few megabytes is then known from a report (arkinox's of
+ * 2026-11-18 said 47 keys and 5.1 million characters, and nothing more).
+ */
+export function largestKeys(entries: ReadonlyArray<readonly [string, number]>, n = 10): Array<[string, number]> {
+  return [...entries].sort((a, b) => b[1] - a[1]).slice(0, n).map(([k, c]) => [safeLabel(k, 64), c])
+}
+
+/**
  * The only text that leaves: a browser's or the app's own label, cut down to the
  * characters such labels use. Anything naming a URL goes whole, tested first,
  * since the strip below takes the colon. Keys and long hex go after the strip,
@@ -319,6 +329,48 @@ export function frameVerb(data: unknown): 'req' | 'close' | 'event' | 'auth' | '
   return 'other'
 }
 
+/** A frame a relay sent, by its verb, from its first bytes only, as frameVerb reads what is sent. */
+export function rxVerb(data: unknown): 'event' | 'ok' | 'eose' | 'closed' | 'other' {
+  if (typeof data !== 'string') return 'other'
+  if (data.startsWith('["EVENT"')) return 'event'
+  if (data.startsWith('["OK"')) return 'ok'
+  if (data.startsWith('["EOSE"')) return 'eose'
+  if (data.startsWith('["CLOSED"')) return 'closed'
+  return 'other'
+}
+
+/** One row per window with relay events checked (lib/verifiedSigs countVerifies): totals, then the top kinds by time. */
+export const VERIFY_COLUMNS = ['t', 'n', 'schnorr', 'hashed', 'compared', 'deferred', 'ms', 'top'] as const
+/** One entry of a verify row's `top`. */
+export const VERIFY_KIND_COLUMNS = ['kind', 'n', 'schnorr', 'hashed', 'compared', 'deferred', 'ms'] as const
+/** Kinds kept per window. */
+export const VERIFY_TOP = 8
+
+/** A window's checks as a row (VERIFY_COLUMNS), or null when none were made. Numbers only: a kind is a number. */
+export function verifyRow(t: number, byKind: ReadonlyMap<number, { n: number; schnorr: number; hashed: number; compared: number; deferred: number; ms: number }>): Array<number | number[][]> | null {
+  if (byKind.size === 0) return null
+  let n = 0, schnorr = 0, hashed = 0, compared = 0, deferred = 0, ms = 0
+  for (const k of byKind.values()) { n += k.n; schnorr += k.schnorr; hashed += k.hashed; compared += k.compared; deferred += k.deferred; ms += k.ms }
+  const top = [...byKind.entries()].sort((a, b) => b[1].ms - a[1].ms).slice(0, VERIFY_TOP)
+    .map(([kind, k]) => [kind, k.n, k.schnorr, k.hashed, k.compared, k.deferred, Math.round(k.ms * 10) / 10])
+  return [t, n, schnorr, hashed, compared, deferred, Math.round(ms * 10) / 10, top]
+}
+
+/** One row per window with labelled tasks timed (lib/taskStats.ts): the top labels by time. */
+export const TASK_COLUMNS = ['t', 'top'] as const
+/** One entry of a task row's `top`: an IndexedDB read's database and store, or what yielded. */
+export const TASK_LABEL_COLUMNS = ['label', 'n', 'ms', 'maxMs'] as const
+/** Labels kept per window. */
+export const TASK_TOP = 8
+
+/** A window's labelled tasks as a row (TASK_COLUMNS), or null when none ran. */
+export function taskRow(t: number, byLabel: ReadonlyMap<string, { n: number; ms: number; max: number }>): Array<number | Array<Array<string | number>>> | null {
+  if (byLabel.size === 0) return null
+  const top = [...byLabel.entries()].sort((a, b) => b[1].ms - a[1].ms).slice(0, TASK_TOP)
+    .map(([label, k]) => [safeLabel(label), k.n, Math.round(k.ms * 10) / 10, Math.round(k.max * 10) / 10])
+  return [t, top]
+}
+
 /** The columns of one sample row. Counts over the window unless the name says otherwise. */
 export const DIAG_COLUMNS = [
   't', 'hidden', 'focused', 'frames', 'ftP50', 'ftP95', 'ftP99', 'ftMax',
@@ -329,6 +381,8 @@ export const DIAG_COLUMNS = [
   'objects', 'meshes', 'visibleMeshes', 'shardFaces', 'points', 'lines', 'instanced', 'geoms', 'sceneVerts',
   'wsOpen', 'relays', 'relaysUp', 'subs', 'txReq', 'txClose', 'txEvent', 'txAuth', 'rxN', 'rxB',
   'workersMade', 'workersLive', 'timeouts', 'intervals', 'resN', 'resB', 'dom', 'canvases', 'idbB', 'storeB', 'thumbs', 'thumbQueue', 'selfMs', 'ui',
+  // Added 2026-11-21, at the end so a reader by position still reads the columns before them.
+  'rxEv', 'rxOk', 'rxEose',
 ] as const
 
 export type DiagColumn = (typeof DIAG_COLUMNS)[number]
@@ -337,4 +391,144 @@ export type DiagRow = Partial<Record<DiagColumn, number | string>>
 /** A sample as a flat array in column order: about a quarter the size of objects with names. Null where nothing was read, never a false 0. */
 export function toRow(s: DiagRow): Array<number | string | null> {
   return DIAG_COLUMNS.map((c) => s[c] ?? null)
+}
+
+/** One script a long animation frame names (PerformanceScriptTiming): only these fields are read. */
+export interface LoafScript {
+  startTime?: number
+  duration: number
+  invokerType?: string
+  invoker?: string
+  sourceFunctionName?: string
+  sourceURL?: string
+  sourceCharPosition?: number
+  forcedStyleAndLayoutDuration?: number
+}
+
+/** A long animation frame (PerformanceLongAnimationFrameTiming): only these fields are read. */
+export interface LoafFrame {
+  startTime: number
+  duration: number
+  blockingDuration?: number
+  renderStart?: number
+  styleAndLayoutStart?: number
+  scripts?: readonly LoafScript[]
+}
+
+/** A frame this long counts. A 60 Hz frame is 16.7 ms, so 50 ms is three missed. */
+export const LOAF_MIN_MS = 50
+/** Scripts kept per window, and for the whole capture. */
+export const LOAF_TOP = 8
+export const LOAF_TOP_ALL = 24
+
+/** Distinct scripts summed for the whole capture: past this, only those already seen are added to. */
+const LOAF_KEYS_KEPT = 2_000
+
+/**
+ * One row per window with long frames. ms columns are summed over the window's
+ * long frames: scriptMs every script named (animation frame callbacks among
+ * them), rafMs the frame's animation frame callbacks (renderStart to
+ * styleAndLayoutStart), layoutMs its style, layout and paint, otherMs what no
+ * script and no rendering accounts for.
+ */
+export const LOAF_COLUMNS = ['t', 'frames', 'ms', 'maxMs', 'blockMs', 'scriptMs', 'rafMs', 'layoutMs', 'otherMs', 'top'] as const
+/** One entry of a row's `top`, and of `loafTop`: who ran, and how long, in those frames. */
+export const LOAF_SCRIPT_COLUMNS = ['invokerType', 'invoker', 'fn', 'pos', 'file', 'n', 'ms', 'maxMs', 'forcedMs'] as const
+
+interface LoafAgg { type: string; invoker: string; fn: string; pos: number; file: string; n: number; ms: number; max: number; forced: number }
+
+const r1 = (x: number): number => Math.round(x * 10) / 10
+
+/**
+ * A script's file: its name alone for a script file served over http (the
+ * app's own chunks); `page` for the page's own address (an inline script, a
+ * timer, eval), whose path could name a place; for a blob, data or extension
+ * script, only its scheme.
+ */
+export function scriptFile(url: unknown): string {
+  if (typeof url !== 'string' || !url) return ''
+  if (!/^https?:\/\//i.test(url)) return safeLabel(url.split(':')[0], 16)
+  const name = url.replace(/[?#].*$/, '').replace(/^https?:\/\/[^/]*/i, '').split('/').filter(Boolean).pop() ?? ''
+  return /\.(m?js|cjs|wasm)$/i.test(name) ? safeLabel(name) : 'page'
+}
+
+/**
+ * Long animation frames, aggregated by who ran in them (2026-11-21).
+ *
+ * arkinox's WALK on #840 had two or three long tasks a second, nearly all 80
+ * to 90 ms, tracking relay traffic; the 200 ms `slow` log never saw them. Each
+ * frame of LOAF_MIN_MS or more is summed here by the script that ran in it:
+ * its invoker type, its invoker, its function's name and position, and its
+ * file's name. All text passes safeLabel and invokerLabel, so no URL, key or
+ * content is kept; a minified function's name is one letter, and its position
+ * in its file finds it in that build.
+ */
+export class LoafLedger {
+  private win = new Map<string, LoafAgg>()
+  private all = new Map<string, LoafAgg>()
+  private frames = 0
+  private ms = 0
+  private max = 0
+  private block = 0
+  private script = 0
+  private raf = 0
+  private layout = 0
+  private rafScript = 0
+
+  add(e: LoafFrame): void {
+    if (!(e.duration >= LOAF_MIN_MS)) return
+    this.frames++
+    this.ms += e.duration
+    this.max = Math.max(this.max, e.duration)
+    this.block += e.blockingDuration || 0
+    const end = e.startTime + e.duration
+    const render = e.renderStart || 0
+    const layout = e.styleAndLayoutStart || 0
+    if (layout > 0) this.layout += Math.max(0, end - layout)
+    if (render > 0) this.raf += Math.max(0, (layout > 0 ? layout : end) - render)
+    for (const s of e.scripts ?? []) {
+      const ms = s.duration || 0
+      this.script += ms
+      // A callback run in the frame's render phase (animation frames, resize observers) is inside rafMs too.
+      if (render > 0 && s.invokerType === 'user-callback' && (s.startTime || 0) >= render) this.rafScript += ms
+      const type = safeLabel(s.invokerType, 24)
+      const invoker = invokerLabel(s.invoker)
+      const fn = safeLabel(s.sourceFunctionName)
+      const pos = typeof s.sourceCharPosition === 'number' ? s.sourceCharPosition : -1
+      const file = scriptFile(s.sourceURL)
+      const key = `${type}|${invoker}|${fn}|${pos}|${file}`
+      for (const m of [this.win, this.all]) {
+        let a = m.get(key)
+        if (!a) {
+          if (m === this.all && m.size >= LOAF_KEYS_KEPT) continue
+          a = { type, invoker, fn, pos, file, n: 0, ms: 0, max: 0, forced: 0 }
+          m.set(key, a)
+        }
+        a.n++
+        a.ms += ms
+        a.max = Math.max(a.max, ms)
+        a.forced += s.forcedStyleAndLayoutDuration || 0
+      }
+    }
+  }
+
+  /** The window's row (LOAF_COLUMNS), or null when no long frame came; the window starts over either way. */
+  take(t: number): Array<number | Array<Array<string | number>>> | null {
+    // Animation frame callbacks are scripts too: counted once, in scriptMs.
+    const other = this.ms - this.script - Math.max(0, this.raf - this.rafScript) - this.layout
+    const out = this.frames === 0 ? null : [
+      t, this.frames, Math.round(this.ms), Math.round(this.max), Math.round(this.block), Math.round(this.script), Math.round(this.raf),
+      Math.round(this.layout), Math.round(Math.max(0, other)), LoafLedger.top(this.win, LOAF_TOP),
+    ]
+    this.win.clear()
+    this.frames = 0; this.ms = 0; this.max = 0; this.block = 0; this.script = 0; this.raf = 0; this.layout = 0; this.rafScript = 0
+    return out
+  }
+
+  /** The whole capture's biggest, by time. */
+  top(): Array<Array<string | number>> { return LoafLedger.top(this.all, LOAF_TOP_ALL) }
+
+  private static top(m: Map<string, LoafAgg>, n: number): Array<Array<string | number>> {
+    return [...m.values()].sort((a, b) => b.ms - a.ms).slice(0, n).map((a) => [a.type, a.invoker, a.fn, a.pos, a.file, a.n, r1(a.ms), r1(a.max), r1(a.forced)])
+  }
 }

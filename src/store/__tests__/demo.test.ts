@@ -218,7 +218,7 @@ describe('leaving a step cleanly (rehearsal, 2026-10-15)', () => {
     const cs = useCyberspace.getState()
     const far = { x: cs.position.x + 1000n, y: cs.position.y, z: cs.position.z }
     // As a block step leaves it: the stop view owned, the focus on the stop, the cursor out there.
-    useHyperspace.setState({ viewOwned: true, returnScaleExp: cs.scaleExp, returnFocus: null })
+    useHyperspace.setState({ viewOwned: true })
     useCyberspace.getState().focusOn(far, cs.headPlane, 'BLOCK 900000 · LANDFALL')
     useCyberspace.setState({ cursor: far })
     useDemo.getState().next() // avatars: your own position
@@ -670,6 +670,8 @@ describe('the district shows only the curators\' things (2026-10-15)', () => {
   const STRANGER = 'ef'.repeat(32)
   let saved: Record<string, unknown> = {}
   beforeEach(() => {
+    // The finds below are said in plane 1; the store's own planes come from a random identity's spawn. Pinned, so the plane filters (spec §7.6 Planes) do not make this test a coin flip.
+    useCyberspace.setState({ anchorPlane: 1, headPlane: 1, plane: 1 })
     saved = useShards.getState().discovered
     const all = [thing(DEMO_CURATORS[0], 1), thing(DEMO_CURATORS[1], 2), thing(STRANGER, 3)]
     useShards.setState({ discovered: Object.fromEntries(all.map((t) => [t.eventId, t])) as never, scanning: false })

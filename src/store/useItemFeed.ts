@@ -12,7 +12,7 @@
  */
 
 import { create } from 'zustand'
-import { publishMany, query, relaySet } from '../lib/relay'
+import { onCanonicalSignIn, publishMany, queryChecked, relaySet, type ReadTrouble } from '../lib/relay'
 import type { KeyItem } from '../lib/hidden'
 import { ITEM_LISTING_KIND, feedListings, listingTemplate, type ItemListing } from '../lib/itemListing'
 import { useCyberspace } from './useCyberspace'
@@ -23,17 +23,38 @@ const FEED_LIMIT = 500
 interface ItemFeedState {
   listings: ItemListing[]
   loading: boolean
-  /** When the feed was last read, or 0 for never. */
+  /** When the feed was last read, or 0 for never. Only an answer from the canonical relay counts. */
   readAt: number
+  /** Why the canonical relay gave the last read nothing, if it did not answer (it is not "nothing listed"). */
+  trouble: ReadTrouble | null
   /** The item public key being listed right now, or null. */
   publishing: string | null
   /** Read the feed from your relays. */
   load: () => Promise<void>
+  /**
+   * Read it only if this session has not yet: what a lock shown with its key
+   * item asks for (hud/KeyListingRow OpensWith), so opening cards and lists
+   * of locked things reads the feed once, not once per card. A read that got
+   * no answer is tried again at most once a minute.
+   */
+  ensure: () => void
   /** List a key item you forged. Null when a relay took it, else the reason. */
   publish: (key: KeyItem) => Promise<string | null>
   /** Whether `itemPubkey` is listed by `lister` in what has been read. */
   listedBy: (itemPubkey: string, lister: string) => boolean
 }
+
+/** Refused for want of AUTH: read again once the relay signs this visit in. Set up on the first read. */
+let watching = false
+function watchSignIn(): void {
+  if (watching) return
+  watching = true
+  onCanonicalSignIn(() => { if (useItemFeed.getState().trouble) void useItemFeed.getState().load() })
+}
+
+/** How long ensure waits after a read that got no answer before asking again. */
+export const ENSURE_RETRY_MS = 60_000
+let ensuredAt = 0
 
 /** Every listing read this session, by event id, so a re-read never loses one a relay forgot. */
 const seen = new Map<string, import('../lib/events').NostrEvent>()
@@ -42,20 +63,31 @@ export const useItemFeed = create<ItemFeedState>((set, get) => ({
   listings: [],
   loading: false,
   readAt: 0,
+  trouble: null,
   publishing: null,
 
   load: async () => {
+    watchSignIn()
     if (get().loading) return
     set({ loading: true })
     try {
-      const events = await query({ kinds: [ITEM_LISTING_KIND], limit: FEED_LIMIT })
+      const { events, trouble } = await queryChecked({ kinds: [ITEM_LISTING_KIND], limit: FEED_LIMIT })
       for (const ev of events) seen.set(ev.id, ev)
-      set({ listings: feedListings([...seen.values()]), readAt: Date.now() })
+      set({ listings: feedListings([...seen.values()]), trouble, ...(trouble ? {} : { readAt: Date.now() }) })
     } catch {
-      // Unreachable relays leave what was read; the picker says when it is empty.
+      // Unreachable relays leave what was read; the picker says so.
+      set({ trouble: 'unreachable' })
     } finally {
       set({ loading: false })
     }
+  },
+
+  ensure: () => {
+    const { readAt, loading } = get()
+    if (readAt > 0 || loading || Date.now() - ensuredAt < ENSURE_RETRY_MS) return
+    ensuredAt = Date.now()
+    // A card drawing a lock never fails for want of the feed: load says what went wrong in `trouble`.
+    get().load().catch(() => {})
   },
 
   publish: async (key) => {

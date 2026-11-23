@@ -23,11 +23,20 @@ vi.hoisted(() => {
 })
 const quote = vi.hoisted(() => ({ state: { status: 'hidden' } as unknown }))
 vi.mock('../useRideQuote', () => ({ useRideQuote: () => quote.state }))
+// The pool calibration as the test sets it: no measuring under node, only the number.
+const bench = vi.hoisted(() => ({ state: null as { msPerBlock: number; workers: number } | null }))
+vi.mock('../../lib/hyperspace/ridePool', async (o) => ({
+  ...(await o() as object),
+  rideBenchmark: () => bench.state,
+  calibrate: () => new Promise(() => {}),
+}))
 vi.mock('../../lib/workers', async (o) => ({ ...(await o() as object), postProof: () => {}, cancelProof: () => {} }))
 vi.mock('../../lib/hyperspace/station', async (o) => ({ ...(await o() as object), findStation: () => ({ stop: { height: 100, kind: 'port', coordApprox: (5n << 200n) + 1n }, distance: 3 }) }))
 vi.mock('../../store/useHyperspace', async (o) => ({
   ...(await o() as object),
   getStopByHeight: (height: number) => ({ height, kind: 'port', merkleRoot: 'ab'.repeat(32), blockHash: 'cd'.repeat(32), coordExact: (5n << 200n) + 1n, coordApprox: (5n << 200n) + 1n }),
+  getBlockHash: () => 'cd'.repeat(32),
+  firstUnhashedHeight: () => null,
 }))
 // A server render reads a zustand store's initial state; here each hook reads the live state.
 vi.mock('zustand', async (importOriginal) => {
@@ -114,6 +123,27 @@ describe('the HOSAKA choice in the Hyperspace panel', () => {
     useCyberspace.setState({ cloudPrefs: { ...useCyberspace.getState().cloudPrefs, profile: 'cost' } })
     expect(button(html(), 'RIDE HERE')).toContain('hyper__btn--ride')
     expect(button(html(), 'RIDE VIA HOSAKA')).not.toContain('hyper__btn--ride')
+  })
+
+  it('TIME compares HOSAKA with the pool\'s estimate, not one worker\'s', () => {
+    quote.state = { status: 'ready', offer: OFFER }
+    // The owner's ride, 363,870 blocks, against HOSAKA's 571 s plus the payment.
+    useHyperspace.setState({ destination: 100 + 363_870, tipHeight: 100 + 363_880 })
+    try {
+      // Seven workers at 0.5 ms a mean block together (3.5 ms each): about 3 min here.
+      bench.state = { msPerBlock: 0.5, workers: 7 }
+      let page = html()
+      expect(page).toMatch(/<dt>Est\. time<\/dt><dd>3 min<\/dd>/)
+      expect(button(page, 'RIDE HERE')).toContain('hyper__btn--ride')
+      expect(button(page, 'RIDE VIA HOSAKA')).not.toContain('hyper__btn--ride')
+      // The same device read as one worker, 3.5 ms a block: 22 min, and HOSAKA would win.
+      bench.state = { msPerBlock: 3.5, workers: 1 }
+      page = html()
+      expect(page).toMatch(/<dt>Est\. time<\/dt><dd>22 min<\/dd>/)
+      expect(button(page, 'RIDE VIA HOSAKA')).toContain('hyper__btn--ride')
+    } finally {
+      bench.state = null
+    }
   })
 
   it('a HOSAKA job already kept or running holds RIDE VIA HOSAKA dark', () => {

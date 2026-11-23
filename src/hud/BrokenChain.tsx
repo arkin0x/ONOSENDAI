@@ -22,24 +22,31 @@
  * instrument stack so the state is never hidden behind the menu on a phone;
  * and BrokenChainModal, the notice and the respawn confirm, opened by the
  * chip, by RESPAWN in the panel, and by WHY wherever a move was refused.
+ *
+ * Since the owner's ruling of 2026-11-12 the same three also stand for a
+ * chain that stops where the relay's rules stop it (lib/chainStop.ts): a
+ * proof in a form the rules reject, like the owner's version 1 sidestep of
+ * 2026-09-04. The chip says CHAIN STOPS AT <day>, RelayStopNotice says where
+ * and why in a few short lines, and RESPAWN is the same respawn. The avatar
+ * stands where the chain stops, as on a broken chain (store derive,
+ * lib/chainStop.ts relayFreezeOf), for you; the rows keep where each action
+ * went, so the chain panel and the tape show them as signed. A hop above the
+ * relay's verify ceiling gets a quiet chip and no RESPAWN: the relay leaves
+ * it unchecked, and a respawn would not help.
  */
 
-import { useEffect, useMemo, useState } from 'react'
-import { TriangleAlert } from 'lucide-react'
-import { actionLabel, firstBreak, type ActionEvent } from '../lib/events'
-import { apologyFor, apologyHeading, breakCause, brokenWords, endOfChainLabel } from '../lib/chainBreak'
+import { Fragment, useEffect, useState } from 'react'
+import { Gauge, TriangleAlert } from 'lucide-react'
+import { actionLabel, type ActionEvent, type firstBreak } from '../lib/events'
+import { apologyFor, apologyHeading, breakCause, brokenWords, endOfChainLabel, relayStopWords, stopDay } from '../lib/chainBreak'
+import type { RelayStop } from '../lib/relayPlacement'
+import { useChainStop } from '../hooks/useChainStop'
 import { useCyberspace } from '../store/useCyberspace'
 import { walkChain } from '../store/useBuilder'
 import { useChainUi } from '../store/useChainUi'
 import { ConfirmModal } from './ConfirmModal'
 import { Explanation } from './Explanation'
-
-/** Your own chain's first break, resolved once per chain change. */
-export function useBrokenChain(): ReturnType<typeof firstBreak> {
-  const events = useCyberspace((s) => s.events)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  return useMemo(() => firstBreak(useCyberspace.getState().actions()), [events])
-}
+import { CopyValue } from './ui/CopyValue'
 
 /** A reason as a sentence: its first letter capitalized. */
 const sentence = (t: string): string => t.charAt(0).toUpperCase() + t.slice(1)
@@ -69,7 +76,7 @@ export function BrokenChainNotice({ broken, actions }: { broken: NonNullable<Ret
       </p>
       <p className="brokenchain__line">
         <b>What broke it:</b> {fork
-          ? <>a fork: {fork.branchIds.map((id) => `event ${id.slice(0, 8)}…`).join(' and ')} each name event {fork.previousId.slice(0, 8)}… as the action before them</>
+          ? <>a fork: {fork.branchIds.map((id, i) => <Fragment key={id}>{i > 0 && ' and '}event <CopyValue value={id} shown={`${id.slice(0, 8)}…`} /></Fragment>)} each name event <CopyValue value={fork.previousId} shown={`${fork.previousId.slice(0, 8)}…`} /> as the action before them</>
           : rowName(index, action)}.
       </p>
       <p className="brokenchain__line">
@@ -109,7 +116,7 @@ export function BrokenChainNotice({ broken, actions }: { broken: NonNullable<Ret
         new chain at your spawn point, the coordinate your public key decodes
         to, and the broken chain stays on the relays as history that no
         longer places you. Before it respawns, ONOSENDAI adds{' '}
-        {endOfChainLabel((lastValid ?? action).id)} to RECENT in the Position panel, at the
+        {endOfChainLabel((lastValid ?? action).id)} to RECENT in the View panel, at the
         place this chain froze, so you can look at it again and travel back.
         It is marked KEPT and stays in RECENT until you remove it.
         <br /><br />
@@ -126,11 +133,79 @@ export function BrokenChainNotice({ broken, actions }: { broken: NonNullable<Ret
   )
 }
 
-/** The red bar at the top of the instrument stack while your chain is broken. Tap: the notice and RESPAWN. */
-export function BrokenChainChip(): JSX.Element | null {
-  const broken = useBrokenChain()
+/**
+ * The notice for a chain that stops at a proof in a form the rules reject
+ * (lib/chainStop.ts): where, why, what it means, and an apology only where
+ * the rule came after the signing. A few short lines (the owner, 2026-11-12).
+ */
+export function RelayStopNotice({ stop, actions }: { stop: RelayStop; actions?: JSX.Element }): JSX.Element {
+  const w = relayStopWords(stop)
+  return (
+    <div className="brokenchain" role="alert">
+      <p className="brokenchain__title">
+        <TriangleAlert size={13} strokeWidth={2.5} aria-hidden className="chainrows__warn" />
+        YOUR CHAIN STOPS AT ROW {stop.index}
+      </p>
+      <p className="brokenchain__line"><b>Where:</b> {rowName(stop.index, stop.action)}.</p>
+      <p className="brokenchain__line"><b>Why:</b> {sentence(w.why)}.</p>
+      <p className="brokenchain__line">
+        <b>What it means:</b> Nothing after it counts, so your chain ends where {stop.lastValid ? `row ${stop.index - 1}` : 'your spawn'} left you on {stopDay(stop)}. ONOSENDAI will not sign a move onto this chain. Respawn to move again.
+      </p>
+      {w.sorry && <p className="brokenchain__sorry brokenchain__sorry--spec-change">{w.sorry}</p>}
+      {actions && <div className="brokenchain__actions">{actions}</div>}
+    </div>
+  )
+}
+
+/** The quiet line for a hop above the relay's verify ceiling: what the relay reads, and that a respawn would not help. */
+export function RelayCeilingNote({ stop }: { stop: RelayStop }): JSX.Element {
+  const w = relayStopWords(stop)
+  return <p className="notice" role="note">{w.title}: {w.why}.</p>
+}
+
+/**
+ * The bar at the top of the instrument stack while your chain stops: red,
+ * tap for the notice and RESPAWN, for a break or a rejected proof; quiet,
+ * and no RESPAWN, for a hop above the relay's ceiling. Nothing while that
+ * cannot be said yet (the 5.13 list loading), nothing while you spectate.
+ * `stopsOnly`: the quiet one stands down too (the tutorial shows only what
+ * stops you).
+ */
+export function BrokenChainChip({ stopsOnly = false }: { stopsOnly?: boolean }): JSX.Element | null {
+  const stop = useChainStop()
   const spectating = useCyberspace((s) => s.spectate !== null)
-  if (!broken || spectating) return null
+  if (!stop || spectating) return null
+  if (stop.source === 'relay') {
+    const w = relayStopWords(stop.stop)
+    if (stop.stop.kind === 'tall') {
+      // `stopsOnly` (the tutorial): only chips that stop you; this one does not.
+      if (stopsOnly) return null
+      return (
+        <div className="hyperbar hyperbar--ceiling" role="status" title={`${w.title}: ${w.why}.`}>
+          <Gauge size={14} strokeWidth={2.5} aria-hidden className="hyperbar__glyph" />
+          <span className="hyperbar__text">
+            <span className="hyperbar__label">{w.chip}</span>
+            <span className="hyperbar__meta">{w.chipMeta}</span>
+          </span>
+        </div>
+      )
+    }
+    return (
+      <button
+        className="hyperbar hyperbar--broken"
+        onClick={() => useChainUi.getState().setBrokenView('notice')}
+        title={`${w.title}. Tap to see where, why, and how to respawn.`}
+        aria-label={`${w.chip}. Tap for why and to respawn.`}
+      >
+        <TriangleAlert size={14} strokeWidth={2.5} aria-hidden className="hyperbar__glyph" />
+        <span className="hyperbar__text">
+          <span className="hyperbar__label">{w.chip}</span>
+          <span className="hyperbar__meta">{w.chipMeta}</span>
+        </span>
+      </button>
+    )
+  }
+  const broken = stop.broken
   return (
     <button
       className="hyperbar hyperbar--broken"
@@ -158,7 +233,7 @@ function RespawnWarning({ lastValid, place }: { lastValid: ActionEvent; place: s
         <li><b>The old chain stays on the relays as history.</b> All {events} of its actions remain there, but from now on it no longer places you anywhere, for anyone.</li>
         <li><b>The travel on the old chain is lost.</b> You do not keep the position it reached; getting back there means traveling there again on the new chain.</li>
         <li><b>Your region keys and your items are kept.</b> A region key is knowledge, not chain state, and nothing you hold is stored on the chain.</li>
-        <li><b>Before it respawns, ONOSENDAI adds {endOfChainLabel(lastValid.id)} to RECENT</b> in the Position panel, {place}, so you can view that place again and find your way back. It is marked KEPT and stays there until you remove it, however many other places you look at.</li>
+        <li><b>Before it respawns, ONOSENDAI adds {endOfChainLabel(lastValid.id)} to RECENT</b> in the View panel, {place}, so you can view that place again and find your way back. It is marked KEPT and stays there until you remove it, however many other places you look at.</li>
       </ul>
     </>
   )
@@ -171,7 +246,7 @@ function RespawnWarning({ lastValid, place }: { lastValid: ActionEvent; place: s
 export function respawnFailed(err: unknown, lastValidId?: string): string {
   // A reason that is a sentence already keeps one full stop, not two.
   const reason = (err instanceof Error ? err.message : String(err)).replace(/\.$/, '')
-  const kept = lastValidId ? ` ${endOfChainLabel(lastValidId)} stays in RECENT in the Position panel.` : ''
+  const kept = lastValidId ? ` ${endOfChainLabel(lastValidId)} stays in RECENT in the View panel.` : ''
   return `Respawn failed: ${reason}. Nothing was signed, and your chain is as it was.${kept} You can try again.`
 }
 
@@ -193,25 +268,27 @@ export async function confirmRespawn(pubkey: string, endOfChainId: string): Prom
 /** The notice in a modal, then the respawn's confirm step. Mounted once, in App. */
 export function BrokenChainModal(): JSX.Element | null {
   const view = useChainUi((s) => s.brokenView)
-  const broken = useBrokenChain()
+  const stop = useChainStop()
   const pubkey = useCyberspace((s) => s.identity.pubkey)
   const [busy, setBusy] = useState(false)
   // A respawn that did not happen says so and keeps the modal open; the End
   // of Chain entry it added first stays in RECENT.
   const [failed, setFailed] = useState<string | null>(null)
   useEffect(() => { setFailed(null) }, [view, pubkey])
-  if (!view || !broken) return null
+  // A hop above the relay's ceiling offers no respawn, so it has no modal.
+  if (!view || !stop || (stop.source === 'relay' && stop.stop.kind === 'tall')) return null
+  const broken = stop.source === 'rules' ? stop.broken : stop.stop
+  const words = stop.source === 'rules' ? brokenWords(stop.broken) : relayStopWords(stop.stop)
   const close = (): void => useChainUi.getState().setBrokenView(null)
   if (view === 'notice') {
+    const showRow = <button className="tag tag--tap" onClick={() => { close(); walkChain(broken.index) }}>SHOW THE ROW</button>
     return (
       <ConfirmModal
-        title={brokenWords(broken).title}
+        title={words.title}
         cardClassName="brokenchain__card"
         scroll
         danger={false}
-        body={<BrokenChainNotice broken={broken} actions={(
-          <button className="tag tag--tap" onClick={() => { close(); walkChain(broken.index) }}>SHOW THE ROW</button>
-        )} />}
+        body={stop.source === 'rules' ? <BrokenChainNotice broken={stop.broken} actions={showRow} /> : <RelayStopNotice stop={stop.stop} actions={showRow} />}
         cancelLabel="CLOSE"
         confirmLabel="RESPAWN"
         onCancel={close}
@@ -227,7 +304,7 @@ export function BrokenChainModal(): JSX.Element | null {
       busy={busy}
       body={(
         <>
-          <RespawnWarning lastValid={broken.lastValid ?? broken.action} place={brokenWords(broken).respawnPlace} />
+          <RespawnWarning lastValid={broken.lastValid ?? broken.action} place={words.respawnPlace} />
           {failed && <p className="notice" role="alert">{failed}</p>}
         </>
       )}

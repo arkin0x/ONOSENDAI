@@ -32,6 +32,10 @@ describe('the resumed filter', () => {
   it('never moves since backwards', () => {
     expect(resumedFilter({ kinds: [1], since: 2000 }, 1000).since).toBe(2000)
   })
+
+  it('leaves a filter bounded by limit and not since as it was: every new event, whatever its created_at (own-chain watch, 2026-11-21)', () => {
+    expect(resumedFilter({ kinds: [3333], authors: ['ab'], limit: 1 }, 1000)).toEqual({ kinds: [3333], authors: ['ab'], limit: 1 })
+  })
 })
 
 describe('the backoff', () => {
@@ -169,5 +173,39 @@ describe('a live subscription', () => {
     opens[0].end('late close of the old socket')
     await vi.advanceTimersByTimeAsync(60_000)
     expect(opens).toHaveLength(2)
+  })
+})
+
+describe('retryWaiting (review of #600, round 2)', () => {
+  beforeEach(() => { vi.useFakeTimers() })
+  afterEach(() => { vi.useRealTimers() })
+
+  it('reopens at once what waits out a backoff, leaves the open ones be, and keeps the backoff', async () => {
+    const { transport, opens } = fakeTransport()
+    const reg = new LiveRegistry(transport)
+    reg.subscribe({ kinds: [1] }, { onEvent: () => {} })
+    reg.subscribe({ kinds: [2] }, { onEvent: () => {} })
+    await vi.runAllTicks()
+    expect(opens).toHaveLength(2)
+    // The first closed five times for want of AUTH: it now waits 30 s.
+    for (let i = 0; i < 5; i++) {
+      opens[opens.length - (i === 0 ? 2 : 1)].end('auth-required: you must auth')
+      await vi.advanceTimersByTimeAsync(backoffFor(i + 1))
+    }
+    const before = opens.length
+    opens[opens.length - 1].end('auth-required: you must auth')
+    reg.retryWaiting()
+    await vi.runAllTicks()
+    expect(opens).toHaveLength(before + 1)
+    expect(opens[opens.length - 1].filter.kinds).toEqual([1])
+    // Nothing more when its timer would have fired.
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(opens).toHaveLength(before + 1)
+    // Closed again, it waits the same 30 s as before, not a second.
+    opens[opens.length - 1].end('auth-required: you must auth')
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(opens).toHaveLength(before + 1)
+    await vi.advanceTimersByTimeAsync(25_000)
+    expect(opens).toHaveLength(before + 2)
   })
 })

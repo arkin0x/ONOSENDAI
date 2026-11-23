@@ -26,7 +26,8 @@ import { findCashuToken } from '../lib/cashu'
 import { Box } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { useLoot } from '../hooks/useLoot'
+import { refreshLoot, sectorFirst, useLoot } from '../hooks/useLoot'
+import { BackupTrouble, RelayTrouble } from './RelayTrouble'
 import { bagReading, messagePreview } from '../lib/hidden'
 import { NFT_WORDS, replaceNftLinks } from '../lib/nftLink'
 import { useBagReadingsVersion } from '../hooks/useBagReadings'
@@ -44,16 +45,40 @@ import { ItemIcon, distinctKinds, type ItemKind } from './ItemIcon'
 import { useNearbyLoot } from '../hooks/useNearbyLoot'
 import { useEscape } from '../hooks/useEscape'
 import { everyWhileVisible } from '../lib/whileVisible'
+import { ModalClose } from './ui/ModalClose'
 
 /** Rows a panel shows before VIEW MORE takes over. */
 const SHOWN = 4
 
+/**
+ * What else a reading says beyond what was read (spec §7.6 Reading): that the
+ * bag names more than was fetched, and that entries were refused. Said
+ * whether or not anything in the bag reads: a bag of 900 references that
+ * shows 1,024 items still holds more.
+ */
+function beyondRead(r: { skipped?: number; refused?: number } | undefined): string {
+  if (!r) return ''
+  const more = r.skipped ? `. ${r.skipped} more not fetched` : ''
+  const refused = r.refused ? `. ${r.refused} refused` : ''
+  return `${more}${refused}`
+}
+
 /** Why an opened bag shows no items: the reading's word, for a tooltip. */
-function unreadableTitle(bagId: string): string {
+export function unreadableTitle(bagId: string): string {
   const r = bagReading(bagId)
   if (!r) return 'Opened'
   if (r.opaque) return 'Opened: this bag holds something other than a list of items'
-  return `Opened: ${r.entries === 0 ? 'nothing inside' : `none of its ${r.entries} entries can be read by this client`}`
+  return `Opened: ${r.entries === 0 ? 'nothing inside' : `none of its ${r.entries} entries can be read by this client`}${beyondRead(r)}`
+}
+
+/**
+ * An opened bag with items: how many, how many in each plane when it holds
+ * both (one bag holds a region and its twin, spec §7.6 Planes), and what the
+ * reading says beyond them (beyondRead).
+ */
+export function openedTitle(bagId: string, count: number, planes?: { data: number; idea: number }): string {
+  const split = planes && planes.data > 0 && planes.idea > 0 ? ` (${planes.data} in dataspace, ${planes.idea} in ideaspace)` : ''
+  return `Opened: ${count} items${split}${beyondRead(bagReading(bagId))}`
 }
 
 type Mode = 'hidden' | 'discovered'
@@ -80,7 +105,7 @@ export function DiscoveredPanel(): JSX.Element {
 }
 
 function BagList({ mode }: { mode: Mode }): JSX.Element {
-  const { items, status } = useLoot()
+  const { items, status, trouble, sector } = useLoot()
   const [more, setMore] = useState(false)
   // The VIEW MORE list is a modal: Escape closes it as a tap outside does (arkinox, 2026-10-01).
   useEscape('modal', more, () => setMore(false))
@@ -90,16 +115,16 @@ function BagList({ mode }: { mode: Mode }): JSX.Element {
   // What each opened bag holds: how many items, and one icon per kind in it
   // (ItemIcon), the oldest item's kind first, a coin apart from a message.
   const kinds = useMemo(() => {
-    const by = new Map<string, (ItemKind & { at: number })[]>()
+    const by = new Map<string, (ItemKind & { at: number; plane: 0 | 1 })[]>()
     for (const h of Object.values(discovered)) {
       // A muted thing is not counted; a bag with nothing else left still reads opened (below).
       if (findHidden(h, muted, me)) continue
       const list = by.get(h.bagId) ?? []
-      list.push({ at: h.createdAt, type: h.type, coin: h.type === 'message' && findCashuToken(h.text) !== null })
+      list.push({ at: h.createdAt, type: h.type, coin: h.type === 'message' && findCashuToken(h.text) !== null, plane: h.plane })
       by.set(h.bagId, list)
     }
-    const out = new Map<string, { count: number; kinds: ItemKind[] }>()
-    for (const [bag, list] of by) out.set(bag, { count: list.length, kinds: distinctKinds(list.sort((a, b) => a.at - b.at)) })
+    const out = new Map<string, { count: number; kinds: ItemKind[]; planes: { data: number; idea: number } }>()
+    for (const [bag, list] of by) out.set(bag, { count: list.length, kinds: distinctKinds(list.sort((a, b) => a.at - b.at)), planes: { data: list.filter((x) => x.plane === 0).length, idea: list.filter((x) => x.plane === 1).length } })
     return out
   }, [discovered, muted, me])
   // A bag is opened when a key of ours decrypted it, whether or not anything in
@@ -114,7 +139,15 @@ function BagList({ mode }: { mode: Mode }): JSX.Element {
   const nearbyCount = useNearbyLoot().length
   // One state per panel: the opened bags here, the rest there.
   const curated = useShards((s) => s.curated)
-  const shown = useMemo(() => shownBags(items, opened, mode, curated, muted, me), [items, opened, mode, curated, muted, me])
+  // HIDDEN BAGS lists your sector's bags first, then the rest as before (owner, 2026-11-14).
+  const shown = useMemo(() => {
+    const rows = shownBags(items, opened, mode, curated, muted, me)
+    if (mode !== 'hidden') return rows
+    const { here, elsewhere } = sectorFirst(rows, sector)
+    return [...here, ...elsewhere]
+  }, [items, opened, mode, curated, muted, me, sector])
+  /** How many of `shown`, from the top, are in your sector (HIDDEN BAGS only). */
+  const hereCount = useMemo(() => (mode === 'hidden' && sector !== null ? shown.filter((it) => it.sector === sector).length : 0), [shown, mode, sector])
   const [now, setNow] = useState(() => Date.now() / 1000)
   useEffect(() => {
     return everyWhileVisible(() => setNow(Date.now() / 1000), 10_000)
@@ -123,9 +156,11 @@ function BagList({ mode }: { mode: Mode }): JSX.Element {
   // "Bags" in the title (arkinox, 2026-10-10): every row is a bag, and the
   // word says so before the explanation does.
   const title = mode === 'discovered' ? 'Discovered bags' : 'Hidden bags'
+  // A relay that did not answer is not zero bags: the count says it does not know.
+  const n = trouble && items.length === 0 ? '?' : String(shown.length)
   const count = status === 'loading'
     ? 'LOADING'
-    : mode === 'discovered' ? `${shown.length} OPENED` : `${shown.length} HIDDEN`
+    : mode === 'discovered' ? `${n} OPENED` : `${n} HIDDEN`
   const countTitle = mode === 'discovered'
     ? 'Bags on the relay your keys have opened'
     : 'Bags on the relay your keys have not opened yet'
@@ -135,10 +170,10 @@ function BagList({ mode }: { mode: Mode }): JSX.Element {
     <li key={it.key} className="loot__row">
       <button className="loot__open" onClick={() => open(it)} title="Open this bag's record">
         <div className="loot__top">
-          <ProfileBadge pubkey={it.author} />
+          <ProfileBadge pubkey={it.author} tappable nested />
           {it.author === me && <span className="avatars__you">YOURS</span>}
           {kinds.has(it.bagId)
-            ? <span className="tag tag--live loot__kinds" title={`Opened: ${kinds.get(it.bagId)?.count ?? 0} items`}>{kinds.get(it.bagId)?.kinds.map((k) => <ItemIcon key={`${k.type}:${k.coin}`} type={k.type} coin={k.coin} size={10} />)}</span>
+            ? <span className="tag tag--live loot__kinds" title={openedTitle(it.bagId, kinds.get(it.bagId)?.count ?? 0, kinds.get(it.bagId)?.planes)}>{kinds.get(it.bagId)?.kinds.map((k) => <ItemIcon key={`${k.type}:${k.coin}`} type={k.type} coin={k.coin} size={10} />)}</span>
             : opened.has(it.bagId) && <span className="tag loot__kinds" title={unreadableTitle(it.bagId)}>∅</span>}
           <span className="avatars__when" title={formatStamp(it.createdAt)}>{formatAgo(it.createdAt, now)}</span>
         </div>
@@ -155,6 +190,22 @@ function BagList({ mode }: { mode: Mode }): JSX.Element {
     </li>
   )
 
+  /**
+   * Rows under group headings when any are in your sector: THIS SECTOR, then
+   * ELSEWHERE for the rest (a bag without a hint is always elsewhere). With
+   * none here, the plain list, as before.
+   */
+  const grouped = (rows: LootItem[]): JSX.Element[] => {
+    if (hereCount === 0) return rows.map(row)
+    const out: JSX.Element[] = []
+    rows.forEach((it, i) => {
+      if (i === 0) out.push(<li key="group:here" className="loot__group" title="Bags whose hider named the sector you stand in">THIS SECTOR</li>)
+      if (i === hereCount) out.push(<li key="group:elsewhere" className="loot__group" title="Every other bag, newest first">ELSEWHERE</li>)
+      out.push(row(it))
+    })
+    return out
+  }
+
   return (
     <section className="panel panel--loot">
       <header className="panel__head">
@@ -164,11 +215,14 @@ function BagList({ mode }: { mode: Mode }): JSX.Element {
         </span>
       </header>
 
-      {status === 'error' && <p className="notice">Could not reach {relayName}.</p>}
+      {trouble
+        ? <RelayTrouble trouble={trouble} onRetry={refreshLoot} />
+        : status === 'error' && <p className="notice">Could not reach {relayName}.</p>}
+      <BackupTrouble onRetry={refreshLoot} />
 
       <ul className="avatars__list loot__list">
-        {shown.slice(0, SHOWN).map(row)}
-        {status === 'ready' && shown.length === 0 && (
+        {grouped(shown.slice(0, SHOWN))}
+        {status === 'ready' && !trouble && shown.length === 0 && (
           <li className="avatars__empty">
             {mode === 'discovered'
               ? 'Nothing opened yet.'
@@ -196,8 +250,8 @@ function BagList({ mode }: { mode: Mode }): JSX.Element {
             are called "bags" and might have clues as to where they can be found.
             The size is the area wherein the bag can be found; larger is more work
             to decrypt but easier to find, smaller is less work to decrypt but
-            harder to find. A bag moves to DISCOVERED BAGS the moment your keys
-            open it.
+            harder to find. Bags whose hider named the sector you stand in come
+            first. A bag moves to DISCOVERED BAGS the moment your keys open it.
           </Explanation>
         )
         : (
@@ -215,11 +269,10 @@ function BagList({ mode }: { mode: Mode }): JSX.Element {
             <header className="panel__head">
               <h2>{title}</h2>
               <span className="tag" title={countTitle}>{count}</span>
+              {/* The ✕ on the title's line, as every modal has it; no CLOSE at the bottom (owner, 2026-11-15). */}
+              <ModalClose onClose={() => setMore(false)} />
             </header>
-            <ul className="avatars__list avatars__list--all loot__list">{shown.map(row)}</ul>
-            <div className="modal__row">
-              <button className="modal__cancel" onClick={() => setMore(false)}>CLOSE</button>
-            </div>
+            <ul className="avatars__list avatars__list--all loot__list">{grouped(shown)}</ul>
           </div>
         </div>,
         document.body,

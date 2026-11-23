@@ -9,7 +9,7 @@
  * reasons only; the rest is behind EXPLAIN.
  */
 
-import { useState } from 'react'
+import { memo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Checkbox } from '../hud/ui/Checkbox'
 import { Field, Switch } from '../hud/ui/Switch'
@@ -19,6 +19,7 @@ import { useEscape } from '../hooks/useEscape'
 import { useCyberspace } from '../store/useCyberspace'
 import { mineIds, plannedBlocks, useShardImport, type ImportRow } from '../store/useShardImport'
 import { dupAction, type Dup, type DupMode } from '../lib/shardZip'
+import { ModalClose } from '../hud/ui/ModalClose'
 
 const MODES: Array<{ mode: DupMode; label: string; help: string }> = [
   { mode: 'skip', label: 'SKIP', help: 'Leave out a piece you already have, and a file whose name one of your shards has' },
@@ -29,7 +30,7 @@ const MODES: Array<{ mode: DupMode; label: string; help: string }> = [
 const size = (n: number): string => (n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(n < 10240 ? 1 : 0)} KB` : `${(n / 1048576).toFixed(1)} MB`)
 
 /** The tag at a row's end: what is happening to it, or what will. */
-function status(row: ImportRow, mode: DupMode, dup: Dup, needs: string | undefined): { label: string; tone: string; title?: string } {
+function status(row: ImportRow, mode: DupMode, dup: Dup, needs: string | undefined, noun: string): { label: string; tone: string; title?: string } {
   if (row.read === 'waiting') return { label: 'WAITING', tone: 'tag--local' }
   if (row.read === 'reading') return { label: 'READING', tone: 'tag--sending' }
   if (row.read === 'error') return { label: 'ERROR', tone: 'tag--failed', title: row.error ?? undefined }
@@ -42,13 +43,39 @@ function status(row: ImportRow, mode: DupMode, dup: Dup, needs: string | undefin
     const act = dupAction(dup, mode).act
     const title = dup.in === 'same' ? `One of your shards has this address: ${row.id}`
       : dup.in === 'published' ? `Your relays already hold an object of yours at this address: ${row.id}`
-        : dup.in === 'name' ? 'One of your shards has this name' : 'Same path twice in this zip'
+        : dup.in === 'name' ? 'One of your shards has this name' : `Same path twice in this ${noun}`
     const label = act === 'skip' ? ({ same: 'YOURS', published: 'PUBLISHED', name: 'TAKEN', zip: 'TWICE' } as const)[dup.in]
       : act === 'update' || (dup.in === 'published' && act === 'new') ? 'UPDATE' : 'AS COPY'
     return { label, tone: 'tag--sending', title }
   }
   return { label: 'NEW', tone: '' }
 }
+
+interface RowProps { r: ImportRow; dup: Dup; mode: DupMode; needs: string | undefined; noun: string; running: boolean; toggle: (key: string) => void }
+
+/**
+ * One row of the list. Memoized: each step of a run changes one row, and a
+ * list of 180 drawn again for every step cost more than the import's own
+ * work on a slow tablet (a production build at 4x CPU, 2026-11-22).
+ */
+const Row = memo(function Row({ r, dup, mode, needs, noun, running, toggle }: RowProps): JSX.Element {
+  const tag = status(r, mode, dup, needs, noun)
+  const folder = r.folder.join('/')
+  return (
+    <li className={`zipimport__row ${r.picked ? '' : 'is-off'}`}>
+      <Checkbox aria-label={`Import ${r.path}`} checked={r.picked} disabled={running || r.read === 'error' || r.run === 'done'} onCheckedChange={() => toggle(r.key)} />
+      <span className="zipimport__thumb">{r.picture ? <ShardThumb shard={r.picture} size={40} /> : null}</span>
+      <span className="zipimport__text">
+        <span className="zipimport__name">{r.name}</span>
+        <span className="zipimport__meta">
+          {folder ? `${folder} · ` : ''}{size(r.size)}{r.shard ? ` · ${r.shard.vertices.length} v · ${r.shard.faces.length} f` : ''}
+        </span>
+        {(r.read === 'error' || r.run === 'failed') && <span className="zipimport__error">{r.read === 'error' ? r.error : r.failure}</span>}
+      </span>
+      <span className={`tag ${tag.tone}`} title={tag.title}>{tag.label}</span>
+    </li>
+  )
+})
 
 export function ZipImport(): JSX.Element | null {
   const s = useShardImport()
@@ -79,7 +106,8 @@ export function ZipImport(): JSX.Element | null {
   else if (s.phase === 'opening') line = 'OPENING'
   else if (s.phase === 'reading') line = s.remote === 'checking' ? 'CHECKING YOUR RELAYS' : `READING ${s.rows.length - reading} OF ${s.rows.length}`
   else if (running && s.remote === 'checking') line = 'CHECKING YOUR RELAYS'
-  else if (running) line = `${publish ? 'PUBLISHING' : 'ADDING'} ${Math.min(done + failed + 1, workTotal)} OF ${workTotal}`
+  // Rows in hand count: with PUBLISH off several are added while storage saves them (store/useShardImport UNSAVED_MAX).
+  else if (running) line = `${publish ? 'PUBLISHING' : 'ADDING'} ${Math.min(done + failed + Math.max(1, s.rows.filter((r) => r.run === 'working').length), workTotal)} OF ${workTotal}`
   else if (s.phase === 'done') line = `${done} DONE${failed ? ` · ${failed} FAILED` : ''}`
   else line = [`${ready.length} SHARD${ready.length === 1 ? '' : 'S'}`, yours ? `${yours} ALREADY YOURS` : '', errors ? `${errors} ERROR${errors === 1 ? '' : 'S'}` : '', s.skipped.length ? `${s.skipped.length} SKIPPED` : '', publish && s.remote === 'unknown' ? 'RELAYS NOT CHECKED' : ''].filter(Boolean).join(' · ')
   const fraction = s.phase === 'reading' ? (s.rows.length - reading) / Math.max(1, s.rows.length) : running || s.phase === 'done' ? (done + failed) / Math.max(1, workTotal) : 0
@@ -94,9 +122,14 @@ export function ZipImport(): JSX.Element | null {
   return createPortal(
     <div className="modal" role="dialog" aria-modal="true" aria-label={`Import ${s.fileName}`} onPointerDown={() => { if (!running && !s.ran) s.close() }}>
       <div className="modal__card modal__card--list zipimport" onPointerDown={(e) => e.stopPropagation()}>
-        <h2 className="modal__title zipimport__title">IMPORT {s.fileName.toUpperCase()}</h2>
+        <div className="modal__head">
+          <h2 className="modal__title zipimport__title">IMPORT {s.fileName.toUpperCase()}</h2>
+          {/* Closes as CANCEL or DONE below does; not while an import is running. */}
+          <ModalClose onClose={() => s.close()} disabled={running} />
+        </div>
         <div className={`zipimport__line ${s.error || s.stall ? 'is-bad' : ''}`} aria-live="polite">{s.stall ? `${s.stall.toUpperCase()} ${line}` : line}</div>
-        <div className="zipimport__bar" aria-hidden><span style={{ width: `${Math.round(fraction * 100)}%` }} /></div>
+        {/* A sheen runs along the bar while the import works, so a long save never looks like a frozen tab. */}
+        <div className={`zipimport__bar ${running ? 'is-working' : ''}`} aria-hidden><span style={{ width: `${Math.round(fraction * 100)}%` }} /></div>
         {s.rows.length > 0 && (
           <div className="zipimport__controls">
             <Field id="zipimport-all" label="ALL">
@@ -113,25 +146,7 @@ export function ZipImport(): JSX.Element | null {
           </div>
         )}
         <ul className="zipimport__list">
-          {s.rows.map((r) => {
-            const dup = s.dups[r.key] ?? null
-            const tag = status(r, s.dupMode, dup, blocked.get(r.key))
-            const folder = r.folder.join('/')
-            return (
-              <li key={r.key} className={`zipimport__row ${r.picked ? '' : 'is-off'}`}>
-                <Checkbox aria-label={`Import ${r.path}`} checked={r.picked} disabled={running || r.read === 'error' || r.run === 'done'} onCheckedChange={() => s.toggle(r.key)} />
-                <span className="zipimport__thumb">{r.picture ? <ShardThumb shard={r.picture} size={40} /> : null}</span>
-                <span className="zipimport__text">
-                  <span className="zipimport__name">{r.name}</span>
-                  <span className="zipimport__meta">
-                    {folder ? `${folder} · ` : ''}{size(r.size)}{r.shard ? ` · ${r.shard.vertices.length} v · ${r.shard.faces.length} f` : ''}
-                  </span>
-                  {(r.read === 'error' || r.run === 'failed') && <span className="zipimport__error">{r.read === 'error' ? r.error : r.failure}</span>}
-                </span>
-                <span className={`tag ${tag.tone}`} title={tag.title}>{tag.label}</span>
-              </li>
-            )
-          })}
+          {s.rows.map((r) => <Row key={r.key} r={r} dup={s.dups[r.key] ?? null} mode={s.dupMode} needs={blocked.get(r.key)} noun={s.noun} running={running} toggle={s.toggle} />)}
         </ul>
         {s.skipped.length > 0 && (
           <div className="zipimport__skipped">
@@ -147,7 +162,8 @@ export function ZipImport(): JSX.Element | null {
           Every .json SNO object and 3D file ({'PLY, STL, OBJ with its MTL, glTF or GLB, VOX'}) in the zip becomes one of
           your shards, named after its file, with its path in the zip as its address, so the same zip imported again
           finds the same pieces. A reference from one piece to another in the zip is pointed at yours. {s.foldersOn ? 'Its folders in the zip become folders here.' : 'Folders in the zip are kept for when the workshop has folders.'} Hidden
-          files and __MACOSX are skipped. A 3D file is fitted to a new shard&apos;s grid, as IMPORT fits one. If one of your
+          files and __MACOSX are skipped. A .json SNO object picked or dropped without a zip comes in the same way, as if
+          it were alone in a zip named import.zip: its address is import/ and its name. A 3D file is fitted to a new shard&apos;s grid, as IMPORT fits one. If one of your
           shards has the name, or the address is already yours (here, or on your relays): SKIP leaves it out, COPY adds a copy, UPDATE replaces a piece
           imported before at the same address, so everything placing it draws the new one. A shard that only shares a
           name is never replaced. With PUBLISH on, each shard is signed and sent as PUBLISH

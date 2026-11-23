@@ -10,21 +10,24 @@ const index = readFileSync(new URL('../../../index.html', import.meta.url), 'utf
 
 describe('withCard', () => {
   it('puts the TV card in the page and leaves everything else as it was', () => {
-    expect(index).toContain('<meta property="og:image" content="https://onosendai.tech/og.png?v=2"')
+    expect(index).toContain('<meta property="og:image" content="https://www.onosendai.tech/og.png?v=3"')
     const tv = withCard(index, TV_CARD)
-    expect(tv).toContain('<meta property="og:image" content="https://onosendai.tech/og-tv.jpg?v=4"')
-    expect(tv).toContain('<meta property="og:url" content="https://onosendai.tech/tv"')
+    expect(tv).toContain('<meta property="og:image" content="https://www.onosendai.tech/og-tv.jpg?v=5"')
+    expect(tv).toContain('<meta property="og:url" content="https://www.onosendai.tech/tv"')
+    // X reads twitter: tags first: they carry the route's card too.
+    expect(tv).toContain('<meta name="twitter:image" content="https://www.onosendai.tech/og-tv.jpg?v=5"')
+    expect(tv).toContain('<meta name="twitter:title" content="CYBERSPACE TV · ONOSENDAI"')
     expect(tv).toContain('<title>CYBERSPACE TV · ONOSENDAI</title>')
-    expect(tv).not.toContain('https://onosendai.tech/og.png')
+    expect(tv).not.toContain('https://www.onosendai.tech/og.png')
     // Same script, same everything else.
     expect(tv).toContain('<meta property="og:image:type" content="image/jpeg"')
-    const strip = (h: string) => h.replace(/<title>[^<]*<\/title>/, '').replace(/<meta (name="description"|property="og:[^"]*") content="[^"]*"/g, '')
+    const strip = (h: string) => h.replace(/<title>[^<]*<\/title>/, '').replace(/<meta (name="description"|property="og:[^"]*"|name="twitter:(?:title|description|image|image:alt)") content="[^"]*"/g, '')
     expect(strip(tv)).toBe(strip(index))
   })
 
   it('puts the workshop card in the page, over the home page image', () => {
     const page = withCard(index, WORKSHOP_CARD)
-    expect(page).toContain('<meta property="og:url" content="https://onosendai.tech/workshop"')
+    expect(page).toContain('<meta property="og:url" content="https://www.onosendai.tech/workshop"')
     expect(page).toContain('<title>SHARD WORKSHOP · ONOSENDAI</title>')
     // The home page's picture, read from index.html, so a new home card cannot leave this one behind.
     const tag = (prop: string) => new RegExp(`<meta property="${prop}" content="([^"]*)"`).exec(index)?.[1]
@@ -32,7 +35,7 @@ describe('withCard', () => {
     expect(WORKSHOP_CARD.imageType).toBe(tag('og:image:type'))
     expect(WORKSHOP_CARD.imageAlt).toBe(tag('og:image:alt'))
     expect(page).toContain(`<meta property="og:description" content="${WORKSHOP_CARD.description}"`)
-    const strip = (h: string) => h.replace(/<title>[^<]*<\/title>/, '').replace(/<meta (name="description"|property="og:[^"]*") content="[^"]*"/g, '')
+    const strip = (h: string) => h.replace(/<title>[^<]*<\/title>/, '').replace(/<meta (name="description"|property="og:[^"]*"|name="twitter:(?:title|description|image|image:alt)") content="[^"]*"/g, '')
     expect(strip(page)).toBe(strip(index))
   })
 

@@ -28,9 +28,10 @@ import { COAST, EARTH, MERIDIAN } from '../lib/palette'
 import { GRID_RADIUS, cellDelta, stepFor, type ViewAxes } from '../lib/space'
 import { EARTH_RADIUS_KM, formatLatLonDeg, originCsMetres, surfaceHit, surfaceVertex } from '../lib/earthSurface'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
-import { markViewedStop, ownHyperspaceView } from '../store/useHyperspace'
+import { viewHyperspace } from '../store/useHyperspace'
 import { useCoastline } from '../hooks/useCoastline'
 import { WorldLabel } from './WorldLabel'
+import { useDrawReach } from './buildZoom'
 
 /** §9.7: 1 km = 1000 * 2^33 gibsons. */
 const GIBSONS_PER_KM = 1000n * (1n << 33n)
@@ -64,6 +65,8 @@ export function Earth({ axes }: Props): JSX.Element | null {
   const plane = useCyberspace((s) => s.anchorPlane)
   // The coarsest shoreline tier, whole: 5k points, 41 KB, fetched once.
   const coast = useCoastline(plane === 0 ? '110m' : null)
+  // The reach every culled layer shares (buildZoom.ts), never less than the least: the fog is black inside it.
+  const drawReach = useDrawReach((s) => Math.max(GRID_RADIUS * 8, s.reach))
 
   const globe = useMemo(() => {
     // Ideaspace has no physical mapping at all (§9.1), so there is no planet in
@@ -87,11 +90,11 @@ export function Earth({ axes }: Props): JSX.Element | null {
 
     // Off in the dark somewhere. Building a sphere nobody can see is wasted
     // work, and at a random spawn this is the overwhelmingly common case.
-    const reach = GRID_RADIUS * 8 + radius
+    const reach = drawReach + radius
     if (Math.hypot(...centre) > reach) return null
 
     return { centre, radius }
-  }, [position, scaleExp, plane, axes])
+  }, [position, scaleExp, plane, axes, drawReach])
 
   // The graticule, replacing the old view-relative wireframe: a sphere
   // mesh's poles follow the camera's up axis, so its "meridians" were
@@ -183,8 +186,6 @@ export function Earth({ axes }: Props): JSX.Element | null {
             if (e.delta > 8 || useTv.getState().on) return
             e.stopPropagation()
             markSceneTapHandled()
-            ownHyperspaceView()
-            markViewedStop(null)
             // Back faces only, so the raycaster's hit is the FAR inner
             // surface: where the ray leaves the planet, not the ground
             // under the pointer. Re-intersect the same ray with the sphere
@@ -201,11 +202,9 @@ export function Earth({ axes }: Props): JSX.Element | null {
             const near = o.addScaledVector(d, -b - Math.sqrt(Math.max(0, disc)))
             const hit = surfaceHit([near.x, near.y, near.z], scaleExp, axes)
             const label = `EARTH · ${formatLatLonDeg(hit.lat, hit.lon)}`
-            useCyberspace.getState().focusOn(hit.position, 0, label)
-            // Leave the pin standing at what was clicked, so the focal point
-            // is a thing in the scene and not just a camera target. It
-            // survives clicking a block; RETURN and REMOVE PIN take it away.
-            useCyberspace.getState().dropPin(hit.position, label)
+            // VIEW there, the cursor on the point clicked. No pin: the cross
+            // marker is off (arkinox, 2026-11-11); the star marks a place.
+            viewHyperspace(hit.position, 0, label, undefined, null)
           }}
         >
           <sphereGeometry args={[globe.radius * 0.995, 32, 16]} />

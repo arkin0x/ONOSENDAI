@@ -5,7 +5,7 @@ import fs from 'node:fs'
 const sk = generateSecretKey()
 const A = 'e8ed3798c6ffebffa08501ac39e271662bfd160f688f94c45d692d8767dd345a'
 const X = 'd4e4c079ad8e2f84af0da56f95c161431226934398e78c7a3c244e2547f6f3d4'
-const relay = await Relay.connect('wss://cyberspace.nostr1.com')
+const relay = await Relay.connect('wss://relay.onosendai.tech')
 await new Promise((r) => setTimeout(r, 1500))
 if (relay.challenge) await relay.auth((t) => finalizeEvent(t, sk))
 const filters = [

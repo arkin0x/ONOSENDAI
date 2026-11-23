@@ -14,8 +14,8 @@
  * a deploy) comes back already uploaded, so it is not uploaded twice.
  */
 
-import { useEffect, useRef, useState } from 'react'
-import { explainUpload } from '../lib/blossom'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { explainUpload, serverAnswered } from '../lib/blossom'
 import { audioFileRefusal, audioTypeOf, iphoneMayNotPlay, sealAndUpload, type UploadedAudio } from '../lib/audioFile'
 import { MAX_AUDIO_TITLE, titleFromFileName, type AudioItem } from '../lib/audioItem'
 import { useBuilder } from '../store/useBuilder'
@@ -23,9 +23,12 @@ import { useCyberspace } from '../store/useCyberspace'
 import { useShards } from '../store/useShards'
 import { BlossomServerPicker, useBlossomChoice } from './BlossomServer'
 import { Field, Switch } from './ui/Switch'
+import { GoArrow } from './ui/GoArrow'
 
 /** A person reads the upload prompt, as for a profile picture. */
 const UPLOAD_SIGN_PATIENCE_MS = 60_000
+/** Said when the identity changed while a file was prepared for upload. */
+const UPLOAD_SWITCHED = 'You switched identity while this file was being uploaded, so it was not used. Upload it again as the identity signed in now.'
 
 type Status = { tone: 'ok' | 'warn' | 'note'; text: string }
 
@@ -47,7 +50,7 @@ export function AudioUpload({ idPrefix, initial, submitLabel, onReady, onCancel 
   idPrefix: string
   /** An item already uploaded (a kept draft): its choices can change, its file cannot. */
   initial?: AudioItem
-  submitLabel: string
+  submitLabel: ReactNode
   /** The item, and the server it was uploaded to (absent for a kept draft that never said). */
   onReady: (audio: AudioItem, server?: string) => void
   onCancel: () => void
@@ -103,14 +106,28 @@ export function AudioUpload({ idPrefix, initial, submitLabel, onReady, onCancel 
     const host = target.replace(/^https?:\/\//, '')
     setBusy(true)
     setStatus({ tone: 'note', text: `Encrypting and uploading to ${host}. Your signer may ask.` })
+    // The upload is signed after the file is encrypted, by whoever is signed
+    // in by then: a switch meanwhile had the new identity sign the old one's
+    // upload. Refused before the signer is asked, and an upload finished
+    // after a switch is not handed on to be placed (identity-switch audit,
+    // 2026-11-19).
+    const owner = me
+    const switched = (): boolean => useCyberspace.getState().identity.pubkey !== owner
     try {
-      const u = await sealAndUpload(file, target, (t) => useCyberspace.getState().signEvent(t, UPLOAD_SIGN_PATIENCE_MS))
-      if (gone.current) return
+      const u = await sealAndUpload(file, target, (t) => {
+        if (switched()) throw new Error(UPLOAD_SWITCHED)
+        return useCyberspace.getState().signEvent(t, UPLOAD_SIGN_PATIENCE_MS)
+      })
+      if (switched()) throw new Error(UPLOAD_SWITCHED)
+      // Kept even when the form has closed: the upload went there.
       blossom.remember(target)
+      if (gone.current) return
       setUploaded(u)
       setStatus({ tone: 'ok', text: `Uploaded, encrypted, to ${host}.` })
       onReady(item(u), target)
     } catch (e) {
+      // The server answered, even with a no (one that wants a subscription): it sticks (owner 2026-11-10).
+      if (serverAnswered(e)) blossom.remember(target)
       if (!gone.current) setStatus({ tone: 'warn', text: explainUpload(e) })
     } finally {
       if (!gone.current) setBusy(false)
@@ -183,7 +200,7 @@ export function AudioCompose({ onDone }: { onDone: () => void }): JSX.Element {
     <AudioUpload
       idPrefix="audio"
       initial={initial}
-      submitLabel="PLACE AUDIO ▸"
+      submitLabel={<>PLACE AUDIO<GoArrow /></>}
       onReady={(audio, server) => { useShards.getState().startDeployAudio(audio, placeAudioOpts(audio, server, kept)); onDone() }}
       onCancel={onDone}
     />

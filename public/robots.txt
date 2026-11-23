@@ -1,0 +1,3 @@
+# Every crawler may read every page, link-preview bots included (X, Bluesky, Signal, nostr clients).
+User-agent: *
+Allow: /

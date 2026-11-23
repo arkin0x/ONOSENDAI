@@ -13,7 +13,10 @@
  * never answers fails the send at the deadline, two in a row pause the run,
  * and STOP ends the wait at once; a rate-limited relay is asked again after
  * a wait; and once the workshop has folders each new shard goes in its zip
- * folder.
+ * folder. A .json picked or dropped without a zip is sniffed (routeImport):
+ * an SNO object comes in as a zip of it would, a glTF goes to IMPORT's 3D
+ * reader as before, anything else is NOT AN SNO OR glTF FILE, and an SNO
+ * object picked with a GLB brings both in as shards.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -43,14 +46,20 @@ vi.mock('../../lib/importFolders', async (importOriginal) => ({
   folderApi: vi.fn(() => null),
 }))
 
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { strToU8, zipSync } from 'fflate'
+import { BUILT_IN } from 'sno-core/snoPalette'
+import { importFiles } from '../../lib/meshImport'
 import { folderApi } from '../../lib/importFolders'
 import { publishMany, queryEach } from '../../lib/relay'
 import { useCyberspace } from '../useCyberspace'
 import { useWorkshop } from '../useWorkshop'
-import { withConstrain } from '../../lib/walkConstrain'
+import { wallMesh, withConstrain } from '../../lib/walkConstrain'
+import { bounceOf, springboardOf, withBounce } from '../../lib/walkBounce'
+import { toPayload } from 'sno-core/shards'
 import { usePublished } from '../usePublished'
-import { timing, useShardImport } from '../useShardImport'
+import { NOT_SNO_OR_GLTF, looseName, routeImport, timing, useShardImport } from '../useShardImport'
 
 const sno = (name: string, x = 1): string => JSON.stringify({
   v: 2, name, unit: 0, mode: 'solid',
@@ -289,6 +298,15 @@ describe('failure and retry', () => {
   it('asks a rate-limited relay again after a wait', async () => {
     let calls = 0
     vi.mocked(publishMany).mockImplementation(async () => (++calls === 1 ? { ok: false, reason: 'rate-limited: slow down' } : { ok: true, accepted: ['wss://relay.test'] }))
+    await openPublishing(kitZip())
+    await imp().start()
+    expect(imp().rows.filter((r) => r.run === 'done')).toHaveLength(3)
+    expect(calls).toBe(4)
+  })
+
+  it('asks again after a wait when the relay says so in its own words (relay.onosendai.tech)', async () => {
+    let calls = 0
+    vi.mocked(publishMany).mockImplementation(async () => (++calls === 1 ? { ok: false, reason: 'Rate limit exceeded for category: addressable' } : { ok: true, accepted: ['wss://relay.test'] }))
     await openPublishing(kitZip())
     await imp().start()
     expect(imp().rows.filter((r) => r.run === 'done')).toHaveLength(3)
@@ -696,5 +714,312 @@ describe('the WALK setting (DECK-0003 §1.12)', () => {
     await imp().start()
     expect(mine().find((x) => x.id === id)!.extra).toEqual({ constrain: 'all' })
     expect(wordSent(id)).toBe('all')
+  })
+})
+
+describe('a .json picked or dropped without a zip (arkinox, 2026-11-09: "I cant import a blue chicken json file by itself")', () => {
+  // His own blue chicken, as the zip in onosendai/sno/blue-chicken holds it.
+  const CHICKEN = readFileSync(join(__dirname, '..', 'fixtures', 'blue-chicken.json'), 'utf8')
+  const chicken = (name = 'blue-chicken.json', type = 'application/json'): File => new File([CHICKEN], name, { type })
+  const pos = new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0])
+  const tri = (buffer: Record<string, unknown>): Record<string, unknown> => ({
+    asset: { version: '2.0' }, scene: 0, scenes: [{ nodes: [0] }], nodes: [{ mesh: 0 }],
+    meshes: [{ primitives: [{ attributes: { POSITION: 0 }, mode: 4 }] }],
+    buffers: [{ ...buffer, byteLength: pos.byteLength }], bufferViews: [{ buffer: 0, byteOffset: 0, byteLength: pos.byteLength }],
+    accessors: [{ bufferView: 0, componentType: 5126, count: 3, type: 'VEC3', min: [0, 0, 0], max: [1, 1, 0] }],
+  })
+  /** A triangle as a glTF .json, its buffer a data URI. */
+  const gltfJson = (name = 'tri.json'): File => {
+    const b64 = Buffer.from(new Uint8Array(pos.buffer)).toString('base64')
+    return new File([JSON.stringify(tri({ uri: `data:application/octet-stream;base64,${b64}` }))], name, { type: 'application/json' })
+  }
+  /** The same triangle as a GLB: its JSON chunk and its BIN chunk. */
+  const glb = (name = 'tri.glb'): File => {
+    const pad = (b: Uint8Array, fill: number): Uint8Array => { const out = new Uint8Array(Math.ceil(b.length / 4) * 4).fill(fill); out.set(b); return out }
+    const json = pad(new TextEncoder().encode(JSON.stringify(tri({}))), 0x20)
+    const bin = pad(new Uint8Array(pos.buffer), 0)
+    const out = new Uint8Array(12 + 8 + json.length + 8 + bin.length)
+    const dv = new DataView(out.buffer)
+    dv.setUint32(0, 0x46546c67, true); dv.setUint32(4, 2, true); dv.setUint32(8, out.length, true)
+    dv.setUint32(12, json.length, true); dv.setUint32(16, 0x4e4f534a, true); out.set(json, 20)
+    const at = 20 + json.length
+    dv.setUint32(at, bin.length, true); dv.setUint32(at + 4, 0x004e4942, true); out.set(bin, at + 8)
+    return new File([out], name, { type: 'model/gltf-binary' })
+  }
+
+  it('a lone SNO .json goes to bulk import and comes in as a zip of it would, at import/<its name>', async () => {
+    const route = await routeImport([chicken()])
+    expect(route.to).toBe('shards')
+    if (route.to !== 'shards') return
+    await imp().openFiles(route.files)
+    const s = imp()
+    expect(s.error).toBeNull()
+    expect(s.phase).toBe('review')
+    expect(s.fileName).toBe('blue-chicken.json')
+    expect(s.publish).toBe(false)
+    expect(s.rows.map((r) => [r.name, r.id, r.folder.join('/'), r.kind, r.read])).toEqual([['blue-chicken', 'import/blue-chicken', '', 'sno', 'ok']])
+    expect(rowOf('blue-chicken').shard!.faces).toHaveLength(578)
+    await imp().start()
+    expect(mine().map((x) => [x.id, x.name, x.faces.length])).toEqual([['import/blue-chicken', 'blue-chicken', 578]])
+    // PUBLISH starts off, as for a zip: nothing went out.
+    expect(sent()).toHaveLength(0)
+  })
+
+  it('the same file again is the same shard: SKIP leaves it, UPDATE replaces it in place', async () => {
+    await imp().openFiles([chicken()])
+    await imp().start()
+    imp().close()
+    const changed = JSON.stringify({ ...JSON.parse(CHICKEN), mode: 'points' })
+    await imp().openFiles([new File([changed], 'blue-chicken.json')])
+    expect(imp().dups[rowOf('blue-chicken').key]).toEqual({ in: 'same', id: 'import/blue-chicken' })
+    await imp().start()
+    expect(rowOf('blue-chicken').run).toBe('skipped')
+    expect(mine()[0].mode).toBe('solid')
+    imp().setDupMode('update')
+    await imp().retry()
+    expect(rowOf('blue-chicken').outcome).toBe('update')
+    expect(mine().map((x) => [x.id, x.mode])).toEqual([['import/blue-chicken', 'points']])
+  })
+
+  it('a .json known only by its type still reads as an SNO object', async () => {
+    const route = await routeImport([chicken('blue-chicken', 'application/json')])
+    expect(route.to).toBe('shards')
+    if (route.to === 'shards') await imp().openFiles(route.files)
+    expect(imp().rows.map((r) => [r.name, r.read])).toEqual([['blue-chicken', 'ok']])
+  })
+
+  it('a glTF .json still goes to IMPORT\'s 3D reader, which reads it', async () => {
+    const file = gltfJson()
+    const route = await routeImport([file])
+    expect(route).toEqual({ to: 'mesh', files: [file] })
+    const res = await importFiles([file], { fit: 8, unit: 0, palette: BUILT_IN, color: [255, 255, 255] })
+    expect(res.ok).toBe(true)
+    expect(imp().open).toBe(false)
+  })
+
+  it('a .json that is neither says NOT AN SNO OR glTF FILE', async () => {
+    expect(await routeImport([new File(['{"hello":"world"}'], 'notes.json')])).toEqual({ to: 'none', error: NOT_SNO_OR_GLTF })
+    expect(await routeImport([new File(['not json at all'], 'notes.json')])).toEqual({ to: 'none', error: NOT_SNO_OR_GLTF })
+    expect(await routeImport([new File(['{"v":2,"name":"cut short"'], 'broken.json')])).toEqual({ to: 'none', error: NOT_SNO_OR_GLTF })
+    // Among others, it names the file.
+    expect(await routeImport([chicken(), new File(['[]'], 'list.json')])).toEqual({ to: 'none', error: `list.json: ${NOT_SNO_OR_GLTF}` })
+    expect(NOT_SNO_OR_GLTF).toBe('NOT AN SNO OR glTF FILE')
+  })
+
+  it('an SNO .json picked with a GLB brings both in, each a new shard', async () => {
+    const route = await routeImport([chicken(), glb()])
+    expect(route.to).toBe('shards')
+    if (route.to !== 'shards') return
+    await imp().openFiles(route.files)
+    expect(imp().fileName).toBe('2 files')
+    expect(imp().rows.map((r) => [r.name, r.id, r.kind, r.read])).toEqual([
+      ['blue-chicken', 'import/blue-chicken', 'sno', 'ok'],
+      ['tri', 'import/tri', 'mesh', 'ok'],
+    ])
+    await imp().start()
+    expect(mine().map((x) => x.id).sort()).toEqual(['import/blue-chicken', 'import/tri'])
+    expect(mine().find((x) => x.id === 'import/tri')!.faces.length).toBeGreaterThan(0)
+  })
+
+  it('a glTF .json picked beside an SNO object is read as a 3D file, not refused as an SNO object', async () => {
+    await imp().openFiles([chicken(), gltfJson()])
+    expect(imp().rows.map((r) => [r.name, r.kind, r.read])).toEqual([['blue-chicken', 'sno', 'ok'], ['tri', 'mesh', 'ok']])
+  })
+
+  describe('a glTF .json and its .bin beside an SNO object', () => {
+    /** The triangle as a glTF .json whose buffer is a file named `bin`. */
+    const withBin = (name: string, type: string, bin: string): File[] => [
+      new File([JSON.stringify(tri({ uri: bin }))], name, { type }),
+      new File([new Uint8Array(pos.buffer)], bin, { type: 'application/octet-stream' }),
+    ]
+
+    it('reads the .bin when it shares the glTF\'s name', async () => {
+      await imp().openFiles([chicken(), ...withBin('tri.json', 'application/json', 'tri.bin')])
+      expect(imp().rows.map((r) => [r.name, r.id, r.kind, r.read])).toEqual([['blue-chicken', 'import/blue-chicken', 'sno', 'ok'], ['tri', 'import/tri', 'mesh', 'ok']])
+      expect(imp().skipped).toEqual([])
+    })
+
+    it('reads the .bin the glTF names when the names differ (scene.json + buffer0.bin)', async () => {
+      await imp().openFiles([chicken(), ...withBin('scene.json', 'application/json', 'buffer0.bin')])
+      expect(imp().rows.map((r) => [r.name, r.id, r.kind, r.read])).toEqual([['blue-chicken', 'import/blue-chicken', 'sno', 'ok'], ['scene', 'import/scene', 'mesh', 'ok']])
+      expect(imp().skipped).toEqual([])
+      expect(rowOf('scene').shard!.faces.length).toBeGreaterThan(0)
+    })
+
+    it('a .gltf a picker typed application/json keeps its name: scene, not scene.gltf', async () => {
+      await imp().openFiles([chicken(), ...withBin('scene.gltf', 'application/json', 'buffer0.bin')])
+      expect(imp().rows.map((r) => [r.name, r.id, r.kind, r.read])).toEqual([['blue-chicken', 'import/blue-chicken', 'sno', 'ok'], ['scene', 'import/scene', 'mesh', 'ok']])
+      expect(imp().skipped).toEqual([])
+    })
+  })
+
+  it('a re-download\'s " (1)" is dropped, so importing it again offers UPDATE in place', async () => {
+    await imp().openFiles([chicken()])
+    await imp().start()
+    imp().close()
+    const changed = JSON.stringify({ ...JSON.parse(CHICKEN), mode: 'points' })
+    await imp().openFiles([new File([changed], 'blue-chicken (1).json', { type: 'application/json' })])
+    expect(imp().rows.map((r) => [r.name, r.id])).toEqual([['blue-chicken', 'import/blue-chicken']])
+    expect(imp().dups[rowOf('blue-chicken').key]).toEqual({ in: 'same', id: 'import/blue-chicken' })
+    imp().setDupMode('update')
+    await imp().start()
+    expect(rowOf('blue-chicken').outcome).toBe('update')
+    expect(mine().map((x) => [x.id, x.mode])).toEqual([['import/blue-chicken', 'points']])
+  })
+
+  it('names each loose file for what it holds, without a re-download\'s " (N)"', () => {
+    expect(looseName('blue-chicken (1).json', 'sno')).toBe('blue-chicken.json')
+    expect(looseName('blue-chicken (12)', 'sno')).toBe('blue-chicken.json')
+    expect(looseName('blue-chicken', 'sno')).toBe('blue-chicken.json')
+    expect(looseName('scene.json', 'gltf')).toBe('scene.gltf')
+    expect(looseName('scene (2).JSON', 'gltf')).toBe('scene.gltf')
+    expect(looseName('scene.gltf', 'gltf')).toBe('scene.gltf')
+    expect(looseName('scene', 'gltf')).toBe('scene.gltf')
+    expect(looseName('tri (1).glb', null)).toBe('tri.glb')
+    expect(looseName('buffer0 (1).bin', null)).toBe('buffer0.bin')
+    // Never down to nothing, or to a dotfile.
+    expect(looseName('(1).json', 'sno')).toBe('(1).json')
+    expect(looseName('room(3).ply', null)).toBe('room(3).ply')
+  })
+
+  it('says "import", not "zip", for loose files', async () => {
+    await imp().openFiles([chicken(), chicken()])
+    expect(imp().noun).toBe('import')
+    await imp().start()
+    expect(imp().rows.map((r) => r.failure)).toEqual([null, 'Same name in this import'])
+    imp().close()
+    await imp().openFiles([new File(['hello'], 'README.txt')])
+    expect(imp().error).toBe('No shard files in that import.')
+    imp().close()
+    await imp().openZip(kitZip())
+    expect(imp().noun).toBe('zip')
+  })
+
+  it('the workshop\'s picker and its drop both take this route, and the picker offers a .json', () => {
+    const src = readFileSync(join(__dirname, '..', '..', 'workshop', 'Workshop.tsx'), 'utf8')
+    expect(src).toContain('const route = await routeImport(files)')
+    expect(src).toContain("if (route.to === 'shards') { void useShardImport.getState().openFiles(route.files); return }")
+    expect(src).toContain('accept={IMPORT_PICKER_ACCEPT}')
+    expect(src).toContain('void importFromFiles(e.dataTransfer.files)')
+  })
+
+  it('without an SNO object, GLBs and glTFs stay with IMPORT\'s 3D reader; a zip still goes alone', async () => {
+    expect((await routeImport([glb(), gltfJson()])).to).toBe('mesh')
+    const zip = kitZip()
+    expect(await routeImport([zip])).toEqual({ to: 'zip', file: zip })
+    expect(await routeImport([zip, chicken()])).toEqual({ to: 'none', error: 'Import one zip at a time, on its own.' })
+  })
+})
+
+describe('BOUNCE through a lone .json (the owner\'s hand-made test shards, maze-kit/bounce-test)', () => {
+  const fixture = (name: string): File => new File([readFileSync(join(__dirname, '../fixtures/bounce-test', `${name}.json`), 'utf8')], `${name}.json`, { type: 'application/json' })
+
+  it('keeps `bounce` from the file to the bench, the wire and the collider', async () => {
+    for (const [name, want, spring] of [['bounce-pad-12', 12, false], ['bounce-pad-reflect', 'reflect', false], ['bounce-test-tower', 0, false], ['bounce-springboard-12', 12, true]] as const) {
+      const route = await routeImport([fixture(name)])
+      expect(route.to).toBe('shards')
+      if (route.to !== 'shards') return
+      await imp().openFiles(route.files)
+      expect(imp().rows.map((r) => r.read)).toEqual(['ok'])
+      await imp().start()
+      imp().close()
+      const stored = mine().find((x) => x.id === `import/${name}`)!
+      expect(stored).toBeDefined()
+      // On the bench: carried in `extra`, beside `constrain`.
+      expect(stored.extra?.bounce).toBe(want === 0 ? undefined : want)
+      expect(stored.extra?.constrain).toBe('all')
+      expect(bounceOf(stored)).toBe(want)
+      expect(springboardOf(stored)).toBe(spring)
+      expect((toPayload(stored) as { springboard?: unknown }).springboard).toBe(spring ? true : undefined)
+      expect(wallMesh(stored, []).ownSpringboard).toBe(spring)
+      // On the wire, as it publishes.
+      expect((toPayload(stored) as { bounce?: unknown }).bounce).toBe(want === 0 ? undefined : want)
+      // At the collider: its own faces bounce by it.
+      expect(wallMesh(stored, []).ownBounce).toBe(want)
+    }
+  })
+
+  describe('UPDATE keeps the bench bounce (decided 2026-11-10, review of #653)', () => {
+    const id = 'maze-kit/forest/rotunda'
+    const sentOf = (d: string) => JSON.parse(sent().find((e) => dOf(e) === d)!.content) as { bounce?: unknown; springboard?: unknown }
+    async function benchThenUpdate(bench: (s: import('sno-core/shards').ShardModel) => import('sno-core/shards').ShardModel, file: string): Promise<import('sno-core/shards').ShardModel> {
+      await openPublishing(kitZip())
+      await imp().start()
+      imp().close()
+      useWorkshop.setState({ shards: mine().map((s) => (s.id === id ? bench(s) : s)) })
+      vi.mocked(publishMany).mockClear()
+      await openPublishing(kitZip({ 'maze-kit/forest/rotunda.json': file }))
+      imp().setDupMode('update')
+      await imp().start()
+      return mine().find((x) => x.id === id)!
+    }
+
+    it('a file that reads as no bounce keeps the bench\'s bounce and springboard, as a pair, on the bench and the wire', async () => {
+      const after = await benchThenUpdate((s) => withBounce(s, 12, true), sno('changed', 3))
+      expect(after.vertices[1].p).toEqual([3, 0, 0])
+      expect(after.extra).toMatchObject({ bounce: 12, springboard: true })
+      expect(sentOf(id)).toMatchObject({ bounce: 12, springboard: true })
+    })
+
+    it('a malformed bounce is no bounce: the bench\'s pair replaces it, and a stray springboard in the file is not kept beside it', async () => {
+      const file = JSON.stringify({ ...JSON.parse(sno('changed', 3)), bounce: 99, springboard: true })
+      const after = await benchThenUpdate((s) => withBounce(s, 'reflect'), file)
+      expect(bounceOf(after)).toBe('reflect')
+      expect(springboardOf(after)).toBe(false)
+      expect(after.extra).not.toHaveProperty('springboard')
+      expect(sentOf(id).bounce).toBe('reflect')
+      expect(sentOf(id).springboard).toBeUndefined()
+    })
+
+    it('a valid bounce in the file wins, with the file\'s own springboard: never the bench\'s springboard beside it', async () => {
+      const file = JSON.stringify({ ...JSON.parse(sno('changed', 3)), bounce: 6 })
+      const after = await benchThenUpdate((s) => withBounce(s, 12, true), file)
+      expect(bounceOf(after)).toBe(6)
+      expect(springboardOf(after)).toBe(false)
+      expect(sentOf(id).bounce).toBe(6)
+      expect(sentOf(id).springboard).toBeUndefined()
+      imp().close()
+      vi.mocked(publishMany).mockClear()
+      await openPublishing(kitZip({ 'maze-kit/forest/rotunda.json': JSON.stringify({ ...JSON.parse(sno('again', 4)), bounce: 'reflect' }) }))
+      imp().setDupMode('update')
+      await imp().start()
+      const again = mine().find((x) => x.id === id)!
+      expect(bounceOf(again)).toBe('reflect')
+      expect(springboardOf(again)).toBe(false)
+    })
+
+    it('a bench with no bounce takes the file as it is', async () => {
+      const file = JSON.stringify({ ...JSON.parse(sno('changed', 3)), bounce: 18, springboard: true })
+      const after = await benchThenUpdate((s) => s, file)
+      expect(bounceOf(after)).toBe(18)
+      expect(springboardOf(after)).toBe(true)
+      // The bench after that UPDATE bounces 18; turned OFF there, a file without bounce leaves it OFF.
+      imp().close()
+      const plain = await benchThenUpdate((s) => withBounce(s, 0), sno('plain', 2))
+      expect(bounceOf(plain)).toBe(0)
+      expect(plain).not.toHaveProperty('extra')
+    })
+  })
+
+  it('a shard set to bounce in the workshop goes out as its payload and comes back through a zip with both fields, on the bench and the wire', async () => {
+    const id0 = useWorkshop.getState().create('Springboard')
+    useWorkshop.getState().select(id0)
+    useWorkshop.setState({ shards: mine().map((s) => (s.id === id0 ? { ...s, mode: 'solid' as const, vertices: [{ p: [0, 0, 0], c: [1, 1, 1] }, { p: [1, 0, 0], c: [1, 1, 1] }, { p: [0, 0, 1], c: [1, 1, 1] }], faces: [[0, 1, 2]] } : s)) })
+    useWorkshop.getState().setBounce(18, true)
+    const json = useWorkshop.getState().exportCurrent()!
+    const reflect = JSON.stringify({ ...JSON.parse(json), name: 'Reflector', bounce: 'reflect', springboard: undefined })
+    useWorkshop.setState({ shards: [], currentId: null })
+    await openPublishing(kitZip({ 'maze-kit/pads/springboard.json': json, 'maze-kit/pads/reflector.json': reflect }))
+    await imp().start()
+    const spring = mine().find((x) => x.id === 'maze-kit/pads/springboard')!
+    expect(spring.extra).toMatchObject({ bounce: 18, springboard: true })
+    expect(bounceOf(spring)).toBe(18)
+    expect(springboardOf(spring)).toBe(true)
+    const refl = mine().find((x) => x.id === 'maze-kit/pads/reflector')!
+    expect(bounceOf(refl)).toBe('reflect')
+    expect(springboardOf(refl)).toBe(false)
+    const wire = JSON.parse(sent().find((e) => dOf(e) === 'maze-kit/pads/springboard')!.content) as { bounce?: unknown; springboard?: unknown }
+    expect(wire.bounce).toBe(18)
+    expect(wire.springboard).toBe(true)
   })
 })

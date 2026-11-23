@@ -1,49 +1,33 @@
 /**
- * The weld row (arkinox, 2026-10-12): a row of its own at the top of the
- * bottom-left column, standing on the tool chip when nothing else is up, and
- * nowhere near the orbit ball, which it used to cover from the color corner.
+ * WELD (arkinox, 2026-10-12): never automatic, and never where it covered
+ * the orbit or the color corner. With the held bar (workshop redesign,
+ * phase 2) it is a key in MORE, saying how many spots are stacked, and MORE
+ * carries the count as a badge on every strip while any are.
  */
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { WeldRow } from '../Workshop'
 
-const SOURCE = readFileSync(join(__dirname, '..', 'Workshop.tsx'), 'utf8')
+const MORE = readFileSync(join(__dirname, '..', 'sheets', 'MoreSheet.tsx'), 'utf8')
+const STRIP = readFileSync(join(__dirname, '..', 'shell', 'Strip.tsx'), 'utf8')
+const HELD = readFileSync(join(__dirname, '..', 'shell', 'HeldBar.tsx'), 'utf8')
+const WORKSHOP = readFileSync(join(__dirname, '..', 'Workshop.tsx'), 'utf8')
 
-/** The JSX between an opening `<div className="X"` and the next sibling block at the same indent. */
-function block(cls: string): string {
-  const start = SOURCE.indexOf(`<div className="${cls}"`)
-  expect(start).toBeGreaterThan(-1)
-  const indent = SOURCE.lastIndexOf('\n', start)
-  const pad = SOURCE.slice(indent + 1, start)
-  const end = SOURCE.indexOf(`\n${pad}</div>`, start)
-  return SOURCE.slice(start, end)
-}
-
-describe('WeldRow', () => {
-  it('is a row with the count and WELD while points are stacked, and nothing otherwise', () => {
-    // The stairs arkinox built: two boxes sharing an edge, 4 points on 2 spots (2026-10-12).
-    const html = renderToStaticMarkup(<WeldRow stacked={{ spots: 2, points: 4 }} selected={4} />)
-    expect(html).toContain('benchclip')
-    expect(html).toContain('2 SPOTS STACKED')
-    expect(html).toContain('4 points share 2 spots')
-    expect(renderToStaticMarkup(<WeldRow stacked={{ spots: 1, points: 3 }} selected={0} />)).toContain('1 SPOT STACKED')
-    expect(html).toContain('WELD')
-    expect(renderToStaticMarkup(<WeldRow stacked={{ spots: 0, points: 0 }} selected={4} />)).toBe('')
+describe('WELD', () => {
+  it('is a key in MORE while points are stacked, with the count, folding the selection or the whole shard', () => {
+    // Not as a fold of the held points in LOOK, where they are out of sight (workshop/benchLook.tsx).
+    expect(MORE).toContain('{stacked.spots > 0 && !(look && selection.length >= 2) && (')
+    expect(MORE).toContain('label={`WELD ${stacked.spots}`}')
+    expect(MORE).toContain("aria={selection.length >= 2 ? 'Weld the selected stacked points' : 'Weld every stacked point'}")
+    expect(MORE).toContain('onClick={() => w().weld()}')
   })
 
-  it('stands first in the bottom-left column, so the chip is the next thing under it when no row is up', () => {
-    const tools = block('ws__tools')
-    const weld = tools.indexOf('<WeldRow')
-    expect(weld).toBeGreaterThan(-1)
-    for (const row of ['<SelectRow', '<ActionRow', '<TurnRow', '<ControlsPad', 'ws__toolchips']) {
-      expect(tools.indexOf(row)).toBeGreaterThan(weld)
-    }
+  it('shows its count as a badge on MORE, on the tool strips and on the held bar alike', () => {
+    expect(WORKSHOP).toContain('moreBadge={stacked}')
+    for (const src of [STRIP, HELD]) expect(src).toContain('{moreBadge > 0 && <i className="ws__badge" aria-hidden>{moreBadge}</i>}')
   })
 
-  it('is gone from the color corner beside the orbit ball', () => {
-    expect(block('ws__corner')).not.toMatch(/WeldRow|weld\(\)|STACKED/i)
-    expect(SOURCE).not.toContain('benchops')
+  it('is nowhere else', () => {
+    for (const src of [STRIP, HELD, WORKSHOP]) expect(src).not.toMatch(/\.weld\(\)/)
   })
 })

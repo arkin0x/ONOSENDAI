@@ -7,7 +7,10 @@
  * until Space commits the hop.
  *
  * WALK has its own keys, first-person style (lib/walkKeys.ts): W forward,
- * S back, A and D sideways, Space or R up, C or F down, every press a step. They are answered before anything else, so in WALK Space never
+ * S back, A and D sideways, Space or R up, C or F down, every press a step;
+ * W or S with A or D held steps diagonally, 45 degrees to that side. A held
+ * key walks from the press on (store/walkHold.ts): the keyboard's own
+ * repeats, which came after a pause, are ignored. They are answered before anything else, so in WALK Space never
  * commits, scrolls or presses a focused button. Z switches WALK's GRAVITY
  * (store/useWalk.ts); the workshop bench's own Z (undo) is never reached
  * from here, since nothing of WALK's is answered with the workshop open.
@@ -19,6 +22,7 @@ import { useCyberspace } from '../store/useCyberspace'
 import { closeScrubber, useHyperspace } from '../store/useHyperspace'
 import { useTv } from '../store/useTv'
 import { useWorkshop } from '../store/useWorkshop'
+import { useGame } from '../store/useGame'
 import { useShards } from '../store/useShards'
 import { stepChain, useBuilder, walkChain } from '../store/useBuilder'
 import { useChat } from '../store/useChat'
@@ -27,7 +31,16 @@ import { moveDirection, type MoveName } from '../lib/moves'
 import type { RotateDirection } from '../lib/space'
 import { stepBuild } from '../store/buildStep'
 import { useWalk } from '../store/useWalk'
-import { walkMove } from '../lib/walkKeys'
+import { walkHeldDir, walkMove } from '../lib/walkKeys'
+import { holdEnd, holdReleaseAll, holdStart } from '../store/walkHold'
+import { addWalkInputCloser, setWalkMenuCovering, walkMenuCovering } from '../store/walkInput'
+import { canFly, useViewFly } from '../lib/viewFly'
+import { useRegion } from '../store/useRegion'
+import { buildToScan, leaveWalk, scanToHop, viewToAvatar } from '../store/padMode'
+import { scanBuying, scanSpace, useScan } from '../store/useScan'
+
+// Cyberspace TV is watching only: WALK's input is closed while it is on (store/walkInput.ts).
+addWalkInputCloser(() => useTv.getState().on)
 
 const MOVE_KEYS: Record<string, MoveName> = {
   KeyW: 'up',
@@ -51,9 +64,8 @@ const ROTATE_KEYS: Record<string, RotateDirection> = {
  * (arkinox, 2026-10-01: "turn off the cyberspace controls while the menu is
  * open"). Set by App, which knows; Escape still works.
  */
-let menuCovering = false
 export function setMenuCovering(covering: boolean): void {
-  menuCovering = covering
+  setWalkMenuCovering(covering)
 }
 
 /**
@@ -78,11 +90,14 @@ export function escapeKey(event: Pick<KeyboardEvent, 'code' | 'defaultPrevented'
  * covered and the workshop shut, so the bench keeps its own Z (undo).
  */
 export function walkKeyDown(event: Pick<KeyboardEvent, 'code' | 'ctrlKey' | 'shiftKey' | 'altKey' | 'metaKey' | 'preventDefault'> & { repeat?: boolean }): boolean {
-  if (!useCyberspace.getState().walking || menuCovering || useWorkshop.getState().open) return false
+  if (!useCyberspace.getState().walking || walkMenuCovering() || useWorkshop.getState().open || useGame.getState().session) return false
   const step = walkMove(event)
   if (step) {
     event.preventDefault()
-    useWalk.getState().press(step)
+    // Held, the key walks from the press on (store/walkHold.ts), so the
+    // keyboard's repeats, which begin after a pause, add nothing. With the
+    // input closed (a modal up) the key is still WALK's, and holds nothing.
+    if (!event.repeat) holdStart(`key:${event.code}`, walkHeldDir(step))
     return true
   }
   // Space is WALK's up even when it is not a step (a modifier held):
@@ -100,22 +115,78 @@ export function walkKeyDown(event: Pick<KeyboardEvent, 'code' | 'ctrlKey' | 'shi
   return false
 }
 
-/** X in WALK: stop the steps still to prove (a fall still in the air is some), or with none, back to HOP. */
+/** A key let go: it stops walking, and is no longer held into a diagonal (store/walkHold.ts). */
+export function walkKeyUp(code: string): void {
+  holdEnd(`key:${code}`)
+}
+
+/**
+ * Everything held let go, keys and pad alike: the window lost focus or the
+ * page was hidden, so no keyup or pointerup will come for what was held.
+ */
+export function walkKeysReleased(): void {
+  holdReleaseAll()
+}
+
+/**
+ * Meta (Cmd) down or up, or any key with it held: everything held is let go
+ * (review of #651). macOS sends no keyup for a key let go while Cmd is down,
+ * so W held through Cmd+Tab would otherwise walk on forever. True when it let go.
+ */
+export function walkMetaRelease(event: Pick<KeyboardEvent, 'code' | 'metaKey'> & { key?: string }): boolean {
+  if (!(event.metaKey || event.code === 'MetaLeft' || event.code === 'MetaRight' || event.key === 'Meta')) return false
+  holdReleaseAll()
+  return true
+}
+
+/** The page hidden: no keyup or pointerup will come for what was held. */
+function pageHidden(): void {
+  if (typeof document !== 'undefined' && document.hidden) holdReleaseAll()
+}
+
+/** X in WALK: stop the steps still to prove (a fall still in the air is some), or with none, back to the mode WALK came from (padMode `leaveWalk`). */
 export function walkCancel(): void {
   const walk = useWalk.getState()
   if (walk.behind > 0 || walk.open !== null || walk.falling || useCyberspace.getState().proof.status === 'computing') walk.stop()
-  else walk.exit()
+  else leaveWalk()
+}
+
+/** Space (forward) or Shift (back) let go in VIEW: the fly that key drove stops, a different one held keeps its own. */
+export function flyKeyUp(dir: 1 | -1): void {
+  const f = useViewFly.getState()
+  if (f.key === dir) f.setKey(0)
+}
+
+/**
+ * The rotate keys (W A S D) held now. Shift flies the view back in VIEW, but
+ * Shift with W A S D rotates it; while a rotate key is down Shift does not
+ * fly, so steering the view by rotation never also drifts it backward
+ * (review, 2026-11-11).
+ */
+const rotateHeld = new Set<string>()
+
+/** The window lost focus: no keyup will come for a held Space or Shift, or a held rotate key. */
+function flyKeysReleased(): void {
+  useViewFly.getState().setKey(0)
+  rotateHeld.clear()
 }
 
 export function useKeyboard(): void {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      // Cmd swallows keyups on macOS: let go of every held walk first.
+      walkMetaRelease(event)
       // Escape closes the top layer even from a field: a modal that focuses
       // its own input (ITEM FEED's search, a chest's name, the login box)
       // otherwise could not be closed from the keyboard at all (pre-class
       // smoke test, 2026-10-16). A field that uses Escape itself (the chat
       // line's mention list) says so with preventDefault, and keeps it.
+      // In a game nothing of cyberspace's is on screen, so Escape closes none of it out of sight.
+      if (useGame.getState().session) return
       if (escapeKey(event)) return
+      // A key that needs its password (hud/KeyLock.tsx): no key moves or
+      // commits behind the gate, to be signed all at once when it opens.
+      if (useCyberspace.getState().keyLock) return
       // Cyberspace TV is watching only: no key moves, zooms or commits.
       if (useTv.getState().on) return
       // Typing into a field, or building on the bench: not ours.
@@ -126,7 +197,7 @@ export function useKeyboard(): void {
       if (walkKeyDown(event)) return
       // Let the browser keep its own shortcuts.
       if (event.metaKey || event.ctrlKey || event.altKey) return
-      if (menuCovering) return
+      if (walkMenuCovering()) return
       // Space and Enter on a focused control press that control. Space is
       // COMMIT here, a proof and possibly a paid one, so a Space meant for a
       // focused switch, checkbox or button used to try to move instead
@@ -134,6 +205,8 @@ export function useKeyboard(): void {
       // their shortcuts with a control focused.
       if ((event.code === 'Space' || event.key === 'Enter') && (event.target as HTMLElement | null)?.closest?.('button, a[href], select, summary, [role="switch"], [role="checkbox"], [role="button"], [role="menuitem"], [role="tab"]')) return
       if (useWorkshop.getState().open) return
+      // In a game its own keys answer (game/GameView.tsx): nothing here moves you in cyberspace meanwhile.
+      if (useGame.getState().session) return
 
       const store = useCyberspace.getState()
       // What is on screen, which under free orbit is not the snapped frame.
@@ -142,6 +215,24 @@ export function useKeyboard(): void {
       // BUILD mode (store/useBuilder.ts): the same keys move the build cursor,
       // and the few that would reach the movement chain are answered here.
       const building = useBuilder.getState().active
+      // SCAN mode (store/useScan.ts): VIEW's view, made SCAN's. Space scans
+      // there, and neither Space nor Shift flies.
+      const scanning = !building && useScan.getState().active && store.viewing()
+      const flies = canFly(store, building) && !scanning
+
+      // N: into SCAN, from HOP, VIEW or BUILD (where BUILD's cursor was), or
+      // out of it to HOP, as the mode button does from SCAN.
+      if (event.code === 'KeyN') {
+        event.preventDefault()
+        // WALK is left by its own keys and buttons, back to the mode it came from.
+        if (store.walking) return
+        if (scanning) scanToHop()
+        else if (building) buildToScan()
+        // From HOP only where the mode button stands: nothing lined up, placing or proving.
+        else if (store.viewing() || (store.atHead() && store.plan === null && store.proof.status !== 'computing'
+          && !useShards.getState().pending && store.cursor.x === store.position.x && store.cursor.y === store.position.y && store.cursor.z === store.position.z)) useScan.getState().enter()
+        return
+      }
 
       // B: into BUILD mode, or out of it, like the BUILD control. Leaving is
       // refused while a deploy is lined up (useBuilder `exit`): that is
@@ -194,6 +285,13 @@ export function useKeyboard(): void {
       if (event.code === 'Space') {
         event.preventDefault()
         if (useShards.getState().pending) { void useShards.getState().deploy(); return }
+        // In VIEW, Space flies the view forward while held, the way the camera
+        // faces (arkinox, 2026-11-11), as the Forward button does; it never
+        // commits there. R and F are FAR and NEAR again, a cell at a time.
+        if (flies) { useViewFly.getState().setKey(1); return }
+        // In SCAN, Space is a tap of the SCAN button; a HOSAKA height takes
+        // two presses, CONFIRM with the price and then pay (store/useScan.ts scanSpace).
+        if (scanning) { scanSpace(event.repeat); return }
         // Building never moves you: with nothing to place, Space does nothing.
         if (building) return
         // The next action, as the button names it: HOSAKA's step brings up the
@@ -209,11 +307,22 @@ export function useKeyboard(): void {
       // While building, X stops a move or a route from before, running,
       // paused or failed (that is stopping a move, not making one), and
       // otherwise brings the build cursor back to your avatar, the builder's
-      // own recall.
+      // own recall. In VIEW, X brings the cursor and the view home and VIEW
+      // stays, as the pad's RECALL does (store/padMode.ts viewToAvatar;
+      // arkinox, 2026-11-12); Esc is VIEW's RETURN.
       if (event.code === 'KeyX') {
         event.preventDefault()
         if (store.walking) { walkCancel(); return }
-        if (building && store.proof.status !== 'computing' && store.cloud.status === 'idle' && store.plan === null) useBuilder.getState().toAvatar()
+        // In region mode, X resets the cursor to where region mode started and
+        // collapses the region to that one cell at the zoom you are now at
+        // (store/useRegion.ts; arkinox, 2026-11-11).
+        if (useRegion.getState().active) { useRegion.getState().collapseToEntry(); return }
+        // In SCAN, X stops a scan under way first, as STOP stops a proof.
+        if (scanning && (useScan.getState().job || useScan.getState().confirm)) { useScan.getState().cancel(); return }
+        // A SCAN's HOSAKA purchase is no move: X leaves it to finish (store/useScan.ts).
+        const idle = store.proof.status !== 'computing' && (store.cloud.status === 'idle' || scanBuying()) && store.plan === null
+        if (building && idle) useBuilder.getState().toAvatar()
+        else if (idle && store.viewing()) viewToAvatar()
         else store.cancel()
         return
       }
@@ -238,7 +347,7 @@ export function useKeyboard(): void {
       if (event.code === 'KeyH') {
         event.preventDefault()
         const hs = useHyperspace.getState()
-        if (hs.scrubHeight === null) hs.setScrubHeight(hs.tipHeight ?? 0)
+        if (hs.scrubHeight === null) hs.setScrubHeight(hs.viewedStop ?? hs.tipHeight ?? 0)
         else closeScrubber()
         return
       }
@@ -246,6 +355,12 @@ export function useKeyboard(): void {
       // The build STEP while a deploy is lined up (store/buildStep.ts): comma
       // is finer, period coarser, the < and > on the same keys.
       if (event.code === 'Comma' || event.code === 'Period') {
+        // In SCAN they step the scan height, down and up.
+        if (scanning && !useShards.getState().pending) {
+          event.preventDefault()
+          useScan.getState().stepHeight(event.code === 'Comma' ? -1 : 1)
+          return
+        }
         if (!useShards.getState().pending) return
         event.preventDefault()
         stepBuild(event.code === 'Comma' ? -1 : 1)
@@ -259,7 +374,9 @@ export function useKeyboard(): void {
       }
 
       // R and F travel along the axis perpendicular to the screen, which is
-      // otherwise unreachable without rotating the view first.
+      // otherwise unreachable without rotating the view first. FAR and NEAR,
+      // one cell at a time, in VIEW as everywhere else (arkinox, 2026-11-11:
+      // "R = FAR, F = NEAR again"); flying the view is Space and Shift now.
       if (event.code === 'KeyR' || event.code === 'KeyF') {
         event.preventDefault()
         // In WALK R and F are up and down, answered above.
@@ -268,10 +385,25 @@ export function useKeyboard(): void {
         return
       }
 
+      // Which rotate keys are held, so Shift can fly only when none is.
+      if (ROTATE_KEYS[event.code]) rotateHeld.add(event.code)
+
+      // In VIEW, Shift flies the view backward while held (arkinox, 2026-11-11),
+      // as the Back button does. Not while a rotate key is down: Shift with
+      // W A S D rotates (below), and a rotate must not also drift the view back.
+      if ((event.code === 'ShiftLeft' || event.code === 'ShiftRight') && flies && rotateHeld.size === 0) {
+        event.preventDefault()
+        useViewFly.getState().setKey(-1)
+        return
+      }
+
       if (event.shiftKey) {
         const rotation = ROTATE_KEYS[event.code]
         if (!rotation) return
         event.preventDefault()
+        // Starting a rotate ends any backward fly Shift had begun, so you steer
+        // by rotation without the view sliding back under you.
+        useViewFly.getState().setKey(0)
         store.rotate(rotation)
         return
       }
@@ -285,15 +417,29 @@ export function useKeyboard(): void {
     }
 
     const onKeyUp = (event: KeyboardEvent) => {
+      walkKeyUp(event.code)
+      walkMetaRelease(event)
+      if (ROTATE_KEYS[event.code]) rotateHeld.delete(event.code)
+      // Space or Shift let go: VIEW's fly from that key stops.
+      if (event.code === 'Space') flyKeyUp(1)
+      if (event.code === 'ShiftLeft' || event.code === 'ShiftRight') flyKeyUp(-1)
       // A button with focus activates on Space's keyup: in WALK that Space
       // was a step up, not a press of the button.
       if (event.code === 'Space' && useCyberspace.getState().walking) event.preventDefault()
     }
     window.addEventListener('keydown', onKeyDown)
     window.addEventListener('keyup', onKeyUp)
+    window.addEventListener('blur', walkKeysReleased)
+    window.addEventListener('blur', flyKeysReleased)
+    // A page hidden (a tab switch, a phone's home button) sends no keyup.
+    const doc = typeof document === 'undefined' ? null : document
+    doc?.addEventListener('visibilitychange', pageHidden)
     return () => {
+      doc?.removeEventListener('visibilitychange', pageHidden)
+      window.removeEventListener('blur', flyKeysReleased)
       window.removeEventListener('keydown', onKeyDown)
       window.removeEventListener('keyup', onKeyUp)
+      window.removeEventListener('blur', walkKeysReleased)
     }
   }, [])
 }

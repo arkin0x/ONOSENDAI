@@ -21,29 +21,38 @@
  */
 
 import { Canvas, useThree } from '@react-three/fiber'
+import { GlowWorldCanvas } from './PointBillboards'
 import { OrbitControls } from '@react-three/drei'
-import { EffectComposer, Bloom } from '@react-three/postprocessing'
-import { BlendFunction, Effect, type BloomEffect, type EffectComposer as PostComposer } from 'postprocessing'
+import { EffectComposer } from '@react-three/postprocessing'
+import { WorldBloom, resolveColourOnly } from './worldBloom'
 import { memo, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
-import { Quaternion, Vector3, type PerspectiveCamera } from 'three'
+import { Quaternion, Spherical, Vector3, type Fog, type PerspectiveCamera } from 'three'
 import { applyLensShift, lensShift, stepShift, uncoveredBand, type Cover } from '../lib/coverBand'
 import { readCovers, setCoverWatch } from '../hooks/useCover'
 import { useBuilder } from '../store/useBuilder'
 import { watchContext } from '../lib/glContext'
 import { broadcastDpr, isBroadcast, isPortraitBroadcast, portraitFov, recoverLostContext } from '../lib/tv/broadcast'
 import { keepPrograms } from '../lib/keepPrograms'
+import { sortWithoutBoxing } from '../lib/sortNoAlloc'
+import { FrameDriver } from './frameDriver'
 import { BG } from '../lib/palette'
-import { GRID_RADIUS, cellDelta, claimScreenAxes, levelScreenAxes, originShift, renderDirection, viewAxes, type Position } from '../lib/space'
+import { GRID_RADIUS, cellDelta, claimScreenAxes, itemCentre, levelScreenAxes, originShift, placeCentre, renderDirection, viewAxes, type AxisName, type Position, type ViewAxes } from '../lib/space'
+import { upOf } from '../lib/walkDown'
 import { carryOrbit } from '../lib/zoomOrbit'
 import { AVATAR_LERP_MS, lerpRemaining } from '../lib/avatarLerp'
-import { walkEye, walkFall } from '../lib/walkEye'
-import { carryLook, clearWalkLook, lookRadPerPx, takeKeepWalkLook, takeWalkLook, walkLookBy } from '../lib/walkLook'
-import { tickFall, useWalk } from '../store/useWalk'
+import { setWalkFacing, walkBody, walkEye, walkFacing, walkFall, walkFallUp, walkGlide, walkRise } from '../lib/walkEye'
+import { WalkEyeRig } from './walkEyeRig'
+import { useAvatars } from '../store/useAvatars'
+import { tryEyeFor } from '../store/tryEye'
+import { clearWalkLook, lookRadPerPx, takeWalkLook, takeWalkLookRad, walkLookBy } from '../lib/walkLook'
+import { tickFall, useWalk, walkDown } from '../store/useWalk'
+import { groundFluid, tickFluid } from '../store/walkFluid'
+import { STEP_UP_MAX } from '../store/walkStep'
 import { orbitOffset } from '../workshop/benchAxes'
 import { WalkProbe } from './WalkProbe'
 import { commitAnchor, commitScale, committedAnchor } from '../lib/renderFrame'
-import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
+import { alignedOrigin, samePosition, useCyberspace } from '../store/useCyberspace'
 import { cameraPose } from '../lib/cameraPose'
 import { useTerrainVolume } from '../hooks/useTerrainVolume'
 import { useHyperspace } from '../store/useHyperspace'
@@ -68,26 +77,35 @@ import { StopCubes } from './StopCubes'
 import { StopBurst } from './StopBurst'
 import { TourLine } from './TourLine'
 import { useDemo } from '../store/useDemo'
+import { HOP_FRAME_MS, clearTutorialZoom, setTutorialFrame, useTutorialCam, type HopFrame } from '../store/useTutorialCam'
+import { easeOrbit, frameHop, liftSide, smooth01, type Orbit } from '../lib/hopFraming'
 import { TourCameraState } from '../demo/tourDistance'
 import { TransitAvatar } from './TransitAvatar'
 import { RidePath } from './RidePath'
 import { PathTrail } from './PathTrail'
 import { GameRegionBox } from './GameRegionBox'
 import { PrefixRegionBox } from './PrefixRegionBox'
+import { RegionSelectBox } from './RegionSelectBox'
 import { Rooms } from './Rooms'
 import { SectorBox } from './SectorBox'
 import { ShaderPointField } from './ShaderPointField'
 import { SecretRegions } from './SecretRegions'
 import { SpawnMarker } from './SpawnMarker'
+import { TutorialTarget } from './TutorialTarget'
 import { TargetAvatars } from './TargetAvatars'
 import { PresenceAvatars } from './PresenceAvatars'
 import { WorldShards } from './WorldShards'
+import { WorldSeeds } from './WorldSeeds'
 import { WorldMessages } from './WorldMessages'
 import { ChestLooks } from './ChestLooks'
+import { BuildOccluders } from './BuildOccluders'
 import { HiddenAudio } from './HiddenAudio'
+import { AudioSpheres } from './AudioSpheres'
 import { StarredMarks } from './StarredMarks'
 import { ShardGhost } from './ShardGhost'
 import { DeployRegionBox } from './DeployRegionBox'
+import { ScanRegionBox } from './ScanRegionBox'
+import { DoorRooms } from './DoorRooms'
 import { StepBox } from './StepBox'
 import { ChatRoomBox } from './ChatRoomBox'
 import { TargetProjector } from './TargetProjector'
@@ -95,9 +113,15 @@ import { Travel } from './Travel'
 import { TvLayer } from './TvLayer'
 import { TvScreenEffect } from './TvScreenEffect'
 import { useTv } from '../store/useTv'
-import { CAMERA_NEAR, FOV } from './camera'
+import { CAMERA_FAR, CAMERA_NEAR, FOV, ORBIT_MAX_DISTANCE, ORBIT_MIN_DISTANCE } from './camera'
 import { headlampReach, headlampUniforms } from './headlamp'
-import { composerSamples, screenPixels } from './composerBudget'
+import { lineFade } from './nearFade'
+import { COMPOSER_SAMPLES } from './composerBudget'
+import './radialFog'
+import { fogFar, fogNear, stepFog, type FogState, type FogView } from './fog'
+import { cameraNear, nextReach, orbitMaxDistance, stepOrbitLimit, useDrawReach } from './buildZoom'
+import { flyGesture, panGesture, sceneMouse, steerToSpend, takeFlyReanchor, useFlyTouches, viewRig, type RigCamera } from './ViewFly'
+import { StartLock } from '../lib/viewCamera'
 
 /** Starting distance from the cursor, in cells. Orbit takes over from here. */
 const START_DISTANCE = 26
@@ -115,7 +139,7 @@ const START_DISTANCE = 26
  */
 function startDistance(hasSphere: boolean): number {
   if (!hasSphere) return START_DISTANCE
-  return Math.min(GRID_RADIUS * 4, sphereFrameDistance(FOV))
+  return Math.min(ORBIT_MAX_DISTANCE, sphereFrameDistance(FOV))
 }
 
 /**
@@ -139,6 +163,13 @@ const GLIDE_SECONDS = 1.6
 const GLIDE_MAX_CELLS = 300
 
 /**
+ * Seconds of the stretched follow (GLIDE_TAU) the view's centre takes back
+ * from a framed hop's middle to the avatar, once the tutorial stops framing
+ * it, so the camera settles onto the avatar rather than flicking there.
+ */
+const FRAME_RETURN_S = 0.6
+
+/**
  * Records the anchor the scene is being drawn against, in the commit that
  * draws it (lib/renderFrame.ts). First in World, so its layout effect runs
  * in the same commit as every mesh placed against the anchor.
@@ -151,24 +182,46 @@ function FrameCommit(): null {
   return null
 }
 
-function World(): JSX.Element {
+/**
+ * The gibson K field: the view window and the terrain volume around it,
+ * which follow every landing (the anchor) and every settle of the cursor.
+ * Their own component, so a landing re-renders this and not the whole world
+ * (World): each part of the world already follows what it draws by itself,
+ * and World rendering all of them again at each landing was a long task per
+ * step of a walk (owner's diag, 2026-11-21).
+ */
+function TerrainField({ axes, idle }: { axes: ViewAxes; idle: boolean }): JSX.Element | null {
+  const win = useViewWindow()
+  const volume = useTerrainVolume(win, axes, idle)
+  return idle ? null : <ShaderPointField volume={volume} win={win} />
+}
+
+/** The target and presence markers, which follow where you stand (useTargets): their own component, as TerrainField. */
+function TargetMarkers({ axes }: { axes: ViewAxes }): JSX.Element {
+  const targets = useTargets()
+  return <TargetProjector axes={axes} targets={targets} />
+}
+
+export function World(): JSX.Element {
   const view = useCyberspace((s) => s.view)
   const scaleExp = useCyberspace((s) => s.scaleExp)
   const pubkey = useCyberspace((s) => s.focusPubkey())
   const axes = useMemo(() => useCyberspace.getState().axes(), [view])
 
-  const win = useViewWindow()
   // The gibson K field is meaningless wallpaper while an Earth or hyperspace
   // view holds the camera, and its scans are real CPU: suspend both together.
-  const hyperView = useHyperspace((s) => s.viewOwned || s.scrubHeight !== null)
+  // A hyperspace VIEW counts only while its cursor is on the thing: driven
+  // off it, the VIEW is any VIEW and the field comes back.
+  const owned = useHyperspace((s) => s.viewOwned)
+  const scrubbing = useHyperspace((s) => s.scrubHeight !== null)
+  const offThing = useCyberspace((s) => s.focus?.view === true && !(s.focus.named !== undefined && samePosition(s.cursor, s.focus.named.position)))
+  const hyperView = (owned && !offThing) || scrubbing
   // The two layers the View panel can turn off (store/useLayers).
   // The dots switched off suspend exactly as a hyperspace view does: no scans,
   // no terrain runs queued, no per-frame uniforms. Only drawing changes.
   const dotsOn = useLayers((s) => s.dots)
   const boxesOn = useLayers((s) => s.boxes)
   const dotsIdle = hyperView || !dotsOn
-  const volume = useTerrainVolume(win, axes, dotsIdle)
-  const targets = useTargets()
   // Cyberspace TV draws the tape, not today: the space itself stays, and
   // everything that is about now (you, your cursor, the people here, what
   // you have found) steps aside for the avatars on tape (TvLayer).
@@ -179,7 +232,7 @@ function World(): JSX.Element {
       <group>
         <FrameCommit />
         <BlackSun axes={axes} />
-        {!dotsIdle && <ShaderPointField volume={volume} win={win} />}
+        <TerrainField axes={axes} idle={dotsIdle} />
         {boxesOn && <Rooms axes={axes} />}
         <SectorBox axes={axes} />
         <Earth axes={axes} />
@@ -194,12 +247,12 @@ function World(): JSX.Element {
       <FrameCommit />
       {/* Runs before anything that reads travelOffset. */}
       <Travel axes={axes} />
-      <TargetProjector axes={axes} targets={targets} />
+      <TargetMarkers axes={axes} />
       {/* Hidden audio sounding where it is hidden, heard at the camera (DECK-0007). */}
       <HiddenAudio axes={axes} />
       {/* At infinity, so it draws behind everything regardless of tree order. */}
       <BlackSun axes={axes} />
-      {!dotsIdle && <ShaderPointField volume={volume} win={win} />}
+      <TerrainField axes={axes} idle={dotsIdle} />
       {boxesOn && <Rooms axes={axes} />}
       <SectorBox axes={axes} />
       <Earth axes={axes} />
@@ -220,15 +273,27 @@ function World(): JSX.Element {
       <PathTrail axes={axes} scaleExp={scaleExp} />
       <GameRegionBox axes={axes} />
       <PrefixRegionBox axes={axes} />
+      <RegionSelectBox axes={axes} />
       <SpawnMarker pubkey={pubkey} axes={axes} />
+      {/* The tutorial's hop target over the course's start, while the tutorial runs (owner, 2026-11-13). */}
+      <TutorialTarget axes={axes} />
       <TargetAvatars axes={axes} />
       <PresenceAvatars axes={axes} />
       <WorldShards axes={axes} />
+      {/* Each seed's bloom, grown here from its DNA and the blocks since it was planted (DECK-0008). */}
+      <WorldSeeds axes={axes} />
       <WorldMessages axes={axes} />
+      {/* Each hidden sound's full-volume sphere, behind the Settings switch (AudioSpheres). */}
+      <AudioSpheres axes={axes} />
       <ChestLooks axes={axes} />
+      {/* In build mode, dims the shards and looks above that stand between the camera and the build cursor. */}
+      <BuildOccluders axes={axes} />
       <StarredMarks axes={axes} />
       <ShardGhost axes={axes} />
       <DeployRegionBox axes={axes} />
+      {/* SCAN mode's purple cube at the cursor (store/useScan.ts). */}
+      <ScanRegionBox axes={axes} />
+      <DoorRooms axes={axes} />
       <StepBox axes={axes} />
       <ChatRoomBox axes={axes} />
       <SecretRegions axes={axes} />
@@ -268,12 +333,19 @@ function ScreenAxes(): null {
     // axis the other two did not claim" kept its original sign, so R and F
     // pushed the wrong way once an orbit flipped that axis.
     state.camera.matrixWorld.extractBasis(right.current, up.current, out.current)
+    // WALK's facing, unsnapped, for a forward or backward press's diagonal
+    // and wall slide (lib/walkSlide.ts); read before levelScreenAxes lays
+    // the basis flat in place.
+    const walking = useCyberspace.getState().walking
+    if (walking) setWalkFacing(right.current, out.current, axes)
+    else walkFacing.valid = false
     // The permutation itself is claimScreenAxes, in space.ts, so the property
     // that makes it correct (three different axes for any camera angle) can be
     // asserted without a camera. Under GRAVITY in WALK the keys are level
-    // (levelScreenAxes): looking down a stair never turns W into down.
-    const screen = useCyberspace.getState().walking && useWalk.getState().gravity
-      ? levelScreenAxes(right.current, up.current, out.current, axes)
+    // across gravity (levelScreenAxes, walkDown): looking down a stair never
+    // turns W into down.
+    const screen = walking && useWalk.getState().gravity
+      ? levelScreenAxes(right.current, up.current, out.current, axes, walkDown())
       : claimScreenAxes(right.current, up.current, out.current, axes)
     useCyberspace.getState().setScreenAxes(screen)
     if (import.meta.env.DEV) {
@@ -285,16 +357,20 @@ function ScreenAxes(): null {
 }
 
 /**
- * Publishes the on-screen size of one cell, in pixels, as `--cell-px`.
+ * Hands the camera, each frame, to the things that cannot reach this Canvas:
+ * its orientation to the compass, which has its own Canvas, and in a dev build
+ * the scene, renderer and camera to the browser harness.
  *
- * The HUD's scale instrument has to be the same size as the cursor cube, and
- * under a perspective camera that is not a constant: it is the projection scale
- * over the distance to what the camera orbits, so it changes as you dolly. A CSS
- * variable rather than store state, because this updates every frame and driving
- * a React render per frame to move one HUD element is not worth it.
+ * Nothing here writes to the page. It used to publish the on-screen size of one
+ * cell as `--cell-px` on the root element for the HUD's scale instrument; that
+ * instrument went in August (e89798eb) and nothing has read the variable since,
+ * but it was still set on every frame the camera moved, and a custom property
+ * changed on the root restyles the whole document. Taking it out cut style
+ * recalculation in fluid WALK from 73 to 14 ms a second (headless production
+ * build, 4x CPU throttle, 2026-11-21). scene/__tests__/cameraShare.test.tsx
+ * checks that nothing here writes to the page.
  */
-function CellMetric(): null {
-  const lastCellPx = useRef<string | null>(null)
+export function CameraShare(): null {
   useFrame((state) => {
     // Share the camera's orientation with the compass, which renders in its own
     // Canvas and cannot reach this one's camera.
@@ -311,19 +387,6 @@ function CellMetric(): null {
       // it and the harness has no other route to the view basis.
       w.__camera = state.camera
     }
-
-    const cam = state.camera as unknown as { fov?: number; position: { distanceTo: (v: never) => number } }
-    if (cam.fov === undefined) return
-    const [tx, ty, tz] = useCyberspace.getState().cursorOffset()
-    const dist = Math.max(0.001, cam.position.distanceTo({ x: tx, y: ty, z: tz } as never))
-    const projScale = state.size.height / (2 * Math.tan((cam.fov * Math.PI) / 360))
-    // Writing the same value re-dirties style on the root element; with the
-    // camera at rest that was a per-frame style pass for nothing.
-    const next = `${(projScale / dist).toFixed(2)}px`
-    if (next !== lastCellPx.current) {
-      lastCellPx.current = next
-      document.documentElement.style.setProperty('--cell-px', next)
-    }
   })
   return null
 }
@@ -337,6 +400,49 @@ function CellMetric(): null {
 const HEADLAMP_PRIORITY = 0.75
 
 /**
+ * The scene's fog, its start and end following the camera's distance from
+ * what it looks at (fog.ts fogNear, fogFar), smoothly, never stepping (a
+ * switch into or out of WALK eases with the eye's glide, fog.ts stepFog), and
+ * the layers' reach set beyond its end (buildZoom.ts nextReach). One Fog for
+ * the page, its distances moved in place every frame: a new Fog object would
+ * send every fogged material back for its program (three compares the fog by
+ * identity), where the distances are uniforms.
+ */
+function SceneFog(): JSX.Element {
+  const fog = useRef<Fog>(null)
+  const kept = useRef<FogState>({ view: null, near: 0, far: 0, owed: null })
+  const controls = useThree((s) => s.controls) as unknown as { target: Vector3 } | null
+  useLayoutEffect(() => {
+    // The browser harness reads and sets it, as it reads __rig.
+    if (import.meta.env.DEV) (window as unknown as { __fog?: unknown }).__fog = fog.current
+  }, [])
+  useFrame((state) => {
+    const f = fog.current
+    if (!f) return
+    // The browser harness can pin the fog, to shoot the old one against the new.
+    const pin = import.meta.env.DEV ? (window as unknown as { __fogFixed?: [number, number] }).__fogFixed : undefined
+    if (pin) {
+      f.near = pin[0]
+      f.far = pin[1]
+    } else {
+      // TV's own fog over a walk it shows; WALK's reaches far ahead of the walker (fog.ts WALK_FOG_FAR).
+      const view: FogView = useTv.getState().on ? 'tv' : useCyberspace.getState().walking ? 'walk' : 'orbit'
+      // A stopped VIEW fly brings the target in close; the distance it drops is owed and fades (ViewFly.ts reachOwed).
+      const distance = controls ? state.camera.position.distanceTo(controls.target) + viewRig.reachOwed : 0
+      kept.current = stepFog(kept.current, view, distance, performance.now())
+      f.near = kept.current.near
+      f.far = kept.current.far
+    }
+    // The layers draw at least as far as the fog's end can be seen from the
+    // camera, out at once and in only well inside it: a step is in the black.
+    const was = useDrawReach.getState().reach
+    const reach = nextReach(was, f.far + state.camera.position.length())
+    if (reach !== was) useDrawReach.setState({ reach })
+  }, HEADLAMP_PRIORITY)
+  return <fog ref={fog} attach="fog" args={[0x000000, fogNear('orbit', 0), fogFar('orbit', 0)]} />
+}
+
+/**
  * Keeps the world's headlamp (scene/headlamp.ts) in step: on or off with the
  * View panel's switch, and its reach the camera's distance from what it looks
  * at (the orbit's target, which Cyberspace TV's camera drives too). Two
@@ -347,10 +453,13 @@ function HeadlampRig(): null {
   const on = useLayers((s) => s.headlamp)
   // In the commit, before any frame is drawn: a switch saved off never shows one frame on.
   useLayoutEffect(() => { headlampUniforms.uHeadlamp.value = on ? 1 : 0 }, [on])
-  const controls = useThree((s) => s.controls) as unknown as { target: Vector3 } | null
+  const controls = useThree((s) => s.controls) as unknown as { target: Vector3; maxDistance: number } | null
   useFrame((state) => {
+    // Lines fade out right at the eye, except in WALK, where the eye is on the avatar and that is how far anything is (scene/nearFade.ts).
+    lineFade.on.value = useCyberspace.getState().walking ? 0 : 1
     if (!controls) return
-    headlampUniforms.uHeadlampReach.value = headlampReach(state.camera.position.distanceTo(controls.target))
+    // A stopped VIEW fly brings the target in close; the reach fades in after it rather than stepping (ViewFly.ts reachOwed).
+    headlampUniforms.uHeadlampReach.value = headlampReach(state.camera.position.distanceTo(controls.target) + viewRig.reachOwed, controls.maxDistance)
   }, HEADLAMP_PRIORITY)
   return null
 }
@@ -480,28 +589,45 @@ function LensShift(): null {
  * axis-aligned view once you have finished looking. So changing `view` does not
  * merely remap the axes, it also returns the camera to straight-on.
  */
-/** The orbit's closest approach outside WALK, in render cells. */
-const ORBIT_MIN_DISTANCE = 2
 /**
- * The WALK eye's distance from the avatar's centre, in render cells: as good
- * as at it, and far enough off it that the orbit still has a direction to
- * turn about.
+ * The WALK camera's distance from the avatar's eye (walkEyeRig.ts), in render
+ * cells: as good as at it, and far enough off it that the orbit still has a
+ * direction to turn about.
  */
 const WALK_EYE = 0.001
 /** Scratch for the eye's line of sight, so the frame loop allocates nothing. */
 const walkDir = new Vector3()
-/** Where cyberspace +Y points in the render frame of a view: worked out once per view, for a fall. */
-let upFor: { view: Quaternion | null; dir: [number, number, number] } = { view: null, dir: [0, 1, 0] }
-function renderUp(view: Quaternion): [number, number, number] {
-  if (upFor.view !== view) upFor = { view, dir: renderDirection(viewAxes(view), 'y') }
+/**
+ * Where a fall's up (lib/walkEye.ts walkFallUp: cyberspace +Y unless the view
+ * is turned) points in the render frame of a view: worked out once per view
+ * and axis, for a fall.
+ */
+let upFor: { view: Quaternion | null; axis: AxisName; sign: 1 | -1; dir: [number, number, number] } = { view: null, axis: 'y', sign: 1, dir: [0, 1, 0] }
+function renderUp(view: Quaternion, axis: AxisName, sign: 1 | -1): [number, number, number] {
+  if (upFor.view !== view || upFor.axis !== axis || upFor.sign !== sign) {
+    const d = renderDirection(viewAxes(view), axis)
+    upFor = { view, axis, sign, dir: [d[0] * sign, d[1] * sign, d[2] * sign] }
+  }
   return upFor.dir
+}
+
+/** Each cyberspace axis's render direction in `view`, kept for the last view asked: fluid WALK's eye offset (walkGlide) is by cyberspace axis. */
+let glideFor: { view: Quaternion | null; x: [number, number, number]; y: [number, number, number]; z: [number, number, number] } = { view: null, x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1] }
+function glideAxes(view: Quaternion): typeof glideFor {
+  if (glideFor.view !== view) {
+    const axes = viewAxes(view)
+    const d = (a: AxisName): [number, number, number] => { const v = renderDirection(axes, a); return [v[0], v[1], v[2]] }
+    glideFor = { view, x: d('x'), y: d('y'), z: d('z') }
+  }
+  return glideFor
 }
 
 function Rig(): JSX.Element {
   const view = useCyberspace((s) => s.view)
   const genesisId = useCyberspace((s) => s.genesisId)
   const focusPubkey = useCyberspace((s) => s.focusPubkey())
-  const focusPoint = useCyberspace((s) => (s.focus ? s.focus.position.x.toString() : ''))
+  // All three axes: a focus that moves along y or z alone is a change of focus too (review of #635, B1).
+  const focusPoint = useCyberspace((s) => (s.focus ? `${s.focus.position.x},${s.focus.position.y},${s.focus.position.z}` : ''))
   // Scrubbing the chain moves the anchor along history. A step within the fly
   // bound glides there the way a hyperspace click does, and a step too far to
   // fly cuts, but neither touches the orbit you have chosen: re-framing
@@ -531,8 +657,10 @@ function Rig(): JSX.Element {
     target: Vector3
     update: () => void
     minDistance: number
+    maxDistance: number
     enableZoom: boolean
     enableRotate: boolean
+    autoRotate: boolean
   } | null>(null)
   // WALK's first person (store/useWalk.ts): whether the last frame was
   // walking, and the eye's glide into the avatar or back out of it, as
@@ -542,10 +670,18 @@ function Rig(): JSX.Element {
   // WALK's look direction, from the eye outward to the camera: kept between
   // frames so only the walker's own turning changes it.
   const walkLook = useRef<Vector3 | null>(null)
-  const eye = useRef<{ from: number; to: number; t0: number } | null>(null)
+  // `mixFrom` is how far onto the avatar's eye the glide starts (eyeMix), so
+  // a WALK left and entered again mid-glide carries on from where it was.
+  const eye = useRef<{ from: number; to: number; t0: number; mixFrom: number } | null>(null)
   const outTo = useRef(START_DISTANCE)
-  // The view the last frame was drawn in, for a look kept through a change of view (GRAVITY's level).
-  const drawnView = useRef<Quaternion | null>(null)
+  // The avatar's eye (walkEyeRig.ts): the orbit's target is the walker's
+  // point plus `eyeShift`, which is the eye's offset times `eyeMix`, 0 out of
+  // WALK and 1 in it, glided between with the camera's distance.
+  const eyeRig = useMemo(() => new WalkEyeRig(), [])
+  const eyeShift = useRef(new Vector3())
+  const eyeMix = useRef(0)
+  const eyeVec = useMemo(() => new Vector3(), [])
+  const eyeFwd = useMemo(() => new Vector3(), [])
 
   // Locked means the camera travels with the cursor, so an axis-aligned view
   // stays framed on it as you drive. Aligning with Shift+WASD re-locks; orbiting
@@ -581,6 +717,23 @@ function Rig(): JSX.Element {
     check(useDemo.getState())
     return useDemo.subscribe(check)
   }, [tourCam])
+  // The first-arrival tutorial's idle orbit spin around the cursor (feedback
+  // item 14); off for everyone else, so the controls are untouched.
+  const tutorialSpin = useTutorialCam((s) => s.spin)
+  // The tutorial's framed hop (useTutorialCam frame): the shot under way,
+  // and whether the last frame was framing one.
+  const frameShot = useRef<{ frame: HopFrame; t0: number; from: Orbit; to: Orbit } | null>(null)
+  const framing = useRef(false)
+  const sideVec = useMemo(() => new Vector3(), [])
+  const turnVec = useMemo(() => new Vector3(), [])
+  // The player took the camera (OrbitControls starts on a drag, a pinch and
+  // the wheel alike): the tutorial's shots stand down and leave it with them.
+  useEffect(() => {
+    const c = controls.current as unknown as { addEventListener?: (t: string, f: () => void) => void; removeEventListener?: (t: string, f: () => void) => void } | null
+    const standDown = (): void => { clearTutorialZoom(); setTutorialFrame(null) }
+    c?.addEventListener?.('start', standDown)
+    return () => c?.removeEventListener?.('start', standDown)
+  }, [])
   // The rig re-framed on its own (a cut or a straight-on reframe): the step's
   // camera comes back only when the view has just arrived at the step's own
   // place. A block landing late reframed straight on, which put the camera on
@@ -639,6 +792,7 @@ function Rig(): JSX.Element {
       const offset = keptOffset()
       const [x, y, z] = s.cursorOffset()
       glideLeft.current = 0
+      viewRig.reset(true)
       smooth.current.set(x, y, z)
       c.target.copy(smooth.current)
       c.object.position.copy(smooth.current).add(offset)
@@ -665,6 +819,15 @@ function Rig(): JSX.Element {
     // SPECTATE and RETURN re-frame straight on, as boot does.
     const focusOnly = before !== null && before.view === view && before.genesisId === genesisId &&
       before.exploreIndex === exploreIndex && before.focusPubkey === focusPubkey && before.focusPoint !== focusPoint
+    // VIEW's fly re-anchored the view on where it has flown (scene/ViewFly.ts):
+    // the camera is already there and the per-frame origin shift carries it,
+    // so there is nothing to glide to and no follow to change. Only when the
+    // focus now is the very one that re-anchor made.
+    const flyMoved = takeFlyReanchor(s.focus)
+    if (focusOnly && flyMoved) {
+      trace('focus-fly')
+      return
+    }
     // A focus that begins or ends where the scene already stands: VIEW
     // turned on or off at your head, which anchors the view exactly where you
     // are. Nothing moved, so the camera stays exactly as it was, orbit and
@@ -692,6 +855,7 @@ function Rig(): JSX.Element {
       const offset = keptOffset()
       const [x, y, z] = s.cursorOffset()
       glideLeft.current = 0
+      viewRig.reset(true)
       smooth.current.set(x, y, z)
       c.target.copy(smooth.current)
       c.object.position.copy(smooth.current).add(offset)
@@ -703,6 +867,7 @@ function Rig(): JSX.Element {
     }
     trace('reframe')
     glideLeft.current = 0
+    viewRig.reset()
     const [x, y, z] = s.cursorOffset()
     smooth.current.set(x, y, z)
     c.target.copy(smooth.current)
@@ -765,14 +930,76 @@ function Rig(): JSX.Element {
       doc.removeEventListener('pointercancel', up, true)
     }
   }, [surface])
+  // The scene's touches and the mouse's right or Shift drag, to VIEW's fly
+  // and the camera's pan (scene/ViewFly.ts).
+  useFlyTouches(surface)
+  // The camera as the offset reads it, gathered once so the frame allocates nothing.
+  const rigCam = useMemo<RigCamera>(() => ({ position: new Vector3(), target: new Vector3(), quaternion: new Quaternion(), fov: FOV, heightPx: 1 }), [])
+  // OrbitControls starts (onStart) the moment a finger or button lands,
+  // before anyone knows whether it orbits, pinches or pans: the unlock waits
+  // for an orbit or a pinch to show itself, and a pan leaves the follow as it
+  // was (lib/viewCamera.ts StartLock; review of #635, S1).
+  const startLock = useMemo(() => new StartLock(), [])
+  const pressed = (): number => panGesture.fingers + (sceneMouse.down ? 1 : 0)
+  // The frame's target, with the offset added (viewRig.apply).
+  const aimAt = useMemo(() => new Vector3(), [])
+  // Scratch for drag-to-steer's orbit (lib/viewFly.ts steerBy): nothing allocated per frame.
+  const steerVec = useMemo(() => new Vector3(), [])
+  const steerSph = useMemo(() => new Spherical(), [])
 
   useFrame((state, dt) => {
     const c = controls.current
     if (!c) return
-    // GRAVITY's fall (store/useWalk.ts) takes its frame first: it can land,
-    // which moves the cursor read below.
+    // Drag-to-steer: a drag on a held Forward or Back fly button orbits the
+    // camera about its target by the drag (lib/viewFly.ts), the way a drag on
+    // open scene would. Applied before anything reads the orbit, so the frame
+    // keeps the new angle; OrbitControls.update at the end derives its spherical
+    // from the camera's position, so moving it here sticks. Breaks the lock,
+    // as any orbit does: once you have steered you are looking, not following.
+    // Anything pressed on the scene is already turning the camera: the
+    // button's drag (a resting thumb's wobble) is drained and not spent
+    // (ViewFly.ts steerToSpend; arkinox, 2026-11-12).
+    const steer = steerToSpend()
+    if (steer) {
+      steerVec.copy(c.object.position).sub(c.target)
+      steerSph.setFromVector3(steerVec)
+      const k = (2 * Math.PI) / Math.max(1, state.size.height)
+      steerSph.theta -= steer.dx * k
+      steerSph.phi = Math.max(0.02, Math.min(Math.PI - 0.02, steerSph.phi - steer.dy * k))
+      steerSph.makeSafe()
+      steerVec.setFromSpherical(steerSph)
+      c.object.position.copy(c.target).add(steerVec)
+      locked.current = false
+    }
+    // In flight, a turn since the last frame (OrbitControls between frames,
+    // the steer above) turns the camera in place, not about the view's
+    // centre out in front (ViewFly.ts pivot; arkinox, 2026-11-12). The
+    // tutorial's auto-rotate is the camera's own turn, not a hand's.
+    viewRig.pivot(c.object.position, c.target, smooth.current, !c.autoRotate)
+    // Fluid WALK (store/walkFluid.ts) takes its frame first: a crossing moves
+    // the anchor (the cursor) and can start a fall. Then GRAVITY's fall
+    // (store/useWalk.ts): it can land, which moves the cursor read below.
+    // Last, the walker drawn on the surface under it, wherever the fall and
+    // the smooth position left it (groundFluid).
+    tickFluid()
     tickFall()
+    groundFluid()
+    // So does the camera's offset from its orbit (ViewFly.ts): VIEW's fly
+    // glides the view along the line of sight while the cursor waits, the
+    // pan takes its frame, and a fly at rest long enough lands the cursor,
+    // which moves the cursor read below.
+    rigCam.position.copy(c.object.position)
+    rigCam.target.copy(c.target)
+    rigCam.quaternion.copy(state.camera.quaternion)
+    rigCam.fov = (state.camera as { fov?: number }).fov ?? FOV
+    rigCam.heightPx = state.size.height
+    viewRig.before(rigCam, dt)
+    // A fly glides by the offset, not the follow: no stretched glide under it.
+    if (viewRig.flying) glideLeft.current = 0
+    if (startLock.frame(panGesture.pinching, flyGesture.orbited || sceneMouse.dragged, pressed())) locked.current = false
     const s = useCyberspace.getState()
+    // A pan's fingers drifting apart never zoom (lib/viewCamera.ts PanGesture).
+    c.enableZoom = !s.walking && !panGesture.panning
     lastOffset.current.copy(c.object.position).sub(c.target)
     // The anchor, not the position: in history the scene is drawn from the
     // action being looked at, and the camera has to ride that the same way it
@@ -805,19 +1032,40 @@ function Rig(): JSX.Element {
     let tx = live[0] + (lag ? lag[0] : 0)
     let ty = live[1] + (lag ? lag[1] : 0)
     let tz = live[2] + (lag ? lag[2] : 0)
+    // The centre of the cursor's own gibson as drawn: the walls behind the
+    // avatar's eye are asked from the eased walker point's distance from it
+    // (walkEyeRig.ts), and they stand on gibsons, not on the zoom's cells.
+    const gibson = s.walking || eye.current ? itemCentre(s.cursor, alignedOrigin(s.anchor, s.scaleExp), s.scaleExp, s.axes()) : null
+    const gx = gibson ? gibson[0] + (lag ? lag[0] : 0) : 0
+    const gy = gibson ? gibson[1] + (lag ? lag[1] : 0) : 0
+    const gz = gibson ? gibson[2] + (lag ? lag[2] : 0) : 0
     // In a fall the eye is above or below the cursor (the point the fall
-    // left off from), along cyberspace Y, and follows that height exactly.
+    // left off from), along the fall's up, and follows that height exactly.
     const falling = s.walking && walkFall.active
-    const up = falling ? renderUp(s.view) : null
+    const up = falling ? renderUp(s.view, walkFallUp.axis, walkFallUp.dir) : null
     if (up) {
       const k = walkFall.offset / 2 ** s.scaleExp
       tx += up[0] * k
       ty += up[1] * k
       tz += up[2] * k
     }
+    // Fluid WALK: the eye is the smooth position, off the anchor's middle by
+    // walkGlide steps (one render cell each), followed exactly below.
+    if (walkGlide.active) {
+      const r = glideAxes(s.view)
+      tx += r.x[0] * walkGlide.x + r.y[0] * walkGlide.y + r.z[0] * walkGlide.z
+      ty += r.x[1] * walkGlide.x + r.y[1] * walkGlide.y + r.z[1] * walkGlide.z
+      tz += r.x[2] * walkGlide.x + r.y[2] * walkGlide.y + r.z[2] * walkGlide.z
+    }
+    // How far the render frame moved since the last frame, for the offset to
+    // tell a moved frame from a moved cursor; null when there is no path (a
+    // zoom, a cut, the first frame).
+    let continuous: [number, number, number] | null = null
     if (prevOrigin.current && prevScale.current === s.scaleExp) {
       const shift = originShift(prevOrigin.current, origin, s.scaleExp, s.axes())
+      continuous = shift
       if (Math.max(Math.abs(shift[0]), Math.abs(shift[1]), Math.abs(shift[2])) >= GLIDE_MAX_CELLS) {
+        continuous = null
         // Too far to fly: a cut, the same one the effect above makes for a
         // chain step that far. This path is for the anchor changes that do
         // not pass through the effect, whose dependencies are the framing
@@ -844,6 +1092,36 @@ function Rig(): JSX.Element {
         smooth.current.z += shift[2]
       }
     }
+
+    // The camera's offset from its orbit (a pan, a fly not yet landed, or the
+    // ease back from either): the camera and the follow point take its
+    // change straight, locked or not, and the target comes back with it.
+    aimAt.set(tx, ty, tz)
+    viewRig.apply(aimAt, continuous, c.object.position, smooth.current)
+    tx = aimAt.x
+    ty = aimAt.y
+    tz = aimAt.z
+
+    // The tutorial frames its first hop (useTutorialCam frame): while it
+    // asks, the view's centre is the hop's middle in the drawn frame, so the
+    // start, the path and the end are all on screen as the avatar goes. When
+    // it stops, the centre settles back onto the avatar over the stretched
+    // follow rather than flicking there.
+    const frame = s.walking ? null : useTutorialCam.getState().frame
+    let hopEnds: [number[], number[]] | null = null
+    if (frame) {
+      const axes = s.axes()
+      const a = placeCentre(frame.from, origin, s.scaleExp, axes)
+      const b = placeCentre(frame.to, origin, s.scaleExp, axes)
+      hopEnds = [a, b]
+      tx = (a[0] + b[0]) / 2
+      ty = (a[1] + b[1]) / 2
+      tz = (a[2] + b[2]) / 2
+    } else {
+      frameShot.current = null
+      if (framing.current && !s.walking) glideLeft.current = Math.max(glideLeft.current, FRAME_RETURN_S)
+    }
+    framing.current = frame !== null
 
     // A zoom rescales every render coordinate, so there is no continuous path
     // between the old framing and the new one to ease along.
@@ -883,6 +1161,14 @@ function Rig(): JSX.Element {
       if (up[1] !== 0) dy = ty - smooth.current.y
       if (up[2] !== 0) dz = tz - smooth.current.z
     }
+    // Fluid WALK is not eased at all: the eye is the smooth position, which
+    // is already smooth. A jump of the target it did not make (more than a
+    // few cells in one frame) still eases.
+    if (s.walking && walkGlide.exact && Math.abs(tx - smooth.current.x) + Math.abs(ty - smooth.current.y) + Math.abs(tz - smooth.current.z) < 3) {
+      dx = tx - smooth.current.x
+      dy = ty - smooth.current.y
+      dz = tz - smooth.current.z
+    }
 
     // Locked, the camera moves with what it is framing, which preserves the
     // orbit offset exactly. Unlocked it stays put and only re-aims.
@@ -902,19 +1188,18 @@ function Rig(): JSX.Element {
     // your head), and a re-frame above is undone on the next frame.
     if (s.walking !== walkWas.current) {
       walkWas.current = s.walking
-      const from = c.object.position.distanceTo(smooth.current)
-      if (s.walking) outTo.current = from >= 2 ? from : START_DISTANCE
-      eye.current = { from, to: s.walking ? WALK_EYE : outTo.current, t0: performance.now() }
+      // From the orbit's target: the walker's point, plus the eye as far as it is in.
+      const from = c.object.position.distanceTo(eyeVec.copy(smooth.current).add(eyeShift.current))
+      if (s.walking && eyeMix.current === 0) eyeRig.reset()
+      // A stopped VIEW fly's orbit is ORBIT_MIN_DISTANCE to within rounding: a real orbit, not a collapsed one.
+      if (s.walking) outTo.current = from >= ORBIT_MIN_DISTANCE - 1e-6 ? from : START_DISTANCE
+      // Back out no further than the orbit may now go: BUILD left during WALK takes its far limit with it.
+      const outLimit = orbitMaxDistance(!(useTv.getState().on || isBroadcast()) && useBuilder.getState().active, s.scaleExp)
+      eye.current = { from, to: s.walking ? WALK_EYE : Math.min(outTo.current, outLimit), t0: performance.now(), mixFrom: eyeMix.current }
       c.enableZoom = !s.walking
       c.enableRotate = !s.walking
       clearWalkLook()
       walkLook.current = null
-    }
-    // GRAVITY levelled the view: the look turns with it, so you face the
-    // same way in cyberspace (lib/walkLook.ts keepWalkLook).
-    if (drawnView.current !== s.view) {
-      if (takeKeepWalkLook() && drawnView.current && s.walking && walkLook.current) carryLook(walkLook.current, viewAxes(drawnView.current), viewAxes(s.view))
-      drawnView.current = s.view
     }
     if (eye.current) {
       const t = (performance.now() - eye.current.t0) / AVATAR_LERP_MS
@@ -926,20 +1211,53 @@ function Rig(): JSX.Element {
       // camera straight on at an orbit distance, and from inside the avatar
       // that read as the view snapping to the chain's frame as a step landed
       // (arkinox, 2026-10-13).
-      const along = s.walking && walkLook.current ? walkDir.copy(walkLook.current) : walkDir.copy(c.object.position).sub(smooth.current)
+      const along = s.walking && walkLook.current ? walkDir.copy(walkLook.current) : walkDir.copy(c.object.position).sub(smooth.current).sub(eyeShift.current)
       if (along.lengthSq() === 0) along.set(0, 0, 1)
       if (s.walking && walkLook.current) {
         const [lx, ly] = takeWalkLook(dt)
         if (lx !== 0 || ly !== 0) along.copy(orbitOffset(along, lx, ly, lookRadPerPx(state.size.width)))
+        // LOOK's drags (hud/WalkLookSphere.tsx), already in radians.
+        const [rx, ry] = takeWalkLookRad(dt)
+        if (rx !== 0 || ry !== 0) along.copy(orbitOffset(along, rx, ry, 1))
       }
-      c.object.position.copy(smooth.current).addScaledVector(along.normalize(), d)
+      // The camera looks from the avatar's eye (lib/avatarEye.ts), not its
+      // origin: above the floor the walker's point is in, turned with the
+      // body, pulled back short of any wall or ceiling between the walker
+      // and the eye. It glides onto the eye on the way in and off it on the
+      // way out, over the same beat as the distance.
+      const mixTo = s.walking ? 1 : 0
+      eyeMix.current = mixTo + (eye.current.mixFrom - mixTo) * lerpRemaining(t)
+      eyeRig.offset({
+        // SET EYE's TRY WALK looks from the workshop shard's eye, unpublished (store/tryEye.ts).
+        shard: tryEyeFor(s.focusPubkey()) ?? useAvatars.getState().shards[s.focusPubkey()] ?? null,
+        scaleExp: s.scaleExp,
+        axes: s.axes(),
+        plane: s.plane,
+        cursor: s.cursor,
+        lead: [smooth.current.x - gx, smooth.current.y - gy, smooth.current.z - gz],
+        forward: eyeFwd.copy(along).negate(),
+        up: upOf(walkDown()),
+        walls: s.walking,
+        stand: s.walking && walkGlide.exact ? Number(STEP_UP_MAX) * 2 ** s.scaleExp : undefined,
+        // Fluid WALK up a stair: the feet are on the step, the camera trails
+        // them up (lib/walkEye.ts walkRise), never nearer their height than
+        // the near plane's room, and kept out of the step in front. The
+        // camera and what it looks at move together (the target, below), so
+        // the way you look is unchanged.
+        rise: walkRise.offset < 0 ? { offset: walkRise.offset, axis: walkRise.up.axis, dir: walkRise.up.dir } : undefined,
+        now: performance.now(),
+      }, eyeVec)
+      eyeShift.current.copy(eyeVec).multiplyScalar(eyeMix.current)
+      // The body's turn for Avatar.tsx, from the same heading: your heading, never the look up or down.
+      walkBody.copy(eyeRig.body)
+      c.object.position.copy(smooth.current).add(eyeShift.current).addScaledVector(along.normalize(), d)
       c.minDistance = Math.min(ORBIT_MIN_DISTANCE, d * 0.5)
       locked.current = true
-      if (t >= 1 && !s.walking) { eye.current = null; c.minDistance = ORBIT_MIN_DISTANCE }
+      if (t >= 1 && !s.walking) { eye.current = null; c.minDistance = ORBIT_MIN_DISTANCE; eyeMix.current = 0; eyeShift.current.set(0, 0, 0) }
     }
     walkEye.copy(smooth.current)
 
-    c.target.copy(smooth.current)
+    c.target.copy(smooth.current).add(eyeShift.current)
     // The tour's camera for this step, once, as a pinch would leave it: at
     // its distance, from its side when it has one (cyberspace x, y, z put
     // into the view's render axes, as Earth is placed), else along the line
@@ -955,10 +1273,95 @@ function Rig(): JSX.Element {
         along.set(comp[axes.right.axis] * axes.right.dir, comp[axes.up.axis] * axes.up.dir, comp[axes.out.axis] * axes.out.dir)
       }
       if (along.lengthSq() === 0) along.set(0, 0, 1)
-      c.object.position.copy(c.target).addScaledVector(along.normalize(), Math.min(GRID_RADIUS * 4, Math.max(ORBIT_MIN_DISTANCE, want.distance)))
+      c.object.position.copy(c.target).addScaledVector(along.normalize(), Math.min(ORBIT_MAX_DISTANCE, Math.max(ORBIT_MIN_DISTANCE, want.distance)))
       lastOffset.current.copy(c.object.position).sub(c.target)
     }
+    // The tutorial eases the orbit in to a close distance after a HOP onto the
+    // course (feedback item 6), only when idle and only while it asks for it.
+    // WALK ends the ask, and so does a finger or the mouse on the scene (the
+    // player taking the camera), not the step moving on, which comes before
+    // the ease is done.
+    // With a side (`from`, after the first hop: behind the avatar from the
+    // chest), it eases round to that side as it eases in, over the avatar's
+    // shoulder. A framed hop eases the camera to its shot over HOP_FRAME_MS,
+    // the time the avatar is held for it (lib/hopStage.ts holdGlide).
+    const cam = useTutorialCam.getState()
+    const tutorialZoom = cam.zoom
+    if ((tutorialZoom !== null || cam.frame !== null) && (s.walking || pressed() > 0)) {
+      clearTutorialZoom()
+      setTutorialFrame(null)
+    } else if (want === null && !eye.current) {
+      if (frame !== null && hopEnds !== null) {
+        let shot = frameShot.current
+        if (shot === null || shot.frame !== frame) {
+          const off = walkDir.copy(c.object.position).sub(c.target)
+          const cur = off.length()
+          const aspect = state.size.width / Math.max(1, state.size.height)
+          shot = frameShot.current = {
+            frame,
+            t0: performance.now(),
+            from: { dir: cur > 1e-4 ? off.clone().divideScalar(cur) : new Vector3(0, 0, 1), distance: Math.max(ORBIT_MIN_DISTANCE, cur) },
+            to: frameHop(hopEnds[0], hopEnds[1], off, rigCam.fov, aspect),
+          }
+        }
+        c.object.position.copy(c.target).add(easeOrbit(shot.from, shot.to, smooth01((performance.now() - shot.t0) / HOP_FRAME_MS), turnVec))
+        lastOffset.current.copy(c.object.position).sub(c.target)
+      } else if (tutorialZoom !== null) {
+        const off = walkDir.copy(c.object.position).sub(c.target)
+        const cur = off.length()
+        if (cur < 1e-4) off.set(0, 0, 1)
+        off.normalize()
+        const target = Math.min(ORBIT_MAX_DISTANCE, Math.max(ORBIT_MIN_DISTANCE, tutorialZoom))
+        const k = 1 - Math.exp(-dt / 0.4)
+        const nd = cur < 1e-4 ? target : cur + (target - cur) * k
+        let turned = true
+        if (cam.from) {
+          // Cyberspace x, y, z put into the view's render axes, as the tour's side is.
+          const axes = s.axes()
+          const comp = cam.from
+          const side = liftSide(sideVec.set(comp[axes.right.axis] * axes.right.dir, comp[axes.up.axis] * axes.up.dir, comp[axes.out.axis] * axes.out.dir))
+          easeOrbit({ dir: off, distance: 1 }, { dir: side, distance: 1 }, k, turnVec)
+          off.copy(turnVec)
+          turned = off.angleTo(side) < 0.01
+        }
+        c.object.position.copy(c.target).addScaledVector(off, nd)
+        lastOffset.current.copy(c.object.position).sub(c.target)
+        if (Math.abs(nd - target) < 0.05 && turned) clearTutorialZoom()
+      }
+    }
+    // A VIEW fly brought the orbit in, and RECALL or VIEW's end asks for it
+    // back (ViewFly.ts restoreOrbit; review of #690): eased out as the
+    // tutorial's zoom is, and given up when anything else takes the camera
+    // (WALK, a press on the scene, the tutorial's zoom, a /demo step, WALK's
+    // eye) or a fly starts. In WALK it is where leaving WALK returns to.
+    if (s.walking) {
+      const back = viewRig.takeRestore()
+      if (back !== null) outTo.current = back
+    }
+    if (viewRig.restoreOrbit(c.object.position, c.target, dt, s.walking || pressed() > 0 || tutorialZoom !== null || frame !== null || want !== null || eye.current !== null)) {
+      lastOffset.current.copy(c.object.position).sub(c.target)
+    }
+    // How far the orbit pulls back: 96 cells, or in BUILD BUILD_MAX_GIBSONS at
+    // this zoom (buildZoom.ts; arkinox, 2026-11-15: "when building the
+    // landscape tiles i feel like i can't zoom out far enough"). A camera left
+    // outside a limit that came in under it eases in rather than jumping.
+    const tvOn = useTv.getState().on || isBroadcast()
+    const limit = orbitMaxDistance(!tvOn && useBuilder.getState().active && !s.walking, s.scaleExp)
+    const orbit = c.object.position.distanceTo(c.target)
+    c.maxDistance = stepOrbitLimit(orbit, limit, dt, c.maxDistance)
+    // The near plane steps back past 96 cells, so the depth buffer keeps its
+    // grain (buildZoom.ts cameraNear); set again only on a change of 5%.
+    // Exactly CAMERA_NEAR again at the usual orbit, and in TV, whose shots are its own.
+    const near = cameraNear(tvOn ? 0 : orbit)
+    const rigCamera = state.camera as PerspectiveCamera
+    if (rigCamera.isPerspectiveCamera && rigCamera.near !== near && (near === CAMERA_NEAR || Math.abs(rigCamera.near - near) > near * 0.05)) {
+      rigCamera.near = near
+      rigCamera.updateProjectionMatrix()
+    }
+    // The controls' own turn this frame (their damping), in place in flight too.
+    viewRig.mark(c.object.position, c.target)
     c.update()
+    viewRig.pivot(c.object.position, c.target, smooth.current, !c.autoRotate)
     if (s.walking) (walkLook.current ??= new Vector3()).copy(c.object.position).sub(c.target).normalize()
   })
 
@@ -968,130 +1371,14 @@ function Rig(): JSX.Element {
       makeDefault
       enablePan={false}
       minDistance={ORBIT_MIN_DISTANCE}
-      maxDistance={GRID_RADIUS * 4}
+      maxDistance={ORBIT_MAX_DISTANCE}
       dampingFactor={0.12}
-      onStart={() => { locked.current = false }}
+      autoRotate={tutorialSpin}
+      autoRotateSpeed={0.6}
+      onStart={() => { if (startLock.start(pressed())) locked.current = false }}
     />
   )
 }
-
-/**
- * R3F zeroes the clock whenever the frameloop changes. Several things here
- * time themselves from clock.elapsedTime (fleet cube fades, the crossing
- * flash, a glide), so a pause would leave them waiting for a time that had
- * already passed. This keeps the last elapsed time seen and puts it back when
- * drawing resumes: to everything in the scene the pause never happened.
- */
-function ClockKeeper(): null {
-  const clock = useThree((s) => s.clock)
-  const frameloop = useThree((s) => s.frameloop)
-  const last = useRef(0)
-  useFrame(() => { last.current = clock.elapsedTime })
-  useEffect(() => { if (frameloop !== 'never' && last.current > 0) clock.elapsedTime = last.current }, [frameloop, clock])
-  return null
-}
-
-/**
- * The last word on a tagged texel: alpha 1. The tag (colour with alpha 0)
- * is valid inside the composer's buffers but not on the canvas, which
- * composites premultiplied: a compositor is free to clamp colour to alpha,
- * and one did, drawing the faces black except where a halo lent them some.
- * Merged into the bloom's own pass by postprocessing, so it costs nothing.
- * Only the tag is touched; every other texel leaves exactly as it came.
- */
-const OPAQUE_TAGGED_FRAGMENT = `
-void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor) {
-  vec4 o = texture(inputBuffer, uv);
-  float tagged = step(o.a, 0.0) * step(0.0005, max(o.r, max(o.g, o.b)));
-  outputColor = vec4(inputColor.rgb, max(inputColor.a, tagged));
-}`
-class OpaqueTaggedEffect extends Effect {
-  constructor() {
-    super('OpaqueTagged', OPAQUE_TAGGED_FRAGMENT, { blendFunction: BlendFunction.SET })
-  }
-}
-
-/** The luminance line the bloom ships with, and the same line blind to tagged texels. */
-const LUMINANCE_LINE = 'float l=luminance(texel.rgb);'
-const LUMINANCE_TAG_AWARE = 'float l=luminance(texel.rgb)*step(0.0005,texel.a);'
-
-/**
- * The bloom, blind to the world's shard faces.
- *
- * Those faces write their colour with alpha 0 (ShardMesh `world`), a tag
- * nothing else in the frame carries: everything visible writes alpha above
- * zero, and the untouched background is black. The bloom's luminance pass,
- * patched here, treats a tagged texel as dark, so the faces draw at their
- * own colours, as on the bench, while every line, ring, label and point
- * field blooms exactly as it always has: same numbers, same passes, no depth
- * texture, nothing drawn twice. The canvas composites premultiplied, which is
- * how the bloom's own halos already show over alpha-0 background, so a
- * tagged texel shows its colour too.
- */
-function WorldBloom(): JSX.Element {
-  // The wrapper types its ref as the class; what it holds is the instance.
-  const ref = useRef<typeof BloomEffect>(null)
-  // After every render, not once: the wrapper rebuilds its effect when a prop changes.
-  useEffect(() => {
-    const m = (ref.current as unknown as BloomEffect | null)?.luminanceMaterial
-    if (!m || m.userData.tagAware) return
-    if (!m.fragmentShader.includes(LUMINANCE_LINE)) {
-      console.warn('[bloom] the luminance shader is not the one expected; shard faces will bloom')
-      m.userData.tagAware = true
-      return
-    }
-    m.fragmentShader = m.fragmentShader.replace(LUMINANCE_LINE, LUMINANCE_TAG_AWARE)
-    m.userData.tagAware = true
-    m.needsUpdate = true
-  })
-  const opaque = useMemo(() => new OpaqueTaggedEffect(), [])
-  return (
-    <>
-      <Bloom ref={ref} mipmapBlur levels={3} intensity={2.6} luminanceThreshold={0.001} luminanceSmoothing={0} />
-      <primitive object={opaque} />
-    </>
-  )
-}
-
-/**
- * The composer's buffers hand on their colour only.
- *
- * The scene is drawn into a multisampled buffer, and before the bloom can
- * read it, three resolves it into a plain one: by default the depth and the
- * stencil too. Nothing after the scene's own draw reads either (the shard
- * faces' stencil tag does its work inside that draw, ShardMesh
- * FACE_TAG_STENCIL), so resolving them was pure cost, and on Windows a
- * heavy one: Direct3D 11 cannot resolve a multisampled stencil on the GPU,
- * so ANGLE draws it (and the depth with it) out, copies it to a staging
- * texture, waits for the GPU to read it back, repacks it pixel by pixel on
- * the CPU and uploads it again, every frame (three.js #27799; ANGLE
- * Blit11::resolveStencil). On an Android phone the same resolve is one blit
- * on the GPU, likely why the main view was smooth there and laboured on a
- * Windows laptop (arkinox, 2026-10-20: "on my laptop the perf has improved
- * but it still isn't great"). Both buffers, since TV's tube makes the bloom
- * draw into the second one.
- *
- * An effect that reads depth (depth of field, SSAO, a normal pass, anything
- * with EffectAttribute.DEPTH) would get the composer's depth from the plain
- * buffer, which this leaves unresolved: it would need resolveDepthBuffer
- * back on. A ref, so a composer made again is set again: the wrapper hands
- * its ref the composer itself (useImperativeHandle, @react-three/
- * postprocessing 2.16), which a wrapper upgrade should check.
- */
-function resolveColourOnly(composer: PostComposer | null): void {
-  if (!composer) return
-  for (const buffer of [composer.inputBuffer, composer.outputBuffer]) {
-    buffer.resolveDepthBuffer = false
-    buffer.resolveStencilBuffer = false
-  }
-  // The second buffer only ever takes a full-screen pass (TV's bloom, ahead of
-  // the tube): a quad's edges are off screen, so samples there smooth nothing,
-  // and it was a second full copy of the scene's buffer while TV had been on.
-  composer.outputBuffer.samples = 0
-}
-
-/** The composer's samples, fixed for the page: a new count would make a new composer (composerBudget.ts). */
-const COMPOSER_SAMPLES = typeof window === 'undefined' ? 4 : composerSamples(screenPixels(window))
 
 /**
  * The canvas, rendered only when what it reads changes (memo): it takes no
@@ -1099,10 +1386,6 @@ const COMPOSER_SAMPLES = typeof window === 'undefined' ? 4 : composerSamples(scr
  * has nothing to say to it.
  */
 export const Scene = memo(function Scene(): JSX.Element {
-  // The workshop is an opaque, full-screen bench with its own canvas. Drawing
-  // the world under it is pure cost, and on a phone it was most of the frame:
-  // the bench measured 3 fps with the world running behind it.
-  const covered = useWorkshop((s) => s.open)
   if (import.meta.env.DEV) { const w = window as unknown as { __sceneRenders?: number }; w.__sceneRenders = (w.__sceneRenders ?? 0) + 1 }
   // The composer's children, made once. EffectComposer rebuilds its passes
   // whenever its `children` prop is a new element, and it only removes the
@@ -1114,7 +1397,7 @@ export const Scene = memo(function Scene(): JSX.Element {
   const bloom = useMemo(() => <><WorldBloom /><TvScreenEffect /></>, [])
   return (
     <Canvas
-      camera={{ fov: FOV, position: [0, 0, START_DISTANCE], near: CAMERA_NEAR, far: 6000 }}
+      camera={{ fov: FOV, position: [0, 0, START_DISTANCE], near: CAMERA_NEAR, far: CAMERA_FAR }}
       // The stream draws at the capture's ratio, 1 to 1.5 (lib/tv/broadcast): a predictable picture and cost.
       dpr={isBroadcast() ? broadcastDpr() : [1, 2]}
       // high-performance: ask for the discrete GPU and against power-save
@@ -1126,24 +1409,26 @@ export const Scene = memo(function Scene(): JSX.Element {
       // (2026-10-15; screenshots identical with and without).
       gl={{ antialias: false, powerPreference: 'high-performance' }}
       style={{ background: BG }}
-      frameloop={covered ? 'never' : 'always'}
+      frameloop="never"
       // A lost context is said in the console (lib/glContext). Shader
       // programs are compiled once, not again at every cut (lib/keepPrograms).
       // On the stream, a loss that does not come back reloads (lib/tv/broadcast).
-      onCreated={({ gl, scene }) => { watchContext(gl.domElement, 'main view'); recoverLostContext(gl.domElement); keepPrograms(gl, scene) }}
+      onCreated={({ gl, scene }) => { watchContext(gl.domElement, 'main view'); recoverLostContext(gl.domElement); keepPrograms(gl, scene); sortWithoutBoxing(gl) }}
     >
-      <ClockKeeper />
+      {/* Draws the view: frameloop "never" and this, every frame or none past 60 a second when nothing moves. */}
+      <FrameDriver />
       {/* Fog to pure black: the only distance cue in an otherwise empty field. */}
-      <fog attach="fog" args={[0x000000, GRID_RADIUS * 0.9, GRID_RADIUS * 4]} />
+      <SceneFog />
       <ambientLight intensity={0.8} />
       <directionalLight position={[10, 10, 10]} intensity={1.2} />
       <Rig />
       <HeadlampRig />
       <LensShift />
       {isPortraitBroadcast() && <PortraitLens />}
-      <CellMetric />
+      <CameraShare />
       <ScreenAxes />
-      <World />
+      {/* Glow halos here keep the bloom's tag, follow the Settings switch, and are strangers' unless a shard is trusted (scene/PointBillboards.tsx). */}
+      <GlowWorldCanvas><World /></GlowWorldCanvas>
       {/* Camera-pinned, so it lives outside the world group: hyperspace is a
           state, not a place. Mounts only while riding, or while Cyberspace
           TV shows a hyperjump's ride (its warp). */}

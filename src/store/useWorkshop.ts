@@ -43,27 +43,52 @@ import {
   validPoint,
   type ShardMode,
   type ShardModel,
-  type ShardVertex, type Part, type Ref, cloneVertex, hexToRgb, rgbToHex } from 'sno-core/shards'
+  type ShardVertex, type Part, type Ref, addressesIn, cloneVertex, hexToRgb, rgbToHex } from 'sno-core/shards'
 import { withOpacity } from '../lib/opacityStep'
-import { noTable, signedTableOnly, you } from '../lib/carried'
+import { readGlow, withGlow, withPointSize, type Glow } from 'sno-core/glow'
+import { drawnFace, withFace, type FaceMode } from 'sno-core/face'
+import { GLOW_START, suggestedGlowStyle } from '../lib/pointGlow'
+import { markCameSealed, noTable, rekeyCarried, signedTableOnly, takeIntoKeeping, you } from '../lib/carried'
+import { planPieces } from '../lib/piecePlan'
+import { useToast } from './useToast'
+import { pieceKeysFor, pieceWasOpened } from '../lib/pieceKeys'
+import { fingerprint, loadLedger } from '../lib/published'
 import { authoredConstrainOf, chosenConstrainOf, withConstrain, type Constrain } from '../lib/walkConstrain'
-import { addPart, quarterTurnPart, removeParts } from 'sno-core/parts'
+import { bounceOf, springboardOf, withBounce, type Bounce } from '../lib/walkBounce'
+import { withAnim } from '../lib/anim'
+import { EYE_FIELD, eyeReachTicks, flipEyeZ, usedBenchEye, withEye, type Eye } from '../lib/avatarEye'
+import { Fetched, addPart, parseAddress, quarterTurnPart, removeParts } from 'sno-core/parts'
 import { FLOOR, MAX_SIZE, MIN_SIZE, stamp, type Facing, type StampKind, type WorkPlane } from 'sno-core/stamps'
 import { BUILT_IN, hexAt, remap, samePalette, snapHex, type Palette } from 'sno-core/snoPalette'
 import { newell, triangulate } from 'sno-core/triangulate'
-import { flipFace, flipSurface, windAdded, windOutward } from 'sno-core/winding'
+import { flipFace, flipSurface, surfaceOf, windAdded, windOutward } from 'sno-core/winding'
 import { Vector3 } from 'three'
 import { ConvexHull } from 'three/examples/jsm/math/ConvexHull.js'
 import { cornerAverage, weld } from '../lib/weld'
 import { subdivide, subdivideNotice } from '../lib/subdivide'
 import { withCredit, type Credit } from 'sno-core/feed'
 import { newestFirst } from '../lib/shardFolders'
-import { attach, initialShards, persist, saveNow as saveStored } from './workshopStorage'
+import { attach, initialShards, persist, saveNow as saveStored, workshopReading } from './workshopStorage'
+
+/**
+ * OPEN WORKSHOP asked while the library was still reading: opened once it has
+ * read, as asked last, and only when that is soon after the tap, so a read
+ * that took long never opens it over whatever came next (see openWorkshop).
+ */
+let openAsked: { id?: string; panel?: 'menu'; at: number } | null = null
+/** How long a tap made while the library reads still opens it once read. */
+const OPEN_ASKED_MS = 8_000
 
 export { hydrateWorkshop, storageMode } from './workshopStorage'
 
 /** VIEW builds nothing: it is the tool you hold to look around. */
-export type Tool = 'view' | 'stamp' | 'add' | 'select' | 'face'
+export type Tool = 'view' | 'stamp' | 'add' | 'select' | 'face' | 'paint'
+
+/** What a tap or a box takes in SELECT (workshop redesign, phase 3). */
+export type SelectKind = 'points' | 'faces' | 'objects'
+
+/** What a tap paints in PAINT (workshop redesign, phase 3): one point, one face, the piece it is part of, or all of it. */
+export type PaintMode = 'point' | 'face' | 'piece' | 'all'
 
 const PALETTE_STORAGE = 'onosendai:palette'
 const PALETTES_STORAGE = 'onosendai:palettes'
@@ -236,6 +261,20 @@ function seamsFollow(before: ShardModel, after: ShardModel, from: number[]): Sha
   return { ...bare, facecolors: from.map((i, j) => (i >= 0 && own[i] ? [...own[i]] as [number, number, number] : cornerAverage(after, after.faces[j]))) }
 }
 
+/**
+ * A color poured over faces that have seams (DECK-0003 §1.4a): a face color
+ * fills the whole triangle and its corners contribute nothing, so a FILL that
+ * wrote the corners alone changed nothing you could see. 321 of the 337 Maze
+ * Kit pieces carry seams, and one SEAM gives every face of a shard one (review
+ * of #550). The faces `on` picks take the color too; a shard with no seams, or
+ * a list out of step that every reader ignores, stays as it is.
+ */
+function seamsPoured(s: ShardModel, on: (face: number) => boolean, c: [number, number, number]): Pick<ShardModel, 'facecolors'> | Record<string, never> {
+  const own = s.facecolors
+  if (!own || own.length !== s.faces.length) return {}
+  return { facecolors: own.map((fc, k) => (on(k) ? [...c] as [number, number, number] : fc)) }
+}
+
 /** Faces 0..n-1 of `after` are `before`'s, in order, and the rest are new: FILL's and FACE's shape. */
 const appended = (before: ShardModel, after: ShardModel): number[] => after.faces.map((_, j) => (j < before.faces.length ? j : -1))
 
@@ -313,8 +352,13 @@ export interface WorkshopState {
   selection: number[]
   /** Corners picked so far for the next face, in order. */
   facePick: number[]
-  /** The face tapped in FACE mode, an index into the shard's faces, so DELETE can take it. */
-  selectedFace: number | null
+  /**
+   * The faces tapped in FACE mode, as indices into the shard's faces, in the
+   * order they were tapped. Every one stays lit and in hand until it is tapped
+   * again or let go (arkinox, 2026-10-31), and DELETE, FLIP, FILL and SEAM take
+   * them all.
+   */
+  selectedFaces: number[]
   /** The swatch row: hexes the author has reached for, all of them palette colours. */
   palette: string[]
   /** Palettes this browser knows, beyond the built-in. Named for people, not for the wire. */
@@ -366,6 +410,41 @@ export interface WorkshopState {
    */
   invert: boolean
   setInvert: (on: boolean) => void
+  /**
+   * BOX (workshop redesign, phase 2, decision 1): one finger orbits in every
+   * tool, and in SELECT this switch makes a one-finger drag draw a box
+   * instead. Off when the workshop opens; kept across tools, read only in
+   * SELECT.
+   */
+  boxSelect: boolean
+  setBoxSelect: (on: boolean) => void
+  /**
+   * SELECT's POINTS, FACES or OBJECTS (workshop redesign, phase 3, decision
+   * 3): what a tap or a box takes. Selecting faces moved here from FACE,
+   * which only makes faces now. Changing it lets go of what is held.
+   */
+  selectKind: SelectKind
+  setSelectKind: (kind: SelectKind) => void
+  /** PAINT's POINT, FACE, PIECE or ALL, and for a face BLEND (its corners) or EDGE (a hard seam). */
+  paintMode: PaintMode
+  paintEdge: boolean
+  setPaintMode: (mode: PaintMode) => void
+  setPaintEdge: (edge: boolean) => void
+  /**
+   * PAINT: the color in hand onto what a tap met, by paintMode: the point
+   * (every vertex on it), the face (BLEND or EDGE), the piece joined to it,
+   * or everything. One UNDO each. What is held stays held.
+   */
+  paintTap: (hit: { vertex?: number; face?: number }) => void
+  /** The dropper on a tap: the color of the point or face it met, into hand. What is held stays held. */
+  takeColorAt: (hit: { vertex?: number; face?: number }) => void
+  /** PAINT's dropper, armed: the next tap takes a color instead of painting, then it is off again. */
+  paintTake: boolean
+  setPaintTake: (on: boolean) => void
+  /** Hold these faces, each with every vertex on its corners' points, as a tapped face is held. */
+  holdFaces: (faces: readonly number[]) => void
+  /** ALL in SELECT: every point, every face, or every placed object, as its switch says. */
+  selectAll: () => void
   /** STAMP places a built-in shape, or a published object by reference (DECK-0003 §1.10). */
   stampMode: 'shape' | 'object'
   /** The object OBJECT stamps, chosen in the picker. */
@@ -379,7 +458,14 @@ export interface WorkshopState {
    */
   placeObject: (at: P3, self?: string) => void
 
-  openWorkshop: (id?: string) => void
+  /**
+   * Open the workshop on `id` (else the shard last open, else the newest),
+   * with `panel` up: the first-arrival tutorial opens it with its MENU
+   * showing (tutorial feedback 2026-11-12, item 10).
+   */
+  openWorkshop: (id?: string, panel?: 'menu') => void
+  /** A panel the workshop shows as it next draws open (openWorkshop `panel`), then null again (workshop/Workshop.tsx). */
+  openPanel: 'menu' | null
   closeWorkshop: () => void
   create: (name?: string) => string
   select: (id: string | null) => void
@@ -407,9 +493,29 @@ export interface WorkshopState {
   /**
    * How solid the shard draws, a whole percent (DECK-0003 §1.11): 100 is
    * solid and is stored as no opacity at all, the wire's canonical form;
-   * anything else is kept between the floor (10) and 99. Undoable like MODE.
+   * anything else is kept between 0 and 99 (no floor: at 0 the object draws
+   * nothing of its own, and its glow still shows). Undoable like MODE.
    */
   setOpacity: (percent: number) => void
+  /**
+   * POINT SIZE (DECK-0003 §1.15): the width of every point in ticks of the
+   * shard's own grid, 0 (no dots) to 7,680, or undefined for the reader's own
+   * size, which removes the field. Written through sno-core withPointSize, so
+   * a value out of range removes the field too. Kept in every mode, drawn in
+   * POINTS. Undoable like MODE.
+   */
+  setPointSize: (ticks: number | undefined) => void
+  /**
+   * GLOW (DECK-0003 §1.16): null turns it OFF and removes the field; anything
+   * else is merged over the shard's glow. Turning it on from OFF starts from
+   * the radius and strength last used this session (glowLast), and from the
+   * suggested style (lib/pointGlow suggestedGlowStyle) when no style is given.
+   * Written through sno-core withGlow, so nothing malformed is stored. Kept in
+   * every mode, drawn in POINTS. Undoable like MODE.
+   */
+  setGlow: (patch: Partial<Glow> | null) => void
+  /** The radius (ticks) and GLOW STRENGTH the last glow written had, so OFF then LIGHT puts them back. This session only. */
+  glowLast: { radius: number; strength: number }
   /**
    * Whether a walker can cross the shard in WALK (DECK-0003 §1.12,
    * lib/walkConstrain.ts): off, all of its faces, or only while it draws
@@ -418,6 +524,20 @@ export interface WorkshopState {
    * edit. Undoable like MODE.
    */
   setConstrain: (c: Constrain) => void
+  /**
+   * Whether walkers with GRAVITY on bounce off the shard (lib/walkBounce.ts):
+   * 0 for none, a whole number of gibsons from 1 to 24, or "reflect"; with a
+   * fixed height, `springboard` launches on walk-on too. Written only as the
+   * walker reads it (withBounce): OFF removes both fields, and nothing invalid
+   * is ever stored. Undoable like MODE.
+   */
+  setBounce: (b: Bounce, springboard?: boolean) => void
+  /**
+   * The shard's `anim` (lib/anim.ts): `raw` read as a reader reads it and
+   * written back canonically, so a malformed entry or an unknown word is
+   * dropped rather than stored; an empty list removes the field. Undoable.
+   */
+  setAnim: (raw: unknown) => void
   setUnit: (unit: number) => void
   /** The build grid's half-width for the current shard, never below what its vertices need. */
   setExtent: (extent: number) => void
@@ -444,21 +564,54 @@ export interface WorkshopState {
   /** Grow the selection to every vertex joined to it by faces (and by shared points). */
   selectConnected: () => void
   selectFace: (index: number | null) => void
+  /** Every selected face gone, in one undoable step; their points stay. */
   deleteSelectedFace: () => void
-  /** FLIP FACE: the selected face turned round, its front to its back (DECK-0003 §1.4). */
+  /** FLIP FACE: every selected face turned round, its front to its back (DECK-0003 §1.4). */
   flipSelectedFace: () => void
-  /** FLIP SURFACE: the selected face turned, and every face joined to it by clean edges turned to agree. */
+  /** FLIP SURFACE: every selected face turned, and every face joined to them by clean edges turned to agree. */
   flipSelectedSurface: () => void
   /** AUTO: every face of the shard wound outward by the guess (sno-core orient). */
   autoWind: () => void
   /** The colour onto one face as a hard seam, not onto its corners. */
   colorFace: (index: number, c: [number, number, number]) => void
+  /** The colour onto several faces as hard seams, in one undoable step: SEAM with faces in hand. */
+  colorFaces: (indices: readonly number[], c: [number, number, number], quiet?: boolean) => void
   /** Give every face back to its corners: the object interpolates again. */
   clearFaceColors: () => void
   /** Put a color at the front of the palette (moving it there if it is already in). */
   rememberColor: (hex: string) => void
   forgetColor: (hex: string) => void
   moveSelected: (axis: 0 | 1 | 2, delta: number) => void
+  /**
+   * SET EYE (avatar eye, UI A "the eye on the bench"; arkinox, 2026-11-16):
+   * the eye in your hand. While on, nothing else is held: the move handles,
+   * the move keys and the strip act on the eye (shell/MoveHandles,
+   * shell/EyeBar). Off with DONE, Esc, E, a tool or a sheet, or anything held.
+   */
+  eyeEdit: boolean
+  setEyeEdit: (on: boolean) => void
+  /**
+   * The eye one move along a model axis (the bench's frame, as moveSelected
+   * moves points), `delta` ticks, landing on the snap's grid (an eye off it,
+   * AUTO's or CENTER's, goes to the next grid line that way first). An
+   * automatic eye starts from where it is and becomes CHOSEN. Refused, and
+   * false, past the reach WALK honours: the avatar size limit at the avatar's
+   * true scale (avatarEye eyeReachTicks). One UNDO each, as any edit.
+   */
+  moveEye: (axis: 0 | 1 | 2, delta: number) => boolean
+  /**
+   * The eye set outright, in ticks in the payload's frame (avatarEye withEye):
+   * undefined for AUTO, which removes the field; anything malformed removes it
+   * too. No edit, and false, when nothing changes. One UNDO.
+   */
+  setEye: (eye: Eye | undefined) => boolean
+  /**
+   * FACING (DECK-0003 §1.18): how the shard turns as it moves when worn, PATH
+   * or UPRIGHT. Written through sno-core withFace, so PATH removes the field
+   * and nothing malformed is stored. No edit, and false, when it is already
+   * so. One UNDO.
+   */
+  setFace: (face: FaceMode) => boolean
   /**
    * Turn the selected points a quarter turn about the vertical, +1 one way
    * and -1 the other, around the middle of their extent snapped to the
@@ -532,6 +685,8 @@ export interface WorkshopState {
   insertImport: (model: ShardModel, notice: string, self?: string) => boolean
   pickForFace: (index: number) => void
   clearFacePick: () => void
+  /** FACE's BACK: the last corner picked, let go. */
+  unpickLast: () => void
   /** Make faces from the picked corners, in order. */
   fill: () => void
   /** Faces for the selected points at once: a flat set becomes one polygon, a solid set its convex hull. */
@@ -583,12 +738,71 @@ export interface WorkshopState {
    */
   replaceShard: (id: string, model: ShardModel) => Promise<'saved' | 'unsaved' | 'missing'>
   current: () => ShardModel | null
+  /**
+   * The shards a double-tap went into (enterPart), outermost first: each the
+   * shard that placed the next, with its own UNDO and REDO kept for its return.
+   * Empty at the top. BACK (and Esc) goes up one; the workshop's close shows
+   * only at the top (owner, 2026-11-22).
+   */
+  backStack: PartFrame[]
+  /**
+   * Open the object placed at `index` of the shard on the bench, to edit it in
+   * place. A shard of yours in the workshop opens as itself: every shard that
+   * places it follows, and an edit of a published one makes it a COPY from
+   * then on (lib/partForm.ts). Anything else (a LINK to a public object, or an
+   * entry of the shard's own table) opens as your copy, made now; the parent
+   * is pointed at the copy only on its first edit, so a look changes nothing.
+   * `fetch` reaches the relays for a link (lib/parts.ts fetchRef, passed in:
+   * this store is imported by what lib/parts.ts imports).
+   */
+  enterPart: (index: number, fetch?: (ref: Ref) => Promise<unknown>) => Promise<void>
+  /** Up one level, to the shard that placed this one. A copy nobody edited goes. */
+  back: () => void
+  /**
+   * A shard about to be used somewhere outside the workshop's own refs (put in
+   * a chest draft): a look copy among them is stored now, so what holds its id
+   * never names a shard that is in no stored list. Anything else: nothing.
+   */
+  keepCopy: (id: string) => void
+  /**
+   * TAKE (MOVE INTO WORKSHOP, COPY) of a shard read from a bag or a chest: the
+   * shard into your workshop with what it carries keyed under you
+   * (lib/carried.ts takeIntoKeeping), and each SEALED PIECE of a split build
+   * it places (lib/pieces.ts) as a shard of your own beside it, its refs
+   * pointed at them, so the copy draws whole and a hide of it seals each piece
+   * again. A piece is opened with the key of the bag it was read from, through
+   * `fetch` (lib/parts.ts fetchRef, passed in: this store is imported by what
+   * lib/parts.ts imports). Its id, and how many pieces came and how many could
+   * not be opened (those stay placeholders).
+   */
+  takeShard: (model: ShardModel, fetch: (ref: Ref) => Promise<unknown>) => Promise<{ id: string; pieces: number; missing: number }>
+}
+
+/**
+ * One level of the way in (backStack): the shard that placed the one opened,
+ * its UNDO and REDO, and, for a copy opened in place of a link or a table
+ * entry, what its first edit points at the copy.
+ */
+export interface PartFrame {
+  /** The shard that placed the one opened. */
+  id: string
+  /** The shard opened from it: BACK means this level only while it is still on the bench. */
+  child: string
+  past: ShardModel[]
+  future: ShardModel[]
+  /**
+   * A copy opened in place of a link or a table entry: the ref it takes the
+   * place of, the address that ref named, and the copy as it was made
+   * (`born`, its fingerprint), so any change to it, however made, is seen.
+   */
+  pending?: { ref: number; address: string; copyId: string; fromTable: boolean; born: string; done?: true }
 }
 
 /** A shard from wire form (DECK-0003 §1), as PASTE and bulk import read it; null if it is not one. */
 export function shardFromText(text: string, id: string): ShardModel | null {
   let raw: unknown
   try { raw = JSON.parse(text) } catch { return null }
+  // sno-core's fromPayload (0.1.31 on) turns a version 1 payload's eye into the version 2 frame itself.
   return fromPayload(raw, id)
 }
 
@@ -604,6 +818,19 @@ export { creditOf } from 'sno-core/feed'
 let lastUsed: () => Readonly<Record<string, number>> | undefined = () => undefined
 export function readLastUsedFrom(read: () => Readonly<Record<string, number>> | undefined): void {
   lastUsed = read
+}
+
+/**
+ * A duplicate goes into the folder its source is in (arkinox, 2026-11-16:
+ * "when i duplicate a shard ... it gets copied to the root instead of the
+ * current folder"). The folder store hands this over too, for the same
+ * import-cycle reason as readLastUsedFrom; until it does, a copy is filed
+ * nowhere, which is the top. Called before the copy joins the list, so the
+ * list never draws it at the top for a moment first.
+ */
+let fileCopy: (copy: string, source: string) => void = () => undefined
+export function fileCopiesWith(file: (copy: string, source: string) => void): void {
+  fileCopy = file
 }
 
 /**
@@ -626,7 +853,51 @@ export function newestId(shards: ShardModel[], used: Readonly<Record<string, num
  * write fails. Whoever needs to know it landed awaits saveNow().
  */
 function save(shards: ShardModel[]): void {
-  persist(shards)
+  persist(kept(shards))
+}
+
+/** A copy's fingerprint: its whole payload, name included, so any change to it shows. */
+export function bornOf(s: ShardModel): string {
+  return fingerprint(JSON.stringify(toPayload(s)))
+}
+
+/**
+ * A copy opened in place of a link or a table entry (enterPart) that nobody has
+ * changed: it is kept out of storage, so a reload or a crash while you only
+ * looked leaves no stray copy in the list. Its first change (any change: its
+ * fingerprint no longer what it was made with) lets it in.
+ */
+export function untouchedLookCopy(s: ShardModel): boolean {
+  const mark = (s as ShardModel & { lookCopy?: string }).lookCopy
+  // Published meanwhile, it went public: stored like any shard (as settle counts it).
+  return typeof mark === 'string' && mark === bornOf(s) && !loadLedger()[s.id]
+}
+
+type Marked = ShardModel & { lookCopy?: string }
+
+/** The shard without its look-copy mark: stored like any shard of yours from now on. */
+function unmarked(s: ShardModel): ShardModel {
+  if ((s as Marked).lookCopy === undefined) return s
+  const { lookCopy: _mark, ...plain } = s as Marked
+  void _mark
+  return plain
+}
+
+/**
+ * The list with every look copy that `used` places un-marked: a copy only
+ * looked at that is placed inside another shard (a stamp, a paste, any edit
+ * that writes a ref to it) is stored at that moment, so the ref never names
+ * a shard that is in no stored list. `me` is the pubkey the refs name it under.
+ */
+export function keepPlacedCopies(list: ShardModel[], used: ShardModel, me: string | null): ShardModel[] {
+  if (!me || !used.refs?.length || !list.some((s) => (s as Marked).lookCopy !== undefined)) return list
+  const named = new Set(used.refs.flatMap((r) => (r[0] === 'a' && r[1].startsWith(`33331:${me}:`) ? [r[1].slice(`33331:${me}:`.length)] : [])))
+  return list.some((s) => named.has(s.id) && (s as Marked).lookCopy !== undefined) ? list.map((s) => (named.has(s.id) ? unmarked(s) : s)) : list
+}
+
+/** The list as it is stored: without copies only looked at. */
+export function kept(list: ShardModel[]): ShardModel[] {
+  return list.some(untouchedLookCopy) ? list.filter((s) => !untouchedLookCopy(s)) : list
 }
 
 /**
@@ -719,14 +990,33 @@ export function tapSelection(s: Pick<ShardModel, 'vertices'>, held: readonly num
   return nextSelection([...held], g, release)
 }
 
+/**
+ * Each point's vertices, once per list of vertices. A list is never changed
+ * in place (every edit makes a new one), so this holds for as long as the list
+ * does. A tap on a face asks three times, and with many faces held a release
+ * asks for all of theirs: a pass over a nave's 1,896 vertices each time was a
+ * good part of a tap.
+ */
+const byPoint = new WeakMap<readonly ShardVertex[], Map<string, number[]>>()
+function pointsOf(vertices: readonly ShardVertex[]): Map<string, number[]> {
+  let m = byPoint.get(vertices)
+  if (!m) {
+    m = new Map()
+    for (let i = 0; i < vertices.length; i++) {
+      const k = pointKey(ticksOf(vertices[i]))
+      const g = m.get(k)
+      if (g) g.push(i); else m.set(k, [i])
+    }
+    byPoint.set(vertices, m)
+  }
+  return m
+}
+
 /** Every vertex on the same point as vertex `index`, itself included. */
 function group(s: Pick<ShardModel, 'vertices'>, index: number): number[] {
   const v = s.vertices[index]
   if (!v) return []
-  const key = pointKey(ticksOf(v))
-  const out: number[] = []
-  s.vertices.forEach((o, i) => { if (pointKey(ticksOf(o)) === key) out.push(i) })
-  return out
+  return [...(pointsOf(s.vertices).get(pointKey(ticksOf(v))) ?? [])]
 }
 
 /**
@@ -799,12 +1089,98 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     if (i < 0) return false
     const next = fn(shards[i])
     if (!next) return false
-    const list = shards.slice()
+    let list = shards.slice()
     list[i] = { ...next, updatedAt: Date.now() }
+    // A look copy this edit places is stored now (keepPlacedCopies).
+    list = keepPlacedCopies(list, list[i], you())
     const partSel = get().partSel.filter((k) => k < (next.parts?.length ?? 0))
-    set({ shards: list, past: [...past.slice(-(HISTORY - 1)), shards[i]], future: [], notice, turnPivot: null, partSel })
+    // A copy opened in place of a link or a table entry: its first edit points
+    // its parent at it, one edit of the parent that the parent's UNDO takes back.
+    const stack = get().backStack
+    const top = stack[stack.length - 1]
+    const pointed = top?.pending && !top.pending.done && top.pending.copyId === shards[i].id ? pointParent(list, top) : null
+    const backStack = pointed ? [...stack.slice(0, -1), pointed] : null
+    set({ shards: list, past: [...past.slice(-(HISTORY - 1)), shards[i]], future: [], notice, turnPivot: null, partSel, ...(backStack ? { backStack } : {}) })
     save(list)
     return true
+  }
+
+  /**
+   * Point a level's parent at its copy, in `list` (changed in place): its ref
+   * names the copy, a table entry nothing places any more goes, and the parent
+   * as it was joins the level's UNDO. The level as it now stands, or null when
+   * the parent is gone or nobody is signed in (the copy then stays as it is).
+   */
+  const pointParent = (list: ShardModel[], frame: PartFrame): PartFrame | null => {
+    const p = frame.pending
+    const me = you()
+    const j = list.findIndex((s) => s.id === frame.id)
+    if (!p || p.done || j < 0 || !me) return null
+    const parent = list[j]
+    const refs = (parent.refs ?? []).map((r, k) => (k === p.ref ? (['a', `33331:${me}:${p.copyId}`] as Ref) : r))
+    let next: ShardModel = { ...parent, refs, updatedAt: Date.now() }
+    // A table entry nothing places any more goes (DECK-0003 §1.10: a key no
+    // placement names is not written); one another entry places stays.
+    const table = next.objects as Record<string, unknown> | undefined
+    if (p.fromTable && table && !refs.some((r) => r[0] === 'a' && r[1] === p.address)) {
+      const placedByEntry = Object.entries(table).some(([k, v]) => k !== p.address && addressesIn(v).includes(p.address))
+      if (!placedByEntry) {
+        // With it go the entries only it placed: what nothing left reaches is carried to every finder and drawn by none.
+        const reach = new Set<string>()
+        const queue = refs.filter((r) => r[0] === 'a').map((r) => r[1])
+        while (queue.length) {
+          const k = queue.shift()!
+          if (reach.has(k) || k === p.address || !Object.prototype.hasOwnProperty.call(table, k)) continue
+          reach.add(k)
+          queue.push(...addressesIn(table[k]))
+        }
+        const kept = Object.fromEntries(Object.entries(table).filter(([k]) => reach.has(k)))
+        const { objects: _all, ...rest } = next
+        void _all
+        next = Object.keys(kept).length ? { ...rest, objects: kept as ShardModel['objects'] } : rest
+      }
+    }
+    list[j] = next
+    // The copy is the parent's now: stored like any shard of yours.
+    const c = list.findIndex((s) => s.id === p.copyId)
+    if (c >= 0) list[c] = unmarked(list[c])
+    return { ...frame, past: [...frame.past.slice(-(HISTORY - 1)), parent], future: [], pending: { ...p, done: true } }
+  }
+
+
+  /**
+   * Leave one level of the way in, in `list` (changed in place). A copy that
+   * changed in any way (an edit, a rename, an import, a copy inside it pointed
+   * at), or that went public, points its parent at it now; one nobody touched
+   * goes, unless it is `keep` (the shard about to be shown), and a look leaves
+   * nothing behind. Never drops a copy whose parent cannot be pointed at it.
+   * The level as it now stands.
+   */
+  const settle = (list: ShardModel[], frame: PartFrame, keep?: string | null): PartFrame => {
+    const p = frame.pending
+    if (!p || p.done) return frame
+    const k = list.findIndex((s) => s.id === p.copyId)
+    if (k < 0) return frame
+    const touched = bornOf(list[k]) !== p.born || !!loadLedger()[p.copyId]
+    if (touched) return pointParent(list, frame) ?? frame
+    // Unchanged but in use elsewhere (placed, or put in a chest): it stays, stored, and the parent keeps its link.
+    if ((list[k] as Marked).lookCopy === undefined) return frame
+    if (p.copyId !== keep && list.some((s) => s.id === frame.id)) list.splice(k, 1)
+    return frame
+  }
+
+  /**
+   * Leave every level of the way in at once (another shard picked, a new one,
+   * the workshop opened afresh), innermost first, so a copy inside a copy
+   * counts as a change to the outer one. The list as it now stands, or null
+   * when there was no way in.
+   */
+  const leaveAll = (keep?: string | null): ShardModel[] | null => {
+    const stack = get().backStack
+    if (stack.length === 0) return null
+    const list = get().shards.slice()
+    for (let i = stack.length - 1; i >= 0; i--) settle(list, stack[i], keep)
+    return list
   }
 
   /** Faces show only in SOLID: a shard's first faces switch it there. */
@@ -898,7 +1274,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     // widens to every vertex sharing a point: pasted exactly, the copy sits
     // on its original and widening would take both, so the nudges could
     // never carry the copy off alone.
-    if (added) set({ selection: placed.map((_, k) => base + k), partSel: objects.map((_, k) => firstPart + k), selectedFace: null, facePick: [] })
+    if (added) set({ selection: placed.map((_, k) => base + k), partSel: objects.map((_, k) => firstPart + k), selectedFaces: [], facePick: [] })
     return added
   }
 
@@ -907,11 +1283,18 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     storageError: null,
     currentId: null,
     open: false,
+    openPanel: null,
     tool: 'view',
     selection: [], partSel: [],
+    eyeEdit: false,
     invert: false,
+    boxSelect: false,
+    selectKind: 'points',
+    paintMode: 'face',
+    paintEdge: false,
+    paintTake: false,
     facePick: [],
-    selectedFace: null,
+    selectedFaces: [],
     clip: null,
     palette: loadPalette(),
     palettes: loadPalettes(),
@@ -923,6 +1306,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     stampObject: null,
     showAvatar: loadShowAvatar(),
     color: [0, 0.9, 1],
+    glowLast: { ...GLOW_START },
     stampKind: 'block',
     stampSize: 2,
     stampFacing: 0,
@@ -930,24 +1314,51 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     past: [],
     future: [],
     notice: null,
+    backStack: [],
 
-    openWorkshop: (id) => {
+    openWorkshop: (id, panel) => {
+      // The library still reading (it starts after the first frame, boot.tsx): open once it has, never on an empty list.
+      // One open waits, the last asked; it opens only soon after the tap.
+      const reading = workshopReading()
+      if (reading) {
+        const waiting = openAsked !== null
+        openAsked = { id, panel, at: Date.now() }
+        if (!waiting) {
+          useToast.getState().show({ label: 'OPENING WORKSHOP', meta: 'Your shards are still loading.', mark: 'build' })
+          void reading.then(() => {
+            const asked = openAsked
+            openAsked = null
+            if (!asked || workshopReading() || get().open || Date.now() - asked.at > OPEN_ASKED_MS) return
+            get().openWorkshop(asked.id, asked.panel)
+          })
+        }
+        return
+      }
+      openAsked = null
+      const left = leaveAll(id ?? get().currentId)
+      if (left) { set({ shards: left }); save(left) }
+      if (get().backStack.length) set({ backStack: [] })
       const { shards } = get()
       const currentId = id ?? get().currentId ?? newestId(shards) ?? get().create()
-      set({ open: true, currentId, selection: [], partSel: [], selectedFace: null, facePick: [], tool: 'view', plane: FLOOR, aim: null, past: [], future: [], notice: null })
+      set({ open: true, currentId, openPanel: panel ?? null, eyeEdit: false, selection: [], partSel: [], selectedFaces: [], facePick: [], tool: 'view', plane: FLOOR, aim: null, past: [], future: [], notice: null, boxSelect: false, selectKind: 'points' })
     },
 
-    closeWorkshop: () => set({ open: false, selection: [], partSel: [], selectedFace: null, facePick: [], aim: null }),
+    closeWorkshop: () => set({ open: false, eyeEdit: false, selection: [], partSel: [], selectedFaces: [], facePick: [], aim: null }),
 
     create: (name) => {
       const s = newShard(name ?? `Object ${get().shards.length + 1}`)
-      const list = [...get().shards, s]
-      set({ shards: list, currentId: s.id, selection: [], partSel: [], selectedFace: null, facePick: [], past: [], future: [], notice: null })
+      const list = [...(leaveAll() ?? get().shards), s]
+      set({ shards: list, backStack: [], currentId: s.id, selection: [], partSel: [], selectedFaces: [], facePick: [], past: [], future: [], notice: null })
       save(list)
       return s.id
     },
 
-    select: (id) => set({ currentId: id, selection: [], partSel: [], selectedFace: null, facePick: [], past: [], future: [], notice: null }),
+    select: (id) => {
+      // Picked from the list: the way in is left, its untouched copies with it (never the one picked).
+      const left = leaveAll(id)
+      if (left) save(left)
+      set({ ...(left ? { shards: left } : {}), backStack: [], currentId: id, selection: [], partSel: [], selectedFaces: [], facePick: [], past: [], future: [], notice: null })
+    },
 
     rename: (id, name) => {
       const list = get().shards.map((s) => (s.id === id ? { ...s, name: name.slice(0, 64), updatedAt: Date.now() } : s))
@@ -957,16 +1368,20 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     duplicate: (id) => {
       const src = get().shards.find((s) => s.id === id)
       if (!src) return id
-      const copy: ShardModel = { ...src, id: uuid(), name: `${src.name} copy`, vertices: src.vertices.map(cloneVertex), faces: src.faces.map((f) => [...f] as [number, number, number]), updatedAt: Date.now() }
+      // A duplicate is a shard of its own, stored: never a look copy (untouchedLookCopy).
+      const copy: ShardModel = { ...unmarked(src), id: uuid(), name: `${src.name} copy`, vertices: src.vertices.map(cloneVertex), faces: src.faces.map((f) => [...f] as [number, number, number]), updatedAt: Date.now() }
+      // Beside its source, in the same folder; a source at the top keeps the copy there.
+      // Filing is a nicety: a fault in it never costs the copy itself.
+      try { fileCopy(copy.id, src.id) } catch (err) { console.warn('[workshop] could not file the copy in its folder', err) }
       const list = [...get().shards, copy]
-      set({ shards: list, currentId: copy.id, selection: [], partSel: [], selectedFace: null, facePick: [], past: [], future: [], notice: null }); save(list)
+      set({ shards: list, currentId: copy.id, selection: [], partSel: [], selectedFaces: [], facePick: [], past: [], future: [], notice: null }); save(list)
       return copy.id
     },
 
     remove: (id) => {
       const list = get().shards.filter((s) => s.id !== id)
       const currentId = get().currentId === id ? newestId(list) : get().currentId
-      set({ shards: list, currentId, selection: [], partSel: [], selectedFace: null, facePick: [], past: [], future: [], notice: null }); save(list)
+      set({ shards: list, currentId, selection: [], partSel: [], selectedFaces: [], facePick: [], past: [], future: [], notice: null }); save(list)
     },
 
     removeMany: (ids) => {
@@ -985,22 +1400,114 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
         list = [...list, s]
         next = s.id
       }
-      set({ shards: list, currentId: next, selection: [], partSel: [], selectedFace: null, facePick: [], past: [], future: [], notice: null, ...stampState }); save(list)
+      set({ shards: list, currentId: next, selection: [], partSel: [], selectedFaces: [], facePick: [], past: [], future: [], notice: null, ...stampState }); save(list)
       return saveStored()
     },
 
     setMode: (mode) => edit((s) => ({ ...s, mode })),
     setOpacity: (percent) => edit((s) => withOpacity(s, percent)),
+    // Already so: the same object back, so no edit and no empty undo step.
+    setPointSize: (ticks) => edit((s) => { const n = withPointSize(s, ticks === undefined ? undefined : Math.round(ticks)); return n.extra?.pointsize === s.extra?.pointsize ? null : n }),
+    setGlow: (patch) => {
+      const { glowLast, color } = get()
+      let wrote: Glow | undefined
+      const changed = edit((s) => {
+        const had = readGlow(s.extra?.glow)
+        if (patch === null) {
+          // OFF remembers the glow it clears, a glow the shard arrived with included, so LIGHT or FOG puts it back.
+          wrote = had
+          return s.extra?.glow === undefined ? null : withGlow(s, undefined)
+        }
+        const g: Glow = { ...(had ?? { style: suggestedGlowStyle(s, color), ...glowLast }), ...patch }
+        // sno-core clears the field on a fractional value: whole ticks and whole percent only.
+        g.radius = Math.round(g.radius)
+        g.strength = Math.round(g.strength)
+        const n = withGlow(s, g)
+        wrote = readGlow(n.extra?.glow)
+        return had && wrote && had.style === wrote.style && had.radius === wrote.radius && had.strength === wrote.strength ? null : n
+      })
+      if (changed && wrote) set({ glowLast: { radius: wrote.radius, strength: wrote.strength } })
+    },
     // Already so: no edit, so no undo step that changes nothing.
     setConstrain: (c) => edit((s) => (authoredConstrainOf(s) === c ? null : withConstrain(s, c))),
+    // Already so: the same object back, so no edit and no empty undo step.
+    setBounce: (b, springboard = false) => edit((s) => { const n = withBounce(s, b, springboard); return n === s ? null : n }),
+    setAnim: (raw) => edit((s) => { const n = withAnim(s, raw).shard; return n === s ? null : n }),
     setUnit: (unit) => edit((s) => ({ ...s, unit: clampUnit(unit) })),
     // FACE works on corners it picks itself, and its panel only appears with
     // nothing else selected, so a point still held from SELECT hid FILL behind
     // it and the tool looked broken. Taking the tool clears the selection.
     // INVERT goes off with the tool too: it is a mode of SELECT and FACE, and
     // the key that shows it is only drawn there.
-    setTool: (tool) => set({ tool, facePick: [], selectedFace: null, aim: null, invert: false, ...(tool === 'face' ? { selection: [], partSel: [] } : {}) }),
+    // The tool already in hand, tapped again, changes nothing: a face held in
+    // SELECT FACES stays a face. A held face's corners go with the face, so
+    // another tool never inherits them as bare points.
+    setTool: (tool) => {
+      const st = get()
+      if (tool === st.tool) return
+      const letGo = tool === 'face' || tool === 'paint' || st.selectedFaces.length > 0
+      set({ tool, eyeEdit: false, facePick: [], selectedFaces: [], aim: null, invert: false, paintTake: false, ...(letGo ? { selection: [], partSel: [] } : {}) })
+    },
     setInvert: (on) => set({ invert: on }),
+    setBoxSelect: (on) => set({ boxSelect: on }),
+    setSelectKind: (kind) => { if (kind !== get().selectKind) set({ selectKind: kind, selection: [], partSel: [], selectedFaces: [], facePick: [] }) },
+    setPaintMode: (mode) => set({ paintMode: mode }),
+    setPaintEdge: (edge) => set({ paintEdge: edge }),
+    setPaintTake: (on) => set({ paintTake: on }),
+    holdFaces: (faces) => {
+      const s = get().current()
+      if (!s) return
+      const on = faces.filter((k) => s.faces[k])
+      set({ selectedFaces: on, selection: [...new Set(on.flatMap((k) => s.faces[k].flatMap((v) => group(s, v))))] })
+    },
+    selectAll: () => {
+      const st = get()
+      const s = st.current()
+      if (!s) return
+      if (st.tool === 'select' && st.selectKind === 'objects') { set({ partSel: [...Array(s.parts?.length ?? 0).keys()] }); return }
+      if (st.tool === 'select' && st.selectKind === 'faces') { st.holdFaces([...Array(s.faces.length).keys()]); return }
+      // Points, and outside SELECT every placed object with them, as ALL always took.
+      set({ selection: [...Array(s.vertices.length).keys()], selectedFaces: [], partSel: st.tool === 'select' ? [] : [...Array(s.parts?.length ?? 0).keys()] })
+    },
+    paintTap: (hit) => {
+      const st = get()
+      const s = st.current()
+      if (!s) return
+      const c = st.color
+      const keep = { selection: st.selection, selectedFaces: st.selectedFaces, partSel: st.partSel }
+      const face = hit.face !== undefined ? s.faces[hit.face] : undefined
+      const corners = hit.vertex !== undefined && s.vertices[hit.vertex] ? group(s, hit.vertex) : face ? [...new Set(face.flatMap((v) => group(s, v)))] : []
+      if (st.paintMode === 'all') { if (corners.length) st.colorAll(c); return }
+      if (st.paintMode === 'face') {
+        if (hit.face === undefined || !face) return
+        // EDGE: a hard seam, quietly: a tap that paints needs no line saying so.
+        if (st.paintEdge) { st.colorFaces([hit.face], c, true); return }
+        // BLEND: every vertex on the face's corners takes the color, as COLOR
+        // does for a face held, so a point stacked on a corner goes with it.
+        set({ selection: corners, selectedFaces: [hit.face] })
+        get().colorSelected(c)
+        set(keep)
+        return
+      }
+      if (corners.length === 0) return
+      // POINT takes a point only: a tap on a face's middle paints nothing, since which corner was meant is a guess.
+      if (st.paintMode === 'point' && hit.vertex === undefined) return
+      set({ selection: corners, selectedFaces: [] })
+      if (st.paintMode === 'piece') get().colorConnected(c)
+      else get().colorSelected(c)
+      set(keep)
+    },
+    takeColorAt: (hit) => {
+      const st = get()
+      const s = st.current()
+      if (!s) return
+      const keep = { selection: st.selection, selectedFaces: st.selectedFaces, partSel: st.partSel }
+      if (hit.vertex !== undefined && s.vertices[hit.vertex]) set({ selection: [hit.vertex], selectedFaces: [] })
+      else if (hit.face !== undefined && s.faces[hit.face]) set({ selection: [], selectedFaces: [hit.face] })
+      else return
+      get().sampleColor()
+      set(keep)
+    },
     setExtent: (extent) => {
       const s = get().current()
       if (!s) return
@@ -1038,7 +1545,13 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     },
 
     setStampMode: (stampMode) => set({ stampMode }),
-    setStampObject: (stampObject) => set({ stampObject, stampMode: 'object' }),
+    setStampObject: (stampObject) => {
+      // A look copy picked to stamp is stored now: whatever it is stamped into names a shard that stays.
+      const me = you()
+      const ref = stampObject?.ref
+      if (me && ref && ref[0] === 'a' && ref[1].startsWith(`33331:${me}:`)) get().keepCopy(ref[1].slice(`33331:${me}:`.length))
+      set({ stampObject, stampMode: 'object' })
+    },
 
     placeObject: (at, self) => {
       const { stampObject, stampFacing } = get()
@@ -1048,7 +1561,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       if (self && stampObject.ref[1] === self) { set({ notice: 'An object cannot place itself.' }); return }
       const { shard } = addPart(s, stampObject.ref, { at: [...at] as P3, turn: [0, (90 * stampFacing) % 360, 0], step: 0 })
       edit(() => shard, `"${stampObject.name}" placed. It is one object: SELECT it to move, turn or copy it.`)
-      set({ selection: [], partSel: [], selectedFace: null, facePick: [] })
+      set({ selection: [], partSel: [], selectedFaces: [], facePick: [] })
     },
 
     placeStamp: (at) => {
@@ -1070,7 +1583,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
         return k < s.faces.length ? k++ : -1
       })
       edit(() => ({ ...seamsFollow(s, res.shard, from), mode }), notice)
-      set({ selection: [], partSel: [], selectedFace: null, facePick: [] })
+      set({ selection: [], partSel: [], selectedFaces: [], facePick: [] })
     },
 
     addVertex: (p) => {
@@ -1083,17 +1596,17 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
         added = s.vertices.length
         return { ...s, vertices: [...s.vertices, vertexAt(p, [...get().color] as ShardVertex['c'])] }
       })
-      if (added >= 0) set({ selection: group(get().current()!, added), selectedFace: null })
+      if (added >= 0) set({ selection: group(get().current()!, added), selectedFaces: [] })
     },
 
     selectVertex: (index) => {
       const s = get().current()
-      set({ selection: index === null || !s ? [] : group(s, index), partSel: [], selectedFace: null })
+      set({ selection: index === null || !s ? [] : group(s, index), partSel: [], selectedFaces: [] })
     },
 
     selectPart: (index) => {
       const s = get().current()
-      set({ partSel: index === null || !s?.parts?.[index] ? [] : [index], selection: [], selectedFace: null })
+      set({ partSel: index === null || !s?.parts?.[index] ? [] : [index], selection: [], selectedFaces: [] })
     },
 
     togglePart: (index) => {
@@ -1101,7 +1614,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       if (!s?.parts?.[index]) return
       const { partSel, invert } = get()
       // Under INVERT a tap only takes an object out; one not in hand is left alone.
-      set({ partSel: nextSelection(partSel, [index], invert || partSel.includes(index)), selectedFace: null })
+      set({ partSel: nextSelection(partSel, [index], invert || partSel.includes(index)), selectedFaces: [] })
     },
 
     setPartSelection: (indices) => {
@@ -1115,7 +1628,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       const { selection, invert } = get()
       // The whole point goes in, or what is held of it comes out. Under INVERT
       // a tap only takes a point out; one not in hand is left alone, never added.
-      set({ selection: tapSelection(s, selection, index, invert), selectedFace: null })
+      set({ selection: tapSelection(s, selection, index, invert), selectedFaces: [] })
     },
 
     setSelection: (indices) => {
@@ -1124,7 +1637,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       // Only what is new to the selection is widened to whole points
       // (settleSelection): a box growing or a pan putting it back rewrites
       // the held vertices as they are.
-      set({ selection: settleSelection(s, get().selection, indices), selectedFace: null })
+      set({ selection: settleSelection(s, get().selection, indices), selectedFaces: [] })
     },
 
     selectConnected: () => {
@@ -1133,47 +1646,79 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       if (!s || selection.length === 0) return
       const out = connectedTo(s, selection)
       const grew = out.length > selection.length
-      set({ selection: out, selectedFace: null, notice: grew ? `${new Set(out.map((i) => pointKey(ticksOf(s.vertices[i])))).size} points connected by faces.` : 'Nothing else is joined to the selection by faces.' })
+      set({ selection: out, selectedFaces: [], notice: grew ? `${new Set(out.map((i) => pointKey(ticksOf(s.vertices[i])))).size} points connected by faces.` : 'Nothing else is joined to the selection by faces.' })
     },
 
     selectFace: (index) => {
-      if (index === null) { set({ selectedFace: null }); return }
+      if (index === null) { set({ selectedFaces: [] }); return }
       const s = get().current()
       const f = s?.faces[index]
       if (!s || !f) return
       // A face is its corners: picking it puts them in the selection (every
       // vertex on each corner's point, as a point tap does), so the pad moves
-      // and turns the face as one thing. Picking a face whose corners are all
-      // in hand already takes them back out (arkinox, 2026-10-10: selecting a
-      // face should let you move it; before, it emptied the selection). Under
-      // INVERT a tap on a face takes its corners out whatever was held, and
-      // selects no face: it is taking away, not picking.
+      // and turns the faces in hand as one thing. Every face tapped stays in
+      // hand and lit, in the order tapped (arkinox, 2026-10-31: "Every face I
+      // tap should remain highlighted"). A tap on one in hand lets it go, and
+      // takes back the corners no other face in hand still stands on. Under
+      // INVERT a tap on a face takes its corners out whatever was held and
+      // selects no face: it is taking away, not picking, and a face that loses
+      // a corner to it is no longer whole in hand, so it goes too.
       const corners = [...new Set(f.flatMap((v) => group(s, v)))]
-      const { selection: sel, invert } = get()
-      const release = invert || corners.every((i) => sel.includes(i))
-      set({
-        selectedFace: release ? null : index,
-        selection: nextSelection(sel, corners, release),
-      })
+      const { selection: sel, invert, selectedFaces: held } = get()
+      if (invert) {
+        const gone = new Set(corners)
+        set({
+          selectedFaces: held.filter((k) => !s.faces[k]?.some((v) => group(s, v).some((i) => gone.has(i)))),
+          selection: nextSelection(sel, corners, true),
+        })
+        return
+      }
+      if (held.includes(index)) {
+        const rest = held.filter((k) => k !== index)
+        const kept = new Set(rest.flatMap((k) => (s.faces[k] ?? []).flatMap((v) => group(s, v))))
+        set({ selectedFaces: rest, selection: nextSelection(sel, corners.filter((i) => !kept.has(i)), true) })
+        return
+      }
+      set({ selectedFaces: [...held, index], selection: nextSelection(sel, corners, false) })
     },
 
     deleteSelectedFace: () => {
-      const { selectedFace } = get()
-      if (selectedFace === null) return
-      get().removeFace(selectedFace)
-      set({ selectedFace: null })
+      const { selectedFaces } = get()
+      if (selectedFaces.length === 0) return
+      const gone = new Set(selectedFaces)
+      edit((s) => {
+        const kept = s.faces.map((_, i) => i).filter((i) => !gone.has(i))
+        if (kept.length === s.faces.length) return null
+        return seamsFollow(s, { ...s, faces: kept.map((i) => s.faces[i]) }, kept)
+      })
+      set({ selectedFaces: [] })
     },
 
     flipSelectedFace: () => {
-      const { selectedFace } = get()
-      if (selectedFace === null) return
-      edit((s) => (s.faces[selectedFace] ? flipFace(s, selectedFace) : null), 'Face turned round.')
+      const { selectedFaces } = get()
+      if (selectedFaces.length === 0) return
+      edit((s) => {
+        const held = selectedFaces.filter((k) => s.faces[k])
+        return held.length ? held.reduce((m, k) => flipFace(m, k), s) : null
+      }, selectedFaces.length === 1 ? 'Face turned round.' : `${selectedFaces.length} faces turned round.`)
     },
 
     flipSelectedSurface: () => {
-      const { selectedFace } = get()
-      if (selectedFace === null) return
-      edit((s) => (s.faces[selectedFace] ? flipSurface(s, selectedFace) : null), 'Surface turned round.')
+      const { selectedFaces } = get()
+      if (selectedFaces.length === 0) return
+      edit((s) => {
+        // Two faces in hand on one surface turn it once: a second turn would
+        // put it back. The whole surface is marked, whether or not a face of
+        // it changed: one wound the other way already agrees after the turn.
+        const done = new Set<number>()
+        let m = s
+        for (const k of selectedFaces) {
+          if (!m.faces[k] || done.has(k)) continue
+          for (const i of surfaceOf(m.faces, k)) done.add(i)
+          m = flipSurface(m, k)
+        }
+        return m === s ? null : m
+      }, selectedFaces.length === 1 ? 'Surface turned round.' : 'Surfaces turned round.')
     },
 
     autoWind: () => {
@@ -1192,10 +1737,14 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
      * looks like, the average of its corners, so turning one face hard leaves
      * every other face looking exactly as it did.
      */
-    colorFace: (index, c) => {
+    colorFace: (index, c) => { get().colorFaces([index], c) },
+
+    colorFaces: (indices, c, quiet = false) => {
       set({ color: clampColor(c) })
+      get().rememberColor(rgbToHex(clampColor(c)))
       edit((s) => {
-        if (!s.faces[index]) return null
+        const on = indices.filter((k) => s.faces[k])
+        if (on.length === 0) return null
         const current = s.facecolors && s.facecolors.length === s.faces.length
           ? s.facecolors
           : s.faces.map((f) => {
@@ -1206,9 +1755,9 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
             return sum.map((n) => n / 3) as [number, number, number]
           })
         const facecolors = current.slice()
-        facecolors[index] = clampColor(c)
+        for (const k of on) facecolors[k] = clampColor(c)
         return { ...s, facecolors }
-      }, 'That face keeps its own color now.')
+      }, quiet ? null : indices.length === 1 ? 'That face keeps its own color now.' : `${indices.length} faces keep their own colors now.`)
     },
 
     clearFaceColors: () => {
@@ -1287,14 +1836,16 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     },
 
     sampleColor: () => {
-      const { selection, selectedFace, tool } = get()
+      const { selection, selectedFaces, tool } = get()
       const s = get().current()
       if (!s) return
+      // The face tapped last, of those in hand.
+      const selectedFace = selectedFaces.length ? selectedFaces[selectedFaces.length - 1] : null
       // A selected face is sampled as a face whenever it is in hand: in FACE
       // its corners are selected with it, so the selection is never empty
       // there (arkinox, 2026-10-12: "the face tool has no sample dropper for
       // the selected face; if I have a face with a seam I will want to sample it").
-      const asFace = selectedFace !== null && (selection.length === 0 || tool === 'face')
+      const asFace = selectedFace !== null && (selection.length === 0 || tool === 'face' || get().selectKind === 'faces')
       const corners = asFace ? s.faces[selectedFace!] ?? [] : selection.length === 1 ? selection : []
       // A face with a hard color (SEAM) shows that color, so that is what the
       // dropper takes. Face colors are all or none (sno-core shards): once one
@@ -1313,6 +1864,36 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       const palette = get().palette.filter((x) => x !== hex.toLowerCase())
       set({ palette }); savePalette(palette)
     },
+
+    setEyeEdit: (on) => {
+      if (get().eyeEdit === on) return
+      // The eye in hand is the only thing held (UI A): what was held lets go.
+      set(on ? { eyeEdit: true, selection: [], partSel: [], selectedFaces: [], facePick: [], aim: null } : { eyeEdit: false })
+    },
+
+    moveEye: (axis, delta) => {
+      const s = get().current()
+      if (!s || delta === 0) return false
+      // From the eye WALK uses: one past the size limit is pulled in first, so a move back toward the middle is never refused.
+      const at = usedBenchEye(s)
+      // Onto the snap's grid on the way: an eye off it (AUTO, CENTER) lands on
+      // the next grid line in the move's direction, then steps along the grid.
+      const grid = get().step()
+      const to = at[axis] + delta
+      at[axis] = grid > 0 ? (delta > 0 ? Math.floor(to / grid) : Math.ceil(to / grid)) * grid + 0 : to
+      // No farther than WALK carries it: the avatar size limit at true scale (avatarEye eyeReachTicks).
+      const reach = eyeReachTicks(s)
+      if (at.some((t) => Math.abs(t) > reach)) { set({ notice: 'The eye can go no further that way: the avatar size limit.' }); return false }
+      return edit((m) => withEye(m, flipEyeZ(at)))
+    },
+
+    // No edit when the field would read and write the same; a malformed one is taken out.
+    setEye: (eye) => edit((m) => {
+      const next = withEye(m, eye)
+      return JSON.stringify(m.extra?.[EYE_FIELD]) === JSON.stringify(next.extra?.[EYE_FIELD]) ? null : next
+    }),
+    // Already so: no edit, so no undo step that changes nothing.
+    setFace: (face) => edit((m) => (drawnFace(m) === face ? null : withFace(m, face))),
 
     moveSelected: (axis, delta) => {
       const { selection, partSel } = get()
@@ -1390,25 +1971,31 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     },
 
     colorSelected: (c) => {
-      const { selection, selectedFace } = get()
+      const { selection, selectedFaces } = get()
       set({ color: clampColor(c) })
       get().rememberColor(rgbToHex(clampColor(c)))
-      // With no points selected, a selected face takes the color for its corners.
-      const face = selection.length === 0 && selectedFace !== null ? get().current()?.faces[selectedFace] : undefined
-      if (selection.length === 0 && !face) return
+      // With no points selected, the selected faces take the color for their corners.
+      const held = get().current()?.faces
+      const corners = selection.length === 0 && held ? selectedFaces.flatMap((k) => held[k] ?? []) : []
+      if (selection.length === 0 && corners.length === 0) return
       edit((s) => {
-        const chosen = new Set((face ?? selection).filter((i) => s.vertices[i]))
+        const chosen = new Set((corners.length ? corners : selection).filter((i) => s.vertices[i]))
         if (chosen.size === 0) return null
         const vertices = s.vertices.slice()
         for (const i of chosen) vertices[i] = { ...vertices[i], c: clampColor(c) }
-        return { ...s, vertices }
+        // The faces in hand, or with none in hand, the faces standing wholly on the points.
+        const heldFaces = new Set(selectedFaces)
+        const on = heldFaces.size > 0 ? (k: number): boolean => heldFaces.has(k) : (k: number): boolean => s.faces[k].every((v) => chosen.has(v))
+        return { ...s, vertices, ...seamsPoured(s, on, clampColor(c)) }
       })
     },
 
     colorAll: (c) => {
       set({ color: clampColor(c) })
       get().rememberColor(rgbToHex(clampColor(c)))
-      edit((s) => ({ ...s, vertices: s.vertices.map((v) => ({ ...v, c: clampColor(c) })) }))
+      // The globe sits beside the other buckets on a phone, and a mistap flattens a whole piece: say so, and say the way back.
+      const seamed = (get().current()?.faces.length ?? 0) > 0 && get().current()?.facecolors?.length === get().current()?.faces.length
+      edit((s) => ({ ...s, vertices: s.vertices.map((v) => ({ ...v, c: clampColor(c) })), ...seamsPoured(s, () => true, clampColor(c)) }), seamed ? 'Every face took the color. UNDO brings the seams back.' : null)
     },
 
     // The whole piece you are pointing at, without having to select it first.
@@ -1425,7 +2012,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
         if (reach.length === 0) return null
         const chosen = new Set(reach)
         const vertices = s.vertices.map((v, i) => (chosen.has(i) ? { ...v, c: clampColor(c) } : v))
-        return { ...s, vertices }
+        return { ...s, vertices, ...seamsPoured(s, (k) => s.faces[k].every((v) => chosen.has(v)), clampColor(c)) }
       })
     },
 
@@ -1444,7 +2031,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
         const faces = kept.map((i) => s.faces[i].map((v) => remap.get(v) as number) as [number, number, number])
         return seamsFollow(s, { ...s, vertices: s.vertices.filter((_, i) => !gone.has(i)), faces }, kept)
       })
-      set({ selection: [], partSel: [], selectedFace: null, facePick: [] })
+      set({ selection: [], partSel: [], selectedFaces: [], facePick: [] })
     },
 
     weld: () => {
@@ -1455,7 +2042,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       if (!res) { set({ notice: 'Nothing to weld: no two points stand on the same spot.' }); return }
       const n = res.shard.vertices.length
       edit(() => res.shard, `${res.merged} point${res.merged === 1 ? '' : 's'} welded${res.colored ? ', and the faces keep their own colors now' : ''}. ${n} vert${n === 1 ? 'ex' : 'ices'}.`)
-      set({ selection: [], partSel: [], selectedFace: null, facePick: [] })
+      set({ selection: [], partSel: [], selectedFaces: [], facePick: [] })
     },
 
     cutSelection: () => {
@@ -1516,11 +2103,12 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       const at = facePick.findIndex((i) => pointKey(ticksOf(s.vertices[i])) === key)
       // Tapping the first corner again closes the loop.
       if (at === 0 && facePick.length >= 3) { get().fill(); return }
-      if (at >= 0) { set({ facePick: facePick.filter((_, i) => i !== at), selectedFace: null }); return }
-      set({ facePick: [...facePick, index], selectedFace: null })
+      if (at >= 0) { set({ facePick: facePick.filter((_, i) => i !== at), selectedFaces: [] }); return }
+      set({ facePick: [...facePick, index], selectedFaces: [] })
     },
 
     clearFacePick: () => set({ facePick: [] }),
+    unpickLast: () => set((s) => ({ facePick: s.facePick.slice(0, -1) })),
 
     fill: () => {
       const s = get().current()
@@ -1590,7 +2178,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     }),
 
     // Everything drawn goes, placements included (their refs with them); undo brings it back.
-    clearShard: () => { edit((s) => { const { refs: _r, parts: _p, facecolors: _f, ...rest } = s; return { ...rest, vertices: [], faces: [] } }); set({ selection: [], partSel: [], selectedFace: null, facePick: [] }) },
+    clearShard: () => { edit((s) => { const { refs: _r, parts: _p, facecolors: _f, ...rest } = s; return { ...rest, vertices: [], faces: [] } }); set({ selection: [], partSel: [], selectedFaces: [], facePick: [] }) },
 
     undo: () => {
       const { past, shards, currentId } = get()
@@ -1598,7 +2186,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       if (i < 0 || !past.length) return
       const list = shards.slice()
       list[i] = past[past.length - 1]
-      set({ shards: list, past: past.slice(0, -1), future: [...get().future, shards[i]], selection: [], partSel: [], selectedFace: null, facePick: [], notice: null })
+      set({ shards: list, past: past.slice(0, -1), future: [...get().future, shards[i]], selection: [], partSel: [], selectedFaces: [], facePick: [], notice: null })
       save(list)
     },
 
@@ -1608,7 +2196,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       if (i < 0 || !future.length) return
       const list = shards.slice()
       list[i] = future[future.length - 1]
-      set({ shards: list, future: future.slice(0, -1), past: [...get().past, shards[i]], selection: [], partSel: [], selectedFace: null, facePick: [], notice: null })
+      set({ shards: list, future: future.slice(0, -1), past: [...get().past, shards[i]], selection: [], partSel: [], selectedFaces: [], facePick: [], notice: null })
       save(list)
     },
 
@@ -1623,7 +2211,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       // Text nobody signed: nothing it carries is trusted (lib/carried.ts noTable).
       const s = noTable(read)
       const list = [...get().shards, s]
-      set({ shards: list, currentId: s.id, selection: [], partSel: [], selectedFace: null, facePick: [], past: [], future: [], notice: null })
+      set({ shards: list, currentId: s.id, selection: [], partSel: [], selectedFaces: [], facePick: [], past: [], future: [], notice: null })
       save(list)
       return s.id
     },
@@ -1679,27 +2267,176 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       // tool) keeps the word the bench's author chose: an OFF or ALL set here
       // survives the update (DECK-0003 §1.12). A word in the file wins.
       const chose = chosenConstrainOf(old)
-      const walk = chose && !chosenConstrainOf(next) ? withConstrain(next, chose) : next
+      const walled = chose && !chosenConstrainOf(next) ? withConstrain(next, chose) : next
+      // BOUNCE likewise (decided 2026-11-10 to match CONSTRAIN, review of #653; not an owner ruling): a file that
+      // reads as no bounce (absent or malformed) keeps the bench's, bounce
+      // and springboard as a pair. A valid bounce in the file wins, with the
+      // file's own springboard: never the file's bounce with the bench's
+      // springboard.
+      const benchBounce = bounceOf(old)
+      const walk = benchBounce !== 0 && bounceOf(walled) === 0 ? withBounce(walled, benchBounce, springboardOf(old)) : walled
       const list = shards.slice()
       list[i] = walk
       // On the bench it is an edit like any other: UNDO brings the old one back.
-      if (id === currentId) set({ shards: list, past: [...past.slice(-(HISTORY - 1)), old], future: [], selection: [], partSel: [], selectedFace: null, facePick: [] })
+      if (id === currentId) set({ shards: list, past: [...past.slice(-(HISTORY - 1)), old], future: [], selection: [], partSel: [], selectedFaces: [], facePick: [] })
       else set({ shards: list })
       save(list)
       return saveStored().then((ok) => (ok ? 'saved' : 'unsaved'))
     },
 
     current: () => get().shards.find((s) => s.id === get().currentId) ?? null,
+
+    enterPart: async (index, fetch) => {
+      const parent = get().current()
+      const part = parent?.parts?.[index]
+      const ref = part ? parent?.refs?.[part.ref] : undefined
+      if (!parent || !part || !ref || ref[0] !== 'a') return
+      const me = you()
+      const open = (id: string, notice: string | null, pending?: PartFrame['pending']): void => {
+        const { past, future, backStack } = get()
+        set({ backStack: [...backStack, { id: parent.id, child: id, past, future, ...(pending ? { pending } : {}) }], currentId: id, past: [], future: [], selection: [], partSel: [], selectedFaces: [], facePick: [], turnPivot: null, notice })
+      }
+      const table = parent.objects as Record<string, unknown> | undefined
+      const inTable = !!table && Object.prototype.hasOwnProperty.call(table, ref[1])
+      const a = parseAddress(ref[1])
+      // A shard of yours in the workshop, no relay hint: edited as itself, in place.
+      if (!inTable && !ref[2] && a && a.kind === 33331 && me && a.pubkey === me) {
+        const own = get().shards.find((s) => s.id === a.d)
+        if (own) { open(own.id, null); return }
+      }
+      // Otherwise your copy: of the table's entry, or of the public object.
+      let model: ShardModel | null = null
+      if (inTable) {
+        // An entry places what the same table holds (DECK-0003 §1.10, one table at
+        // the root): the copy carries those entries in a table of its own.
+        const read = fromPayload(table![ref[1]], ref[1])
+        if (read) {
+          const carried: Record<string, unknown> = {}
+          const queue = addressesIn(table![ref[1]])
+          while (queue.length) {
+            const k = queue.shift()!
+            if (k === ref[1] || carried[k] !== undefined || !Object.prototype.hasOwnProperty.call(table, k)) continue
+            carried[k] = table![k]
+            queue.push(...addressesIn(table![k]))
+          }
+          const { objects: _none, ...bare } = read
+          void _none
+          model = { ...bare, ...(Object.keys(carried).length ? { objects: carried as ShardModel['objects'] } : {}), author: me ?? undefined }
+        }
+      } else {
+        const answer = fetch ? await fetch(ref).catch(() => null) : null
+        const payload = answer instanceof Fetched ? answer.payload : answer
+        const read = payload == null ? null : fromPayload(payload, ref[1])
+        // The bench moved on while the relays answered: nothing is opened.
+        if (get().current() !== parent) return
+        // What it carries comes along, keyed under you (as a copy taken from a chest is).
+        const author = answer instanceof Fetched ? answer.pubkey : a?.pubkey ?? null
+        model = read ? rekeyCarried({ ...read, author: author ?? undefined }, me) : null
+      }
+      if (!model) {
+        set({ notice: inTable ? 'That part is carried here, but it is not one the format can read.' : 'That object did not come back from the relays, so there is nothing to open.' })
+        return
+      }
+      const credit: Credit | undefined = !inTable && a && a.pubkey !== me ? { address: ref[1], ...(ref[2] ? { relay: ref[2] } : {}) } : undefined
+      const made = get().importShard(model, credit)
+      // Marked as only looked at, so it is not stored until it changes (untouchedLookCopy).
+      const copy = { ...get().shards.find((s) => s.id === made)! }
+      ;(copy as ShardModel & { lookCopy?: string }).lookCopy = bornOf(copy)
+      const marked = get().shards.map((s) => (s.id === made ? copy : s))
+      set({ shards: marked })
+      save(marked)
+      const copyId = made
+      open(copyId, `Your copy of ${copy.name}. ${parent.name} uses it once you change it${inTable ? '' : '; the public object stays as it is'}.`, { ref: part.ref, address: ref[1], copyId, fromTable: inTable, born: bornOf(copy) })
+    },
+
+    takeShard: async (model, fetch) => {
+      const me = you()
+      const author = model.author ?? null
+      let parent: ShardModel = model
+      const pieces: ShardModel[] = []
+      let missing = 0
+      try {
+        if (me && author) {
+          const plan = await planPieces(model, author, async (address) => {
+            const payload = await fetch(['a', address]).catch(() => null)
+            // Only a sealed piece of this build (opened with its bag's key); a public object stays a link.
+            if (!pieceWasOpened(address)) { if (payload == null && pieceKeysFor(address).length > 0) missing++; return undefined }
+            return payload && typeof payload === 'object' && !Array.isArray(payload) ? (payload as Record<string, unknown>) : undefined
+          }, () => uuid(), false)
+          // Another identity signed in while the relays answered: the copy goes in without the pieces, never under the old key.
+          if (you() !== me) throw new Error('switched')
+          if (plan.pieces.length > 0) {
+            // Each piece a shard of yours, under the id its address now names.
+            const names = new Map(plan.pieces.map((p) => [p.address, `33331:${me}:${p.d}`]))
+            const point = (refs: unknown): Ref[] | undefined => (Array.isArray(refs) ? (refs as Ref[]).map((r) => (r[0] === 'a' && names.has(r[1]) ? (['a', names.get(r[1])!] as Ref) : r)) : undefined)
+            parent = { ...plan.parent, refs: point(plan.parent.refs) }
+            for (const p of plan.pieces) {
+              const read = fromPayload(JSON.parse(p.payload), p.d)
+              if (!read) { missing++; continue }
+              const refs = point(read.refs)
+              // Marked as come sealed: PUBLISH asks before it goes out in the clear (lib/carried.ts cameSealed).
+              pieces.push(markCameSealed(takeIntoKeeping({ ...read, ...(refs ? { refs } : {}), id: p.d, author }, me)))
+            }
+          }
+        }
+      } catch {
+        // The copy alone, as TAKE always made it: nothing half done.
+        parent = model
+        pieces.length = 0
+        missing = 0
+      }
+      // Taken by whoever tapped: one signed in since gets nothing in their workshop from it.
+      if (you() !== me) return { id: '', pieces: 0, missing: 0 }
+      for (const piece of pieces) get().importShard(piece, undefined, piece.id)
+      const id = get().importShard(markCameSealed(takeIntoKeeping(parent, me)))
+      if (missing > 0) useToast.getState().show({ label: 'PART OF IT STAYED BEHIND', meta: `${missing === 1 ? 'One part' : `${missing} parts`} of this shard could not be opened here, so your copy shows ${missing === 1 ? 'a placeholder' : 'placeholders'} there.`, mark: 'build' })
+      return { id, pieces: pieces.length, missing }
+    },
+
+    keepCopy: (id) => {
+      const list = get().shards
+      const i = list.findIndex((s) => s.id === id)
+      if (i < 0 || (list[i] as Marked).lookCopy === undefined) return
+      const next = list.slice()
+      next[i] = unmarked(list[i])
+      set({ shards: next })
+      save(next)
+    },
+
+    back: () => {
+      const stack = get().backStack
+      const top = stack[stack.length - 1]
+      if (!top) return
+      // Another shard came onto the bench some other way: there is no level to go
+      // back up, and every level is left as picking a shard leaves it.
+      if (get().currentId !== top.child) {
+        const left = leaveAll(get().currentId)
+        if (left) save(left)
+        set({ ...(left ? { shards: left } : {}), backStack: [] })
+        return
+      }
+      const list = get().shards.slice()
+      const frame = settle(list, top, null)
+      // The shard to go back to was deleted meanwhile: the way in ends here, on what is shown.
+      if (!list.some((s) => s.id === top.id)) { save(list); set({ shards: list, backStack: [] }); return }
+      if (list.length !== get().shards.length || list.some((s, i) => s !== get().shards[i])) save(list)
+      set({ shards: list, backStack: stack.slice(0, -1), currentId: frame.id, past: frame.past, future: frame.future, selection: [], partSel: [], selectedFaces: [], facePick: [], turnPivot: null, notice: null })
+    },
   }
 })
 
 attach({
-  shards: () => useWorkshop.getState().shards,
-  replace: (list) => useWorkshop.setState((s) => ({
-    shards: list,
-    // A shard that is gone cannot stay the one on the bench.
-    currentId: s.currentId !== null && !list.some((x) => x.id === s.currentId) ? null : s.currentId,
-  })),
+  shards: () => kept(useWorkshop.getState().shards),
+  replace: (given) => useWorkshop.setState((s) => {
+    // A copy only looked at is in no stored list: it stays, as it was (untouchedLookCopy).
+    const looks = s.shards.filter((x) => untouchedLookCopy(x) && !given.some((g) => g.id === x.id))
+    const list = looks.length ? [...given, ...looks] : given
+    return {
+      shards: list,
+      // A shard that is gone cannot stay the one on the bench.
+      currentId: s.currentId !== null && !list.some((x) => x.id === s.currentId) ? null : s.currentId,
+    }
+  }),
   report: (message) => { if (useWorkshop.getState().storageError !== message) useWorkshop.setState({ storageError: message }) },
   protect: () => (useWorkshop.getState().open ? useWorkshop.getState().currentId : null),
   notice: (message) => useWorkshop.setState({ notice: message }),

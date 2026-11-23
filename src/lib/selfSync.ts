@@ -21,17 +21,35 @@
  * answer was "nobody could say" and the connection shows signs of life: the
  * network coming back, the tab returning, a dead socket replaced
  * (relay.ts onResume), or the live subscription below reaching its EOSE.
+ *
+ * Kept caught up (owner, 2026-11-21: "when I go to my tablet and refresh, it
+ * doesn't immediately get the movement chain events I did on my phone"):
+ *
+ * | When | What is asked | Cost |
+ * |---|---|---|
+ * | load, identity switch | the self-check: spawns and the newest page of the chain, then every page down to what this device holds (chains.ts gatherChain); the HUD says CHECKING YOUR CHAIN meanwhile, and a move waits for it (useCyberspace confirmHead) | one check |
+ * | the tab shown or focused, the network back, a dead socket replaced | the chain from the newest event the relays hold that this device has (the head check's question), paged the same way | one ask, at most every CATCH_UP_GAP_MS |
+ * | another device publishes | the live watch delivers it (chains.ts watchOwnChain: no `since`, so moves signed hours ago while LOCAL and published now arrive too); one that does not link to the chain in hand asks the relays for what lies between | nothing per step |
+ *
+ * None of it ever signs anything. Every signature checks the head first
+ * (confirmHead): from the standing subscriptions when a relay is current and
+ * nothing it delivered is missing here (lib/ownWatch.ts, owner's ruling of
+ * 2026-11-22), and otherwise by asking the relays, so a catch-up that is late
+ * or fails costs a moment of a stale view, never a fork.
  */
 
-import { askChainEvents, fetchChainEvents, watchAuthor } from './chains'
+import { askChainEvents, fetchChainEvents } from './chains'
+import { outsideChain, reopenOwnWatch, retryWaitingOwnWatch, startOwnWatch } from './ownWatch'
 import { decideSelfCheck } from './chainHold'
-import { onResume } from './relay'
-import { newestSpawn, type NostrEvent } from './events'
+import { onCanonicalSignIn, onResume, retryFailedAuth } from './relay'
+import { chainHolders } from './chainHolders'
+import { signerHeld } from './authOpen'
+import { actionLink, newestSpawn, type NostrEvent } from './events'
 import type { RelayAnswer } from './relayOutcome'
 import { requeueForCanonical } from './publisher'
 import { normalizeURL } from 'nostr-tools/utils'
-import { DEFAULT_RELAY } from '../store/useRelays'
-import { useCyberspace } from '../store/useCyberspace'
+import { DEFAULT_RELAY, READ_FALLBACK_RELAY } from '../store/useRelays'
+import { newestOnRelays, signedOnThisPage, useCyberspace } from '../store/useCyberspace'
 
 let close: (() => void) | null = null
 let started = false
@@ -73,10 +91,17 @@ async function check(pubkey: string): Promise<void> {
   checking = pubkey
   again = false
   useCyberspace.getState().applySelfCheck(pubkey, { status: 'checking' })
+  // Only the identity's first look on this page is CHECKING YOUR CHAIN and
+  // holds a move: a recheck while the relays stay silent (every resume, every
+  // dead probe) leaves CHAIN NOT CHECKED up until one answers.
+  const first = useCyberspace.getState().chainSync?.pubkey !== pubkey
+  if (first) setSync(pubkey, 'checking')
   try {
     const answers = await askChainEvents(pubkey, knownGenesis(pubkey), knownEvents(pubkey))
     if (useCyberspace.getState().identity.pubkey !== pubkey) return
-    useCyberspace.getState().applySelfCheck(pubkey, decideSelfCheck(answers, DEFAULT_RELAY, online()))
+    const verdict = decideSelfCheck(answers, DEFAULT_RELAY, online(), checkHolders(pubkey))
+    useCyberspace.getState().applySelfCheck(pubkey, verdict)
+    setSync(pubkey, verdict.status === 'unknown' ? 'unreachable' : 'done')
     requeueMissingOnCanonical(pubkey, answers)
   } catch {
     // The query reports rather than throws; anything that escapes is a
@@ -84,20 +109,128 @@ async function check(pubkey: string): Promise<void> {
     if (useCyberspace.getState().identity.pubkey === pubkey) {
       useCyberspace.getState().applySelfCheck(pubkey, { status: 'unknown', cause: online() ? { kind: 'unreachable', reason: 'query failed' } : { kind: 'offline' } })
     }
+    setSync(pubkey, 'unreachable')
   } finally {
     if (checking === pubkey) checking = null
+    // A check that was not taken in (an identity switch) leaves no CHECKING behind.
+    const s = useCyberspace.getState()
+    if (s.chainSync?.pubkey === pubkey && s.chainSync.status === 'checking') setSync(pubkey, 'unreachable')
     if (again) { again = false; recheckIfUnknown() }
+    if (catchAgain) { catchAgain = false; catchUp('again') }
   }
 }
 
+/** What the HUD and a waiting move read about the check (store chainSync). */
+function setSync(pubkey: string, status: 'checking' | 'done' | 'unreachable'): void {
+  const cur = useCyberspace.getState().chainSync
+  if (cur?.pubkey === pubkey && cur.status === status) return
+  useCyberspace.setState({ chainSync: { pubkey, status } })
+}
+
+/** The least time between two catch-ups that a tab return or a focus asks for. */
+export const CATCH_UP_GAP_MS = 3000
+/** A catch-up out right now. */
+let catching = false
+/** One was asked for while a check or a catch-up was out: it runs once that one ends. */
+let catchAgain = false
+let lastCatchUp = -Infinity
+/** Catch-ups in a row that got no answer: each doubles the gap before the next (to 16 times CATCH_UP_GAP_MS). */
+let failures = 0
+/** A catch-up put off to the end of the gap, at most one. */
+let later: ReturnType<typeof setTimeout> | null = null
+
 /**
- * Published events of this device's chain that the canonical relay, asked
- * just now, does not hold: another relay took them and the canonical relay
- * never did, and a reload forgot that it still had to (verification of
- * #236, finding 3). They are sent to it again in the background. They are
- * never dropped from this device's chain for it: the chain this device holds
- * stays the chain, and the canonical relay is brought up to it. Nothing is
- * sent when the canonical relay did not answer, or when its newest spawn is
+ * Why a catch-up was asked for: `gap` is a live event that did not link to
+ * the chain in hand, `again` one asked for while another was out. Every
+ * reason is held to one per CATCH_UP_GAP_MS (doubled after each that got
+ * no answer); a gap or a resume asked inside it runs once at its end,
+ * since it may be about something new. A focus inside it is dropped: the
+ * last catch-up answered it.
+ */
+export type CatchUpReason = 'focus' | 'resume' | 'gap' | 'again'
+
+/**
+ * Ask the relays for the chain from the newest event they hold that this
+ * device has (the head check's question, paged the same way: chains.ts
+ * gatherChain) and fold in what is newer, so the position, the chip and the
+ * scene go to the true head without a move. Never signs; a fork against
+ * unpublished moves raises the diverged-branch prompt (adoptChain). One at a
+ * time, and nothing while the self-check is out, which asks the same
+ * question already.
+ */
+export function catchUp(reason: CatchUpReason = 'focus'): void {
+  const s = useCyberspace.getState()
+  const pubkey = s.identity.pubkey
+  // One out already answers a focus; a gap or a resume may be about something
+  // newer than its question, so it is asked once more when that one ends.
+  if (checking === pubkey || catching) { if (reason !== 'focus') catchAgain = true; return }
+  // No chain here yet: the question is the self-check's, asked again when it could not say.
+  if (s.events.length === 0) { recheckIfUnknown(); return }
+  const now = Date.now()
+  const gap = CATCH_UP_GAP_MS * 2 ** Math.min(failures, 4)
+  if (now - lastCatchUp < gap) {
+    if (reason !== 'focus' && later === null) later = setTimeout(() => { later = null; catchUp('again') }, gap - (now - lastCatchUp))
+    return
+  }
+  lastCatchUp = now
+  catching = true
+  const since = newestOnRelays(s.events, s.published)
+  void fetchChainEvents(pubkey, knownGenesis(pubkey), knownEvents(pubkey), since)
+    .then((events) => {
+      // Nothing back at all is no answer: a relay holding this chain sends
+      // at least the event `since` was taken from.
+      failures = events.length === 0 && since !== undefined ? failures + 1 : 0
+      if (useCyberspace.getState().identity.pubkey !== pubkey) return
+      useCyberspace.getState().adoptChain(events)
+      const sync = useCyberspace.getState().chainSync
+      if (failures === 0 && sync?.pubkey === pubkey && sync.status === 'unreachable') setSync(pubkey, 'done')
+    })
+    .catch(() => { failures++ /* unreachable, or a hole: the head check before any signature asks again */ })
+    .finally(() => {
+      catching = false
+      if (catchAgain) { catchAgain = false; catchUp('again') }
+    })
+}
+
+/**
+ * A live event of the chain in hand that the fold did not take: its
+ * previous event is not here (it was published while this socket was
+ * down, or the watch only just opened). The relays are asked for what lies
+ * between. Not during a proof, a held chain or a pending choice, where the
+ * store keeps what arrives for later on purpose.
+ */
+function linkMissing(ev: NostrEvent): boolean {
+  const s = useCyberspace.getState()
+  if (s.held || s.chainConflict || s.proof.status === 'computing' || s.events.length === 0) return false
+  const link = actionLink(ev)
+  if (!link || link.genesisId !== s.genesisId) return false
+  return !s.events.some((e) => e.id === ev.id)
+}
+
+/**
+ * Published events of this device's chain that the canonical relay's answer
+ * just now did not include: another relay may have taken them and the
+ * canonical relay never did, and a reload forgot that it still had to
+ * (verification of #236, finding 3).
+ *
+ * That answer is not a list of everything the relay holds. The relay sends
+ * at most 500 events to a filter (relay.onosendai.tech, grain), and the chain
+ * read fills the holes below that page from this device's own events rather
+ * than paging (chains.ts gatherChain), so on a chain longer than one page
+ * every older event is left out of it. Read as "missing", that made every
+ * load requeue the whole older chain: 1520 of the owner's actions the relay
+ * held, warned about as not there (2026-11-09). So these are only suspects:
+ * the publisher checks them by id on the canonical relay (a COUNT, then the
+ * ids of a batch that counted short) before it counts any of them
+ * (publisher.ts reconcileCanonical). What it lacks goes out again, and so
+ * does what it could not be asked about (a read refused for want of AUTH,
+ * or no answer three passes in a row), where its "duplicate:" clears what
+ * it had.
+ *
+ * They are never dropped from this device's chain for it: the chain this
+ * device holds stays the chain, and the canonical relay is brought up to it.
+ * Nothing is handed over when the canonical relay did not answer (a timeout,
+ * a refusal, a hole: unknown, never missing), or when its newest spawn is
  * newer than this chain's (this chain is the old one then).
  */
 function requeueMissingOnCanonical(pubkey: string, answers: RelayAnswer[]): void {
@@ -114,6 +247,18 @@ function requeueMissingOnCanonical(pubkey: string, answers: RelayAnswer[]): void
   if (missing.length > 0) requeueForCanonical(missing)
 }
 
+/**
+ * The relays whose AUTH held up by the signer leaves the self-check saying
+ * nothing (chainHold decideSelfCheck): the chain's holders, and the read-only
+ * old relay (useRelays READ_FALLBACK_RELAY) too. It never holds up a move
+ * (chainHolders), but a chain that lives only there (a client that publishes
+ * only to it) must not be read as "none" while it cannot be read, or the
+ * first move would start a live new chain over it.
+ */
+export function checkHolders(pubkey: string): Set<string> {
+  return new Set([...chainHolders(pubkey), normalizeURL(READ_FALLBACK_RELAY)])
+}
+
 /** Ask again, but only when the last answer for the current identity was "nobody could say". */
 export function recheckIfUnknown(): void {
   const s = useCyberspace.getState()
@@ -122,7 +267,15 @@ export function recheckIfUnknown(): void {
 
 /** Ask again now, whatever the last answer was: the CHECK AGAIN button on a held chain. */
 export function recheckNow(): void {
-  void check(useCyberspace.getState().identity.pubkey)
+  // A deliberate tap, as RETRY is: every relay this chain lives on (the
+  // canonical relay and its known holders) whose AUTH the signer turned down
+  // or let run out asks it again, so the check that follows can be read
+  // signed in, and the prompt the panel speaks of is really shown. No other
+  // relay is asked: the check does not wait on it.
+  const pubkey = useCyberspace.getState().identity.pubkey
+  const holders = checkHolders(pubkey)
+  for (const url of [...signerHeld]) if (holders.has(url)) retryFailedAuth(url)
+  void check(pubkey)
 }
 
 /**
@@ -147,14 +300,33 @@ function resync(pubkey: string): void {
   const ifCurrent = (fn: () => void): void => {
     if (useCyberspace.getState().identity.pubkey === pubkey) fn()
   }
-  const since = Math.floor(Date.now() / 1000) - 60
-  close = watchAuthor(
+  // One standing subscription per relay (lib/ownWatch.ts), which the head
+  // check before a signature also reads (owner's ruling of 2026-11-22). Every
+  // relay delivers the same move: it is taken in once.
+  const seen = new Set<string>()
+  close = startOwnWatch(
     pubkey,
-    since,
-    (ev) => ifCurrent(() => useCyberspace.getState().adoptChain([ev])),
-    // The live subscription reaching EOSE is the relay talking again; if the
+    (ev) => ifCurrent(() => {
+      if (seen.has(ev.id)) return
+      seen.add(ev.id)
+      if (seen.size > 512) seen.delete(seen.values().next().value as string)
+      useCyberspace.getState().adoptChain([ev])
+      if (linkMissing(ev)) catchUp('gap')
+    }),
+    // A relay's subscription reaching EOSE is the relay talking again; if the
     // check could not get through before, it may now.
     () => ifCurrent(recheckIfUnknown),
+    // A (re)subscription also asks from the second of the newest move on the relays, inclusive.
+    () => { const s = useCyberspace.getState(); return s.identity.pubkey === pubkey ? newestOnRelays(s.events, s.published) : undefined },
+    // This page's own moves, and moves in hand, are never another device's;
+    // nor is an older chain's move, which cannot touch this one (ownWatch outsideChain).
+    (ev) => {
+      if (signedOnThisPage(ev.id)) return true
+      const s = useCyberspace.getState()
+      const events = s.events
+      for (let i = events.length - 1; i >= 0; i--) if (events[i].id === ev.id) return true
+      return outsideChain(ev, s.genesisId, events.find((e) => e.id === s.genesisId)?.created_at)
+    },
   )
   void check(pubkey)
 }
@@ -173,4 +345,22 @@ export function startSelfSync(): void {
   // drop and read as "unreachable". onResume fires after the drop.
   onResume(recheckIfUnknown)
   onResume(compareUnpublished)
+  onResume(() => catchUp('resume'))
+  // The sockets were dropped: every relay's watch opens again, and is not current until its EOSE.
+  onResume(reopenOwnWatch)
+  onCanonicalSignIn(retryWaitingOwnWatch)
+  watchShown(() => catchUp('focus'))
+}
+
+/**
+ * The tab shown again or the window focused. Its own listeners rather than
+ * relay.ts watchTabReturn, which also asks the signer to sign in again after
+ * an absence: App.tsx already does that once.
+ */
+function watchShown(fn: () => void): void {
+  if (typeof document === 'undefined' || typeof window === 'undefined') return
+  const shown = (): void => { if (document.visibilityState === 'visible') fn() }
+  document.addEventListener('visibilitychange', shown)
+  window.addEventListener('focus', shown)
+  window.addEventListener('pageshow', shown)
 }

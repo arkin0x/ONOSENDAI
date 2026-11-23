@@ -28,39 +28,71 @@
  * run before anything is published that would be gone on a reload: each
  * shard is published only once its write has committed.
  * A second zip waits until a run is over.
+ *
+ * A .json SNO object picked or dropped on its own (or with other files) comes
+ * in the same way, as if it were the one file at the top of a zip named
+ * LOOSE_ZIP (openFiles): the same naming, limits, review, SKIP/COPY/UPDATE and
+ * publishing (arkinox, 2026-11-09: "I cant import a blue chicken json file by
+ * itself"). routeImport says which door IMPORT's picked or dropped files take.
  */
 
 import { create } from 'zustand'
-import { GRID_HALF, neededExtent, uuid, type ShardModel } from 'sno-core/shards'
+import { GRID_HALF, fromPayload, neededExtent, uuid, type ShardModel } from 'sno-core/shards'
 import { importFitFor } from 'sno-core/meshToShard'
 import { mtlNames } from 'sno-core/obj'
 import { BUILT_IN } from 'sno-core/snoPalette'
 import { listZip, readEntry, ZipError, type ZipEntry } from '../lib/zipRead'
 import {
-  ZIP_MAX_BYTES, ZIP_MAX_ENTRIES, ZIP_MAX_ENTRY_BYTES, ZIP_MAX_TOTAL_BYTES, companionsFor, copyName, dupAction, findDups, planZip,
+  ZIP_MAX_BYTES, ZIP_MAX_ENTRIES, ZIP_MAX_ENTRY_BYTES, ZIP_MAX_TOTAL_BYTES, companionsFor, copyName, dupAction, findDups, isJsonFile, isZipFile, planZip,
   blockedRows, hasPlaceholders, offlinePicture, refTargets, resolveRefs, withoutPlaceholderHints,
-  type Companion, type Dup, type DupMode, type PlannedRow, type SkippedFile,
+  type Companion, type Dup, type DupMode, type PlannedRow, type SkippedFile, type ZipPlan,
 } from '../lib/shardZip'
 import { folderApi, placeInFolders } from '../lib/importFolders'
-import { importBytes } from '../lib/meshImport'
+import { importBytes, tooLarge } from '../lib/meshImport'
 import { shardRefusal } from '../lib/hidden'
 import { publishState, shardFingerprint } from '../lib/published'
 import { queryEach } from '../lib/relay'
+import { isRateLimited } from '../lib/rateLimit'
 import { SNO_KIND } from 'sno-core/feed'
 import { shardFromText, useWorkshop } from './useWorkshop'
-import { saveFailure } from './workshopStorage'
+import { bulkWrites, saveFailure, storageMode } from './workshopStorage'
 import { refreshFeed, usePublished, type SendOutcome } from './usePublished'
 import { useCyberspace } from './useCyberspace'
 
 /** The run's pace, in one object so a test can shorten it. */
 export const timing = {
-  /** Between one publish and the next: a kit of fifty is not a burst. */
-  gapMs: 300,
+  /**
+   * Between one publish and the next: a kit of fifty is not a burst. Shards
+   * are addressable (kind 33331), which relay.onosendai.tech takes at 3 a
+   * second on a connection; this, and the send itself, keep under it.
+   */
+  gapMs: 350,
   /** One send, sign and relays together: past the signer's patience (15 s, and once more after a reconnect) and two relay waits. */
   sendDeadlineMs: 90_000,
-  /** A relay that said rate-limited is asked again after this, times the attempt. */
+  /** A relay that said it was sent to too fast is asked again after this, times the attempt. */
   rateBackoffMs: 3000,
+  /**
+   * How long a shard may wait for storage to say it is saved before the run
+   * pauses and says so, rather than waiting on a database that has stopped
+   * answering (arkinox, 2026-11-22, on his tablet: "still stopping").
+   */
+  saveStallMs: 20_000,
+  /** After STOP, how long the run waits for what it added to be saved before it ends anyway. */
+  stopGraceMs: 1000,
 }
+/**
+ * With PUBLISH off, shards are added without waiting for each one's save:
+ * storage writes what changed in one transaction while the next shard comes
+ * in (store/workshopStorage.ts). A row is DONE only once its save has
+ * committed, and the run waits when this many are still unsaved.
+ */
+export const UNSAVED_MAX = 32
+/** With PUBLISH off, how long the run works before it lets the page paint and hear STOP. */
+export const SLICE_MS = 50
+/** What a row says when its save had not committed by the time the run ended: RETRY saves it. */
+export const NOT_SAVED = 'Not saved yet'
+/** What the run says when storage stops answering. */
+export const STORAGE_SILENT = 'Your shards\' storage is not answering. What came in is kept in this tab and saved when it answers.'
 /** Sends of one shard while a relay says rate-limited. */
 export const RATE_TRIES = 3
 /** Sends in a row with no answer before the run pauses. */
@@ -92,6 +124,8 @@ export interface ShardImportState {
   open: boolean
   fileName: string
   phase: Phase
+  /** What the list calls what is being imported: 'zip', or 'import' for loose files. */
+  noun: Noun
   /** Why the zip as a whole cannot be read. */
   error: string | null
   rows: ImportRow[]
@@ -120,6 +154,8 @@ export interface ShardImportState {
   stall: string | null
   /** Start on a zip picked or dropped; refused while a run is going. */
   openZip: (file: File) => Promise<void>
+  /** Start on loose files picked or dropped (a .json SNO object among them), each as if at the top of a zip named LOOSE_ZIP. */
+  openFiles: (files: File[]) => Promise<void>
   toggle: (key: string) => void
   pickAll: (on: boolean) => void
   setDupMode: (mode: DupMode) => void
@@ -132,19 +168,95 @@ export interface ShardImportState {
   close: () => void
 }
 
+/** What the list's words call what is being imported: a zip, or loose files picked or dropped. */
+type Noun = 'zip' | 'import'
+
 /** Each open or close: a loop from an earlier one sees a newer number and stops. */
 let generation = 0
-/** The open zip's bytes, directory and companions, until every file has been read. */
-let zip: { bytes: Uint8Array; entries: Map<string, ZipEntry>; companions: Record<string, Companion[]>; budget: number } | null = null
+/** The open zip's reader, directory and companions, until every file has been read. */
+let zip: { noun: Noun; read: (entry: ZipEntry, cap: number) => Uint8Array; entries: Map<string, ZipEntry>; companions: Record<string, Companion[]>; budget: number } | null = null
 /** The run going now, with what ends its waits when STOP is pressed. */
 let current: { stopped: Promise<void>; stop: () => void } | null = null
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
+/**
+ * Why nothing can be imported now, or null: your shards have not loaded
+ * (store/workshopStorage.ts), so what is yours is not known, and nothing
+ * would be saved. Matched against an empty list, every piece would look new.
+ */
+export function notLoaded(): string | null {
+  const m = storageMode()
+  return m === 'pending' || m === 'unavailable' ? 'Your shards have not loaded yet. Import works once they have.' : null
+}
+
 /** UTF-8, a leading BOM dropped (TextDecoder's default). */
 const text = new TextDecoder('utf-8')
 const baseName = (path: string): string => path.split('/').pop() ?? path
 
-const blank = { open: false, fileName: '', phase: 'opening' as Phase, error: null, rows: [], skipped: [], dups: {}, dupMode: 'skip' as DupMode, publish: false, foldersOn: false, kit: '', published: [] as string[], remote: 'idle' as const, checkedFor: '', ran: false, stopAsked: false, stall: null }
+/**
+ * The zip loose files are read as if they came in: so a lone blue-chicken.json
+ * is the shard `import/blue-chicken` (lib/shardZip kitIds), the same address
+ * each time it is imported, and UPDATE finds it again.
+ */
+export const LOOSE_ZIP = 'import.zip'
+/** What IMPORT says of a .json that is neither. */
+export const NOT_SNO_OR_GLTF = 'NOT AN SNO OR glTF FILE'
+
+/** What a .json holds: an SNO object (as PASTE and a zip read one: fromPayload, through shardFromText), a glTF 2 file, or neither. Parsed once. */
+export function jsonKind(json: string): 'sno' | 'gltf' | null {
+  let raw: unknown
+  try { raw = JSON.parse(json) } catch { return null }
+  if (fromPayload(raw, 'probe')) return 'sno'
+  const asset = raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as { asset?: unknown }).asset : undefined
+  return asset && typeof asset === 'object' && typeof (asset as { version?: unknown }).version === 'string' ? 'gltf' : null
+}
+
+/**
+ * A loose file's name as its entry in the zip it is read as. A browser saves
+ * a second download as "blue-chicken (1).json" (a phone does it every time),
+ * and that is the same file, so the " (N)" goes, as kitIds drops it from a
+ * zip's name, and importing it again finds the same shard. A .json is named
+ * for what it holds: a glTF as <stem>.gltf (one already called .gltf stays),
+ * so it is read as a 3D file and its .bin is found beside it whatever the
+ * .bin is called; an SNO object known only by its type as <name>.json.
+ */
+export function looseName(name: string, kind: 'sno' | 'gltf' | null): string {
+  const plain = name.replace(/^(.*\S)\s+\(\d+\)(\.[^.]*)?$/, '$1$2')
+  if (kind === 'gltf') return /\.gltf$/i.test(plain) ? plain : `${plain.replace(/\.json$/i, '')}.gltf`
+  if (kind === 'sno' && !/\.json$/i.test(plain)) return `${plain}.json`
+  return plain
+}
+
+/** Where IMPORT's picked or dropped files go: bulk import of a zip, bulk import of loose files, the 3D importer, or nowhere and why. */
+export type ImportRoute =
+  | { to: 'zip'; file: File }
+  | { to: 'shards'; files: File[] }
+  | { to: 'mesh'; files: File[] }
+  | { to: 'none'; error: string }
+
+/**
+ * Which door these files take. A zip goes alone to bulk import. Every .json
+ * is read and sniffed: one that is neither an SNO object nor a glTF stops
+ * them all with NOT_SNO_OR_GLTF; if any is an SNO object, every file goes to
+ * bulk import (openFiles), as a zip of them would; otherwise they are 3D
+ * files for IMPORT's reader, a glTF .json among them, as before.
+ */
+export async function routeImport(files: File[]): Promise<ImportRoute> {
+  const zips = files.filter(isZipFile)
+  if (zips.length) return zips.length > 1 || files.length > 1 ? { to: 'none', error: 'Import one zip at a time, on its own.' } : { to: 'zip', file: zips[0] }
+  let sno = false
+  for (const f of files.filter(isJsonFile)) {
+    const big = tooLarge([f])
+    if (big) return { to: 'none', error: big }
+    let kind: 'sno' | 'gltf' | null
+    try { kind = jsonKind(await f.text()) } catch { return { to: 'none', error: 'That file could not be opened.' } }
+    if (!kind) return { to: 'none', error: files.length > 1 ? `${f.name}: ${NOT_SNO_OR_GLTF}` : NOT_SNO_OR_GLTF }
+    if (kind === 'sno') sno = true
+  }
+  return sno ? { to: 'shards', files } : { to: 'mesh', files }
+}
+
+const blank = { open: false, fileName: '', noun: 'zip' as Noun, phase: 'opening' as Phase, error: null, rows: [], skipped: [], dups: {}, dupMode: 'skip' as DupMode, publish: false, foldersOn: false, kit: '', published: [] as string[], remote: 'idle' as const, checkedFor: '', ran: false, stopAsked: false, stall: null }
 
 /** The ids of your shards, for what exists already (lib/shardZip blockedRows). */
 export function mineIds(): string[] {
@@ -188,7 +300,7 @@ const CHECK_CHUNK = 100
 async function publishedAt(me: string, ids: readonly string[]): Promise<Set<string> | null> {
   const found = new Set<string>()
   for (let i = 0; i < ids.length; i += CHECK_CHUNK) {
-    const answers = await queryEach({ kinds: [SNO_KIND], authors: [me], '#d': ids.slice(i, i + CHECK_CHUNK) })
+    const answers = await queryEach({ kinds: [SNO_KIND], authors: [me], '#d': ids.slice(i, i + CHECK_CHUNK) }, undefined, { written: true })
     if (!answers.some((a) => a.outcome === 'answered')) return null
     for (const a of answers) for (const ev of a.events) {
       if (ev.pubkey !== me || ev.kind !== SNO_KIND) continue
@@ -213,12 +325,12 @@ function namedFiles(file: string, bytes: Uint8Array): string[] {
 
 /** One file of the zip as a shard named after it, through PASTE's or IMPORT's door. */
 async function readRow(row: ImportRow): Promise<{ shard: ShardModel; picture: ShardModel; note: string | null } | { error: string }> {
-  if (!zip) return { error: 'The zip is closed.' }
+  if (!zip) return { error: 'The import is closed.' }
   const entry = zip.entries.get(row.key)
-  if (!entry) return { error: 'Missing from the zip.' }
+  if (!entry) return { error: `Missing from the ${zip.noun}.` }
   let bytes: Uint8Array
   try {
-    bytes = readEntry(zip.bytes, entry, ZIP_MAX_ENTRY_BYTES)
+    bytes = zip.read(entry, ZIP_MAX_ENTRY_BYTES)
   } catch (e) {
     return { error: e instanceof ZipError ? e.message : 'It could not be read.' }
   }
@@ -237,9 +349,9 @@ async function readRow(row: ImportRow): Promise<{ shard: ShardModel; picture: Sh
       const e = zip.entries.get(c.key)
       if (!e) continue
       if (used + e.size > ZIP_MAX_ENTRY_BYTES) return { error: `Over ${ZIP_MAX_ENTRY_BYTES / 1048576} MB with ${c.file}` }
-      if (e.size > zip.budget) return { error: `Past ${ZIP_MAX_TOTAL_BYTES / 1048576} MB for the zip` }
+      if (e.size > zip.budget) return { error: `Past ${ZIP_MAX_TOTAL_BYTES / 1048576} MB for the ${zip.noun}` }
       zip.budget -= e.size
-      try { files.push({ name: c.file, bytes: readEntry(zip.bytes, e, ZIP_MAX_ENTRY_BYTES - used) }) } catch { continue /* a model without its MTL still comes in */ }
+      try { files.push({ name: c.file, bytes: zip.read(e, ZIP_MAX_ENTRY_BYTES - used) }) } catch { continue /* a model without its MTL still comes in */ }
       used += e.size
     }
     // A new shard's grid, as IMPORT fits a file into a new, empty shard.
@@ -326,12 +438,73 @@ export const useShardImport = create<ShardImportState>((set, get) => {
     const pause = (ms: number): Promise<void> => Promise.race([sleep(ms), stopped])
     let inHand: string | null = null
     let sent = 0
+    /** When STOP's grace runs out: the saves and the folders' filing share it. */
+    let graceEnd: number | null = null
+    /** When a save last settled, for what counts as storage gone silent. */
+    let lastProgress = 0
+    /** Rows added whose save has not committed yet, each with what settles it. */
+    const unsaved = new Map<string, { since: number; settled: Promise<boolean> }>()
+    /** Storage refused a save: nothing more comes in. */
+    let refusedSave = false
+    /** A row's save, followed: DONE once committed (unless it still has to be published), failed when storage refused it. */
+    const track = (key: string, saved: Promise<boolean>, thenDone: boolean): Promise<boolean> => {
+      const settled = saved.catch(() => false).then((ok) => {
+        unsaved.delete(key)
+        lastProgress = Date.now()
+        // A save left from a run that ended says nothing about the run going now (a RETRY).
+        if (g !== generation || (current !== null && current !== mineRun)) return ok
+        const r = row(key)
+        if (ok) {
+          // A row the run gave up waiting on is DONE once its save lands after all.
+          if (thenDone && r && (r.run === 'working' || (r.run === 'failed' && r.failure === NOT_SAVED))) patch(key, { run: 'done', failure: null })
+        } else if (!refusedSave) {
+          refusedSave = true
+          refused(key)
+        } else if (r && r.run === 'working') {
+          patch(key, { run: 'failed', failure: saveFailure() ?? 'Workshop storage is full' })
+        }
+        return ok
+      })
+      unsaved.set(key, { since: Date.now(), settled })
+      return settled
+    }
+    /**
+     * Wait for saves: every one when `all`, otherwise until fewer than
+     * UNSAVED_MAX are waiting. Never past STOP's grace, nor past
+     * timing.saveStallMs from the oldest: 'silent' then, and the run pauses.
+     */
+    const waitSaves = async (all: boolean): Promise<'ok' | 'silent' | 'stopped'> => {
+      while (unsaved.size > 0 && (all || unsaved.size >= UNSAVED_MAX)) {
+        if (halted()) {
+          // One grace for everything STOP waits on (graceEnd, set at the first wait after STOP).
+          graceEnd ??= Date.now() + timing.stopGraceMs
+          await Promise.race([Promise.all([...unsaved.values()].map((u) => u.settled)), sleep(Math.max(0, graceEnd - Date.now()))])
+          return unsaved.size ? 'stopped' : 'ok'
+        }
+        // Silent: nothing settled for saveStallMs (a slow disk still settling one batch after another is not silent).
+        const oldest = Math.min(...[...unsaved.values()].map((u) => u.since))
+        const left = Math.max(oldest, lastProgress) + timing.saveStallMs - Date.now()
+        if (left <= 0) return 'silent'
+        await Promise.race([...[...unsaved.values()].map((u) => u.settled), sleep(left), stopped])
+      }
+      return 'ok'
+    }
+    // Broadcasts held either way; relaxed durability only when no save gates a publish.
+    const endBulk = bulkWrites({ relaxed: !publish })
+    let sliceFrom = performance.now()
     try {
       const folders = folderApi()
       const made = new Map<string, string | null>()
       let silent = 0
       for (const { key } of get().rows) {
-        if (halted()) break
+        if (halted() || refusedSave) break
+        // Too many still unsaved: wait for storage before adding more.
+        const waited = await waitSaves(false)
+        if (g !== generation) return
+        if (waited === 'silent') { set({ stall: STORAGE_SILENT }); break }
+        // A breath every SLICE_MS of work, whatever the rows do: the list paints and STOP is heard.
+        if (performance.now() - sliceFrom >= SLICE_MS) { await sleep(0); sliceFrom = performance.now(); if (g !== generation) return }
+        if (halted() || refusedSave) break
         const r = row(key)
         if (!r || !r.picked || r.read !== 'ok' || !r.shard || r.run === 'done' || r.run === 'skipped') continue
         inHand = key
@@ -342,8 +515,13 @@ export const useShardImport = create<ShardImportState>((set, get) => {
         // Made once: a retry publishes the shard the first try made.
         let id = r.shardId && ws.shards.some((s) => s.id === r.shardId) ? r.shardId : null
         // Reused: it must be in storage before it goes out (a first try may have been refused).
-        if (id && !(await ws.saveNow())) { refused(key); inHand = null; break }
-        if (g !== generation) return
+        if (id) {
+          const saved = await Promise.race([track(key, ws.saveNow(), !publish), stopped.then(() => null), sleep(timing.saveStallMs).then(() => undefined)])
+          if (g !== generation) return
+          if (saved === false) { inHand = null; break }
+          if (saved !== true) { patch(key, { run: 'failed', failure: NOT_SAVED }); if (saved === undefined) set({ stall: STORAGE_SILENT }); inHand = null; break }
+          if (!publish) { inHand = null; continue }
+        }
         if (!id) {
           const missing = blocked.get(key)
           // Left out, not failed: a retry cannot help, a change of picks or answer can (setDupMode, toggle).
@@ -352,13 +530,13 @@ export const useShardImport = create<ShardImportState>((set, get) => {
           if (!me && hasPlaceholders(r.shard.refs)) { patch(key, { run: 'failed', failure: 'Log in first' }); inHand = null; continue }
           const model: ShardModel = r.shard.refs && me ? { ...r.shard, refs: resolveRefs(r.shard.refs, targets, me) } : r.shard
           const action = dupAction(dups[key] ?? null, mode)
-          if (action.act === 'skip') { patch(key, { run: 'skipped', failure: dups[key]?.in === 'zip' ? 'Same name in this zip' : 'In your shards' }); inHand = null; continue }
-          let saved: boolean
+          if (action.act === 'skip') { patch(key, { run: 'skipped', failure: dups[key]?.in === 'zip' ? `Same name in this ${get().noun}` : 'In your shards' }); inHand = null; continue }
+          let saved: Promise<boolean>
           if (action.act === 'update') {
-            const res = await ws.replaceShard(action.id, model)
-            if (res === 'missing') { patch(key, { run: 'failed', failure: 'Its namesake is gone' }); inHand = null; continue }
+            // Gone since the list was matched: replaceShard would say 'missing'.
+            if (!ws.shards.some((s) => s.id === action.id)) { patch(key, { run: 'failed', failure: 'Its namesake is gone' }); inHand = null; continue }
+            saved = ws.replaceShard(action.id, model).then((res) => res === 'saved')
             id = action.id
-            saved = res === 'saved'
           } else {
             const fresh = action.act === 'copy'
             // A new address goes out only once your relays said nothing of yours is there.
@@ -366,22 +544,28 @@ export const useShardImport = create<ShardImportState>((set, get) => {
             const added = ws.addShard(model, fresh || action.copyName ? copyName(r.name) : r.name, fresh ? undefined : r.id)
             if (!added) { patch(key, { run: 'failed', failure: 'Its id is taken' }); inHand = null; continue }
             id = added.id
-            saved = await added.saved
+            saved = added.saved
             // An update keeps the folder it is in; a new shard goes in its own.
             placeInFolders(folders, [{ shardId: id, folder: r.folder }], made)
           }
           patch(key, { shardId: id, outcome: action.act === 'new' ? (action.copyName ? 'copy' : 'new') : action.act })
+          const settled = track(key, saved, !publish)
+          // PUBLISH off: on to the next shard while this one is written (the
+          // loop's top lets the page paint every SLICE_MS, not every shard).
+          if (!publish) { inHand = null; continue }
           // Nothing goes out that a reload would lose here: saved means committed (store/workshopStorage.ts).
-          if (!saved) { refused(key); inHand = null; break }
+          const ok = await Promise.race([settled, stopped.then(() => null), sleep(timing.saveStallMs).then(() => undefined)])
           if (g !== generation) return
+          if (ok === false) { inHand = null; break }
+          if (ok !== true) { patch(key, { run: 'failed', failure: NOT_SAVED }); if (ok === undefined) set({ stall: STORAGE_SILENT }); inHand = null; break }
         }
-        if (!publish) { patch(key, { run: 'done' }); inHand = null; continue }
         const shard = useWorkshop.getState().shards.find((s) => s.id === id)
         if (!shard) { patch(key, { run: 'failed', failure: 'Gone from your shards' }); inHand = null; continue }
         // Sent already, this very version (a send that timed out here and landed anyway).
         if (publishState(usePublished.getState().ledger[shard.id], shardFingerprint(shard), me) === 'published') { patch(key, { run: 'done' }); inHand = null; continue }
         let outcome = await sendWithin(shard, stopped)
-        for (let tries = 1; !outcome.ok && /^rate-limited\b/i.test(outcome.detail) && tries < RATE_TRIES; tries++) {
+        // In the relay's own words: relay.onosendai.tech says "Rate limit exceeded for category: ...", not NIP-01's "rate-limited:".
+        for (let tries = 1; !outcome.ok && isRateLimited(outcome.detail) && tries < RATE_TRIES; tries++) {
           if (halted()) break
           await pause(timing.rateBackoffMs * tries)
           if (halted()) break
@@ -400,17 +584,62 @@ export const useShardImport = create<ShardImportState>((set, get) => {
       // Whatever went wrong, the row in hand says so and the modal can be closed.
       if (inHand && g === generation) patch(inHand, { run: 'failed', failure: e instanceof Error ? e.message : String(e) })
     } finally {
+      // What was added is saved before DONE shows: within STOP's grace when
+      // stopped, or until storage has been silent too long. A row still
+      // waiting says so, and turns DONE if its save lands after all.
+      try {
+        const waited = await waitSaves(true)
+        if (g === generation) {
+          if (waited === 'silent') set({ stall: STORAGE_SILENT })
+          for (const key of unsaved.keys()) if (row(key)?.run === 'working') patch(key, { run: 'failed', failure: NOT_SAVED })
+        }
+      } catch { /* the rows say what they can */ }
+      endBulk()
       if (current === mineRun) current = null
-      // The folders' filing, saved before DONE shows; never waited on past a few seconds.
+      // The folders' filing, saved before DONE shows; never waited on past a few seconds, nor past STOP's grace.
       try {
         const flush = folderApi()?.flush
-        if (flush) await Promise.race([flush().catch(() => undefined), sleep(5000)])
+        if (flush) await Promise.race([flush().catch(() => undefined), sleep(halted() ? Math.max(0, (graceEnd ??= Date.now() + timing.stopGraceMs) - Date.now()) : 5000)])
       } catch { /* the filing is the folders store's to report */ }
       if (g === generation) {
         if (sent > 0) refreshFeed()
         set({ phase: 'done', stopAsked: false })
       }
     }
+  }
+
+  /** A zip's (or loose files') plan read row by row into shards, then checked against your relays and put up for review. */
+  const readAll = async (g: number, plan: ZipPlan, entries: ZipEntry[], read: (entry: ZipEntry, cap: number) => Uint8Array): Promise<void> => {
+    const noun = get().noun
+    zip = { noun, read, entries: new Map(entries.map((e) => [String(e.index), e])), companions: plan.companions, budget: Math.max(0, ZIP_MAX_TOTAL_BYTES - plan.total) }
+    const rows: ImportRow[] = plan.rows.map((p) => ({
+      ...p, read: p.error ? 'error' : 'waiting', shard: null, picture: null, note: null, picked: !p.error, run: 'idle', shardId: null, outcome: null, failure: null,
+    }))
+    if (rows.length === 0) set({ error: `No shard files in that ${noun}.` })
+    set({ rows, skipped: plan.skipped, kit: plan.kit, phase: 'reading' })
+    for (const { key } of rows) {
+      if (g !== generation) return
+      const r = row(key)
+      if (!r || r.read !== 'waiting') continue
+      patch(key, { read: 'reading' })
+      const res = await readRow(r)
+      if (g !== generation) return
+      if ('error' in res) patch(key, { read: 'error', error: res.error, picked: false })
+      else patch(key, { read: 'ok', shard: res.shard, picture: res.picture, note: res.note })
+      // A breath between files, so the list paints as it fills.
+      await sleep(0)
+    }
+    if (g !== generation) return
+    zip = null
+    // What your relays already hold at these addresses (another device, or another kit with this folder name).
+    const { published, remote, checkedFor } = await checkRelays()
+    if (g !== generation) return
+    // A reference to a piece of the kit that will not exist would draw as a placeholder.
+    const targets = refTargets(get().rows)
+    const ok = get().rows.filter((r) => r.read === 'ok')
+    const blocked = blockedRows(ok.map((r) => ({ key: r.key, id: r.id, refs: r.shard?.refs })), targets, new Set([...useWorkshop.getState().shards.map((x) => x.id), ...published]), new Set(ok.map((r) => r.id)))
+    for (const [key, missing] of blocked) patch(key, { read: 'error', error: `Places ${missing}, not in this ${noun}`, picked: false })
+    set({ phase: 'review', published, remote, checkedFor, dups: dupsFor(get().rows, get().kit, published) })
   }
 
   return {
@@ -425,6 +654,8 @@ export const useShardImport = create<ShardImportState>((set, get) => {
       // because the import has 'publish' ON by default").
       set({ ...blank, open: true, fileName: file.name, foldersOn: !!folderApi() })
       if (file.size > ZIP_MAX_BYTES) { set({ error: `That zip is ${Math.round(file.size / 1048576)} MB. Import reads zips of up to ${ZIP_MAX_BYTES / 1048576} MB.`, phase: 'review' }); return }
+      const waiting = notLoaded()
+      if (waiting) { set({ error: waiting, phase: 'review' }); return }
       let bytes: Uint8Array
       try { bytes = new Uint8Array(await file.arrayBuffer()) } catch { if (g === generation) set({ error: 'That zip could not be opened.', phase: 'review' }); return }
       if (g !== generation) return
@@ -434,35 +665,33 @@ export const useShardImport = create<ShardImportState>((set, get) => {
         return
       }
       const plan = planZip(entries, file.name)
-      zip = { bytes, entries: new Map(entries.map((e) => [String(e.index), e])), companions: plan.companions, budget: Math.max(0, ZIP_MAX_TOTAL_BYTES - plan.total) }
-      const rows: ImportRow[] = plan.rows.map((p) => ({
-        ...p, read: p.error ? 'error' : 'waiting', shard: null, picture: null, note: null, picked: !p.error, run: 'idle', shardId: null, outcome: null, failure: null,
-      }))
-      if (rows.length === 0) set({ error: 'No shard files in that zip.' })
-      set({ rows, skipped: plan.skipped, kit: plan.kit, phase: 'reading' })
-      for (const { key } of rows) {
-        if (g !== generation) return
-        const r = row(key)
-        if (!r || r.read !== 'waiting') continue
-        patch(key, { read: 'reading' })
-        const res = await readRow(r)
-        if (g !== generation) return
-        if ('error' in res) patch(key, { read: 'error', error: res.error, picked: false })
-        else patch(key, { read: 'ok', shard: res.shard, picture: res.picture, note: res.note })
-        // A breath between files, so the list paints as it fills.
-        await sleep(0)
-      }
-      if (g !== generation) return
+      await readAll(g, plan, entries, (e, cap) => readEntry(bytes, e, cap))
+    },
+
+    openFiles: async (list) => {
+      if (get().phase === 'running') return
+      const g = ++generation
       zip = null
-      // What your relays already hold at these addresses (another device, or another kit with this folder name).
-      const { published, remote, checkedFor } = await checkRelays()
+      const files = [...list]
+      set({ ...blank, open: true, noun: 'import', fileName: files.length === 1 ? files[0].name : `${files.length} files`, foldersOn: !!folderApi() })
+      const waiting = notLoaded()
+      if (waiting) { set({ error: waiting, phase: 'review' }); return }
+      // Everything picked is read at once, so all of it under a zip's own ceiling.
+      const total = files.reduce((t, f) => t + f.size, 0)
+      if (total > ZIP_MAX_BYTES) { set({ error: `Those files are ${Math.round(total / 1048576)} MB. Import reads up to ${ZIP_MAX_BYTES / 1048576} MB at once.`, phase: 'review' }); return }
+      let loose: Uint8Array[]
+      try { loose = await Promise.all(files.map(async (f) => new Uint8Array(await f.arrayBuffer()))) } catch { if (g === generation) set({ error: 'Those files could not be opened.', phase: 'review' }); return }
       if (g !== generation) return
-      // A reference to a piece of the kit that will not exist would draw as a placeholder.
-      const targets = refTargets(get().rows)
-      const ok = get().rows.filter((r) => r.read === 'ok')
-      const blocked = blockedRows(ok.map((r) => ({ key: r.key, id: r.id, refs: r.shard?.refs })), targets, new Set([...useWorkshop.getState().shards.map((x) => x.id), ...published]), new Set(ok.map((r) => r.id)))
-      for (const [key, missing] of blocked) patch(key, { read: 'error', error: `Places ${missing}, not in this zip`, picked: false })
-      set({ phase: 'review', published, remote, checkedFor, dups: dupsFor(get().rows, get().kit, published) })
+      // Each a file at the top of the zip, named for what it holds before the zip's plan reads the names (looseName).
+      const entries: ZipEntry[] = files.map((f, index) => ({
+        index, name: looseName(f.name, isJsonFile(f) ? jsonKind(text.decode(loose[index])) : null), dir: false, method: 0, encrypted: false,
+        compressedSize: f.size, size: loose[index].length, offset: 0, crc: 0,
+      }))
+      const plan = planZip(entries, LOOSE_ZIP)
+      await readAll(g, plan, entries, (e, cap) => {
+        if (e.size > cap) throw new ZipError('It is too large.')
+        return loose[e.index]
+      })
     },
 
     toggle: (key) => {

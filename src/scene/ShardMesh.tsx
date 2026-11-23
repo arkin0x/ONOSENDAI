@@ -14,8 +14,8 @@
  * with an ease-out, jittering less as they land. Decryption made visible.
  */
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useSyncExternalStore, type ReactNode } from 'react'
-import { useFrame, type ThreeEvent } from '@react-three/fiber'
+import { Component, useContext, useEffect, useLayoutEffect, useMemo, useRef, useSyncExternalStore, type ReactNode } from 'react'
+import { useFrame, useThree, type ThreeEvent } from '@react-three/fiber'
 import {
   FrontSide,
   BufferAttribute,
@@ -26,6 +26,7 @@ import {
   EdgesGeometry,
   Line,
   LineBasicMaterial,
+  MeshBasicMaterial,
   Matrix4,
   Vector3,
   type Plane,
@@ -37,16 +38,22 @@ import { parseAddress, partMatrix, placedBounds, refKey, type Placed } from 'sno
 import { useResolved, type Resolved } from '../lib/parts'
 import { dropDemand, provisional, setDemand, useAllowance, type Allowance } from './meshBudget'
 import { followsVersion, onFollows, trustedAuthor } from '../lib/trust'
-import { ACCENT, WARN } from '../lib/palette'
+import { ACCENT, BUILD, WARN } from '../lib/palette'
+import { scaledDisc, useDotScale } from './dotScale'
 import { renderPose, type Pose } from '../lib/pose'
 import { boxContains, clipMesh, clipPoints, type Box } from '../lib/clip'
 import { faceEdges } from 'sno-core/outline'
 import { BACK_SHADE_COLOR, SHARD_FACES_TONE_MAPPED } from './shardLight'
 import { SHARD_DOTS, SHARD_POINTS, createDiscMaterial, sizeDisc, withDiscColors } from './pointDisc'
-import { DOTS_ORDER, basicFaceProps, benchOrders, lineProps, litFaceProps, shardOpacity, shardOrder } from './shardFaces'
+import { DOTS_ORDER, GHOST_OPACITY, NO_BLOOM_BLEND, TRANSLUCENT_ORDER, basicFaceProps, benchOrders, lineProps, litFaceProps, shardOpacity, shardOrder } from './shardFaces'
 
 import { HEADLAMP_FACES, HEADLAMP_LINES } from './headlamp'
 import { holdPlaced, placedBuffers, type PlacedBuffers } from './placedBuffers'
+import { animOf, type Motion } from '../lib/anim'
+import { AnimClock, AnimGroups, clipWalls } from './animMotion'
+import { benchFaintDots, drawPlan, haloFade, pointLookOf } from '../lib/pointLook'
+import { GlowHalos, GlowTrust, PointCores, useGlowAllowed } from './PointBillboards'
+import { PickVolume, SoftOutline, pickRadius, softPicked } from './softPick'
 
 export { FACE_TAG_STENCIL } from './shardFaces'
 
@@ -56,6 +63,21 @@ interface Props {
   scale?: number
   /** Dimmed, for a preview that is not yet real. */
   ghost?: boolean
+  /**
+   * Kept out of the world's bloom: faces blended as a see-through face is,
+   * lines and dots with the alpha under them kept (shardFaces.ts
+   * NO_BLOOM_BLEND), drawn after the opaque faces. BUILD's ghosts: the one
+   * being placed and a shard being moved (owner, 2026-11-16).
+   */
+  noBloom?: boolean
+  /** Thin crisp edges where its faces turn (GHOST_EDGES): the placing ghost's, to line it up by. */
+  edges?: boolean
+  /**
+   * A shard with nothing solid of its own (only points, fog or glow) outlined
+   * by its box over everything (scene/softPick.tsx SoftOutline): the placing
+   * ghost's (with `edges`) and a shard EDIT is moving.
+   */
+  softOutline?: boolean
   /**
    * Lit, as on the bench: faces shaded flat by the canvas's ShardLights
    * (shardLight.tsx, anchored at the world's full color), each one's
@@ -70,7 +92,7 @@ interface Props {
    * everything lit back onto the frame, and across a filled face that is
    * several times the face's own colour, so faces came out white with a
    * tint. Out there the faces write their colour with alpha 0, a tag the
-   * scene's bloom is blind to (Scene.tsx WorldBloom), so they draw at their
+   * scene's bloom is blind to (worldBloom.tsx WorldBloom), so they draw at their
    * own colours, as on the bench; points and lines are untagged and glow as
    * they always did. Not for a ghost, whose translucency needs real alpha.
    */
@@ -154,11 +176,63 @@ interface Props {
    * §3.3). Proof of work prices an avatar's size and detail, not how hard it
    * is to see, and a near-invisible body is a stealth tool. Carried to its
    * placed objects too, so no part of an avatar is see-through either.
+   * An avatar ignores its point size and glow too (§1.15, §1.16, §3.3).
    */
   ignoreOpacity?: boolean
+  /**
+   * Drawn at this share of its own opacity, and so see-through as a shard of
+   * that opacity is (shardFaces.ts), its placed objects too: an item you hold
+   * is drawn at half (arkinox, 2026-11-06; WorldMessages HeldItemMark). 1, the
+   * default, changes nothing.
+   */
+  dim?: number
+  /**
+   * Drawn exactly as written, whatever its `anim` (lib/anim.ts), its placed
+   * objects too: the workshop's bench while editing (a handle must sit on its
+   * vertex) and the feed's still pictures. Everywhere else an object with
+   * `anim` moves on the world clock (scene/animMotion.ts).
+   */
+  still?: boolean
 }
 
+const NO_MOTION: readonly Motion[] = Object.freeze([])
+
 const STATIC = [0, 0.9, 1] as const
+
+/** Whether two lists hold the same numbers, in the same order. */
+export function sameNumbers(a: ArrayLike<number>, b: ArrayLike<number>): boolean {
+  if (a === b) return true
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false
+  return true
+}
+
+/**
+ * The list last handed over while the new one holds the same numbers, so what
+ * is keyed on it stands. The numbers are read at most once per change of the
+ * model, and that is far less than what it saves: painting a face changes no
+ * position and no triangle, and rebuilt, it was five new geometries and their
+ * GPU buffers per paint.
+ */
+/**
+ * What the position and color attributes live and die by. Every geometry a
+ * shard draws shares them, and disposing a geometry makes three delete the GL
+ * buffer of each attribute it holds, even one another geometry still uses. That
+ * geometry's vertex array goes on reading the deleted buffer, while three writes
+ * to a new one: a paint changes the store and the buffer and nothing on screen
+ * (SOLID, LINES, SOLID, then paint: review of #562). So they are made again
+ * whenever any geometry using them is: the points, the triangles (a FLIP), the
+ * mode (the wireframe) and `lit` (the insides). A paint changes none of these.
+ */
+export function sharedBufferDeps(positions: ArrayLike<number>, colorCount: number, index: ArrayLike<number>, mode: string, lit: boolean): unknown[] {
+  return [positions, colorCount, index, mode, lit]
+}
+
+function useSame<T extends ArrayLike<number>>(next: T): T {
+  const held = useRef(next)
+  if (!sameNumbers(held.current, next)) held.current = next
+  return held.current
+}
 
 /**
  * What a shard draws: its points in the render mapping, and every one of its
@@ -193,33 +267,49 @@ export function shardGeometry(shard: ShardModel, clip?: Box, pose?: Pose): { pos
   return { ...cut, faces, drawn: faces.map((_, i) => i) }
 }
 
+/**
+ * A geometry's bounds, measured now, while the shared position buffer still
+ * holds the shard's final positions. A shard being born scrambles that buffer
+ * for SHARD_DECODE_MS, and three measures a geometry only the first time it
+ * is asked (a tap target's box, a ray test's sphere): asked mid-scramble, the
+ * sphere of a wall slab missed part of the finished wall by up to a cell and
+ * a half, for good (review of #618). `rest` is those final positions, for a
+ * ray test that walks the triangles themselves (lib/occluders.ts bvhOf).
+ */
+export function settleBounds(g: BufferGeometry, rest?: ArrayLike<number>): BufferGeometry {
+  g.computeBoundingBox()
+  g.computeBoundingSphere()
+  if (rest) g.userData.rest = rest
+  return g
+}
+
 /** A shard's points and lines: one vertex each, with the colours again under the name the disc shader reads (scene/pointDisc). */
 function plainGeometry(posAttr: BufferAttribute, colAttr: BufferAttribute): BufferGeometry {
   const g = new BufferGeometry()
   g.setAttribute('position', posAttr)
   g.setAttribute('color', colAttr)
-  return withDiscColors(g, colAttr)
+  return settleBounds(withDiscColors(g, colAttr))
 }
 
-/** A shard's faces. */
-function indexedGeometry(posAttr: BufferAttribute, colAttr: BufferAttribute, index: number[]): BufferGeometry {
+/** A shard's faces; `rest` the final positions (settleBounds). */
+function indexedGeometry(posAttr: BufferAttribute, colAttr: BufferAttribute, index: number[], rest: ArrayLike<number>): BufferGeometry {
   const g = new BufferGeometry()
   g.setAttribute('position', posAttr)
   g.setAttribute('color', colAttr)
   g.setIndex(index)
   g.computeVertexNormals()
-  return g
+  return settleBounds(g, rest)
 }
 
 /** The same triangles wound the other way: the insides, for a lit draw. */
-function insideGeometry(posAttr: BufferAttribute, colAttr: BufferAttribute, index: number[]): BufferGeometry {
+function insideGeometry(posAttr: BufferAttribute, colAttr: BufferAttribute, index: number[], rest: ArrayLike<number>): BufferGeometry {
   const g = new BufferGeometry()
   g.setAttribute('position', posAttr)
   g.setAttribute('color', colAttr)
   const flipped: number[] = []
   for (let i = 0; i + 2 < index.length; i += 3) flipped.push(index[i], index[i + 2], index[i + 1])
   g.setIndex(flipped)
-  return g
+  return settleBounds(g, rest)
 }
 
 /** LINES mode: every edge of every face, once. Null with no edges to draw. */
@@ -231,22 +321,22 @@ function outlineGeometry(posAttr: BufferAttribute, colAttr: BufferAttribute, fac
   g.setAttribute('position', posAttr)
   g.setAttribute('color', colAttr)
   g.setIndex(idx)
-  return g
+  return settleBounds(g)
 }
 
 /** One object's buffers, for all its placements (placedBuffers.ts): no decode writes to them, so no second copy of any array. */
 function buildPlaced(model: ShardModel): PlacedBuffers<ShardModel> {
-  const shard = expandFaceColors(model)
-  const { positions, colors, index, faces, drawn } = shardGeometry(shard)
+  const { positions, colors, index, faces, drawn } = shardGeometry(expandFaceColors(model))
   const posAttr = new BufferAttribute(positions, 3)
   const colAttr = new BufferAttribute(colors, 3)
   const plain = plainGeometry(posAttr, colAttr)
-  const indexed = indexedGeometry(posAttr, colAttr, index)
+  const indexed = indexedGeometry(posAttr, colAttr, index, positions)
   const outline = outlineGeometry(posAttr, colAttr, faces)
   let inside: BufferGeometry | null = null
+  // The model as given, which its placements hold anyway: the expansion goes once the buffers are made.
   return {
-    shard, positions, colors, index, faces, drawn, plain, indexed, outline,
-    inside: () => (inside ??= insideGeometry(posAttr, colAttr, index)),
+    shard: model, positions, colors, index, faces, drawn, plain, indexed, outline,
+    inside: () => (inside ??= insideGeometry(posAttr, colAttr, index, positions)),
     geometries: () => [plain, indexed, ...(outline ? [outline] : []), ...(inside ? [inside] : [])],
   }
 }
@@ -266,20 +356,123 @@ export function faceOfHit(i: { object: { userData: { faceOf?: number[] } }; face
   return map && k != null && map[k] !== undefined ? map[k] : null
 }
 
-export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, dissolve, onFaceClick, world = false, headlamp = world, lit = false, clip, clipPlanes, pose, nested, placed = false, onPartClick, selectedParts, cull = false, ignoreOpacity = false, budget }: Props): JSX.Element | null {
+/**
+ * One shard that cannot be drawn is drawn as nothing, for that shard alone. A throw
+ * while building geometry would otherwise reach the root and blank the page, and a
+ * stranger's event can carry the shard. A new model gets a new try.
+ */
+export class ShardBoundary extends Component<{ shard: unknown; children: ReactNode }, { broken: boolean; shard: unknown }> {
+  state = { broken: false, shard: this.props.shard }
+  static getDerivedStateFromError(): { broken: boolean } { return { broken: true } }
+  static getDerivedStateFromProps(props: { shard: unknown }, state: { shard: unknown }): { broken: boolean; shard: unknown } | null {
+    return props.shard === state.shard ? null : { broken: false, shard: props.shard }
+  }
+  componentDidCatch(e: unknown): void { console.warn('[onosendai] a shard could not be drawn', e) }
+  render(): ReactNode { return this.state.broken ? null : this.props.children }
+}
+
+export function ShardMesh(props: Props): ReactNode {
+  return <ShardBoundary shard={props.shard}><ShardMeshBody {...props} /></ShardBoundary>
+}
+
+/**
+ * The placing ghost's edges in the world (owner, 2026-11-16: "can we reduce
+ * the glowiness in build mode? its hard to line up what we are placing"): the
+ * BUILD cursor's white, thin and see-through, drawn without bloom, at every
+ * edge where its faces meet at more than `angle` degrees, so flat runs of
+ * faces read as one wall and corners and rims stand out.
+ */
+export const GHOST_EDGES = { color: BUILD, opacity: 0.6, angle: 20, maxTriangles: 40_000 } as const
+
+/** Pushes the ghost's faces a hair back in depth, so its edges, drawn on them, never stipple. */
+const GHOST_FACE_OFFSET = { polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 } as const
+
+/** A shard's crease edges (GHOST_EDGES.angle), posed, as line segment pairs. */
+export function ghostEdgeSegments(shard: ShardModel, pose?: Pose): Float32Array {
+  const f = flatten(shard, pose)
+  const g = new BufferGeometry()
+  g.setAttribute('position', new Float32BufferAttribute(f.positions, 3))
+  g.setIndex(f.index)
+  const e = new EdgesGeometry(g, GHOST_EDGES.angle)
+  const out = (e.getAttribute('position').array as Float32Array).slice()
+  g.dispose()
+  e.dispose()
+  return out
+}
+
+/** Line segment pairs cut to a box (Liang-Barsky): the part of each inside it, or nothing. */
+export function clipSegments(seg: Float32Array, box: Box): Float32Array {
+  const out: number[] = []
+  for (let i = 0; i + 5 < seg.length; i += 6) {
+    let t0 = 0
+    let t1 = 1
+    let keep = true
+    for (let a = 0; a < 3 && keep; a++) {
+      const p = seg[i + a]
+      const d = seg[i + 3 + a] - p
+      if (d === 0) { if (p < box.min[a] || p > box.max[a]) keep = false; continue }
+      let lo = (box.min[a] - p) / d
+      let hi = (box.max[a] - p) / d
+      if (lo > hi) [lo, hi] = [hi, lo]
+      t0 = Math.max(t0, lo)
+      t1 = Math.min(t1, hi)
+      if (t0 > t1) keep = false
+    }
+    if (!keep) continue
+    for (const t of [t0, t1]) for (let a = 0; a < 3; a++) out.push(seg[i + a] + (seg[i + 3 + a] - seg[i + a]) * t)
+  }
+  return Float32Array.from(out)
+}
+
+function segmentsGeometry(seg: Float32Array): BufferGeometry {
+  const g = new BufferGeometry()
+  g.setAttribute('position', new Float32BufferAttribute(seg, 3))
+  return g
+}
+
+export function ShardMeshBody({ shard: given, scale = 1, ghost = false, noBloom = false, edges = false, softOutline = false, birth, dissolve, onFaceClick, world = false, headlamp = world, lit = false, clip: regionClip, clipPlanes: givenPlanes, pose, nested, placed = false, onPartClick, selectedParts, cull = false, ignoreOpacity = false, dim = 1, budget, still = false }: Props): JSX.Element | null {
+  // Its own motion on the world clock (lib/anim.ts, scene/animMotion.ts): a
+  // group above everything it draws, its placed objects included (a parent's
+  // motion carries what it places). A moving object is cut at its region
+  // where it is at each moment, so its region box becomes planes on the GPU
+  // rather than a cut made once in its geometry.
+  const motions = still ? NO_MOTION : animOf(given)
+  const moving = motions.length > 0
+  const poseTurn = useMemo(() => (moving && pose ? renderPose(pose).elements : null), [moving, pose])
+  const walls = useMemo(() => (moving && regionClip ? clipWalls(regionClip) : null), [moving, regionClip])
+  const clip = moving ? undefined : regionClip
+  const clipPlanes = useMemo(() => (walls && givenPlanes ? [...walls.world, ...givenPlanes] : walls?.world ?? givenPlanes), [walls, givenPlanes])
+  const motion = (node: ReactNode): ReactNode => (moving ? <AnimGroups motions={motions} pose={poseTurn} walls={walls}>{node}</AnimGroups> : node)
   // What everything below is drawn at: the object's own opacity (DECK-0003
-  // §1.11, with its 10% floor), times a ghost's; an avatar ignores its own.
+  // §1.11, 0 to 100 with no floor), times a ghost's; an avatar ignores its own.
   // A placed object reaches here with its own model, so it never takes its
   // parent's (§1.10). See shardFaces.ts for how see-through faces blend.
-  const opacity = shardOpacity(given, { ghost, ignoreOpacity })
+  const opacity = shardOpacity(given, { ghost, ignoreOpacity }) * dim
   // This shard's own share, without a ghost's, written on each of its own
   // materials for whatever animates them by material (WorldShards' EDIT
   // breath), which reaches placed parts too and must not give them ours.
   // Set as one key (R3F's pierced `userData-share`), never by replacing
   // userData: TV keeps its own state there (TvFinds lookOne).
-  const own = shardOpacity(given, { ignoreOpacity })
-  const order = shardOrder(opacity, ghost)
+  const own = shardOpacity(given, { ignoreOpacity }) * dim
+  const order = shardOrder(opacity, ghost, noBloom)
   const bench = benchOrders(opacity, ghost)
+  // Point size and glow (DECK-0003 §1.15, §1.16; lib/pointLook.ts): POINTS
+  // only, never an avatar, the object's own (never a parent's). At opacity
+  // 0 the object draws nothing of its own, and its glow still shows: GLOW
+  // STRENGTH is never multiplied by the object's opacity, only by the
+  // client's own fade (a ghost's share, `dim`).
+  const look = useMemo(() => pointLookOf(given, { avatar: ignoreOpacity }), [given, ignoreOpacity])
+  const glowAllowed = useGlowAllowed()
+  const plan = drawPlan(given.mode, look, { cull, glowAllowed })
+  // On the workshop's bench (the only canvas with its own anim clock,
+  // scene/animMotion.ts AnimClock), faint dots for an object no one can see,
+  // only where the bench's handles are hidden and never in LOOK (lib/pointLook.ts benchFaintDots).
+  const onBench = useContext(AnimClock) !== null
+  const benchFaint = benchFaintDots(given, look, { onBench, moving, cull, world })
+  const faintMaterial = useMemo(() => (benchFaint ? createDiscMaterial(SHARD_POINTS, BENCH_FAINT_OPACITY, false) : null), [benchFaint])
+  useEffect(() => () => { faintMaterial?.dispose() }, [faintMaterial])
+  const trustedAbove = useContext(GlowTrust)
+  const glowTrusted = budget ? budget.trusted : trustedAbove
   // The objects this one places, fetched once for the whole app; a part's own
   // parts come resolved from its parent instead. In the world's scene, what it
   // reads is charged to the read pool of its trust (lib/readPools.ts).
@@ -302,7 +495,10 @@ export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, disso
   const budgetKey = budget && !nested ? budget.key : undefined
   // Coarsely, in eighths of a doubling: a step of the anchor moves every
   // shard's centre a little, and a shard says so only when it has moved a
-  // good way nearer or farther, not on every step.
+  // good way nearer or farther, not on every step. A world shard that places
+  // nothing is handed its first centre for good (WorldShards budgetCentre):
+  // its demand is nothing, so its distance is never read. Read the centre for
+  // anything else here and that shard's goes stale.
   const distance = budget ? Math.round(Math.log2(1 + Math.hypot(...budget.centre)) * 8) / 8 : 0
   useLayoutEffect(() => {
     if (!budgetKey) return
@@ -323,22 +519,76 @@ export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, disso
   // to its vertices, and a clip or a pose changes them, so those keep their own.
   const sharing = placed && !clip && !pose && birth === undefined && dissolve === undefined
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const shared = useMemo(() => (sharing ? placedBuffers(given, () => buildPlaced(given)) : null), [sharing, given])
-  useEffect(() => (shared ? holdPlaced(given, shared as PlacedBuffers<unknown>) : undefined), [shared, given])
-  const shard = useMemo(() => shared?.shard ?? expandFaceColors(given), [given, shared])
-  // Keyed on the points and faces rather than the whole model, so a parent
-  // that hands over a fresh copy of the same shard does not rebuild it
-  // (unless it has face colours: the expansion above makes new arrays).
+  const renderer = useThree((s) => s.gl)
+  const shared = useMemo(() => (sharing ? placedBuffers(given, renderer, () => buildPlaced(given)) : null), [sharing, given, renderer])
+  useEffect(() => (shared ? holdPlaced(given, renderer, shared as PlacedBuffers<unknown>) : undefined), [shared, given, renderer])
+  // Keyed on the points, faces and face colours rather than the whole model,
+  // so a parent that hands over a fresh copy of the same shard does not
+  // rebuild it. The face colour expansion is made here and let go once the
+  // geometry is built: kept, it was a second model of JS objects per shard, a
+  // vertex for every corner of every face (about 130 bytes each), held for as
+  // long as the shard was drawn. At arkinox's spot that is the bulk of the
+  // heap left after a GC (?diag=1, 2026-11-18).
+  // A ghost is the one exception: one at a time, cut again at every cursor
+  // step, so it keeps its expansion rather than making it on each step.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const { positions, colors, index, faces, drawn } = useMemo(() => shared ?? shardGeometry(shard, clip, pose), [shared, shard.vertices, shard.faces, clip, pose])
+  const ghostExpanded = useMemo(() => (ghost ? expandFaceColors(given) : null), [ghost, given.vertices, given.faces, given.facecolors])
+  const expanded = (): ShardModel => ghostExpanded ?? expandFaceColors(given)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const built = useMemo(() => shared ?? shardGeometry(expanded(), clip, pose), [shared, given.vertices, given.faces, given.facecolors, clip, pose, ghostExpanded])
+  const { colors, faces, drawn } = built
+  const positions = useSame(built.positions)
+  const index = useSame(built.index)
 
-  // Live copies: the decode writes into these, the targets stay untouched.
-  const posAttr = useMemo(() => (shared ? null : new Float32BufferAttribute(positions.slice(), 3)), [positions, shared])
-  const colAttr = useMemo(() => (shared ? null : new Float32BufferAttribute(colors.slice(), 3)), [colors, shared])
+  // Live copies: the decode writes into these, the targets stay untouched. A
+  // placement sharing its object's buffers has none of its own.
+  // Made again with the geometries that share them (sharedBufferDeps), and not
+  // for a paint: new colors on the same corners go into the buffer that is
+  // there, once, below.
+  const buffers = sharedBufferDeps(positions, colors.length, index, given.mode, lit)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const posAttr = useMemo(() => (shared ? null : new Float32BufferAttribute(positions.slice(), 3)), [...buffers, shared])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const colAttr = useMemo(() => (shared ? null : new Float32BufferAttribute(colors.slice(), 3)), [...buffers, shared])
+  const invalidate = useThree((s) => s.invalidate)
+  useLayoutEffect(() => {
+    if (!colAttr) return
+    const a = colAttr.array as Float32Array
+    if (sameNumbers(a, colors)) return
+    a.set(colors)
+    colAttr.needsUpdate = true
+    // Nothing R3F set has changed, so it would not know to draw on a canvas that draws on demand.
+    invalidate()
+  }, [colAttr, colors, invalidate])
 
   const plain = useMemo(() => shared?.plain ?? plainGeometry(posAttr!, colAttr!), [posAttr, colAttr, shared])
+  // The points a POINT SIZE or a glow draws at, one per vertex: face colours
+  // give each face its own corners (expandFaceColors), which would stack a
+  // halo per face on every corner, so those are drawn from the vertices as
+  // written. Anything else uses the points' own geometry, decode and all.
+  const wantsBillboards = look.glow !== undefined || (look.pointSize ?? 0) > 0
+  const ownPoints = useMemo(() => {
+    if (!wantsBillboards || !(given.facecolors?.length)) return null
+    const g = shardGeometry({ ...given, faces: [], facecolors: undefined }, clip, pose)
+    return plainGeometry(new BufferAttribute(g.positions, 3), new BufferAttribute(g.colors, 3))
+    // Keyed on what it reads, so a fresh copy of the same object does not rebuild it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wantsBillboards, given.vertices, given.facecolors, clip, pose])
+  useEffect(() => () => { ownPoints?.dispose() }, [ownPoints])
+  const pointsPlain = ownPoints ?? plain
+  // Nothing solid to tap, only points, fog or glow (scene/softPick.tsx): in
+  // the world, a pick volume that is raycast and never drawn; while placing,
+  // its outline over everything. The outline reads the glow whatever the
+  // Settings switch says, so a glow being placed is always outlined.
+  const softTaps = world && !ghost && softPicked(plan, cull)
+  const outlinePlan = edges || softOutline ? drawPlan(given.mode, look, { cull }) : null
+  const softSeen = outlinePlan !== null && softPicked(outlinePlan, cull)
+  const pickPoints = ownPoints ? (ownPoints.getAttribute('position').array as ArrayLike<number>) : positions
+  const softRadius = softSeen && outlinePlan ? pickRadius(outlinePlan, look) : softTaps ? pickRadius(plan, look) : 0
 
-  const indexed = useMemo(() => shared?.indexed ?? indexedGeometry(posAttr!, colAttr!, index), [posAttr, colAttr, index, shared])
+  // Made with the buffer at its final positions: a birth's scramble writes them only from the next frame (settleBounds).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const indexed = useMemo(() => shared?.indexed ?? indexedGeometry(posAttr!, colAttr!, index, positions), [posAttr, colAttr, index, shared])
 
   // The inside of every face as a front face of its own: the same triangles
   // wound the other way. Flat shading takes a face's normal from the screen,
@@ -347,14 +597,22 @@ export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, disso
   // lights like the outsides do.
   const inside = useMemo(() => {
     if (!lit) return null
-    return shared ? shared.inside() : insideGeometry(posAttr!, colAttr!, index)
+    return shared ? shared.inside() : insideGeometry(posAttr!, colAttr!, index, positions)
+    // `positions` changes only with posAttr (sharedBufferDeps).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [posAttr, colAttr, index, lit, shared])
 
   // The points, drawn as the terrain field draws its gibsons: a feathered disc
   // with a bright core for the bloom, sized in pixels between a floor and a cap.
+  // At the canvas's own dot scale (scene/dotScale.ts): 1, the world's, except on the workshop's LOOK.
+  const dotScale = useDotScale()
   const pointMaterial = useMemo(() => {
-    return createDiscMaterial(shard.mode === 'points' ? SHARD_POINTS : SHARD_DOTS, shard.mode === 'points' ? opacity : opacity * 0.55, headlamp && !lit)
-  }, [shard.mode, opacity, headlamp, lit])
+    const profile = scaledDisc(given.mode === 'points' ? SHARD_POINTS : SHARD_DOTS, dotScale)
+    const m = createDiscMaterial(profile, given.mode === 'points' ? opacity : opacity * 0.55, headlamp && !lit)
+    // A ghost's dots in the world never bloom: it is drawn as it will look, without the glow (shardFaces.ts GHOST_OPACITY).
+    if (noBloom) Object.assign(m, NO_BLOOM_BLEND)
+    return m
+  }, [given.mode, opacity, headlamp, lit, dotScale, noBloom])
   useEffect(() => () => pointMaterial.dispose(), [pointMaterial])
   useEffect(() => { pointMaterial.clippingPlanes = clipPlanes ?? null }, [pointMaterial, clipPlanes])
 
@@ -365,19 +623,25 @@ export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, disso
    * polygon shows its outline and not the diagonals its triangles were cut
    * along, and an edge two faces share is drawn once rather than twice.
    */
-  const outline = useMemo(() => (shared ? shared.outline : outlineGeometry(posAttr!, colAttr!, faces)), [posAttr, colAttr, faces, shared])
+  const outline = useMemo(() => {
+    if (shared) return shared.outline
+    if (given.mode !== 'lines') return null
+    return outlineGeometry(posAttr!, colAttr!, faces)
+    // Keyed on the triangle list, the steady twin of `faces`: a paint that leaves it alone keeps the outline.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [posAttr, colAttr, index, given.mode, shared])
 
   useEffect(() => (shared ? undefined : () => { outline?.dispose() }), [outline, shared])
 
   const line = useMemo(() => {
-    const m = new LineBasicMaterial({ vertexColors: true, toneMapped: false, ...lineProps(opacity, ghost) })
+    const m = new LineBasicMaterial({ vertexColors: true, toneMapped: false, ...lineProps(opacity, ghost, noBloom) })
     if (headlamp && !lit) Object.assign(m, HEADLAMP_LINES)
     const l = new Line(plain, m)
     l.frustumCulled = false
-    l.renderOrder = shardOrder(opacity, ghost)
+    l.renderOrder = shardOrder(opacity, ghost, noBloom)
     l.material.userData.share = own
     return l
-  }, [plain, opacity, ghost, own, headlamp, lit])
+  }, [plain, opacity, ghost, own, headlamp, lit, noBloom])
 
   // A rebuild replaces these; nothing else lets the GPU buffers go. The line
   // is a primitive, which R3F never disposes, so its material is ours too.
@@ -388,6 +652,19 @@ export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, disso
   useEffect(() => { (line.material as LineBasicMaterial).clippingPlanes = clipPlanes ?? null }, [line, clipPlanes])
   // Spread into each JSX material: nothing at all when there are no planes, so those materials are as they were.
   const cut = clipPlanes ? { clippingPlanes: clipPlanes } : {}
+
+  // The placing ghost's edges in the world: where its faces turn, a thin crisp
+  // line to line it up by, never a glow (GHOST_EDGES). Found once per model
+  // and pose (the costly part: about 90 ms for 10k triangles), not on every
+  // cursor step, then cut at its region box on each step, which is a pass
+  // over the segments (ghostEdgeSegments). None past GHOST_EDGES.maxTriangles.
+  const edgeSource = useMemo(
+    () => (edges && plan.faces && given.faces.length > 0 && given.faces.length <= GHOST_EDGES.maxTriangles ? ghostEdgeSegments(expanded(), pose) : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [edges, plan.faces, given.vertices, given.faces, given.facecolors, pose, ghostExpanded],
+  )
+  const ghostEdges = useMemo(() => (edgeSource ? segmentsGeometry(clip ? clipSegments(edgeSource, clip) : edgeSource) : null), [edgeSource, clip])
+  useEffect(() => () => { ghostEdges?.dispose() }, [ghostEdges])
   // The same two functions on every world face and every world line: one program each (scene/headlamp.ts).
   const lampFaces = headlamp ? HEADLAMP_FACES : {}
   const lampLines = headlamp && !lit ? HEADLAMP_LINES : {}
@@ -395,7 +672,7 @@ export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, disso
   // The scrambled start: each vertex thrown somewhere in the model's extent.
   const noise = useMemo(() => {
     if (birth === undefined) return null
-    const seed = seedOf(shard.id)
+    const seed = seedOf(given.id)
     let extent = 1
     for (let i = 0; i < positions.length; i++) extent = Math.max(extent, Math.abs(positions[i]))
     const pos = new Float32Array(positions.length)
@@ -411,13 +688,13 @@ export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, disso
       col[v * 3 + 2] = STATIC[2] * b
     }
     return { pos, col, extent, seed }
-  }, [birth, positions, colors, shard.id])
+  }, [birth, positions, colors, given.id])
 
   // Going away: each vertex's own scatter and lift, and its static brightness.
   // Made once, not per vertex per frame: the decode runs every frame for DOOR_DISSOLVE_MS.
   const away = useMemo(() => {
     if (dissolve === undefined) return null
-    const seed = seedOf(shard.id) ^ 0x5bd1e995
+    const seed = seedOf(given.id) ^ 0x5bd1e995
     let extent = 1
     for (let i = 0; i < positions.length; i++) extent = Math.max(extent, Math.abs(positions[i]))
     const n = positions.length / 3
@@ -435,7 +712,7 @@ export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, disso
       shade[v] = 0.35 + 0.65 * hash01(v * 5, seed)
     }
     return { seed, extent, scatter, lift, shade }
-  }, [dissolve, positions, shard.id])
+  }, [dissolve, positions, given.id])
 
   const done = useRef(false)
   const frame = useRef(0)
@@ -443,6 +720,7 @@ export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, disso
   useFrame((state) => {
     // The disc is sized in pixels, so it needs the canvas it is drawn on.
     sizeDisc(pointMaterial, state.gl.getPixelRatio(), state.size.height)
+    if (faintMaterial) sizeDisc(faintMaterial, state.gl.getPixelRatio(), state.size.height)
     if (dissolve !== undefined && away !== null) {
       if (done.current) return
       const t = dissolveShare(performance.now() - dissolve)
@@ -484,18 +762,21 @@ export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, disso
     if (t >= 1) done.current = true
   })
 
-  const placements = (given.parts?.length ?? 0) > 0
-    ? <Placements shard={given} byRef={resolved} nested={nested} lit={lit} ghost={ghost} world={world} headlamp={headlamp} pose={pose} onPartClick={onPartClick} selected={selectedParts} cull={cull} ignoreOpacity={ignoreOpacity} allowance={allowance} near={near} rootTrusted={trusted} />
+  const placed$ = (given.parts?.length ?? 0) > 0
+    ? <Placements shard={given} byRef={resolved} nested={nested} lit={lit} ghost={ghost} noBloom={noBloom} edges={edges} softOutline={softOutline} world={world} headlamp={headlamp} pose={pose} onPartClick={onPartClick} selected={selectedParts} cull={cull} ignoreOpacity={ignoreOpacity} dim={dim} allowance={allowance} near={near} rootTrusted={trusted} still={still} />
     : null
+  // What a world shard places is its trust's to budget, glow included.
+  const placements = placed$ && budget ? <GlowTrust.Provider value={budget.trusted}>{placed$}</GlowTrust.Provider> : placed$
   // An object may be nothing but the arrangement of others (§1.9 rule 13).
-  if (shard.vertices.length === 0) return placements ? <group scale={scale}>{placements}</group> : null
+  if (given.vertices.length === 0) return placements ? <group scale={scale}>{motion(placements)}</group> : null
   // The nearest hit is on whichever side faces the tap; it answers and stops it there.
   const pick = { userData: { faceOf: drawn }, ...(onFaceClick ? { onClick: (e: ThreeEvent<MouseEvent>) => { const f = faceOfHit(e); if (f !== null) onFaceClick(e, f) } } : {}) }
 
   return (
     <group scale={scale}>
+      {motion(<>
       {placements}
-      {shard.mode === 'solid' && index.length > 0 && (
+      {plan.faces && index.length > 0 && (
         <group>
           <mesh name="shard-faces" geometry={indexed} frustumCulled={false} renderOrder={lit ? bench.front : order} {...pick}>
             {/* forceSinglePass: three draws a transparent DoubleSide material
@@ -515,7 +796,7 @@ export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, disso
               ? <meshLambertMaterial vertexColors flatShading side={FrontSide} toneMapped={SHARD_FACES_TONE_MAPPED} {...litFaceProps(opacity, ghost)} userData-share={own} {...cut} />
               // `transparent forceSinglePass` repeat basicFaceProps so singlePass.test.ts's source scan sees this material.
               // lampFaces: opaque and see-through alike (the headlamp scales rgb only, so it composes with either blend).
-              : <meshBasicMaterial vertexColors side={cull ? FrontSide : DoubleSide} toneMapped={SHARD_FACES_TONE_MAPPED} transparent forceSinglePass={!ghost} {...basicFaceProps(opacity, { ghost, world })} {...lampFaces} userData-share={own} {...cut} />}
+              : <meshBasicMaterial vertexColors side={cull ? FrontSide : DoubleSide} toneMapped={SHARD_FACES_TONE_MAPPED} transparent forceSinglePass={!ghost} {...basicFaceProps(opacity, { ghost, world, noBloom })} {...lampFaces} {...(edges ? GHOST_FACE_OFFSET : {})} userData-share={own} {...cut} />}
           </mesh>
           {lit && inside && (
             <mesh geometry={inside} frustumCulled={false} renderOrder={bench.inside} {...pick}>
@@ -526,24 +807,59 @@ export function ShardMesh({ shard: given, scale = 1, ghost = false, birth, disso
           )}
         </group>
       )}
+      {ghostEdges && (
+        <lineSegments name="ghost-edges" geometry={ghostEdges} frustumCulled={false} renderOrder={TRANSLUCENT_ORDER + 0.5}>
+          <lineBasicMaterial color={GHOST_EDGES.color} toneMapped={false} transparent opacity={GHOST_EDGES.opacity * dim} depthWrite={false} {...NO_BLOOM_BLEND} {...cut} />
+        </lineSegments>
+      )}
       {/* Faces as outlines. A shard with no faces has no edges to draw, so it
           keeps the old single line through its points, which is all there is. */}
       {/* Seen from inside (cull, WALK's first person) only the faces' fronts
           are drawn. The points and lines have no back to cull: every vertex
           dot and edge of your own body would sit across the view, which is
           what arkinox still saw with the backs culled (2026-10-13). */}
-      {shard.mode === 'lines' && outline && !cull && (
+      {plan.lines && outline && (
         <lineSegments geometry={outline} frustumCulled={false} renderOrder={order}>
-          <lineBasicMaterial vertexColors toneMapped={false} {...lineProps(opacity, ghost)} {...lampLines} userData-share={own} {...cut} />
+          <lineBasicMaterial vertexColors toneMapped={false} {...lineProps(opacity, ghost, noBloom)} {...lampLines} userData-share={own} {...cut} />
         </lineSegments>
       )}
-      {shard.mode === 'lines' && !outline && !cull && shard.vertices.length > 1 && <primitive object={line} />}
-      {!cull && (shard.mode === 'points' || shard.mode === 'solid' || shard.mode === 'lines') && (
-        <points geometry={plain} material={pointMaterial} frustumCulled={false} renderOrder={DOTS_ORDER} />
+      {plan.lines && !outline && given.vertices.length > 1 && <primitive object={line} />}
+      {/* The client's own points, as always, unless a POINT SIZE says otherwise (always absent under SOLID and LINES). */}
+      {plan.points === 'disc' && (given.mode === 'points' || given.mode === 'solid' || given.mode === 'lines') && (
+        <points geometry={plain} material={pointMaterial} frustumCulled={false} renderOrder={DOTS_ORDER} userData-softPick={softTaps} />
       )}
+      {/* At a POINT SIZE: billboards, since a GPU caps a GL point's size. 0 draws no points. Sized in model
+          units, carried by the model's own scale, so the canvas's dot scale (scene/dotScale.ts, LOOK) never applies. */}
+      {/* Nothing of its own drawn (opacity 0, or POINTS at point size 0): an invisible copy still answers taps and picks, and is never drawn, so it hides and occludes nothing. */}
+      {!cull && (look.hidden || plan.points === 'none') && (given.mode === 'solid' && index.length > 0 && look.hidden
+        ? <mesh name="shard-hit" visible={false} geometry={indexed} material={HIT_MATERIAL} frustumCulled={false} onClick={pick.onClick} userData-faceOf={drawn} userData-softPick />
+        : !faintMaterial && <points name="shard-hit" visible={false} geometry={plain} material={pointMaterial} frustumCulled={false} userData-softPick />)}
+      {/* Soft, as the dots and points above are on such a shard: it takes a tap only when nothing solid is hit nearer (softPick.tsx). */}
+      {softTaps && <PickVolume points={pickPoints} radius={softRadius} />}
+      {softSeen && <SoftOutline points={pickPoints} radius={softRadius} dim={dim} />}
+      {faintMaterial && <points name="shard-faint" geometry={plain} material={faintMaterial} frustumCulled={false} renderOrder={DOTS_ORDER} />}
+      {plan.points === 'billboard' && look.pointSize !== undefined && (
+        <PointCores plain={pointsPlain} size={look.pointSize} opacity={opacity} glow={SHARD_POINTS.glow} headlamp={headlamp && !lit} clipPlanes={clipPlanes} walls={clip} noBloom={noBloom} soft={softTaps} />
+      )}
+      {plan.halos && look.glow && (
+        <GlowHalos plain={pointsPlain} glow={look.glow} radius={look.glowRadius} strength={look.glowStrength} drawnWorld={world} core={plan.points === 'billboard' ? look.pointSize : 0} fade={haloFade({ ghostShare: ghost ? GHOST_OPACITY : 1, dim })} trusted={glowTrusted} clipPlanes={clipPlanes} walls={clip} birth={birth} dissolve={dissolve} />
+      )}
+      </>)}
     </group>
   )
 }
+
+/** How strong the bench's dots for an object no one can see are drawn: faint, but there. */
+export const BENCH_FAINT_OPACITY = 0.35
+
+/**
+ * The material of the copy of an unseen object (opacity 0, or POINTS at size
+ * 0) that only answers taps and picks. The copy is never drawn (visible
+ * false; three and R3F raycast it anyway), and should it ever be, it writes
+ * neither colour nor depth: an invisible wall stops a walker and hides
+ * nothing (owner's ruling on 0% with constrain).
+ */
+const HIT_MATERIAL = new MeshBasicMaterial({ colorWrite: false, depthWrite: false })
 
 /** A unit cube's twelve edges, centred on the origin: the placeholder (§1.10). */
 export const CUBE_EDGES = new EdgesGeometry(new BoxGeometry(1, 1, 1))
@@ -699,12 +1015,15 @@ function cutBox(shard: ShardModel, list: readonly Listed[], cut: readonly number
   return min[0] === Infinity ? null : { min, max }
 }
 
-function Placements({ shard, byRef, nested, lit, ghost, world, headlamp, pose, onPartClick, selected, cull, ignoreOpacity, allowance, near, rootTrusted = false }: {
+function Placements({ shard, byRef, nested, lit, ghost, noBloom, edges, softOutline, world, headlamp, pose, onPartClick, selected, cull, ignoreOpacity, dim, allowance, near, rootTrusted = false, still = false }: {
   shard: ShardModel
   byRef: Map<string, Resolved>
   nested?: Placed[]
   lit: boolean
   ghost: boolean
+  noBloom: boolean
+  edges: boolean
+  softOutline: boolean
   world: boolean
   headlamp: boolean
   pose?: Pose
@@ -712,12 +1031,15 @@ function Placements({ shard, byRef, nested, lit, ghost, world, headlamp, pose, o
   selected?: number[]
   cull: boolean
   ignoreOpacity: boolean
+  dim: number
   /** How many placed objects it may draw from each share, at every depth (scene/meshBudget.ts); undefined for no budget. */
   allowance?: Allowance
   /** Whether the shard itself is trusted, for which share pays for each placement. */
   rootTrusted?: boolean
   /** Where the shard stands in the render frame, for nearest first. */
   near?: Near
+  /** Drawn as written, whatever the placed objects' `anim` (ShardMesh `still`). */
+  still?: boolean
 }): JSX.Element | null {
   const list = useMemo(() => listOf(shard, byRef, nested), [shard, byRef, nested])
   const turn = useMemo(() => (pose ? renderPose(pose) : null), [pose])
@@ -737,9 +1059,10 @@ function Placements({ shard, byRef, nested, lit, ghost, world, headlamp, pose, o
     if (r.missing === 'objects') return null
     const model = r.model && r.model.unit + part.step >= 0 && r.model.unit + part.step <= MAX_UNIT ? r.model : null
     const matrix = new Matrix4().fromArray(partMatrix(part, shard.unit, model ? model.unit : shard.unit))
-    let body: ReactNode = <lineSegments geometry={CUBE_EDGES}><lineBasicMaterial color={ACCENT} toneMapped={false} transparent opacity={ghost ? 0.45 : 0.8} /></lineSegments>
+    // Its own share (without a ghost's), as every face and line keeps one, so the EDIT breath and the build dim's fade scale it rather than skip it.
+    let body: ReactNode = <lineSegments geometry={CUBE_EDGES}><lineBasicMaterial color={ACCENT} toneMapped={false} transparent opacity={(ghost ? 0.45 : 0.8) * dim} userData-share={0.8 * dim} {...(noBloom ? NO_BLOOM_BLEND : {})} /></lineSegments>
     // The part's own model, so its own opacity, never the parent's (§1.10).
-    if (model) body = <ShardMesh shard={model} placed nested={r.children} lit={lit} ghost={ghost} world={world} headlamp={headlamp} cull={cull} ignoreOpacity={ignoreOpacity} />
+    if (model) body = <ShardMesh shard={model} placed nested={r.children} lit={lit} ghost={ghost} noBloom={noBloom} edges={edges} softOutline={softOutline} world={world} headlamp={headlamp} cull={cull} dim={dim} still={still} ignoreOpacity={ignoreOpacity} />
     // Selected: an amber box around what the placement draws, in its own frame so it turns with it.
     const box = selected?.includes(i) ? (model ? placedBounds(model, r.children) : null) ?? { min: [-0.5, -0.5, -0.5], max: [0.5, 0.5, 0.5] } : null
     return (
@@ -764,8 +1087,8 @@ function Placements({ shard, byRef, nested, lit, ghost, world, headlamp, pose, o
       position={[(outline.min[0] + outline.max[0]) / 2, (outline.min[1] + outline.max[1]) / 2, (outline.min[2] + outline.max[2]) / 2]}
       scale={[Math.max(outline.max[0] - outline.min[0], 0.05), Math.max(outline.max[1] - outline.min[1], 0.05), Math.max(outline.max[2] - outline.min[2], 0.05)]}
     >
-      {/* Its share kept as the EDIT breath and TV's look scale it (WorldShards breatheMaterial). */}
-      <lineBasicMaterial color={ACCENT} toneMapped={false} transparent opacity={CUT_OPACITY} userData-share={CUT_OPACITY} />
+      {/* Its share kept as the EDIT breath, TV's look and the build dim's fade scale it (WorldShards breatheMaterial, BuildOccluders fadeMaterial); dimmed with the rest of its shard. */}
+      <lineBasicMaterial color={ACCENT} toneMapped={false} transparent opacity={CUT_OPACITY * dim} userData-share={CUT_OPACITY * dim} />
     </lineSegments>
   )
   return turn ? <group matrix={turn} matrixAutoUpdate={false}>{drawn}{cutOutline}</group> : <>{drawn}{cutOutline}</>

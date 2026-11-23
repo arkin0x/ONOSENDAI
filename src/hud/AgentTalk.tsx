@@ -29,7 +29,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { ClipboardList, Copy, FastForward, Hand, MapPin, Send, Square, Target, Trash2, Volume2, X } from 'lucide-react'
+import { ClipboardList, Copy, FastForward, Hand, MapPin, Send, Square, Target, Trash2, Volume2 } from 'lucide-react'
 import { useAgentConversation } from '../hooks/useAgentConversation'
 import { useEscape } from '../hooks/useEscape'
 import { useProfile } from '../hooks/useProfile'
@@ -41,10 +41,11 @@ import { ConfirmModal } from './ConfirmModal'
 import { DmInboxSetup } from './DmInboxSetup'
 import { Explanation } from './Explanation'
 import { ProfileBadge } from './ProfileBadge'
+import { ModalClose } from './ui/ModalClose'
 
 /** What a DM inbox is, for the tooltip on NO DM INBOX. */
 export const DM_INBOX_TIP =
-  'A DM inbox is a kind 10050 list naming the relays where someone reads private messages (NIP-17). Messages go only to those relays. Without yours, SET UP DM INBOX publishes one, only when you tap it and confirm. Your agent copies yours by itself.'
+  'A DM inbox is a kind 10050 list naming the relays where someone reads private messages (NIP-17). Messages go only to those relays. Without yours, SET UP DM INBOX publishes one, only when you tap it and confirm; on a key made here, it is published for you. Your agent copies yours by itself.'
 
 /** The quick orders: plain messages, written into the composer. */
 export function quickOrders(coordHex: string): { label: string; title: string; text: string; keepGoing?: boolean }[] {
@@ -225,11 +226,11 @@ export function AgentTalk({ agent, onClose }: { agent: string; onClose: () => vo
     <div className="modal" role="dialog" aria-modal="true" aria-label="Talk to your agent" onPointerDown={backdrop}>
       <div className="modal__card login talk" onPointerDown={(e) => e.stopPropagation()}>
         <div className="login__head">
-          <h2 className="modal__title talk__title">TALK <ProfileBadge pubkey={agent} /></h2>
+          <h2 className="modal__title talk__title">TALK <ProfileBadge pubkey={agent} tappable /></h2>
           <button className="avatars__go talk__clear" onClick={() => setConfirmClear(true)} disabled={talk.messages.length === 0} title="Delete this conversation's messages kept on this device">
             <Trash2 size={10} aria-hidden /> CLEAR HISTORY
           </button>
-          <button className="secret__close" onClick={onClose} aria-label="Close"><X size={14} /></button>
+          <ModalClose onClose={onClose} />
         </div>
 
         {talk.blocked && (

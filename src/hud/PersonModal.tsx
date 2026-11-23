@@ -28,9 +28,10 @@ import type { NostrEvent } from 'nostr-tools'
 import type { ShardModel } from 'sno-core/shards'
 import { ProfilePic, ProfileTap } from './ProfileBadge'
 import { useProfile } from '../hooks/useProfile'
-import { useEscape } from '../hooks/useEscape'
+import { Stacked, leaveModals, useModalStack } from './modalStack'
 import { profileLabel } from '../store/useProfiles'
 import { useCyberspace } from '../store/useCyberspace'
+import { newestAvatar } from '../lib/avatar'
 import { useAvatarShard, useAvatars } from '../store/useAvatars'
 import { copyAvatarToWorkshop, usePersonCard } from '../store/usePersonCard'
 import { spectate } from '../lib/spectator'
@@ -41,6 +42,8 @@ import { useSecrets } from '../store/useSecrets'
 import { setTalking } from '../store/useAgentDms'
 import { EventData } from './EventData'
 import { BlockButton } from './BlockButton'
+import { ModalClose } from './ui/ModalClose'
+import { copyText } from '../lib/copyText'
 
 /** How long COPIED stays on a button, as on a hidden item's card. */
 const COPIED_MS = 1400
@@ -51,9 +54,9 @@ export function PersonModal(): JSX.Element | null {
   const close = usePersonCard((s) => s.close)
   // Escape closes it as a tap outside does; registered on the modal layer,
   // which also hides the pad while the card is up (useModalUp).
-  useEscape('modal', pubkey !== null, close)
+  useModalStack(pubkey !== null, close)
   if (!pubkey) return null
-  return <PersonCardLive pubkey={pubkey} onClose={close} />
+  return <Stacked><PersonCardLive pubkey={pubkey} onClose={close} /></Stacked>
 }
 
 /** The card with the avatar this client draws for `pubkey` (useAvatars). */
@@ -61,13 +64,9 @@ function PersonCardLive({ pubkey, onClose }: { pubkey: string; onClose: () => vo
   const shard = useAvatarShard(pubkey)
   const me = useCyberspace((s) => s.identity.pubkey)
   // Yours: the newer of what this device signed and what the relay answered
-  // (an avatar adopted on another device is only the latter).
-  const event = useAvatars((s) => {
-    const fetched = s.events[pubkey] ?? null
-    if (pubkey !== me) return fetched
-    const kept = s.mineEvent
-    return !kept ? fetched : !fetched || kept.created_at >= fetched.created_at ? kept : fetched
-  })
+  // (an avatar adopted on another device is only the latter), newest wins
+  // as NIP-01 has it (avatarReplaces).
+  const event = useAvatars((s) => newestAvatar([s.events[pubkey], pubkey === me ? s.mineEvent : null]))
   return <PersonCard pubkey={pubkey} shard={shard} event={event} onClose={onClose} />
 }
 
@@ -101,17 +100,19 @@ export function PersonCard({ pubkey, shard, event = null, onClose, Preview = Car
     setCopied(what)
     window.setTimeout(() => setCopied((c) => (c === what ? null : c)), COPIED_MS)
   }
-  const copyNpub = (): void => { void navigator.clipboard?.writeText(npub); flash('npub') }
+  const copyNpub = (): void => { void copyText(npub).then((ok) => { if (ok) flash('npub') }) }
   const copyShard = (): void => {
     if (!shard) return
     copyAvatarToWorkshop(shard, pubkey, me)
     flash('shard')
   }
   const target = (): void => useCyberspace.getState().toggleTarget(pubkey, profile?.name ?? null)
-  const watch = (): void => { onClose(); void spectate(pubkey) }
+  // Out into the world: every modal closes, not this one alone (modalStack).
+  const watch = (): void => { onClose(); leaveModals(); void spectate(pubkey) }
   const chat = (): void => {
     if (noChat) return
     onClose()
+    leaveModals()
     useChat.getState().startTo({ pubkey, label: name })
   }
   const hasShard = !!shard && shard.vertices.length > 0
@@ -123,7 +124,7 @@ export function PersonCard({ pubkey, shard, event = null, onClose, Preview = Car
           <span className="secret__badge">AVATAR</span>
           {profile?.bot && <span className="person__bot" title="This profile says it is a bot (NIP-24)"><Bot size={11} strokeWidth={2.25} aria-hidden />AGENT</span>}
           {mine && <span className="secret__mine">YOU</span>}
-          <button className="secret__close" onClick={onClose} aria-label="Close">✕</button>
+          <ModalClose onClose={onClose} />
         </div>
 
         <div className="secret__creator">

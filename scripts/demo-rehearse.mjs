@@ -28,7 +28,8 @@ const [base, out, label, stepsFile] = process.argv.slice(2)
 fs.mkdirSync(out, { recursive: true })
 const { steps, district } = JSON.parse(fs.readFileSync(stepsFile, 'utf8'))
 const viewport = label === 'phone' ? { width: 412, height: 915 } : { width: 1920, height: 1080 }
-const CANON = /cyberspace\.nostr1\.com/
+// The canonical relay and the read-only old one (useRelays READ_FALLBACK_RELAY) are answered here, never dialed.
+const CANON = /relay\.onosendai\.tech|cyberspace\.nostr1\.com/
 const dropped = { EVENT: 0, AUTH: 0 }
 const consoleErrors = []
 const report = { label, viewport, runs: {}, keys: {}, speak: {}, exit: {}, deepLinks: [], dropped, consoleErrors }
@@ -350,7 +351,7 @@ saveReport()
   await page.goto(`${base}/demo/spawn`, { waitUntil: 'load' })
   await page.waitForFunction(() => !!document.querySelector('.demo__title'), null, { timeout: 60_000 })
   await sleep(2500)
-  await page.locator('.demo__icon[aria-label="Exit the tour"]').click()
+  await page.locator('[aria-label="Exit the tour"]').click()
   await sleep(1500)
   const after = await state(); const d = await dom()
   report.exit.B = { coachGone: !d.active, live: after.live, focus: after.focus, path: after.path, ok: !d.active && after.live === true && after.focus === null && after.path === '/' }

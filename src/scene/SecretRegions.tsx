@@ -20,7 +20,10 @@ import { BoxGeometry, EdgesGeometry } from 'three'
 import { GRID_RADIUS, cellDelta, type AxisName, type ViewAxes } from '../lib/space'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { useSecrets, type HeldKey } from '../store/useSecrets'
+import { useDemo } from '../store/useDemo'
+import { baseOf } from '../lib/secrets/base'
 import { WorldLabel } from './WorldLabel'
+import { useDrawReach } from './buildZoom'
 
 /** The green of "found here", dimmer than the deploy box so it sits behind the work. */
 const HELD = '#52e39f'
@@ -48,12 +51,16 @@ interface Props {
 /** Whether `outer` covers every gibson of `inner`, on all three axes. */
 export function contains(outer: HeldKey, inner: HeldKey): boolean {
   if (outer.lookupId === inner.lookupId || outer.plane !== inner.plane) return false
+  // A corner stored inexact (lib/secrets/base.ts) nests in nothing.
+  const outerBase = baseOf(outer.base, outer.heights ?? outer.height)
+  const innerBase = baseOf(inner.base, inner.heights ?? inner.height)
+  if (!outerBase || !innerBase) return false
   for (const axis of ['x', 'y', 'z'] as const) {
     const ho = BigInt(outer.heights ? outer.heights[axis] : outer.height)
     const hi = BigInt(inner.heights ? inner.heights[axis] : inner.height)
     if (hi > ho) return false
-    const lo = BigInt(outer.base[axis])
-    const v = BigInt(inner.base[axis])
+    const lo = outerBase[axis]
+    const v = innerBase[axis]
     // Aligned blocks nest or miss: the inner one is inside when its base
     // falls in the outer one and it does not run past the outer's end.
     if (v < lo || v + (1n << hi) > lo + (1n << ho)) return false
@@ -89,11 +96,16 @@ export function SecretRegions({ axes }: Props): JSX.Element | null {
   const anchor = useCyberspace((s) => s.anchor)
   const anchorPlane = useCyberspace((s) => s.anchorPlane)
   const scaleExp = useCyberspace((s) => s.scaleExp)
-  const show = useCyberspace((s) => s.showSecrets)
+  // Settings' Region keys (off by default), or a /demo step that shows them while it is up.
+  const switchedOn = useCyberspace((s) => s.showSecrets)
+  const demoShows = useDemo((s) => s.active && s.script.steps[s.index]?.scene?.regionKeys === true)
+  const show = switchedOn || demoShows
   // The list's focus dims the rest only when it is a key drawn here. A
   // scanned place is focused too, so RETURN brings the list back, but it is
   // no cage, and dimming every cage for it hid the ones around the spot.
   const focused = useSecrets((s) => (s.focused !== null && s.keys[s.focused] ? s.focused : null))
+  // As far as the fog's end needs (buildZoom.ts).
+  const reach = useDrawReach((s) => s.reach)
 
   const geometry = useMemo(() => new EdgesGeometry(new BoxGeometry(1, 1, 1)), [])
 
@@ -107,6 +119,9 @@ export function SecretRegions({ axes }: Props): JSX.Element | null {
     }
     for (const key of Object.values(keys)) {
       if (key.plane !== anchorPlane) continue
+      // A corner stored inexact (lib/secrets/base.ts) cannot be drawn: skipped, never thrown in the scene.
+      const base = baseOf(key.base, key.heights ?? key.height)
+      if (!base) continue
       const widest = sideOf(key.height)
       // Smaller than the cell you are looking at: there is nothing to see and
       // nothing to aim at, so it waits until you zoom back in. Measured on the
@@ -121,7 +136,7 @@ export function SecretRegions({ axes }: Props): JSX.Element | null {
         // A hop's region is a box: each axis is as wide as its own crossing.
         const side = sideOf(key.heights ? key.heights[axis] : key.height)
         sides[i] = side
-        const lo = cellDelta(BigInt(key.base[axis]), origin[axis], scaleExp)
+        const lo = cellDelta(base[axis], origin[axis], scaleExp)
         centre[i] = (lo + (side - 1) / 2) * a.dir
         // Always the same corner: +X and +Z, at the region's floor. A key
         // hanging at a fixed corner says which cage it belongs to, where one
@@ -129,7 +144,10 @@ export function SecretRegions({ axes }: Props): JSX.Element | null {
         corner[i] = (lo + (axis === 'y' ? -0.5 : side - 0.5)) * a.dir
         far = Math.max(far, Math.abs(centre[i]))
       })
-      if (far > GRID_RADIUS * 4) continue
+      // The reach every culled layer shares (fog.ts CULL_REACH, GRID_RADIUS
+      // * 8, further as the fog's end needs): the fog is black before it,
+      // so a cage never pops at the line (review of #635, S2).
+      if (far > Math.max(GRID_RADIUS * 8, reach)) continue
       out.push({ key, centre, corner, sides })
     }
     /*
@@ -150,7 +168,7 @@ export function SecretRegions({ axes }: Props): JSX.Element | null {
     // Nearest first, so the ones you are standing in are the ones you see.
     out.sort((a, b) => Math.hypot(...a.centre) - Math.hypot(...b.centre))
     return out.slice(0, DRAWN_MAX)
-  }, [show, keys, anchor, anchorPlane, scaleExp, axes, focused])
+  }, [show, keys, anchor, anchorPlane, scaleExp, axes, focused, reach])
 
   if (cages.length === 0) return null
 

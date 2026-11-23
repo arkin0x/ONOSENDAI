@@ -1,0 +1,105 @@
+/**
+ * walkEyeRig.test.ts - the rig's eye: turned with the body's heading about up
+ * only, never tipped by a look up or down, kept when the look is straight
+ * down, the icosahedron's 0.875 over its origin for no avatar, and a stair's
+ * trail lowering it no nearer the feet than EYE_ROOM.
+ */
+import { describe, expect, it, vi } from 'vitest'
+
+vi.hoisted(() => {
+  const m = new Map<string, string>()
+  ;(globalThis as { localStorage?: Storage }).localStorage = {
+    get length() { return m.size },
+    clear: () => m.clear(),
+    getItem: (k: string) => m.get(k) ?? null,
+    key: (i: number) => [...m.keys()][i] ?? null,
+    removeItem: (k: string) => { m.delete(k) },
+    setItem: (k: string, v: string) => { m.set(k, String(v)) },
+  }
+})
+vi.mock('../../lib/contacts', () => ({ GENERAL_RELAYS: [], followsOf: async () => [], fetchContacts: async () => [] }))
+
+import { Vector3 } from 'three'
+import { newShard, type ShardModel } from 'sno-core/shards'
+import { EYE_ROOM, WalkEyeRig, type EyeFrame } from '../walkEyeRig'
+import { WALL_AXES } from '../../store/walkWalls'
+import { canonicalQuaternion, rotateView, viewAxes } from '../../lib/space'
+
+/** A column 0 to 2 units tall, with an eye written one unit forward (wire -Z, the nose) and one up. */
+const tall: ShardModel = { ...newShard('Tall'), vertices: [{ p: [0, 0, 0], c: [1, 1, 1] }, { p: [0, 2, 0], c: [1, 1, 1] }, { p: [1, 0, 0], c: [1, 1, 1] }], faces: [[0, 1, 2]], extra: { eye: [0, 120, -120] } }
+
+const frame = (shard: ShardModel | null, forward: { x: number; y: number; z: number }): EyeFrame => ({
+  shard, scaleExp: 0, axes: WALL_AXES, plane: 1, cursor: { x: 0n, y: 0n, z: 0n }, lead: [0, 0, 0], forward, up: { axis: 'y', dir: 1 }, walls: false, now: 0,
+})
+
+describe('WalkEyeRig', () => {
+  it('gives the icosahedron its 0.875 over its origin, its lowest point (0.375 over its centre)', () => {
+    const v = new WalkEyeRig().offset(frame(null, { x: 0, y: 0, z: -1 }), new Vector3())
+    expect(v.toArray()).toEqual([0, 0.875, 0])
+  })
+
+  it('turns the eye with the heading, about up only', () => {
+    const rig = new WalkEyeRig()
+    // Looking down render -Z: the nose's way, so the eye is one forward and one up.
+    const a = rig.offset(frame(tall, { x: 0, y: 0, z: -1 }), new Vector3())
+    expect(a.distanceTo(new Vector3(0, 1, -1))).toBeLessThan(1e-9)
+    // Looking along +X and down: the eye swings to +X, and stays one up.
+    const b = rig.offset(frame(tall, { x: 0.6, y: -0.8, z: 0 }), new Vector3())
+    expect(b.distanceTo(new Vector3(1, 1, 0))).toBeLessThan(1e-9)
+  })
+
+  it('under a world the compass has turned, the eye is still up on your screen and turns about your up (DECK-0003 §1.18)', () => {
+    // A quarter turn: render +Y is no longer cyberspace +Y.
+    const axes = viewAxes(rotateView(canonicalQuaternion(), 'up'))
+    expect(axes.up.axis).not.toBe('y')
+    const rig = new WalkEyeRig()
+    const f = (forward: { x: number; y: number; z: number }): EyeFrame => ({ ...frame(tall, forward), axes, up: { axis: axes.up.axis, dir: axes.up.dir } })
+    expect(rig.offset(f({ x: 0, y: 0, z: -1 }), new Vector3()).distanceTo(new Vector3(0, 1, -1))).toBeLessThan(1e-9)
+    expect(rig.offset(f({ x: 0.6, y: -0.8, z: 0 }), new Vector3()).distanceTo(new Vector3(1, 1, 0))).toBeLessThan(1e-9)
+  })
+
+  it('keeps the heading it had when the look is straight down', () => {
+    const rig = new WalkEyeRig()
+    rig.offset(frame(tall, { x: 1, y: 0, z: 0 }), new Vector3())
+    const v = rig.offset(frame(tall, { x: 0, y: -1, z: 0 }), new Vector3())
+    expect(v.distanceTo(new Vector3(1, 1, 0))).toBeLessThan(1e-9)
+  })
+
+  it('lowers the eye by a stair\u2019s trail, never nearer the feet than EYE_ROOM, and keeps the last answer once the trail is gone', () => {
+    const rig = new WalkEyeRig()
+    const up = { offset: -0.4, axis: 'y' as const, dir: 1 as const }
+    expect(rig.offset({ ...frame(tall, { x: 0, y: 0, z: -1 }), rise: up }, new Vector3()).distanceTo(new Vector3(0, 0.6, -1))).toBeLessThan(1e-9)
+    // A trail longer than the eye is high: down to EYE_ROOM over the feet, no further.
+    expect(rig.offset({ ...frame(tall, { x: 0, y: 0, z: -1 }), rise: { ...up, offset: -3 } }, new Vector3()).distanceTo(new Vector3(0, EYE_ROOM, -1))).toBeLessThan(1e-9)
+    // Along a turned view's up: the trail follows the axis it is given.
+    const axes = viewAxes(rotateView(canonicalQuaternion(), 'up'))
+    const f: EyeFrame = { ...frame(tall, { x: 0, y: 0, z: -1 }), axes, up: { axis: axes.up.axis, dir: axes.up.dir }, rise: { offset: -0.4, axis: axes.up.axis, dir: axes.up.dir } }
+    expect(rig.offset(f, new Vector3()).distanceTo(new Vector3(0, 0.6, -1))).toBeLessThan(1e-9)
+    expect(rig.offset(frame(tall, { x: 0, y: 0, z: -1 }), new Vector3()).distanceTo(new Vector3(0, 1, -1))).toBeLessThan(1e-9)
+  })
+
+  it('with walls on its way, keeps its last answer only for about the same eye, else waits at the walker', async () => {
+    const walls = await import('../../store/walkWalls')
+    const place = vi.spyOn(walls, 'eyePlace')
+    const items = vi.spyOn(walls, 'wallItemsAt').mockReturnValue([])
+    try {
+      const rig = new WalkEyeRig()
+      const f = (forward: { x: number; y: number; z: number }): EyeFrame => ({ ...frame(tall, forward), walls: true })
+      // Before any answer: a shard building holds the eye at the walker.
+      place.mockImplementation((_c, _l, _o, _m, _i, _u, out) => { if (out) out.pending = true; return [0, 0, 0] })
+      expect(rig.offset(f({ x: 0, y: 0, z: -1 }), new Vector3()).length()).toBeLessThan(1e-9)
+      // An answer: the eye pulled in to half.
+      place.mockImplementation((_c, _l, o, _m, _i, _u, out) => { if (out) out.pending = false; return [o[0] / 2, o[1] / 2, o[2] / 2] })
+      const half = rig.offset(f({ x: 0, y: 0, z: -1 }), new Vector3())
+      expect(half.distanceTo(new Vector3(0, 0.5, -0.5))).toBeLessThan(1e-9)
+      // Building again, the same eye: the answer stands (no drop to the feet).
+      place.mockImplementation((_c, _l, _o, _m, _i, _u, out) => { if (out) out.pending = true; return [0, 0, 0] })
+      expect(rig.offset(f({ x: 0, y: 0, z: -1 }), new Vector3()).distanceTo(half)).toBeLessThan(1e-9)
+      // Turned right round: that answer is not this eye's, so it waits at the walker.
+      expect(rig.offset(f({ x: 0, y: 0, z: 1 }), new Vector3()).length()).toBeLessThan(1e-9)
+    } finally {
+      place.mockRestore()
+      items.mockRestore()
+    }
+  })
+})

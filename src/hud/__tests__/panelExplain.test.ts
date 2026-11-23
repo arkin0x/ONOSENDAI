@@ -35,7 +35,7 @@ describe('every menu panel has EXPLAIN', () => {
   it('each component in the panel registry renders <Explanation>', () => {
     const all = sources()
     const hud = all.get('Hud.tsx')!
-    const registry = /const PANELS: Record<PanelId, \(\) => JSX\.Element> = \{([\s\S]*?)\n\}/.exec(hud)?.[1] ?? ''
+    const registry = /const PANELS: Record<PanelId, \(\) => JSX\.Element(?: \| null)?> = \{([\s\S]*?)\n\}/.exec(hud)?.[1] ?? ''
     const entries = [...registry.matchAll(/^\s*(\w+): (\w+),/gm)].map((m) => [m[1], m[2]] as const)
     expect(entries.length).toBeGreaterThanOrEqual(20)
     // A panel may hand its body to a component of its own (HiddenPanel to

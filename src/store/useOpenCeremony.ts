@@ -14,31 +14,34 @@
  */
 
 import { create } from 'zustand'
-import { afterOpen, ceremonyLength, type CeremonyKind } from '../lib/ceremony'
-import { ceremonyFeedback } from '../lib/ceremonySound'
+import { VANISH_MS, afterClose, afterOpen, afterReopen, calmVanish, ceremonyLength, type CeremonyKind } from '../lib/ceremony'
+import { ceremonyFeedback, closeFeedback } from '../lib/ceremonySound'
 import { openedKey } from './useOpenedChests'
 import { useLootView } from './useLootView'
 import { useShards } from './useShards'
+import { useCyberspace } from './useCyberspace'
 
 /** One ceremony playing: what plays, from when (performance.now() at the decrypt's return), and whether on the calm path. */
 export interface Playing {
   kind: CeremonyKind
   at: number
   calm: boolean
+  /** A door closing (CLOSE): its open look fading back into the closed one (scene/DoorCeremony DoorCloses). */
+  closing?: true
 }
 
 interface OpenCeremonyState {
   /** By openedKey(identity, chest id). */
   playing: Record<string, Playing>
-  begin: (me: string, chestId: string, kind: CeremonyKind, calm: boolean, at?: number) => void
+  begin: (me: string, chestId: string, kind: CeremonyKind, calm: boolean, at?: number, closing?: true) => void
   end: (key: string) => void
 }
 
 export const useOpenCeremony = create<OpenCeremonyState>((set, get) => ({
   playing: {},
-  begin: (me, chestId, kind, calm, at = performance.now()) => {
+  begin: (me, chestId, kind, calm, at = performance.now(), closing) => {
     const key = openedKey(me, chestId)
-    set({ playing: { ...get().playing, [key]: { kind, at, calm } } })
+    set({ playing: { ...get().playing, [key]: { kind, at, calm, ...(closing ? { closing } : {}) } } })
     setTimeout(() => { if (get().playing[key]?.at === at) get().end(key) }, ceremonyLength(kind, calm) + 50)
   },
   end: (key) => {
@@ -83,4 +86,70 @@ export function celebrateOpen(o: { me: string; chestId: string; kind: CeremonyKi
   if (plan.ceremony) useOpenCeremony.getState().begin(o.me, o.chestId, o.kind, o.calm)
   if (plan.feedback) ceremonyFeedback(o.kind, Date.now(), plan.ceremony ? o.landMs : undefined)
   return plan
+}
+
+/**
+ * OPEN on a door closed with CLOSE (arkinox, 2026-11-01: a SHORT reveal): the card
+ * yields when the door is drawn, and the door plays the short crossfade from shut
+ * to open (lib/ceremony.ts afterReopen), the calm path's, shorter than the first
+ * OPEN's slab decoding away. No sound, no loot, no reveal of the room.
+ */
+export function celebrateReopen(o: { me: string; chestId: string }): ReturnType<typeof afterReopen> {
+  const plan = afterReopen(lookDrawn(o.chestId))
+  if (plan.yieldCards) yieldToWorld()
+  if (plan.ceremony) useOpenCeremony.getState().begin(o.me, o.chestId, 'door', true)
+  return plan
+}
+
+/**
+ * CLOSE on an opened door: the card yields when the door is drawn, so the door is
+ * seen closing, and its open look fades back into the closed one, as briefly. A soft
+ * lock tick and the door's short buzz are offered, each through the gate every
+ * opening shares (arkinox, 2026-11-09; lib/ceremonySound closeFeedback).
+ */
+export function celebrateClose(o: { me: string; chestId: string }): ReturnType<typeof afterClose> {
+  const plan = afterClose(lookDrawn(o.chestId))
+  if (plan.yieldCards) yieldToWorld()
+  if (plan.ceremony) useOpenCeremony.getState().begin(o.me, o.chestId, 'door', true, performance.now(), true)
+  if (plan.feedback) closeFeedback()
+  return plan
+}
+
+/** One item going out of the world after TAKE: from when, and whether on the calm path. */
+export interface Vanishing {
+  at: number
+  calm: boolean
+}
+
+interface TakeVanishState {
+  /** By openedKey(identity, item id). Never kept: a reload draws a held item as its box at once. */
+  playing: Record<string, Vanishing>
+  begin: (me: string, id: string, calm: boolean, at?: number) => void
+}
+
+export const useTakeVanish = create<TakeVanishState>((set, get) => ({
+  playing: {},
+  begin: (me, id, calm, at = performance.now()) => {
+    const key = openedKey(me, id)
+    set({ playing: { ...get().playing, [key]: { at, calm } } })
+    setTimeout(() => {
+      if (get().playing[key]?.at !== at) return
+      const playing = { ...get().playing }
+      delete playing[key]
+      set({ playing })
+    }, (calm ? calmVanish() : VANISH_MS) + 50)
+  },
+}))
+
+/**
+ * TAKE on an item where it stands (arkinox, 2026-11-01): held, the list or the
+ * card it was tapped in closes, and the item fades out where it stands
+ * (scene/ItemVanish). A bag record stays open: it may be far from the item.
+ */
+export function takeAndVanish(id: string, calm: boolean): void {
+  const shards = useShards.getState()
+  if (shards.takeFound([id]).length === 0) return
+  useTakeVanish.getState().begin(useCyberspace.getState().identity.pubkey, id, calm)
+  if (shards.selectedSecret !== null) shards.selectSecret(null)
+  if (shards.nearbyOpen) shards.setNearbyOpen(false)
 }

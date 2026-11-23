@@ -111,7 +111,7 @@ export interface StarSpot {
   input: string
 }
 
-/** Where the list lives on this device. Shared by every identity signed in here. */
+/** Where builds before 2026-11-19 kept the list, once per device; now only read, to adopt (legacyPlaces). */
 export const STARRED_KEY = 'onosendai:starred-places'
 
 /** The most places kept. Starring past this drops the oldest. */
@@ -134,7 +134,7 @@ function same(a: Position, b: Position): boolean {
   return a.x === b.x && a.y === b.y && a.z === b.z
 }
 
-/** "x, y, z" in full decimals: the same text the POSITION panel reads back. */
+/** "x, y, z" in full decimals: the same text the View panel reads back. */
 export function placeInput(p: Position): string {
   return `${p.x}, ${p.y}, ${p.z}`
 }
@@ -147,13 +147,36 @@ export function placeInput(p: Position): string {
  * way RECENT shows typed axes.
  */
 export function starSpot(s: StarSource): StarSpot | null {
+  const at = spotAt(s)
+  if (!at) return null
+  const { position, plane } = at
+  const named = s.focus && same(s.focus.position, position) && s.focus.plane === plane && s.focus.label.trim() !== ''
+  const label = named ? s.focus!.label : axesText(position).label
+  return { position: { ...position }, plane, label, input: axesText(position).input }
+}
+
+/** Where the spot is, or null when it is your avatar: no text made. */
+function spotAt(s: StarSource): { position: Position; plane: Plane } | null {
   const drive = s.canDrive()
   const position = drive ? s.cursor : (s.focus?.position ?? s.anchor)
   const plane: Plane = drive ? (s.atHead() ? s.plane : s.anchorPlane) : (s.focus?.plane ?? s.anchorPlane)
   if (same(position, s.position) && plane === s.headPlane) return null
-  const named = s.focus && same(s.focus.position, position) && s.focus.plane === plane && s.focus.label.trim() !== ''
-  const label = named ? s.focus!.label : [position.x, position.y, position.z].map(shortAxis).join(', ')
-  return { position: { ...position }, plane, label, input: placeInput(position) }
+  return { position, plane }
+}
+
+/**
+ * The shortened and the full text of a place, for the last place asked: the
+ * star's selectors run at every change to the scene's store, several times a
+ * frame while walking, and writing out three 85-bit axes each time was a
+ * steady cost of every frame (owner's phone diag, 2026-11-22). Compared by
+ * value: three bigint comparisons, against three long divisions written out.
+ */
+let lastText: { x: bigint; y: bigint; z: bigint; label: string; input: string } | null = null
+function axesText(position: Position): { label: string; input: string } {
+  if (!lastText || lastText.x !== position.x || lastText.y !== position.y || lastText.z !== position.z) {
+    lastText = { x: position.x, y: position.y, z: position.z, label: [position.x, position.y, position.z].map(shortAxis).join(', '), input: placeInput(position) }
+  }
+  return lastText
 }
 
 /**
@@ -162,7 +185,7 @@ export function starSpot(s: StarSource): StarSpot | null {
  * is your avatar. An unfolded chat is left alone either way.
  */
 export function bottomChip(s: StarSource): 'star' | 'chat' {
-  return starSpot(s) ? 'star' : 'chat'
+  return spotAt(s) ? 'star' : 'chat'
 }
 
 /** Whether `entry` (by its text and plane, as RECENT matches) is in the list. */
@@ -202,19 +225,28 @@ function valid(p: unknown): p is StarredPlace {
   )
 }
 
-/** The list as stored on this device; empty when nothing is stored or storage cannot be read. */
-export function loadPlaces(): StarredPlace[] {
+/** A list as this app can use it, from whatever was stored. */
+export function cleanPlaces(raw: unknown): StarredPlace[] {
+  return Array.isArray(raw) ? raw.filter(valid).slice(0, MAX_STARRED) : []
+}
+
+/**
+ * The device-wide list builds before 2026-11-19 kept in localStorage, for
+ * adoption by the identity signed in when it is first read
+ * (store/useStarred.ts); undefined when there is none. Never written again.
+ */
+export function legacyPlaces(): unknown {
   try {
-    const v = JSON.parse(localStorage.getItem(STARRED_KEY) ?? '[]') as unknown
-    return Array.isArray(v) ? v.filter(valid).slice(0, MAX_STARRED) : []
+    const raw = localStorage.getItem(STARRED_KEY)
+    return raw === null ? undefined : JSON.parse(raw) as unknown
   } catch {
-    return []
+    return undefined
   }
 }
 
-/** Keep the list on this device. A storage that refuses (private mode, full) keeps it for this visit only. */
-export function savePlaces(list: StarredPlace[]): void {
-  try {
-    localStorage.setItem(STARRED_KEY, JSON.stringify(list))
-  } catch { /* private mode or full: the list still holds for this visit */ }
+/** Two lists as one: `early` (changes made before the stored list was read) first, then the stored places it does not hold. */
+export function unionPlaces(stored: StarredPlace[], early: StarredPlace[]): StarredPlace[] {
+  const out = [...early]
+  for (const p of stored) if (!out.some((q) => q.input === p.input && q.plane === p.plane)) out.push(p)
+  return out.slice(0, MAX_STARRED)
 }

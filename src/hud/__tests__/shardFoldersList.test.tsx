@@ -35,7 +35,7 @@ function render(collapsed = false): string {
   ])
   tree = { ...tree, assign: { ...tree.assign, ghost: 'deleted-folder' } }
   if (collapsed) tree = { ...tree, collapsed: { water: true } }
-  useShardFolders.setState({ owner: 'ee'.repeat(32), tree, storage: 'indexeddb' })
+  useShardFolders.setState({ tree, storage: 'indexeddb' })
   Object.assign(useShardFolders.getInitialState(), useShardFolders.getState())
   return renderToStaticMarkup(
     <ul>
@@ -86,7 +86,7 @@ describe('moving into a folded folder', () => {
       { op: 'collapse', id: 'kit', collapsed: true },
       { op: 'collapse', id: 'water', collapsed: true },
     ])
-    useShardFolders.setState({ owner: 'ee'.repeat(32), tree, storage: 'memory' })
+    useShardFolders.setState({ tree, storage: 'memory' })
   }
 
   it('files shards there and leaves it and the folders above it folded', () => {

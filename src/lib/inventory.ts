@@ -23,7 +23,8 @@ import { withAuthoredConstrain } from './walkConstrain'
 import type { NostrEvent } from './events'
 import type { ChestEntry, OpeningKey } from './chests'
 import type { AudioItem } from './audioItem'
-import { KEY_KIND, hiddenLabel, keyItemOf, type ChestItem, type Hidden, type HiddenType, type ItemBody, type KeyItem } from './hidden'
+import { isGuideKey } from './commentSubjects'
+import { KEY_KIND, hiddenLabel, itemLineage, keyItemOf, type ChestItem, type Hidden, type HiddenType, type ItemBody, type KeyItem } from './hidden'
 
 /** What a key looks like as text, for COPY and PASTE across devices. */
 export const KEY_TEXT_PREFIX = 'cyberspace-key:'
@@ -38,6 +39,21 @@ export interface HeldPlace {
   at: { x: string; y: string; z: string }
   plane: Plane
   height: number
+  /**
+   * Who signed the bag: who the in-world card names as the author of what was
+   * found there (Hidden `author`), so a key item's COMMENT in ITEMS opens the
+   * thread its card opens (lib/commentSubjects.ts). For something taken out
+   * of a chest, the chest's hider as the chest was opened. Absent on rows
+   * held before it was kept. Kept on this device only, like the rest.
+   */
+  author?: string
+  /**
+   * The bag was sealed by a tutorial guide key (tutorial/guideBags.ts), as
+   * told when it was taken: never a thread, whatever guide key this device
+   * keeps later (lib/commentSubjects subjectOfHeld). Its bag was never on a
+   * relay, and a comment would name the guide key in public.
+   */
+  guide?: true
 }
 
 /** The chest a taken item came out of. */
@@ -87,9 +103,13 @@ export interface HeldItem {
   /** Hidden audio taken from a chest (DECK-0007): its file and key, so ITEMS can play it and save it (LISTEN). */
   audio?: AudioItem
   /**
-   * Unix seconds when it left the TAKEN list: moved into the workshop, or
-   * cleared (arkinox, 2026-10-11). The row is kept, hidden, so the chest it
-   * came out of still says TAKEN and it cannot be taken a second time.
+   * Unix seconds when it left the TAKEN list: moved into the workshop
+   * (arkinox, 2026-10-11). Rows cleared by the old X or CLEAR ALL (both gone
+   * since 2026-11-14) carry it too. The row is kept on disk but is
+   * no longer in ITEMS (inItems), so the chest it came out of offers it
+   * again with TAKE (arkinox, 2026-11-09: "it should check each item against
+   * my ITEMS current state. anything missing should appear again"), and a
+   * TAKE of it holds it afresh in this row's place (addHeld).
    */
   cleared?: number
   /**
@@ -99,6 +119,40 @@ export interface HeldItem {
    * once the same key is found in play.
    */
   watched?: true
+  /**
+   * Unix seconds when it was filed away under ARCHIVED (arkinox, 2026-11-06:
+   * "refuse and offer archive instead to file it away behind a modal.
+   * Inventory and Archived"). Still held for what a key does: it opens and
+   * seals chests and doors, and keeps its secret on this device. Not drawn
+   * as held in the world (WorldMessages), and out of the INVENTORY list.
+   * UNARCHIVE takes it back.
+   */
+  archived?: number
+}
+
+/**
+ * What is in ITEMS now: INVENTORY and ARCHIVED, without the rows cleared off
+ * the TAKEN list (`cleared`), which no list shows.
+ */
+export function inItems(items: Record<string, HeldItem>): Record<string, HeldItem> {
+  let out: Record<string, HeldItem> | null = null
+  for (const [id, it] of Object.entries(items)) {
+    if (!it.cleared) continue
+    out ??= { ...items }
+    delete out[id]
+  }
+  return out ?? items
+}
+
+/** What is not filed away under ARCHIVED: what the world draws as held. */
+export function unarchived(items: Record<string, HeldItem>): Record<string, HeldItem> {
+  let out: Record<string, HeldItem> | null = null
+  for (const [id, it] of Object.entries(items)) {
+    if (!it.archived) continue
+    out ??= { ...items }
+    delete out[id]
+  }
+  return out ?? items
 }
 
 export function rowKeyOf(owner: string, id: string): string {
@@ -106,11 +160,13 @@ export function rowKeyOf(owner: string, id: string): string {
 }
 
 /** A found item's place, as the inventory keeps it. */
-export function placeOf(h: Pick<Hidden, 'lookupId' | 'bagId' | 'at' | 'plane' | 'height'>): HeldPlace {
-  return { lookupId: h.lookupId, bagId: h.bagId, at: { x: h.at.x.toString(), y: h.at.y.toString(), z: h.at.z.toString() }, plane: h.plane, height: h.height }
+export function placeOf(h: Pick<Hidden, 'lookupId' | 'bagId' | 'at' | 'plane' | 'height'> & Partial<Pick<Hidden, 'author'>>): HeldPlace {
+  return { lookupId: h.lookupId, bagId: h.bagId, at: { x: h.at.x.toString(), y: h.at.y.toString(), z: h.at.z.toString() }, plane: h.plane, height: h.height, ...(h.author ? { author: h.author } : {}) }
 }
 
-function row(owner: string, event: NostrEvent, body: ItemBody, verified: boolean, source: HeldSource, place: HeldPlace | null, from: HeldFrom | null, at: number): HeldItem {
+function row(owner: string, event: NostrEvent, body: ItemBody, verified: boolean, source: HeldSource, given: HeldPlace | null, from: HeldFrom | null, at: number): HeldItem {
+  // Sealed by a tutorial guide key: said on the place at TAKE, so it holds after a reload or a new guide key.
+  const place = given?.author && isGuideKey(given.author) ? { ...given, guide: true as const } : given
   return {
     rowKey: rowKeyOf(owner, event.id),
     owner,
@@ -152,7 +208,11 @@ export function heldFromFind(owner: string, h: Hidden, at: number, watched = fal
   return watched ? { ...held, watched: true } : held
 }
 
-/** A key the identity forged and hid, held at once so chests can be sealed to it (B1 §3.1). */
+/**
+ * A key the identity forged, held as forged: picked up by TAKE on one of its
+ * own (arkinox, 2026-11-06: hiding no longer holds it, B1 §3.1 as amended).
+ * Rows held at hiding before then stay.
+ */
 export function heldFromForged(owner: string, event: NostrEvent, key: KeyItem, place: HeldPlace, at: number): HeldItem {
   return row(owner, event, { type: 'key', key }, true, 'forged', place, null, at)
 }
@@ -168,17 +228,77 @@ export function heldFromPasted(owner: string, event: NostrEvent, key: KeyItem, v
 }
 
 /**
- * Hold more items. One row per id: an item already held keeps its row, so a
- * key read twice (a rescan, a second device's bag) is held once, and the
- * place and time of the first holding stand. Returns what was new.
+ * An item's lineage as held: its author and its first version's id
+ * (lib/hidden.ts itemLineage). Only its author can move it, so only an event
+ * by the same author is a version of it: a `d` is a claim anyone can write,
+ * and another key's item carrying this one's id as its `d` is not this item
+ * (review of #595).
  */
-export function addHeld(items: Record<string, HeldItem>, add: HeldItem[]): { items: Record<string, HeldItem>; added: HeldItem[] } {
+export function lineageKey(author: string, lineage: string): string {
+  return `${author}:${lineage}`
+}
+
+/**
+ * The lineages of what is held (lineageKey). An item its hider moved (MOVE,
+ * EDIT) is a new event at the new place that carries its first version's id
+ * as `d`, so a version held before the move and the one standing now are one
+ * item: its blue box stays, and TAKE does not hold it a second time.
+ */
+export function heldLineages(items: Record<string, HeldItem>): Set<string> {
+  const out = new Set<string>()
+  for (const it of Object.values(items)) {
+    out.add(lineageKey(it.event.pubkey, itemLineage(it.event) ?? it.id))
+    if (it.type === 'key' && it.key) out.add(keypairKey(it.key.itemPubkey))
+  }
+  return out
+}
+
+/**
+ * A key's keypair among held lineages. Holding a key is holding its keypair
+ * (lib/hidden.ts KeyItem secretHex), so every instance of it is held: one
+ * PLACEd again from ITEMS is the same key (arkinox, 2026-11-06), as HIDE
+ * AGAIN's copy is.
+ */
+export function keypairKey(itemPubkey: string): string {
+  return `key:${itemPubkey}`
+}
+
+/**
+ * Whether this item is held: by its own id, as a version, by the same
+ * author, of one held (heldLineages), or, for a key, by its keypair
+ * (`keypair`, its item public key).
+ */
+export function holdsItem(items: Record<string, HeldItem>, id: string, lineage?: string | null, author?: string | null, lineages?: ReadonlySet<string>, keypair?: string | null): boolean {
+  if (items[id]) return true
+  const held = lineages ?? heldLineages(items)
+  if (keypair && held.has(keypairKey(keypair))) return true
+  return !!lineage && !!author && held.has(lineageKey(author, lineage))
+}
+
+/**
+ * Hold more items. One row per item: an item already held keeps its row, so
+ * a key read twice (a rescan, a second device's bag) is held once, and so is
+ * a version of it its hider moved, or another instance of its keypair
+ * (holdsItem), and the place and time of the first holding stand. Only what
+ * is in ITEMS counts (inItems): a row cleared off the TAKEN list is replaced
+ * by the item held afresh. `byLineage: false` is a chest's TAKE, which goes
+ * by the item's own identity (holdsEntry): its id, or a key's keypair, never
+ * a lineage shared with another item. Returns what was new.
+ */
+export function addHeld(items: Record<string, HeldItem>, add: HeldItem[], { byLineage = true }: { byLineage?: boolean } = {}): { items: Record<string, HeldItem>; added: HeldItem[] } {
   const added: HeldItem[] = []
   let next = items
+  const lineages = heldLineages(inItems(items))
   for (const item of add) {
-    if (next[item.id]) continue
+    const lineage = lineageKey(item.event.pubkey, itemLineage(item.event) ?? item.id)
+    const keypair = item.type === 'key' && item.key ? keypairKey(item.key.itemPubkey) : null
+    const was = next[item.id]
+    // A cleared row gives way to the same item held again, never to another cleared copy.
+    if ((was && (!was.cleared || item.cleared)) || (byLineage && lineages.has(lineage)) || (keypair && lineages.has(keypair))) continue
     if (next === items) next = { ...items }
     next[item.id] = item
+    lineages.add(lineage)
+    if (keypair) lineages.add(keypair)
     added.push(item)
   }
   return { items: next, added }
@@ -238,6 +358,76 @@ export function openingKeys(items: Record<string, HeldItem>, auto = false): Open
   return out
 }
 
+/** A key this identity made: its id (its event's), its name, when, and the key. */
+export interface MadeKey {
+  id: string
+  name: string
+  at: number
+  key: KeyItem
+}
+
+/** What madeKeys reads of a deployment row of this identity's (store/useShards MyDeployment). */
+export interface MadeRow {
+  eventId: string
+  inner: { pubkey: string; created_at: number }
+  createdAt: number
+  key?: KeyItem
+  /** A chest's contents as sealed, kept on the device that sealed it. */
+  sealed?: readonly unknown[]
+}
+
+/**
+ * The keys this identity made on this device, held or not (arkinox,
+ * 2026-11-06: "when i place an item: i want to pick it up for the first time,
+ * not have it automatically"): each key it placed, from its deployment rows,
+ * and each key it forged inside a chest it placed, from that chest's contents
+ * as sealed. Their secrets were never anywhere else, so nothing is asked
+ * again. Only its own: a row or an entry by another identity is left out.
+ * One per keypair, the first met.
+ */
+export function madeKeys(rows: readonly MadeRow[], me: string): MadeKey[] {
+  const out: MadeKey[] = []
+  const seen = new Set<string>()
+  const add = (k: MadeKey): void => { if (!seen.has(k.key.itemPubkey)) { seen.add(k.key.itemPubkey); out.push(k) } }
+  for (const d of rows) {
+    if (!me || d.inner.pubkey !== me) continue
+    if (d.key) add({ id: d.eventId, name: d.key.name, at: d.createdAt, key: d.key })
+    for (const e of d.sealed ?? []) {
+      const ev = e as Partial<NostrEvent>
+      if (typeof ev.id !== 'string' || ev.pubkey !== me || typeof ev.kind !== 'number' || !Array.isArray(ev.tags) || typeof ev.content !== 'string') continue
+      const key = keyItemOf(ev as NostrEvent)
+      if (key) add({ id: ev.id, name: key.name, at: ev.created_at ?? d.createdAt, key })
+    }
+  }
+  return out
+}
+
+/**
+ * What the hider's own work opens a chest of theirs with: the keys held, and
+ * every key it made (madeKeys), held or not. For EDIT, ADD, CONVERT and the
+ * bag's guard against carrying a chest's contents in the open, never for
+ * opening a chest in play, which takes a key held (openingKeys).
+ */
+export function hiderKeys(items: Record<string, HeldItem>, rows: readonly MadeRow[], me: string): OpeningKey[] {
+  const out = openingKeys(items)
+  const have = new Set(out.map((k) => k.itemPubkey))
+  for (const m of madeKeys(rows, me)) if (!have.has(m.key.itemPubkey)) { have.add(m.key.itemPubkey); out.push({ id: m.id, itemPubkey: m.key.itemPubkey, secretHex: m.key.secretHex }) }
+  return out
+}
+
+/**
+ * The keys a chest or a door can be sealed to from the composer: every key
+ * held, then every key this identity made and has not picked up (madeKeys),
+ * newest first, one per keypair.
+ */
+export function sealableKeys(items: Record<string, HeldItem>, rows: readonly MadeRow[], me: string): MadeKey[] {
+  const held = Object.values(items).filter((it): it is HeldItem & { key: KeyItem } => it.type === 'key' && !!it.key).map((it) => ({ id: it.id, name: it.name, at: it.at, key: it.key }))
+  const have = new Set(held.map((k) => k.key.itemPubkey))
+  const out: MadeKey[] = [...held]
+  for (const m of madeKeys(rows, me)) if (!have.has(m.key.itemPubkey)) { have.add(m.key.itemPubkey); out.push(m) }
+  return out.sort((a, b) => b.at - a.at)
+}
+
 /** Which of these chests a key opens: those whose lock is the key's public key. */
 export function chestsOpenedBy(key: Pick<KeyItem, 'itemPubkey'>, chests: Array<{ id: string; chest: ChestItem }>): string[] {
   return chests.filter((c) => c.chest.lockPubkey === key.itemPubkey).map((c) => c.id)
@@ -258,13 +448,42 @@ export interface DiscoveredPlace {
 
 /** What the LOOT panel shows: the keys held, and the contents taken from chests. */
 export interface Loot {
-  /** Newest held first. */
+  /** Newest held first, not archived. */
   keys: HeldItem[]
-  /** Everything taken that is not a key, newest first. */
+  /** Everything taken that is not a key, newest first, not archived. */
   taken: HeldItem[]
+  /** Everything filed away under ARCHIVED, newest first. */
+  archived: HeldItem[]
 }
 
 const newestFirst = <T extends { at: number }>(a: T, b: T): number => b.at - a.at
+
+/**
+ * Which of the ITEMS panel's two buttons a held row is under (owner,
+ * 2026-11-14: "key items with a key emoji, and loot items with a sparkle
+ * emoji"). A KEY ITEM is a keypair item, the kind 3340 event of DECK-0004:
+ * the one thing a chest or a door can be sealed to, so the one thing that
+ * opens them. That holds however it came to be held: forged, found, pasted,
+ * or taken out of a chest. Everything else held is OTHER LOOT: shards,
+ * messages and Cashu coins, sounds, seeds and DNA, and chests taken out of
+ * chests, since a chest is locked by a key and is never one. Region and room
+ * keys are not held items at all; they are in the KEYRING.
+ */
+export const isKeyItem = (it: Pick<HeldItem, 'type'>): boolean => it.type === 'key'
+
+/**
+ * The public keys of every key item held, archived ones too: KEY ITEMS
+ * > FEED leaves these out, and a lock shown with its key item says IN YOUR
+ * ITEMS for them. Matched by keypair, so a renamed copy is the same key.
+ */
+export function heldKeypairs(items: Record<string, Pick<HeldItem, 'type' | 'key' | 'cleared'>>): Set<string> {
+  return new Set(Object.values(items).flatMap((it) => (isKeyItem(it) && it.key && !it.cleared ? [it.key.itemPubkey] : [])))
+}
+
+/** Whether a key item with this public key is held (heldKeypairs), for one lock. */
+export function holdsKeypair(items: Record<string, Pick<HeldItem, 'type' | 'key' | 'cleared'>>, itemPubkey: string): boolean {
+  return Object.values(items).some((it) => isKeyItem(it) && !it.cleared && it.key?.itemPubkey === itemPubkey)
+}
 
 /**
  * The three-panel model's two local panels, as one pure split (B1 ruling 14):
@@ -289,8 +508,10 @@ export function splitPanels(discovered: Hidden[], held: HeldItem[]): { discovere
   return {
     discovered: grouped,
     loot: {
-      keys: held.filter((it) => it.type === 'key').sort(newestFirst),
-      taken: held.filter((it) => it.type !== 'key' && !it.cleared).sort(newestFirst),
+      keys: held.filter((it) => isKeyItem(it) && !it.archived).sort(newestFirst),
+      taken: held.filter((it) => !isKeyItem(it) && !it.cleared && !it.archived).sort(newestFirst),
+      // Never a row cleared off the list (moved into the workshop): it is out of ITEMS, archived or not.
+      archived: held.filter((it) => !!it.archived && !it.cleared).sort(newestFirst),
     },
   }
 }
@@ -306,24 +527,30 @@ export function modelPrint(shard: ShardModel): string {
   return JSON.stringify(toPayload(withAuthoredConstrain({ ...shard, id: '', name: '' })))
 }
 
-/** Whether a shard with this model is already held, cleared or not: taking it again would only duplicate it. */
 /**
- * Whether a chest's content is held already: by its id, or (one shard per
- * model, arkinox, 2026-10-11) a shard whose model is held under any name.
- * What is held is hidden on the chest, in its rows and its loot (arkinox,
- * 2026-10-30: "hide it on the chest so it feels like you took it").
+ * Whether a chest's content is in ITEMS now (arkinox, 2026-11-09: "it should
+ * check each item against my ITEMS current state. anything missing should
+ * appear again"), and so hidden on the chest, in its rows and its loot
+ * (arkinox, 2026-10-30: "hide it on the chest so it feels like you took
+ * it"). In ITEMS is INVENTORY and ARCHIVED, never a row cleared off the
+ * TAKEN list (inItems). Matched by the item's own identity: its id; for a
+ * key, its keypair, held under any row (keys ARE items: every instance of
+ * one is the same key, review of #615); for a shard, one per model (arkinox,
+ * 2026-10-11), its model held under any name. Never by an author's lineage
+ * shared with some other item. A chest's TAKE refuses exactly what this
+ * holds (store/useInventory take), so TAKE ALL always finishes.
  */
 export function holdsEntry(items: Record<string, HeldItem>, entry: ChestEntry): boolean {
-  return !!items[entry.id] || (entry.body.type === 'shard' && !!entry.body.shard && holdsModel(items, entry.body.shard))
+  const row = items[entry.id]
+  if (row && !row.cleared) return true
+  const keypair = entry.body.type === 'key' ? entry.body.key?.itemPubkey : null
+  if (keypair) for (const it of Object.values(items)) if (!it.cleared && it.type === 'key' && it.key?.itemPubkey === keypair) return true
+  return entry.body.type === 'shard' && !!entry.body.shard && holdsModel(items, entry.body.shard)
 }
 
+/** Whether a shard with this model is in ITEMS (inItems): taking it again would only duplicate it. */
 export function holdsModel(items: Record<string, HeldItem>, shard: ShardModel): boolean {
   const print = modelPrint(shard)
-  for (const it of Object.values(items)) if (it.shard && modelPrint(it.shard) === print) return true
+  for (const it of Object.values(items)) if (!it.cleared && it.shard && modelPrint(it.shard) === print) return true
   return false
-}
-
-/** Whether a TAKEN row may be cleared by CLEAR ALL: anything but a coin, which is money and is cleared one at a time once redeemed. */
-export function clearsWithAll(item: Pick<HeldItem, 'type' | 'text'>, isCoin: (text: string | undefined) => boolean): boolean {
-  return !(item.type === 'message' && isCoin(item.text))
 }

@@ -66,6 +66,13 @@ export interface MigratedMeta {
 
 /** Readwrite transactions for shards ask for strict durability: committed means on disk, not in a cache. */
 const STRICT = { durability: 'strict' } as IDBTransactionOptions
+/**
+ * Bulk import's writes (store/workshopStorage.ts bulkWrites): committed to
+ * the database, which a closed tab keeps, without waiting for the disk to
+ * sync on every transaction. On a busy Android tablet each strict commit
+ * waited on its own disk sync, one shard at a time (arkinox, 2026-11-22).
+ */
+const RELAXED = { durability: 'relaxed' } as IDBTransactionOptions
 
 export function openWorkshopDb(timeoutMs: number = OPEN_TIMEOUT_MS): Promise<IDBDatabase> {
   const opening = openDatabase(WORKSHOP_DB, DB_VERSION, [[SHARDS_STORE, 'id'], [TOMBSTONES_STORE, 'id'], [META_STORE, 'key']])
@@ -96,15 +103,38 @@ export async function readMigrated(db: IDBDatabase): Promise<MigratedMeta | null
   return v && typeof v === 'object' && typeof v.at === 'number' ? v : null
 }
 
-/** Every record, in seq order (ties by id). A record without an id string or a json string is left out here and counted. */
-export async function readAll(db: IDBDatabase): Promise<{ records: ShardRecord[]; malformed: number }> {
+/** How many records one request of readAll brings back. */
+export const READ_PAGE = 40
+
+/**
+ * Every record, in seq order (ties by id). A record without an id string or a
+ * json string is left out here and counted.
+ *
+ * Read a page at a time, all in one transaction, so it is one snapshot as a
+ * single getAll was, but each page is its own task: a library of a thousand
+ * shards (tens of megabytes of JSON) no longer arrives as one long block on
+ * the page's thread, and the page draws between pages. `onPage` sees each
+ * page's well-formed records as it lands (workshopStorage parses them there),
+ * in key order, before the sort.
+ */
+export async function readAll(db: IDBDatabase, onPage?: (records: ShardRecord[]) => void, pageSize = READ_PAGE): Promise<{ records: ShardRecord[]; malformed: number }> {
   const os = db.transaction(SHARDS_STORE, 'readonly').objectStore(SHARDS_STORE)
-  const rows = await request(os.getAll()) as unknown[]
   const records: ShardRecord[] = []
   let malformed = 0
-  for (const r of rows) {
-    if (isRecord(r)) records.push(r)
-    else malformed++
+  let after: IDBValidKey | null = null
+  for (;;) {
+    // Asked inside the last page's answer, so the transaction is still active.
+    const rows = await request(os.getAll(after === null ? null : IDBKeyRange.lowerBound(after, true), pageSize)) as unknown[]
+    const page: ShardRecord[] = []
+    for (const r of rows) {
+      if (isRecord(r)) page.push(r)
+      else malformed++
+    }
+    records.push(...page)
+    if (page.length) onPage?.(page)
+    if (rows.length < pageSize) break
+    // Every row has its key at `id` (the store's key path), well formed or not.
+    after = (rows[rows.length - 1] as { id: IDBValidKey }).id
   }
   records.sort((a, b) => a.seq - b.seq || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
   return { records, malformed }
@@ -129,14 +159,15 @@ function isRecord(r: unknown): r is ShardRecord {
 
 /**
  * Write these records and delete these ids, in ONE transaction: all of it
- * lands or none of it does. A delete leaves a tombstone; a put clears one.
+ * lands or none of it does. Strict durability unless a bulk import asks for
+ * relaxed (RELAXED). A delete leaves a tombstone; a put clears one.
  * Rejects with the transaction's error (QuotaExceededError when the disk
  * share is used up), never swallows it.
  */
-export function commit(db: IDBDatabase, puts: readonly ShardRecord[], deletes: readonly string[], now: number = Date.now()): Promise<void> {
+export function commit(db: IDBDatabase, puts: readonly ShardRecord[], deletes: readonly string[], now: number = Date.now(), durability: 'strict' | 'relaxed' = 'strict'): Promise<void> {
   return new Promise((resolve, reject) => {
     let tx: IDBTransaction
-    try { tx = db.transaction([SHARDS_STORE, TOMBSTONES_STORE], 'readwrite', STRICT) } catch (e) { reject(e); return }
+    try { tx = db.transaction([SHARDS_STORE, TOMBSTONES_STORE], 'readwrite', durability === 'strict' ? STRICT : RELAXED) } catch (e) { reject(e); return }
     const shards = tx.objectStore(SHARDS_STORE)
     const tombs = tx.objectStore(TOMBSTONES_STORE)
     try {

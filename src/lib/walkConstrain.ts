@@ -47,6 +47,9 @@ import { MAX_UNIT, posed, readOpacity, ticksOf, toRender, type ShardModel } from
 import { partMatrix, type Placed } from 'sno-core/parts'
 import type { Box } from './clip'
 import { renderPose, type Pose } from './pose'
+import { bounceOf, springboardOf, type Bounce } from './walkBounce'
+import { hasAnim } from './anim'
+import { unseenObject } from './pointLook'
 
 /** What a shard asks of a walker. */
 export type Constrain = 'off' | 'all' | 'opaque'
@@ -133,8 +136,20 @@ export function seeThrough(s: Pick<ShardModel, 'mode' | 'opacity'>): boolean {
   return readOpacity(s.opacity) !== undefined || s.mode !== 'solid'
 }
 
-/** Whether this object's own faces stop a walker. */
-export function blocks(s: Pick<ShardModel, 'mode' | 'opacity' | 'extra'>): boolean {
+/**
+ * Whether an object at opacity 0 still stops a walker by its `constrain`.
+ * Ruled 2026-11-15 (owner): yes, 0% plus `constrain` blocks, since invisible
+ * walls and floors are a building tool. So `all` stops a walker at every
+ * opacity, and `opaque` never stops at 0, which is not opaque. Kept as one
+ * switch: false would make an object at 0 stop nothing, whatever its
+ * `constrain`. A walker stopped by a wall it cannot see is shown a brief
+ * outline of it (scene/WalkContactHint.tsx).
+ */
+export const ZERO_OPACITY_STOPS_WALKERS = true
+
+/** Whether this object's own faces stop a walker. `zeroStops`: ZERO_OPACITY_STOPS_WALKERS, a parameter so a test can flip it. */
+export function blocks(s: Pick<ShardModel, 'mode' | 'opacity' | 'extra'>, zeroStops: boolean = ZERO_OPACITY_STOPS_WALKERS): boolean {
+  if (!zeroStops && readOpacity(s.opacity) === 0) return false
   const c = constrainOf(s)
   return c === 'all' || (c === 'opaque' && !seeThrough(s))
 }
@@ -277,6 +292,12 @@ export interface WallPlacement {
   f: Float64Array
   min: [number, number, number]
   max: [number, number, number]
+  /** The placed object's own `bounce` (lib/walkBounce.ts), 0 for none: its faces bounce by it. */
+  bounce?: Bounce
+  /** The placed object's own `springboard` (lib/walkBounce.ts). */
+  springboard?: boolean
+  /** No one can see the placed object (lib/pointLook.ts unseenObject): a walker it stops is shown its outline. */
+  unseen?: boolean
 }
 
 /**
@@ -298,6 +319,12 @@ export interface WallMesh {
   own: number
   /** The shard's own walls in its model frame, whose triangles `tris` holds posed, in order; null when it blocks nothing. */
   ownWalls: ModelWalls | null
+  /** The shard's own `bounce` (lib/walkBounce.ts), 0 for none: its own faces bounce by it. */
+  ownBounce?: Bounce
+  /** The shard's own `springboard` (lib/walkBounce.ts). */
+  ownSpringboard?: boolean
+  /** No one can see the shard itself (lib/pointLook.ts unseenObject). */
+  ownUnseen?: boolean
   /** The objects it places, and theirs, each where it stands. */
   placements: WallPlacement[]
   /** The bounds of every corner of every triangle, own and placed, or null for no triangles. */
@@ -316,6 +343,10 @@ export function wallMesh(shard: ShardModel, placed: readonly Placed[], pose?: Po
   const max: [number, number, number] = [-Infinity, -Infinity, -Infinity]
   // The shard's own corners take the pose through their ticks, as flatten does.
   let tris = new Float64Array(0)
+  // An object with `anim` (lib/anim.ts) is drawn moving, and its walls would
+  // stand at its rest pose: until riding and pushing land (design note §9.2),
+  // it and everything it places stop no walker.
+  if (hasAnim(shard)) return { tris, own: 0, ownWalls: null, ownBounce: 0, ownSpringboard: false, placements: [], min: null, max: null }
   const ownWalls = blocks(shard) ? wallsOf(shard) : null
   if (ownWalls) {
     const pts = shard.vertices.map((v) => toRender(posed(ticksOf(v), pose)))
@@ -337,11 +368,13 @@ export function wallMesh(shard: ShardModel, placed: readonly Placed[], pose?: Po
     for (const p of list) {
       const m = p.model
       if (!m || m.unit + p.part.step < 0 || m.unit + p.part.step > MAX_UNIT) continue
+      // A placed object that moves carries what it places: none of it is a wall yet (see above).
+      if (hasAnim(m)) continue
       const f = mul(frame, partMatrix(p.part, parent.unit, m.unit))
       if (blocks(m)) {
         const walls = wallsOf(m)
         if (walls.tris.length) {
-          const at = { walls, f: Float64Array.from(f), min: [Infinity, Infinity, Infinity] as [number, number, number], max: [-Infinity, -Infinity, -Infinity] as [number, number, number] }
+          const at = { walls, f: Float64Array.from(f), min: [Infinity, Infinity, Infinity] as [number, number, number], max: [-Infinity, -Infinity, -Infinity] as [number, number, number], bounce: bounceOf(m), springboard: springboardOf(m), unseen: unseenObject(m) }
           const c = walls.corners
           for (let u = 0; u < walls.used.length; u++) {
             const q = walls.used[u] * 3
@@ -366,8 +399,11 @@ export function wallMesh(shard: ShardModel, placed: readonly Placed[], pose?: Po
   }
   place(shard, placed, root)
   const any = tris.length > 0 || placements.length > 0
-  return { tris, own: tris.length / 9, ownWalls, placements, min: any ? min : null, max: any ? max : null }
+  return { tris, own: tris.length / 9, ownWalls, ownBounce: bounceOf(shard), ownSpringboard: springboardOf(shard), ownUnseen: unseenObject(shard), placements, min: any ? min : null, max: any ? max : null }
 }
+
+/** Two faces this close along a step, as a share of its distance (at least one model unit), are flush: float rounding only. */
+const TIE = 1e-9
 
 /** Barycentric slack: a ray through an edge or a corner hits, so two triangles that share an edge leave no seam. */
 const EDGE_SLACK = 1e-9
@@ -400,11 +436,24 @@ let scratch = new Float64Array(0)
  * that once made its triangles ahead of time, so every hit is the same
  * number to the last bit (walkConstrain.test.ts holds the old way beside the
  * new one).
+ *
+ * With `who`, the `bounce` of the payload that owns the face it returns is
+ * written there (lib/walkBounce.ts): the shard's own for its own faces, a
+ * placed object's for that object's, 0 when nothing is hit, and its
+ * `springboard` beside it. Of two faces at the same distance, within float
+ * rounding, one with a bounce is the one returned.
  */
-export function firstHit(mesh: WallMesh, o: readonly [number, number, number], i: 0 | 1 | 2, s: 1 | -1, maxT: number, minT: number, clip?: Box): number | null {
+export function firstHit(mesh: WallMesh, o: readonly [number, number, number], i: 0 | 1 | 2, s: 1 | -1, maxT: number, minT: number, clip?: Box, who?: { bounce: Bounce; springboard?: boolean; unseen?: boolean }): number | null {
   const j = (i + 1) % 3, k = (i + 2) % 3
   const pj = o[j], pk = o[k], pi = o[i]
   let best: number | null = null
+  let bestBounce: Bounce = 0
+  let bestSpring = false
+  /** The owner of the triangles being tested now: what a hit among them bounces by. */
+  let owner: Bounce = mesh.ownBounce ?? 0
+  let ownerSpring = mesh.ownSpringboard ?? false
+  let ownerUnseen = mesh.ownUnseen ?? false
+  let bestUnseen = false
   // One triangle: the cheap rejects, then the exact test.
   const test = (t: Float64Array, a: number, b: number, c: number, own: boolean): void => {
     const aj = t[a + j], ak = t[a + k], bj = t[b + j], bk = t[b + k], cj = t[c + j], ck = t[c + k]
@@ -421,7 +470,13 @@ export function firstHit(mesh: WallMesh, o: readonly [number, number, number], i
     const h = wa * t[a + i] + wb * t[b + i] + wc * t[c + i]
     const along = (h - pi) * s
     if (!(along > minT) || along > maxT) return
-    if (best !== null && along >= best) return
+    // Nearer wins, exactly as it always has; only on a tie (within float
+    // rounding, TIE) between a face with a bounce and one without does the
+    // bounce win: a pad flush with a floor, placed or the shard's own.
+    if (best !== null) {
+      const split = (owner !== 0) !== (bestBounce !== 0) && Math.abs(along - best) <= TIE * Math.max(1, Math.abs(best))
+      if (split ? owner === 0 : along >= best) return
+    }
     if (clip && own) {
       const hit = [0, 0, 0]
       hit[i] = h; hit[j] = pj; hit[k] = pk
@@ -430,6 +485,9 @@ export function firstHit(mesh: WallMesh, o: readonly [number, number, number], i
       if (!inside) return
     }
     best = along
+    bestBounce = owner
+    bestSpring = ownerSpring
+    bestUnseen = ownerUnseen
   }
   const t = mesh.tris
   for (let n = 0; n < t.length; n += 9) test(t, n, n + 3, n + 6, true)
@@ -453,8 +511,12 @@ export function firstHit(mesh: WallMesh, o: readonly [number, number, number], i
       scratch[q + 1] = f[1] * r0 + f[5] * r1 + f[9] * r2 + f[13]
       scratch[q + 2] = f[2] * r0 + f[6] * r1 + f[10] * r2 + f[14]
     }
+    owner = p.bounce ?? 0
+    ownerSpring = p.springboard ?? false
+    ownerUnseen = p.unseen ?? false
     for (let n = 0; n < tris.length; n += 3) test(scratch, tris[n] * 3, tris[n + 1] * 3, tris[n + 2] * 3, false)
   }
+  if (who) { who.bounce = best === null ? 0 : bestBounce; who.springboard = best !== null && bestSpring; if ('unseen' in who) who.unseen = best !== null && bestUnseen }
   return best
 }
 
@@ -527,4 +589,148 @@ export function enclosed(mesh: WallMesh, p: readonly [number, number, number], c
     if (odd(pl.walls, scratch, 3, tris)) return true
   }
   return false
+}
+
+/** One placement's corners where it stands, for the eye's triangles (trianglesNear): their own, so they never share firstHit's. */
+let eyeScratch = new Float64Array(0)
+
+/** Whether triangle a, b, c (in `t`) has corners on both sides of, or inside, the box lo..hi on every axis. */
+function triMeetsBox(t: Float64Array, a: number, b: number, c: number, lo: readonly number[], hi: readonly number[]): boolean {
+  for (let q = 0; q < 3; q++) {
+    if (Math.max(t[a + q], t[b + q], t[c + q]) < lo[q]) return false
+    if (Math.min(t[a + q], t[b + q], t[c + q]) > hi[q]) return false
+  }
+  return true
+}
+
+/**
+ * The blocking triangles of `mesh` that come into the box `lo`..`hi` (the
+ * shard's render frame, model units), nine numbers each, for the WALK eye's
+ * tests (store/walkWalls.ts eyeReach): gathered once a question, so the
+ * questions it asks again and again as it steps the eye back look only at
+ * what is near. A placement wholly outside the box is passed by. With
+ * `clip`, the shard's own triangles wholly outside the region box are left
+ * out, where they are not drawn; one that crosses the region's wall is kept
+ * whole, which can only hold the eye further back, never let it through.
+ */
+export function trianglesNear(mesh: WallMesh, lo: readonly number[], hi: readonly number[], clip?: Box): Float64Array {
+  const out: number[] = []
+  const take = (t: Float64Array, a: number, b: number, c: number): void => {
+    out.push(t[a], t[a + 1], t[a + 2], t[b], t[b + 1], t[b + 2], t[c], t[c + 1], t[c + 2])
+  }
+  const t = mesh.tris
+  for (let n = 0; n < t.length; n += 9) {
+    if (!triMeetsBox(t, n, n + 3, n + 6, lo, hi)) continue
+    if (clip && !triMeetsBox(t, n, n + 3, n + 6, clip.min, clip.max)) continue
+    take(t, n, n + 3, n + 6)
+  }
+  for (const p of mesh.placements) {
+    let apart = false
+    for (let q = 0; q < 3; q++) if (hi[q] < p.min[q] - NEAR || lo[q] > p.max[q] + NEAR) apart = true
+    if (apart) continue
+    const { corners, tris } = p.walls
+    const f = p.f
+    if (eyeScratch.length < corners.length) eyeScratch = new Float64Array(Math.max(corners.length, eyeScratch.length * 2))
+    for (let q = 0; q < corners.length; q += 3) {
+      const r0 = corners[q], r1 = corners[q + 1], r2 = corners[q + 2]
+      eyeScratch[q] = f[0] * r0 + f[4] * r1 + f[8] * r2 + f[12]
+      eyeScratch[q + 1] = f[1] * r0 + f[5] * r1 + f[9] * r2 + f[13]
+      eyeScratch[q + 2] = f[2] * r0 + f[6] * r1 + f[10] * r2 + f[14]
+    }
+    for (let n = 0; n < tris.length; n += 3) {
+      const a = tris[n] * 3, b = tris[n + 1] * 3, c = tris[n + 2] * 3
+      if (triMeetsBox(eyeScratch, a, b, c, lo, hi)) take(eyeScratch, a, b, c)
+    }
+  }
+  return Float64Array.from(out)
+}
+
+/** Triangle `n` of `tris` (trianglesNear)'s normal, unit length, into `out`; false for a sliver with none. */
+export function triangleNormal(tris: Float64Array, n: number, out: number[]): boolean {
+  const e1x = tris[n + 3] - tris[n], e1y = tris[n + 4] - tris[n + 1], e1z = tris[n + 5] - tris[n + 2]
+  const e2x = tris[n + 6] - tris[n], e2y = tris[n + 7] - tris[n + 1], e2z = tris[n + 8] - tris[n + 2]
+  const nx = e1y * e2z - e1z * e2y, ny = e1z * e2x - e1x * e2z, nz = e1x * e2y - e1y * e2x
+  const len = Math.hypot(nx, ny, nz)
+  if (!(len > FLAT * Math.hypot(e1x, e1y, e1z) * Math.hypot(e2x, e2y, e2z)) || !(len > 0)) return false
+  out[0] = nx / len; out[1] = ny / len; out[2] = nz / len
+  return true
+}
+
+/**
+ * The first triangle of `tris` (trianglesNear) a straight segment crosses, in
+ * any direction: the WALK eye's line from the walker's point out to the eye,
+ * which unlike a step need not run along an axis. The segment is `o + s * d`
+ * for `s` in (`minS`, 1]. Returns the share `s` of the nearest hit and how
+ * squarely the segment meets that face (the cosine between them, 0 edge-on to
+ * 1 head-on), or null when it crosses nothing.
+ */
+export function segmentHit(tris: Float64Array, o: readonly [number, number, number], d: readonly [number, number, number], minS: number): { s: number; square: number } | null {
+  const len = Math.hypot(d[0], d[1], d[2])
+  if (!(len > 0)) return null
+  let best: { s: number; square: number } | null = null
+  for (let a = 0; a < tris.length; a += 9) {
+    const b = a + 3, c = a + 6
+    // Moller and Trumbore, as `enclosed` crosses.
+    const e1x = tris[b] - tris[a], e1y = tris[b + 1] - tris[a + 1], e1z = tris[b + 2] - tris[a + 2]
+    const e2x = tris[c] - tris[a], e2y = tris[c + 1] - tris[a + 1], e2z = tris[c + 2] - tris[a + 2]
+    const px = d[1] * e2z - d[2] * e2y, py = d[2] * e2x - d[0] * e2z, pz = d[0] * e2y - d[1] * e2x
+    const det = e1x * px + e1y * py + e1z * pz
+    const size = Math.hypot(e1x, e1y, e1z) * Math.hypot(e2x, e2y, e2z)
+    if (!(Math.abs(det) > FLAT * size * len)) continue
+    const tx = o[0] - tris[a], ty = o[1] - tris[a + 1], tz = o[2] - tris[a + 2]
+    const u = (tx * px + ty * py + tz * pz) / det
+    if (u < -EDGE_SLACK || u > 1 + EDGE_SLACK) continue
+    const qx = ty * e1z - tz * e1y, qy = tz * e1x - tx * e1z, qz = tx * e1y - ty * e1x
+    const v = (d[0] * qx + d[1] * qy + d[2] * qz) / det
+    if (v < -EDGE_SLACK || u + v > 1 + EDGE_SLACK) continue
+    const s = (e2x * qx + e2y * qy + e2z * qz) / det
+    if (!(s > minS) || s > 1) continue
+    if (best !== null && s >= best.s) continue
+    // |n . d| / (|n| |d|), with n = e1 x e2.
+    const nx = e1y * e2z - e1z * e2y, ny = e1z * e2x - e1x * e2z, nz = e1x * e2y - e1y * e2x
+    best = { s, square: Math.abs(nx * d[0] + ny * d[1] + nz * d[2]) / (Math.hypot(nx, ny, nz) * len) }
+  }
+  return best
+}
+
+/** triangleDistance's nearest point, which it does not keep. */
+const closestScratch = [0, 0, 0]
+
+/** How far `p` is from triangle `n` of `tris` (Ericson, Real-Time Collision Detection 5.1.5). */
+export function triangleDistance(tris: Float64Array, n: number, p: readonly number[]): number {
+  return triangleClosest(tris, n, p, closestScratch)
+}
+
+/**
+ * The point of triangle `n` of `tris` nearest `p`, into `out`, and how far
+ * `p` is from it (Ericson, Real-Time Collision Detection 5.1.5): which way
+ * is away from the face, for the WALK eye kept off it (store/walkWalls.ts
+ * eyePlace).
+ */
+export function triangleClosest(tris: Float64Array, n: number, p: readonly number[], out: number[]): number {
+  const ax = tris[n], ay = tris[n + 1], az = tris[n + 2]
+  const abx = tris[n + 3] - ax, aby = tris[n + 4] - ay, abz = tris[n + 5] - az
+  const acx = tris[n + 6] - ax, acy = tris[n + 7] - ay, acz = tris[n + 8] - az
+  const at = (x: number, y: number, z: number): number => { out[0] = x; out[1] = y; out[2] = z; return Math.hypot(p[0] - x, p[1] - y, p[2] - z) }
+  const apx = p[0] - ax, apy = p[1] - ay, apz = p[2] - az
+  const d1 = abx * apx + aby * apy + abz * apz, d2 = acx * apx + acy * apy + acz * apz
+  if (d1 <= 0 && d2 <= 0) return at(ax, ay, az)
+  const bpx = p[0] - tris[n + 3], bpy = p[1] - tris[n + 4], bpz = p[2] - tris[n + 5]
+  const d3 = abx * bpx + aby * bpy + abz * bpz, d4 = acx * bpx + acy * bpy + acz * bpz
+  if (d3 >= 0 && d4 <= d3) return at(tris[n + 3], tris[n + 4], tris[n + 5])
+  const vc = d1 * d4 - d3 * d2
+  if (vc <= 0 && d1 >= 0 && d3 <= 0) { const v = d1 / (d1 - d3); return at(ax + abx * v, ay + aby * v, az + abz * v) }
+  const cpx = p[0] - tris[n + 6], cpy = p[1] - tris[n + 7], cpz = p[2] - tris[n + 8]
+  const d5 = abx * cpx + aby * cpy + abz * cpz, d6 = acx * cpx + acy * cpy + acz * cpz
+  if (d6 >= 0 && d5 <= d6) return at(tris[n + 6], tris[n + 7], tris[n + 8])
+  const vb = d5 * d2 - d1 * d6
+  if (vb <= 0 && d2 >= 0 && d6 <= 0) { const w = d2 / (d2 - d6); return at(ax + acx * w, ay + acy * w, az + acz * w) }
+  const va = d3 * d6 - d5 * d4
+  if (va <= 0 && d4 - d3 >= 0 && d5 - d6 >= 0) {
+    const w = (d4 - d3) / ((d4 - d3) + (d5 - d6))
+    return at(tris[n + 3] + (tris[n + 6] - tris[n + 3]) * w, tris[n + 4] + (tris[n + 7] - tris[n + 4]) * w, tris[n + 5] + (tris[n + 8] - tris[n + 5]) * w)
+  }
+  const den = 1 / (va + vb + vc)
+  const v = vb * den, w = vc * den
+  return at(ax + abx * v + acx * w, ay + aby * v + acy * w, az + abz * v + acz * w)
 }

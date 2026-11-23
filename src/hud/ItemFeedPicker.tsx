@@ -9,6 +9,7 @@
  * chest.
  */
 
+import { BackupTrouble, RelayTrouble } from './RelayTrouble'
 import { useEffect, useMemo, useState } from 'react'
 import { useProfile } from '../hooks/useProfile'
 import { useEscape } from '../hooks/useEscape'
@@ -21,6 +22,7 @@ import { ItemFace } from './ItemIcon'
 import { useMutes } from '../store/useMutes'
 import { hidesThing } from '../lib/muteList'
 import { useCyberspace } from '../store/useCyberspace'
+import { ModalClose } from './ui/ModalClose'
 
 function Row({ listing, onPick }: { listing: ItemListing; onPick: (l: ItemListing) => void }): JSX.Element {
   const profile = useProfile(listing.lister)
@@ -43,6 +45,7 @@ function Row({ listing, onPick }: { listing: ItemListing; onPick: (l: ItemListin
 export function ItemFeedPicker({ onPick, onClose }: { onPick: (l: ItemListing) => void; onClose: () => void }): JSX.Element {
   const listings = useItemFeed((s) => s.listings)
   const loading = useItemFeed((s) => s.loading)
+  const trouble = useItemFeed((s) => s.trouble)
   const [q, setQ] = useState('')
   // Read fresh each time it opens: a listing published a minute ago belongs here.
   useEffect(() => { void useItemFeed.getState().load() }, [])
@@ -57,11 +60,13 @@ export function ItemFeedPicker({ onPick, onClose }: { onPick: (l: ItemListing) =
         <header className="panel__head secrets__head">
           <h2>Item feed</h2>
           <span className="tag">{loading && listings.length === 0 ? 'READING…' : `${listings.length} LISTED`}</span>
-          <button className="targets__remove secrets__close" onClick={onClose} aria-label="Close" title="Close">✕</button>
+          <ModalClose onClose={onClose} />
         </header>
         <input className="avatars__input" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search items by name" aria-label="Search items" autoFocus />
+        {trouble && !loading && <RelayTrouble trouble={trouble} onRetry={() => void useItemFeed.getState().load()} />}
+        {!loading && <BackupTrouble onRetry={() => void useItemFeed.getState().load()} />}
         <ul className="secrets__list">
-          {shown.length === 0 && (
+          {shown.length === 0 && !(trouble && !loading && listings.length === 0) && (
             <li className="secrets__empty">{loading ? 'Reading the item feed…' : listings.length === 0 ? 'No items are listed on your relays yet.' : 'No listed item matches.'}</li>
           )}
           {shown.map((l) => <Row key={l.itemPubkey} listing={l} onPick={onPick} />)}

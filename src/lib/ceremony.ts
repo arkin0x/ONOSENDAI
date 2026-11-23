@@ -120,6 +120,23 @@ export function glintLevel(elapsed: number, calm = false): number {
   return Math.min(1, t / 150) * (1 - (t / end) ** 2)
 }
 
+/** How long a taken item takes to leave the world (arkinox, 2026-11-01: "over 4 seconds"). */
+export const VANISH_MS = 4000
+/** The calm path's length: a plain fade, no sparkles. */
+export const calmVanish = (): number => CALM_FADE_MS
+
+/** How much of a taken item is left `elapsed` ms after TAKE: all of it, down to none. */
+export function vanishOpacity(elapsed: number, calm = false): number {
+  const share = Math.min(1, Math.max(0, elapsed / (calm ? calmVanish() : VANISH_MS)))
+  return 1 - share
+}
+
+/** How bright its sparkles are: up at once, and gone with the last of it. */
+export function vanishSparkle(elapsed: number): number {
+  if (elapsed <= 0 || elapsed >= VANISH_MS) return 0
+  return Math.min(1, elapsed / 150) * (1 - (elapsed / VANISH_MS) ** 3)
+}
+
 /** What OPEN does once the decrypt has returned. */
 export interface AfterOpen {
   /** The card (and any list it was in) closes, so the chest is seen. */
@@ -140,5 +157,25 @@ export interface AfterOpen {
  */
 export function afterOpen(first: boolean, drawn: boolean): AfterOpen {
   if (!first) return { yieldCards: false, ceremony: false, feedback: false }
+  return { yieldCards: drawn, ceremony: drawn, feedback: true }
+}
+
+/**
+ * What OPEN on a door closed with CLOSE does (arkinox, 2026-11-01: re-open has a
+ * SHORT reveal, no loot): the card yields and the door plays the calm crossfade
+ * (CALM_FADE_MS, shorter than the first OPEN's slab decoding away) when it is
+ * drawn. Silent (arkinox, 2026-11-09). Every time, not once.
+ */
+export function afterReopen(drawn: boolean): AfterOpen {
+  return { yieldCards: drawn, ceremony: drawn, feedback: false }
+}
+
+/**
+ * What CLOSE does: as a re-open (the card yields, the calm crossfade back to shut
+ * when drawn), and a soft lock tick with the door's short buzz, offered every time,
+ * drawn or not, each through the OPEN ceremony's own 10 s gates (arkinox, 2026-11-09;
+ * lib/ceremonySound closeFeedback).
+ */
+export function afterClose(drawn: boolean): AfterOpen {
   return { yieldCards: drawn, ceremony: drawn, feedback: true }
 }

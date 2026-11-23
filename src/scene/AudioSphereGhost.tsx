@@ -11,7 +11,7 @@
  * legend.
  */
 
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef, type Ref } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { BufferGeometry, Float32BufferAttribute, type Group } from 'three'
 import { fadeAt, fadeRadius, sourceLocal } from '../lib/audioItem'
@@ -50,25 +50,20 @@ export function pendingSphereRadius(): number {
   return p.audio.fade === undefined ? fadeRadius(undefined, sourceLocal(at, height), height) : fadeAt(p.audio.fade, at, height) ?? 0
 }
 
-export function AudioSphereGhost({ landingAt }: { landingAt: () => [number, number, number] }): JSX.Element {
-  const group = useRef<Group>(null)
+/**
+ * A unit sphere drawn as rings, the note's blue: three on the axes and one
+ * that turns to face the camera every frame, so it reads as a sphere at any
+ * angle. The caller places and scales the group. Also the world's spheres
+ * (AudioSpheres.tsx).
+ */
+export function FadeRings({ group, opacity = 1 }: { group?: Ref<Group>; opacity?: number }): JSX.Element {
   const facing = useRef<Group>(null)
   const rings = useMemo(() => ({ xy: ring(0, 1), xz: ring(0, 2), yz: ring(1, 2) }), [])
   useEffect(() => () => { rings.xy.dispose(); rings.xz.dispose(); rings.yz.dispose() }, [rings])
+  // The silhouette ring turns to face the camera, so the sphere reads as a sphere at any angle.
+  useFrame(({ camera }) => { facing.current?.quaternion.copy(camera.quaternion) })
 
-  useFrame(({ camera }) => {
-    const g = group.current
-    if (!g) return
-    const at = landingAt()
-    g.position.set(at[0], at[1], at[2])
-    const r = pendingSphereRadius() / 2 ** useCyberspace.getState().scaleExp
-    g.visible = r > 0
-    g.scale.setScalar(Math.max(1e-6, r))
-    // The silhouette ring turns to face the camera, so the sphere reads as a sphere at any angle.
-    facing.current?.quaternion.copy(camera.quaternion)
-  })
-
-  const material = <lineBasicMaterial color={SPHERE_BLUE} toneMapped={false} transparent opacity={0.45} depthWrite={false} />
+  const material = <lineBasicMaterial color={SPHERE_BLUE} toneMapped={false} transparent opacity={0.45 * opacity} depthWrite={false} />
   return (
     <group ref={group}>
       <lineLoop geometry={rings.xy} frustumCulled={false}>{material}</lineLoop>
@@ -76,9 +71,23 @@ export function AudioSphereGhost({ landingAt }: { landingAt: () => [number, numb
       <lineLoop geometry={rings.yz} frustumCulled={false}>{material}</lineLoop>
       <group ref={facing}>
         <lineLoop geometry={rings.xy} frustumCulled={false}>
-          <lineBasicMaterial color={SPHERE_BLUE} toneMapped={false} transparent opacity={0.8} depthWrite={false} />
+          <lineBasicMaterial color={SPHERE_BLUE} toneMapped={false} transparent opacity={0.8 * opacity} depthWrite={false} />
         </lineLoop>
       </group>
     </group>
   )
+}
+
+export function AudioSphereGhost({ landingAt }: { landingAt: () => [number, number, number] }): JSX.Element {
+  const group = useRef<Group>(null)
+  useFrame(() => {
+    const g = group.current
+    if (!g) return
+    const at = landingAt()
+    g.position.set(at[0], at[1], at[2])
+    const r = pendingSphereRadius() / 2 ** useCyberspace.getState().scaleExp
+    g.visible = r > 0
+    g.scale.setScalar(Math.max(1e-6, r))
+  })
+  return <FadeRings group={group} />
 }

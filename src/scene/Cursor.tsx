@@ -35,7 +35,9 @@ import { useCalibration } from '../lib/calibration'
 import { nextActionFor } from '../store/useOffer'
 import { ACCENT, BUILD, DANGER, SIDESTEP, WARN } from '../lib/palette'
 import { useBuilder } from '../store/useBuilder'
+import { useRegion } from '../store/useRegion'
 import { cubeAt } from '../lib/buildCursor'
+import { cursorGlide } from '../lib/viewCamera'
 /** Paid legs: the cloud's warm gold, the color the HUD uses for HOSAKA. */
 const CLOUD = '#ffd27d'
 import { aimCentres, placeCentre, type Position, type ViewAxes } from '../lib/space'
@@ -164,6 +166,9 @@ export function Cursor({ axes }: Props): JSX.Element | null {
   // BUILD mode rides the free view: the same cube, white and labeled, as
   // the build cursor (store/useBuilder.ts).
   const building = useBuilder((s) => s.active)
+  // Region mode draws its own box and a spinning glyph (scene/RegionSelectBox.tsx),
+  // so the free view's cursor cube stands down for it.
+  const regionActive = useRegion((s) => s.active)
 
   // In history there is no move being lined up, so no tether and no target
   // cell. The scale label stays, riding the anchor instead of the cursor.
@@ -287,7 +292,17 @@ export function Cursor({ axes }: Props): JSX.Element | null {
     const s = useCyberspace.getState()
     const live = cubeAt(s, useBuilder.getState().active)
     const { cell, point: b } = aimCentres(live, alignedOrigin(s.anchor, s.scaleExp), s.scaleExp, axes)
-    if (outline.current) outline.current.position.set(cell[0], cell[1], cell[2])
+    if (outline.current) {
+      outline.current.position.set(cell[0], cell[1], cell[2])
+      // VIEW's fly landing: the box glides to where the view now centres
+      // before the cursor moves there (lib/viewCamera.ts cursorGlide).
+      const g = cursorGlide
+      if (g.share > 0 && g.from === s.cursor) {
+        outline.current.position.x += g.dx * g.share
+        outline.current.position.y += g.dy * g.share
+        outline.current.position.z += g.dz * g.share
+      }
+    }
     if (ghost.current && points.ghostOnCursor) ghost.current.position.set(b[0], b[1], b[2])
     // The leg that ends on the cursor follows it within the frame.
     if (restLeg.visible) setSegmentEnd(restLeg, restGeometry, b)
@@ -353,7 +368,7 @@ export function Cursor({ axes }: Props): JSX.Element | null {
           looking at, which the pad moves with the view. In BUILD mode it is
           the build cursor: white, and labeled with the cell size it places
           at, which is the zoom. */}
-      {!home && atHead && !active && (
+      {!home && atHead && !active && !regionActive && (
         <lineSegments ref={outline} name="cursor-cell" geometry={cellOutline} position={points.targetCell} frustumCulled={false} renderOrder={10}>
           <lineBasicMaterial color={building ? BUILD : WARN} toneMapped={false} transparent opacity={building ? 0.95 : 0.85} depthTest={false} />
         </lineSegments>

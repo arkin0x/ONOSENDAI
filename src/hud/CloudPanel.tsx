@@ -21,6 +21,8 @@ import { RATIO_MIN_SAMPLES, ratioOf, useExperience } from '../lib/experience'
 import { offloadFrom } from '../lib/crossover'
 import { useCalibration } from '../lib/calibration'
 import { Explanation } from './Explanation'
+import { GoArrow } from './ui/GoArrow'
+import { CopyValue } from './ui/CopyValue'
 
 const MODES: Array<[CloudMode, string]> = [['auto', 'AUTO'], ['ask', 'ASK'], ['off', 'OFF']]
 /** The amounts most people want, so the common case is one tap. */
@@ -43,6 +45,7 @@ const STAGE_LABEL: Record<string, string> = {
 
 const STATUS_LABEL: Record<string, string> = {
   idle: 'IDLE',
+  checking: 'CHECKING',
   quoting: 'QUOTING',
   confirm: 'CONFIRM',
   awaiting_payment: 'AWAITING PAYMENT',
@@ -264,7 +267,7 @@ export function CloudPanel(): JSX.Element {
               onChange={(e) => setTopUpSats(e.target.value)}
               aria-label="Top-up amount in sats"
             />
-            <button className="avatars__go" type="submit">GET INVOICE ▸</button>
+            <button className="avatars__go" type="submit">GET INVOICE<GoArrow /></button>
           </div>
           <span className="cloud__profile-note">
             HOSAKA sends a lightning invoice. The balance updates the moment the node reports it paid, and nothing is spent until a move needs it.
@@ -358,7 +361,7 @@ export function CloudPanel(): JSX.Element {
       {cloud.last && !job && (
         <p className="legend__note">
           Last cloud {cloud.last.action}: {satsOf(cloud.last.costMsats)} sats, job {cloud.last.jobId.slice(0, 8)}
-          {cloud.last.lookupId ? `, region ${shortHex(cloud.last.lookupId, 8, 4)}` : ''}.
+          {cloud.last.lookupId && <>, region <CopyValue value={cloud.last.lookupId} shown={shortHex(cloud.last.lookupId, 8, 4)} /></>}.
         </p>
       )}
 

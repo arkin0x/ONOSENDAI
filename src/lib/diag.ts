@@ -10,13 +10,18 @@
  * for its size, and all text passes safeLabel. No key, no plaintext, no relay
  * address and no coordinate is ever kept.
  *
+ * Long animation frames of 50 ms or more are summed by who ran in them (diagCore
+ * LoafLedger): invoker, function name and position, file name. Never a URL.
+ *
  * A tab that crashes at a spike takes a log in memory with it, so the last report
  * is kept in this tab's sessionStorage once a minute, and the next load offers it.
  *
  * Installed before the first render, because it has to see the contexts made.
  */
 
-import { getPool } from './relay'
+import { getPool, getSignerPool } from './relay'
+import { countVerifies } from './verifiedSigs'
+import { countTasks } from './taskStats'
 import { modalUp } from '../hooks/useEscape'
 import { useCyberspace } from '../store/useCyberspace'
 import { useHyperspace } from '../store/useHyperspace'
@@ -24,7 +29,9 @@ import { useThumbs } from '../store/useThumbs'
 import { useTv } from '../store/useTv'
 import { useWorkshop } from '../store/useWorkshop'
 import { DIAG_FOUND_KEY, DIAG_LAST_KEY, diagForget } from './diagGate'
-import { DIAG_COLUMNS, GlLedger, Ring, frameVerb, framePercentiles, heapReading, invokerLabel, safeDescription, safeLabel, toRow, uploadedBytes, type DiagRow } from './diagCore'
+import { bootTimes } from './bootMarks'
+import { hudFlags } from './hudFlags'
+import { DIAG_COLUMNS, GlLedger, LOAF_COLUMNS, LOAF_SCRIPT_COLUMNS, LoafLedger, Ring, TASK_COLUMNS, TASK_LABEL_COLUMNS, VERIFY_COLUMNS, taskRow, VERIFY_KIND_COLUMNS, type LoafFrame, frameVerb, rxVerb, scriptFile, verifyRow, framePercentiles, heapReading, invokerLabel, largestKeys, safeDescription, safeLabel, toRow, uploadedBytes, type DiagRow } from './diagCore'
 
 /** Seconds between samples, and how long each ring reaches back. */
 const SAMPLE_MS = 5_000
@@ -37,6 +44,8 @@ const SLOW_ROWS = 200
 const EVENT_ROWS = 200
 /** A frame this long is logged with its scripts. */
 const SLOW_FRAME_MS = 200
+/** Windows with long frames kept, by who ran in them (diagCore LoafLedger): 15 minutes of 5 s windows. */
+const LOAF_ROWS = 180
 const STORAGE_EVERY_MS = 60_000
 /** How often the report is kept for a tab that crashes. */
 const KEEP_EVERY_MS = 60_000
@@ -204,7 +213,14 @@ export function startDiag(): void {
   }
 
   // ---- Sockets: verbs and lengths only.
-  const wire = { txReq: 0, txClose: 0, txEvent: 0, txAuth: 0, rxN: 0, rxB: 0 }
+  const wire = { txReq: 0, txClose: 0, txEvent: 0, txAuth: 0, rxN: 0, rxB: 0, rxEv: 0, rxOk: 0, rxEose: 0 }
+  // What a relay's frame is, by its verb alone (rxVerb), as what is sent is read for its verb.
+  const rxCount = (data: unknown): void => {
+    const v = rxVerb(data)
+    if (v === 'event') wire.rxEv++
+    else if (v === 'ok') wire.rxOk++
+    else if (v === 'eose') wire.rxEose++
+  }
   const sockets: Array<WeakRef<WebSocket>> = []
   const seenSocket = new WeakSet<WebSocket>()
   const send = WebSocket.prototype.send
@@ -212,7 +228,7 @@ export function startDiag(): void {
     if (!seenSocket.has(this)) {
       seenSocket.add(this)
       sockets.push(new WeakRef(this))
-      this.addEventListener('message', (e: MessageEvent) => { wire.rxN++; wire.rxB += typeof e.data === 'string' ? e.data.length : 0 })
+      this.addEventListener('message', (e: MessageEvent) => { wire.rxN++; wire.rxB += typeof e.data === 'string' ? e.data.length : 0; rxCount(e.data) })
     }
     const v = frameVerb(d)
     if (v === 'req') wire.txReq++
@@ -260,10 +276,19 @@ export function startDiag(): void {
     try { new PerformanceObserver((l) => { for (const e of l.getEntries()) f(e) }).observe({ type, buffered: true }) } catch { /* not in this browser */ }
   }
   observe('longtask', (e) => { long.n++; long.ms += e.duration; long.max = Math.max(long.max, e.duration) })
+  // Each relay event's check, by kind (lib/verifiedSigs countVerifies): counted only while the capture runs.
+  const verifies = countVerifies()
+  const verify = new Ring<unknown[]>(LOAF_ROWS)
+  // What ran after each IndexedDB answer and each yielded task, by database and store or by what yielded (lib/taskStats.ts).
+  const tasks = countTasks()
+  const task = new Ring<unknown[]>(LOAF_ROWS)
+  const loafs = new LoafLedger()
+  const loaf = new Ring<unknown[]>(LOAF_ROWS)
   observe('long-animation-frame', (e) => {
+    loafs.add(e as unknown as LoafFrame)
     if (e.duration < SLOW_FRAME_MS) return
     const scripts = (e as unknown as { scripts?: Array<{ duration: number; invoker?: string; sourceFunctionName?: string; sourceCharPosition?: number; sourceURL?: string }> }).scripts ?? []
-    slow.push([Math.round(performance.now() / 1000), Math.round(e.duration), scripts.slice().sort((a, b) => b.duration - a.duration).slice(0, 3).map((s) => [Math.round(s.duration), invokerLabel(s.invoker), safeLabel(s.sourceFunctionName), s.sourceCharPosition ?? -1, safeLabel((s.sourceURL ?? '').split('/').pop())])])
+    slow.push([Math.round(performance.now() / 1000), Math.round(e.duration), scripts.slice().sort((a, b) => b.duration - a.duration).slice(0, 3).map((s) => [Math.round(s.duration), invokerLabel(s.invoker), safeLabel(s.sourceFunctionName), s.sourceCharPosition ?? -1, scriptFile(s.sourceURL)])])
   })
   observe('resource', (e) => { long.res++; long.resB += (e as PerformanceResourceTiming).encodedBodySize ?? 0 })
 
@@ -332,6 +357,8 @@ export function startDiag(): void {
     row.longN = long.n; row.longMs = Math.round(long.ms); row.longMax = Math.round(long.max)
     row.resN = long.res; row.resB = long.resB
     long.n = 0; long.ms = 0; long.max = 0; long.res = 0; long.resB = 0
+    const lf = loafs.take(row.t as number)
+    if (lf) loaf.push(lf)
 
     const mem = (performance as unknown as { memory?: { usedJSHeapSize: number; totalJSHeapSize: number } }).memory
     if (mem) {
@@ -390,12 +417,20 @@ export function startDiag(): void {
     let open = 0
     for (const s of alive(sockets)) if (s.readyState === WebSocket.OPEN) open++
     row.wsOpen = open
-    const relays = (getPool() as unknown as { relays?: Map<string, { connected?: boolean; openSubs?: Map<string, unknown> }> }).relays
-    let up = 0, subs = 0
-    if (relays) for (const r of relays.values()) { if (r.connected) up++; subs += r.openSubs?.size ?? 0 }
-    row.relays = relays?.size ?? 0; row.relaysUp = up; row.subs = subs
+    // The app's sockets and the remote signer's (its own pool, relay.ts getSignerPool).
+    let count = 0, up = 0, subs = 0
+    for (const p of [getPool(), getSignerPool()]) {
+      const relays = (p as unknown as { relays?: Map<string, { connected?: boolean; openSubs?: Map<string, unknown> }> }).relays
+      if (relays) for (const r of relays.values()) { count++; if (r.connected) up++; subs += r.openSubs?.size ?? 0 }
+    }
+    row.relays = count; row.relaysUp = up; row.subs = subs
     row.txReq = wire.txReq; row.txClose = wire.txClose; row.txEvent = wire.txEvent; row.txAuth = wire.txAuth; row.rxN = wire.rxN; row.rxB = wire.rxB
-    wire.txReq = 0; wire.txClose = 0; wire.txEvent = 0; wire.txAuth = 0; wire.rxN = 0; wire.rxB = 0
+    row.rxEv = wire.rxEv; row.rxOk = wire.rxOk; row.rxEose = wire.rxEose
+    wire.txReq = 0; wire.txClose = 0; wire.txEvent = 0; wire.txAuth = 0; wire.rxN = 0; wire.rxB = 0; wire.rxEv = 0; wire.rxOk = 0; wire.rxEose = 0
+    const vr = verifyRow(row.t as number, verifies.take())
+    if (vr) verify.push(vr)
+    const tr = taskRow(row.t as number, tasks.take())
+    if (tr) task.push(tr)
     row.workersMade = workers.made; row.workersLive = workers.made - workers.ended
     row.timeouts = timers.timeouts; row.intervals = timers.intervals
     timers.timeouts = 0; timers.intervals = 0
@@ -438,9 +473,10 @@ export function startDiag(): void {
     const ctxs = liveContexts()
     let lsBytes = 0
     let lsKeys = 0
+    const lsSizes: Array<[string, number]> = []
     try {
       lsKeys = localStorage.length
-      for (let i = 0; i < localStorage.length; i++) { const key = localStorage.key(i)!; lsBytes += key.length + (localStorage.getItem(key)?.length ?? 0) }
+      for (let i = 0; i < localStorage.length; i++) { const key = localStorage.key(i)!; const n = key.length + (localStorage.getItem(key)?.length ?? 0); lsBytes += n; lsSizes.push([key, n]) }
     } catch { /* refused */ }
     // The largest drawing context: a throwaway probe may be WebGL 1, with no MAX_SAMPLES to ask.
     const first = ctxs.filter((gl) => !gl.isContextLost()).sort((a, b) => b.drawingBufferWidth * b.drawingBufferHeight - a.drawingBufferWidth * a.drawingBufferHeight)[0]
@@ -470,17 +506,37 @@ export function startDiag(): void {
         gpu: gpuInfo?.gpu ?? null, maxSamples: gpuInfo?.maxSamples ?? null, lateStart, route: safeLabel(location.pathname.split('/')[1] ?? '', 12), isolated: window.crossOriginIsolated,
         heapLimit: (performance as unknown as { memory?: { jsHeapSizeLimit: number } }).memory?.jsHeapSizeLimit ?? null,
       },
+      // The load, in ms since the page started: first paint and first contentful paint (the wordmark index.html draws),
+      // then each step the app waited on before its first render, the render, its frame on screen, and the workshop's read (lib/bootMarks.ts).
+      boot: bootTimes(),
+      // The test conditions: HUD pieces taken off the page (?nochip=1, ?nosyncwarn=1).
+      hud: hudFlags(),
       contexts: { made: contextsMade, lostEver: contextsLostEver },
       workers: { made: workers.made, ended: workers.ended },
       renderers: alive(renderers).map((r) => ({ w: r.domElement?.width, h: r.domElement?.height, pr: r.getPixelRatio?.(), geoms: r.info?.memory.geometries, textures: r.info?.memory.textures, programs: r.info?.programs?.length ?? 0 })),
       largest: ledger.largest(ctxs, isLost),
-      storage: { ...storage, localStorageKeys: lsKeys, localStorageChars: lsBytes },
+      storage: { ...storage, localStorageKeys: lsKeys, localStorageChars: lsBytes, localStorageTop: largestKeys(lsSizes) },
       peak,
       columns: DIAG_COLUMNS,
       uiStates,
       fine: fine.all(),
       coarse: coarse.all(),
       slow: slow.all(),
+      // Frames of 50 ms or more, per window, by who ran in them; and the whole capture's top.
+      // False where the browser has no long animation frames (Firefox, Safari): an empty table there means nothing.
+      loafSupported: PerformanceObserver.supportedEntryTypes?.includes('long-animation-frame') ?? false,
+      loafColumns: LOAF_COLUMNS,
+      loafScriptColumns: LOAF_SCRIPT_COLUMNS,
+      loaf: loaf.all(),
+      loafTop: loafs.top(),
+      // Relay events checked per window, by kind: how many, how (Schnorr, hashed, compared with one checked before) and the time.
+      verifyColumns: VERIFY_COLUMNS,
+      verifyKindColumns: VERIFY_KIND_COLUMNS,
+      verify: verify.all(),
+      // The work after IndexedDB answers and yielded tasks, per window, by database and store or by what yielded.
+      taskColumns: TASK_COLUMNS,
+      taskLabelColumns: TASK_LABEL_COLUMNS,
+      task: task.all(),
       events: events.all(),
     })
   }

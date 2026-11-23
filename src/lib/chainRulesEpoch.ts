@@ -77,6 +77,12 @@
  */
 export const CHAIN_RULES_EPOCH = 2
 
+/**
+ * Read by vite.config.ts at build time, like the rest of this file. The deploy's
+ * own chain store, which every running build obeys (lib/chainStore.ts).
+ */
+import { CHAIN_STORE_VERSION } from './chainStoreVersion'
+
 /** Where every deploy serves its version file, from the site root. */
 export const VERSION_FILE = 'version.json'
 
@@ -86,18 +92,24 @@ export interface DeployedVersion {
   build: string
   /** The lowest chain epoch the deploy accepts movement from. */
   minChainEpoch: number
+  /**
+   * Which store the deploy keeps chains in (lib/chainStoreVersion.ts): the kill
+   * switch for the rows. Only 2 lets a chain be in them. A file without it is a
+   * deploy from before the rows, and says no.
+   */
+  chainStore?: number
 }
 
 /** The version file for a build of `build`, as the deploy serves it. */
-export function versionFileOf(build: string, epoch: number = CHAIN_RULES_EPOCH): DeployedVersion {
-  return { build, minChainEpoch: epoch }
+export function versionFileOf(build: string, epoch: number = CHAIN_RULES_EPOCH, chainStore: number = CHAIN_STORE_VERSION): DeployedVersion {
+  return { build, minChainEpoch: epoch, chainStore }
 }
 
 /** The version file's contents read back, or null for anything that is not one. */
 export function parseVersionFile(data: unknown): DeployedVersion | null {
   if (typeof data !== 'object' || data === null) return null
-  const { build, minChainEpoch } = data as Record<string, unknown>
+  const { build, minChainEpoch, chainStore } = data as Record<string, unknown>
   if (typeof build !== 'string' || build === '') return null
   if (typeof minChainEpoch !== 'number' || !Number.isInteger(minChainEpoch) || minChainEpoch < 0) return null
-  return { build, minChainEpoch }
+  return { build, minChainEpoch, ...(typeof chainStore === 'number' && Number.isInteger(chainStore) ? { chainStore } : {}) }
 }

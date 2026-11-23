@@ -7,12 +7,14 @@
  * slow-relay grace). A relay holds the chain once
  * it has taken one of this identity's chain events (OK true on a publish) or
  * sent one back in a fetch, in this session or an earlier one. The canonical
- * relay always does.
+ * relay always does. The former canonical relay, read only while it is
+ * retired (useRelays READ_FALLBACK_RELAY), never does: the moves of this
+ * version are not sent there, so a move does not wait for it.
  *
  * Kept per identity beside the saved chain, as the publisher keeps the
  * actions still owed to the canonical relay, so a reload still knows which
  * relays another device of this identity has been publishing to. A relay is
- * never dropped from the set, unless it is retired (useRelays RETIRED_RELAYS):
+ * never dropped from the set, unless it is retired (useRelays RETIRED_HOSTS):
  * one that stops answering costs a move at most those 2.5 s, until the player
  * takes it out of the relay list (only the configured relays are asked, so
  * only they are waited for).
@@ -21,7 +23,7 @@
 import { normalizeURL } from 'nostr-tools/utils'
 import type { NostrEvent } from './events'
 import type { RelayAnswer } from './relayOutcome'
-import { DEFAULT_RELAY, isRetiredRelay } from '../store/useRelays'
+import { DEFAULT_RELAY, isReadFallbackRelay, isRetiredRelay } from '../store/useRelays'
 
 /** Where an identity's set is saved: normalized relay URLs, the canonical relay left implicit. */
 const holdersKeyFor = (pubkey: string): string => `onosendai:chain-holders:${pubkey}`
@@ -36,16 +38,29 @@ function load(pubkey: string): Set<string> {
   try {
     const saved: unknown = JSON.parse(localStorage.getItem(holdersKeyFor(pubkey)) ?? '[]')
     const urls = Array.isArray(saved) ? saved.filter((url): url is string => typeof url === 'string') : []
-    for (const url of urls) if (!isRetiredRelay(url)) set.add(normalizeURL(url))
+    for (const url of urls) {
+      // One bad string must not hide the holders after it.
+      try { if (!isRetiredRelay(url)) set.add(normalizeURL(url)) } catch { /* not a URL */ }
+    }
     if (urls.some(isRetiredRelay)) localStorage.setItem(holdersKeyFor(pubkey), JSON.stringify([...set]))
   } catch { /* nothing saved, or no storage here: an empty set */ }
   known.set(pubkey, set)
   return set
 }
 
-/** The relays that hold `pubkey`'s chain (normalized URLs), the canonical relay always among them. */
+/**
+ * The relays that hold `pubkey`'s chain (normalized URLs), the canonical relay
+ * always among them. The read-only former canonical relay (useRelays
+ * READ_FALLBACK_RELAY) never is, though a set saved while it was pinned names
+ * it: nothing of this version publishes there, so what it holds is no newer
+ * than the canonical relay, and waiting for it (and for its AUTH) would only
+ * slow a move. It is still asked, and a newer move it sends before the
+ * question settles (which may be as soon as the canonical relay answers)
+ * stops the move, as any relay's does; one that comes later is heard by the
+ * standing subscription on it (ownWatch), not by this question.
+ */
 export function chainHolders(pubkey: string): Set<string> {
-  return new Set([normalizeURL(DEFAULT_RELAY), ...load(pubkey)])
+  return new Set([normalizeURL(DEFAULT_RELAY), ...[...load(pubkey)].filter((url) => !isReadFallbackRelay(url))])
 }
 
 /** These relays hold `pubkey`'s chain: one took a chain event, or sent one back. Saved at once. */

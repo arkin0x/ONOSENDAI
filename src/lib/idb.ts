@@ -16,12 +16,18 @@
  * loop so the UI stays alive during a cold cache load.
  */
 
+import { countingTasks, idbLabel, timeRestOfTask } from './taskStats'
+
 /** Every database here keeps its meta records in a store of this name, keyed by `key`. */
 export const META_STORE = 'meta'
 
 export function request<T>(req: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
-    req.onsuccess = () => resolve(req.result)
+    req.onsuccess = () => {
+      // Which read this was, for a diagnostics capture (lib/taskStats.ts): every read resolves here.
+      if (countingTasks()) timeRestOfTask(idbLabel(req))
+      resolve(req.result)
+    }
     req.onerror = () => reject(req.error ?? new Error('IndexedDB request failed'))
   })
 }
@@ -121,6 +127,10 @@ export async function getRangePaged<T>(
     await onChunk(rows)
     if (rows.length < chunkSize) return
     from = keyOf(rows[rows.length - 1])
+    // A page that ended on the top key: there is nothing after it, and the
+    // range (top, top] it would ask next is refused (DataError), which ended
+    // a replay early whenever a stretch held an exact multiple of the page.
+    if (upper !== null && indexedDB.cmp(from, upper) >= 0) return
     open = true
   }
 }

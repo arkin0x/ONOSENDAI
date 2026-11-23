@@ -49,10 +49,22 @@ describe('a see-through shard (DECK-0003 §1.11) draws in one pass too', () => {
   // Its face material's props come from basicFaceProps, out of reach of the
   // scan above, so it is asked directly: every opacity a real object can
   // have, in the world and off it, is one pass. Only a ghost keeps two.
-  it('at every opacity from the floor to solid', () => {
-    for (let pct = 10; pct <= 100; pct += 5) {
+  it('at every opacity from 0 to solid', () => {
+    for (let pct = 0; pct <= 100; pct += 5) {
       for (const world of [true, false]) expect(basicFaceProps(pct / 100, { ghost: false, world }).forceSinglePass).toBe(true)
     }
     expect(basicFaceProps(0.45, { ghost: true, world: true }).forceSinglePass).toBe(false)
+  })
+})
+
+describe('the glow halos and points at a POINT SIZE draw in one pass too', () => {
+  // DoubleSide (a mirrored placement turns a billboard's winding) and transparent:
+  // made by functions, so asked directly as well as scanned above.
+  it('every new material', async () => {
+    const { createHaloMaterial, createCoreMaterial } = await import('../glowHalos')
+    for (const m of [createHaloMaterial('light', true), createHaloMaterial('fog', true), createHaloMaterial('light', false), createHaloMaterial('fog', false), createCoreMaterial(1, 1.1, 0.5, true)]) {
+      expect(m.transparent).toBe(true)
+      expect(m.forceSinglePass).toBe(true)
+    }
   })
 })

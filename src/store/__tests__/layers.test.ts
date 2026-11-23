@@ -63,7 +63,7 @@ describe('scene layer switches', () => {
     useLayers.getState().toggleLayer('dots')
     expect(useLayers.getState().dots).toBe(false)
     expect(useLayers.getState().boxes).toBe(true)
-    expect(JSON.parse(storage.map.get(LAYERS_KEY) ?? 'null')).toEqual({ dots: false, boxes: true, walkAvatarHidden: false, walkLookSphere: true, headlamp: true })
+    expect(JSON.parse(storage.map.get(LAYERS_KEY) ?? 'null')).toEqual({ dots: false, boxes: true, walkAvatarHidden: false, walkLookSphere: true, headlamp: true, spatialAudio: false, glow: true, walkLimits: true })
 
     // A reload: the store is created again from what was stored.
     const reloaded = await freshStore(storage)
@@ -73,7 +73,7 @@ describe('scene layer switches', () => {
     reloaded.useLayers.getState().toggleLayer('boxes')
     reloaded.useLayers.getState().toggleLayer('dots')
     expect(reloaded.useLayers.getState()).toMatchObject({ dots: true, boxes: false })
-    expect(JSON.parse(storage.map.get(LAYERS_KEY) ?? 'null')).toEqual({ dots: true, boxes: false, walkAvatarHidden: false, walkLookSphere: true, headlamp: true })
+    expect(JSON.parse(storage.map.get(LAYERS_KEY) ?? 'null')).toEqual({ dots: true, boxes: false, walkAvatarHidden: false, walkLookSphere: true, headlamp: true, spatialAudio: false, glow: true, walkLimits: true })
   })
 
   it('keep WALK\'s avatar shown unless it is explicitly hidden', async () => {
@@ -106,7 +106,7 @@ describe('scene layer switches', () => {
     expect(loadLayers().headlamp).toBe(true)
     expect(useLayers.getState().headlamp).toBe(true)
     useLayers.getState().setLayer('headlamp', false)
-    expect(JSON.parse(storage.map.get(LAYERS_KEY) ?? 'null')).toEqual({ dots: true, boxes: true, walkAvatarHidden: false, walkLookSphere: true, headlamp: false })
+    expect(JSON.parse(storage.map.get(LAYERS_KEY) ?? 'null')).toEqual({ dots: true, boxes: true, walkAvatarHidden: false, walkLookSphere: true, headlamp: false, spatialAudio: false, glow: true, walkLimits: true })
     const reloaded = await freshStore(storage)
     expect(reloaded.useLayers.getState()).toMatchObject({ dots: true, boxes: true, walkAvatarHidden: false, headlamp: false })
     // A value stored before the switch existed, or an odd one, reads on.
@@ -116,12 +116,64 @@ describe('scene layer switches', () => {
     }
   })
 
+  it('draw glow halos unless explicitly off, and remember turning them off', async () => {
+    const storage = memoryStorage()
+    const { useLayers, loadLayers, LAYERS_KEY } = await freshStore(storage)
+    expect(loadLayers().glow).toBe(true)
+    expect(useLayers.getState().glow).toBe(true)
+    useLayers.getState().setLayer('glow', false)
+    expect(JSON.parse(storage.map.get(LAYERS_KEY) ?? 'null')).toMatchObject({ glow: false, headlamp: true })
+    expect(loadLayers().glow).toBe(false)
+    // A value stored before the switch existed, or an odd one, reads on (loadLayers reads the storage each time: no reload needed).
+    for (const raw of [JSON.stringify({ dots: false }), JSON.stringify({ glow: 0 }), JSON.stringify({ glow: 'off' })]) {
+      g.localStorage = memoryStorage({ [LAYERS_KEY]: raw })
+      expect(loadLayers().glow, raw).toBe(true)
+    }
+  })
+
+  it('hide Spatial Audio unless it is explicitly on, and remember turning it on (arkinox, 2026-11-22)', async () => {
+    const storage = memoryStorage()
+    const { useLayers, loadLayers, LAYERS_KEY } = await freshStore(storage)
+    expect(loadLayers().spatialAudio).toBe(false)
+    expect(useLayers.getState().spatialAudio).toBe(false)
+    useLayers.getState().setLayer('spatialAudio', true)
+    expect(JSON.parse(storage.map.get(LAYERS_KEY) ?? 'null')).toEqual({ dots: true, boxes: true, walkAvatarHidden: false, walkLookSphere: true, headlamp: true, spatialAudio: true, glow: true, walkLimits: true })
+    // An explicit on survives a reload, and a toggle of another switch keeps it.
+    const reloaded = await freshStore(storage)
+    expect(reloaded.useLayers.getState()).toMatchObject({ dots: true, headlamp: true, spatialAudio: true, glow: true })
+    reloaded.useLayers.getState().toggleLayer('dots')
+    expect((await freshStore(storage)).useLayers.getState()).toMatchObject({ dots: false, spatialAudio: true })
+    // Nothing stored, or odd: off.
+    for (const raw of [JSON.stringify({ dots: false, headlamp: false }), JSON.stringify({ spatialAudio: 1 }), JSON.stringify({ spatialAudio: 'on' })]) {
+      const old = await freshStore(memoryStorage({ [LAYERS_KEY]: raw }))
+      expect(old.useLayers.getState().spatialAudio, raw).toBe(false)
+    }
+  })
+
+  it('do not carry the old Sound spheres flag over: a stored audioSpheres cannot say who chose it, so it reads as the new default, off', async () => {
+    const { LAYERS_KEY, spatialAudioStored } = await freshStore(memoryStorage())
+    // What a device that touched any switch before holds: every flag, audioSpheres on by default.
+    const before = { dots: false, boxes: true, walkAvatarHidden: false, walkLookSphere: true, headlamp: true, audioSpheres: true, glow: true, walkLimits: true }
+    const storage = memoryStorage({ [LAYERS_KEY]: JSON.stringify(before) })
+    const { useLayers } = await freshStore(storage)
+    expect(useLayers.getState()).toMatchObject({ dots: false, spatialAudio: false })
+    expect(spatialAudioStored({ audioSpheres: true })).toBe(false)
+    expect(spatialAudioStored({ audioSpheres: false })).toBe(false)
+    // The next save writes the new flag and drops the old one.
+    useLayers.getState().toggleLayer('boxes')
+    const saved = JSON.parse(storage.map.get(LAYERS_KEY) ?? 'null')
+    expect(saved).toMatchObject({ dots: false, boxes: false, spatialAudio: false })
+    expect(saved).not.toHaveProperty('audioSpheres')
+    // An explicit on of the new switch is kept, whatever the old flag said.
+    expect(spatialAudioStored({ audioSpheres: false, spatialAudio: true })).toBe(true)
+  })
+
   it('read both on, and still toggle, when storage throws', async () => {
     const { useLayers, loadLayers, saveLayers } = await freshStore(blockedStorage())
     expect(useLayers.getState().dots).toBe(true)
     expect(useLayers.getState().boxes).toBe(true)
     expect(() => loadLayers()).not.toThrow()
-    expect(() => saveLayers({ dots: false, boxes: false, walkAvatarHidden: false, walkLookSphere: true, headlamp: true })).not.toThrow()
+    expect(() => saveLayers({ dots: false, boxes: false, walkAvatarHidden: false, walkLookSphere: true, headlamp: true, spatialAudio: false, glow: true, walkLimits: true })).not.toThrow()
     expect(() => useLayers.getState().toggleLayer('boxes')).not.toThrow()
     // Kept in memory for the visit.
     expect(useLayers.getState().boxes).toBe(false)
@@ -147,7 +199,8 @@ describe('the switches leave the proof and movement alone', () => {
 
   beforeEach(() => { storage = memoryStorage() })
 
-  it('changes no proof, cursor, position, anchor, route or commit mode', async () => {
+  // It imports the whole game store fresh, which under a loaded test run can pass the default 5 s.
+  it('changes no proof, cursor, position, anchor, route or commit mode', { timeout: 30_000 }, async () => {
     const { useLayers } = await freshStore(storage)
     // Same module graph as the store above, so this is the live game state.
     const { useCyberspace } = await import('../useCyberspace')

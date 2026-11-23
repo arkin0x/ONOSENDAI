@@ -21,16 +21,28 @@
  * and decays to zero. Only their own move glides; your hop moves everybody's
  * render coordinates, and since the offset is relative, that shift is applied
  * whole as the rest of the world's is.
+ *
+ * In build mode it dims while it stands between the camera and the build
+ * cursor, as a shard does, and a tap passes through it then (BuildOccluders;
+ * arkinox, 2026-11-09). It registers only while the Builder is on: anywhere
+ * else an avatar is never see-through (AvatarShape, DECK-0003 §3.3).
  */
 
-import { useEffect, useLayoutEffect, useRef } from 'react'
+import { useEffect, useId, useLayoutEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
-import type { Group, Quaternion } from 'three'
+import { Quaternion, type Group } from 'three'
 import { AvatarLerp, type Vec3 } from '../lib/avatarLerp'
-import type { Position } from '../lib/space'
+import { renderDirection, type Position } from '../lib/space'
+import { useCyberspace } from '../store/useCyberspace'
+import { REST_FLOOR } from '../store/walkWalls'
+import { easeRest, useRestDrop } from './useRestDrop'
 import { drawnAvatars } from '../lib/targets'
+import { yawOnly } from '../lib/avatarEye'
+import { useAvatarFace } from '../store/avatarFace'
 import { usePersonCard } from '../store/usePersonCard'
 import { AvatarShape } from './AvatarShape'
+import { useAvatarLift } from './avatarLift'
+import { useAvatarOccluder } from './BuildOccluders'
 import { TapTarget } from './TapTarget'
 import { WorldLabel } from './WorldLabel'
 
@@ -69,6 +81,14 @@ export function OtherAvatar({ pubkey, color, center, position, place, turn, labe
   const out = useRef<Vec3>([0, 0, 0])
   const last = useRef<Position>(position)
   const zoomWas = useRef(scaleExp)
+  /** The drop a move left with, and how far its glide had to go (render cells): apply blends the drop along it. */
+  const dropFrom = useRef<number | null>(null)
+  const glideLen = useRef(0)
+  const dropNow = useRef<number | null>(null)
+  // Its key among what may block the build cursor, only while the Builder is
+  // on; unique to this one drawing, since two lists may draw the same pubkey.
+  const id = useId()
+  const { occluder, dim } = useAvatarOccluder(`${pubkey}:${id}`, drawn)
   // Before the move's effect below, so a move landing in the same commit as
   // a zoom adds its own offset (in the new zoom's cells) to a glide already
   // put in them.
@@ -87,15 +107,45 @@ export function OtherAvatar({ pubkey, color, center, position, place, turn, labe
     if (old.x === position.x && old.y === position.y && old.z === position.z) return
     const was = place(old)
     lerp.current.move([was[0] - center[0], was[1] - center[1], was[2] - center[2]], performance.now())
+    // The height it leaves with, blended onto the new one as the glide goes (apply).
+    dropFrom.current = dropNow.current
+    glideLen.current = Math.hypot(was[0] - center[0], was[1] - center[1], was[2] - center[2])
     // place and center are read at the moment of the move on purpose, as
     // Travel reads its frame: a zoom mid-glide must not restart it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [moveKey])
+  // Their origin stands on the surface under their gibson, else on its
+  // floor, as yours does, the icosahedron lifted onto it (useRestDrop,
+  // useAvatarLift; arkinox, 2026-11-17). Not on Cyberspace TV (`scaleExp`
+  // given), whose frame and zoom are its own: drawn there as before.
+  const tv = scaleExp !== undefined
+  const plane = useCyberspace((st) => st.plane)
+  const zoom = useCyberspace((st) => st.scaleExp)
+  const dropTo = useRestDrop(tv ? null : position, plane, zoom)
+  const lift = useAvatarLift(pubkey, keepShape)
+  const dropAt = useRef<number | null>(null)
   const apply = (): void => {
     const g = placed.current
     if (!g) return
-    const o = lerp.current.offset(performance.now(), out.current)
+    const now = performance.now()
+    const o = lerp.current.offset(now, out.current)
     g.position.set(center[0] + o[0], center[1] + o[1], center[2] + o[2])
+    if (!tv) {
+      // A move under way goes from the height it left with to the new one as
+      // it glides, so a walker on a slope keeps its feet on it; at rest it settles.
+      const left = Math.hypot(o[0], o[1], o[2])
+      if (dropNow.current === null) dropNow.current = dropTo.current
+      else if (left > 1e-3 && dropFrom.current !== null && glideLen.current > 1e-9) {
+        const t = Math.min(1, Math.max(0, 1 - left / glideLen.current))
+        dropNow.current = dropFrom.current + (dropTo.current - dropFrom.current) * t
+      } else dropNow.current = easeRest(dropNow.current, dropTo.current, dropAt.current === null ? 0 : (now - dropAt.current) / 1000)
+      dropAt.current = now
+      const up = renderDirection(useCyberspace.getState().axes(), 'y')
+      const k = lift - dropNow.current
+      g.position.x += up[0] * k
+      g.position.y += up[1] * k
+      g.position.z += up[2] * k
+    }
     if (size && drawn.current) drawn.current.scale.setScalar(Math.max(1e-4, size()))
   }
   // On every commit as well as every frame, so the group is never left at
@@ -108,13 +158,18 @@ export function OtherAvatar({ pubkey, color, center, position, place, turn, labe
     drawnAvatars[pubkey] = g
     return () => { if (drawnAvatars[pubkey] === g) delete drawnAvatars[pubkey] }
   }, [pubkey])
+  // UPRIGHT (DECK-0003 §1.18): the caller's turn laid level about your
+  // view's up, render +Y, so they stand on their feet on your screen however
+  // the compass has turned the world. Idempotent on a turn already level.
+  const face = useAvatarFace(pubkey)
+  const drawnTurn = useMemo(() => (face === 'upright' ? yawOnly(turn, new Quaternion()) : turn), [face, turn])
   return (
     <group ref={placed}>
-      <group ref={drawn} quaternion={turn}>
-        <AvatarShape pubkey={pubkey} color={color} keepShape={keepShape} />
+      <group ref={drawn} quaternion={drawnTurn}>
+        <AvatarShape pubkey={pubkey} color={color} keepShape={keepShape} dim={dim} />
       </group>
-      {tappable && <TapTarget measure={drawn} onTap={() => usePersonCard.getState().open(pubkey)} />}
-      <WorldLabel text={label} color={color} at={[0, 0.9, 0]} align="center" px={labelPx} opacity={labelOpacity} />
+      {tappable && <TapTarget measure={drawn} occluder={occluder} onTap={() => usePersonCard.getState().open(pubkey)} />}
+      <WorldLabel text={label} color={color} at={[0, tv ? 0.9 : 0.9 + REST_FLOOR - lift, 0]} align="center" px={labelPx} opacity={labelOpacity} />
     </group>
   )
 }

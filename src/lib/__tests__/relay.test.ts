@@ -96,7 +96,8 @@ describe('publishMany', () => {
 
   it('takes a relay refusal as final', async () => {
     answers = [new Error('blocked: not welcome')]
-    expect(await publishMany(['wss://one'], event)).toEqual({ ok: false, reason: 'blocked: not welcome' })
+    // Said to be a refusal, so a caller knows no relay holds it (review of #645, B3).
+    expect(await publishMany(['wss://one'], event)).toEqual({ ok: false, reason: 'blocked: not welcome', refused: true })
     expect(calls.publish).toHaveLength(1)
     expect(calls.closed).toEqual([])
   })

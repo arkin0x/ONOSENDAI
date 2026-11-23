@@ -87,7 +87,7 @@ describe('a find this identity wrote', () => {
     // Still a discovery too, as a find of your own always was on the device that placed it.
     expect(discovered[inner.id]).toBeDefined()
     // And on disk, where loadMine reads it from on the next page load.
-    const saved = JSON.parse(localStorage.getItem('onosendai:deployments') ?? '[]') as MyDeployment[]
+    const saved = JSON.parse(localStorage.getItem(`onosendai:deployments:${useCyberspace.getState().identity.pubkey}`) ?? '[]') as MyDeployment[]
     expect(saved.map((d) => d.eventId)).toEqual([inner.id])
     // JSON keeps the event, not the Symbol(verified) nostr-tools stamps on it.
     expect(saved[0].inner).toMatchObject({ id: inner.id, sig: inner.sig })
@@ -123,7 +123,7 @@ describe('a find this identity wrote', () => {
     useShards.getState().addDiscovered(await unbag(outer, rk.key))
     expect(useShards.getState().mine).toHaveLength(0)
     expect(useShards.getState().discovered[inner.id]).toBeUndefined()
-    expect(localStorage.getItem('onosendai:deployments')).toBeNull()
+    expect(localStorage.getItem(`onosendai:deployments:${useCyberspace.getState().identity.pubkey}`)).toBeNull()
   })
 
   it('needs the find to have come out of a bag', () => {

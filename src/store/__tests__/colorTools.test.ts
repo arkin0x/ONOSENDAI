@@ -43,7 +43,7 @@ function bench(): ShardModel {
     ],
     faces: [[0, 1, 2]],
   }
-  useWorkshop.setState({ shards: [s], currentId: s.id, selection: [], partSel: [], selectedFace: null, palette: [], clip: null, color: [0, 0.9, 1] })
+  useWorkshop.setState({ shards: [s], currentId: s.id, selection: [], partSel: [], selectedFaces: [], palette: [], clip: null, color: [0, 0.9, 1] })
   return s
 }
 
@@ -58,7 +58,7 @@ describe('the dropper', () => {
   })
 
   it('takes a selected face\'s color as the average of its corners, snapped onto the palette', () => {
-    useWorkshop.setState({ selectedFace: 0 })
+    useWorkshop.setState({ selectedFaces: [0] })
     w().sampleColor()
     const cs = [RED, BLUE, WHITE].map(hexToRgb)
     const mean = [0, 1, 2].map((k) => (cs[0][k] + cs[1][k] + cs[2][k]) / 3) as [number, number, number]
@@ -70,7 +70,7 @@ describe('the dropper', () => {
   it('takes a face\'s hard color (SEAM) when it has one, not the average of its corners', () => {
     const s = w().current()!
     const GREEN = hexAt(BUILT_IN, 246)
-    useWorkshop.setState({ shards: [{ ...s, facecolors: [hexToRgb(GREEN)] }], selectedFace: 0 })
+    useWorkshop.setState({ shards: [{ ...s, facecolors: [hexToRgb(GREEN)] }], selectedFaces: [0] })
     w().sampleColor()
     expect(rgbToHex(w().color)).toBe(GREEN)
     expect(w().palette[0]).toBe(GREEN)
@@ -79,7 +79,7 @@ describe('the dropper', () => {
   it('in FACE, samples the selected face (its seam) even though its corners are selected with it (arkinox, 2026-10-12)', () => {
     const s = w().current()!
     const GREEN = hexAt(BUILT_IN, 246)
-    useWorkshop.setState({ shards: [{ ...s, facecolors: [hexToRgb(GREEN)] }], tool: 'face', selectedFace: 0, selection: [0, 1, 2] })
+    useWorkshop.setState({ shards: [{ ...s, facecolors: [hexToRgb(GREEN)] }], tool: 'face', selectedFaces: [0], selection: [0, 1, 2] })
     w().sampleColor()
     expect(rgbToHex(w().color)).toBe(GREEN)
   })

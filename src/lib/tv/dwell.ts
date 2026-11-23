@@ -108,6 +108,17 @@ export class Dwell {
     return held > 0 && free === 0 ? 0 : n
   }
 
+  /**
+   * TV stood still for `ms` (an UPGRADE ANNOUNCEMENT, store/useTvAnnounce):
+   * none of it is anyone's screen time or rest, so the run on screen and
+   * every rest move on by it.
+   */
+  hold(ms: number): void {
+    if (!(ms > 0)) return
+    this.since += ms
+    for (const [pk, until] of this.rests) this.rests.set(pk, until + ms)
+  }
+
   /** `pubkey` rests no more: a shot cued on purpose (useTv cueItem, cueBeats) plays whoever it is. */
   free(pubkey: string): void {
     this.rests.delete(pubkey)

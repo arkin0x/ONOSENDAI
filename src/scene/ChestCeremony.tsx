@@ -9,18 +9,24 @@
  *   - the lid: the closed chest cut at the lid (lib/looks.ts splitAt), the
  *     lid turning up and back on its hinge, ease-out over LID_MS;
  *   - the swap: the open look in its place once the lid is up, under the
- *     glints, so the hollow and the gold appear as the lid arrives;
+ *     glints, so the hollow and the gold appear as the lid arrives. The open
+ *     look is the chest's own resting mesh (ChestLooks RestLook), mounted and
+ *     hidden from the moment OPEN begins, so it is built and its parts fetched
+ *     before it shows; it shows from LID_MS (restShowsFrom), the frame the lid
+ *     stops being drawn, so there is never a frame with neither;
  *   - the glints: a few dozen points of light at the gold inside, each
  *     twinkling on its own clock, drawn with the shared glow sprite
  *     (lib/glow.ts). Points are seen by the scene's bloom and faces are not
- *     (Scene.tsx WorldBloom), so the gold flares without the frame swelling;
+ *     (worldBloom.tsx WorldBloom), so the gold flares without the frame swelling;
  *   - the rain: glyphs of the wordmark (lib/decode.ts GLYPHS) rising from
  *     the mouth, flickering until they resolve, then fading. One draw call,
  *     their motion worked in the vertex shader, as BurstLines works its.
  *
  * The calm path (reduced motion): the closed look fades into the open one,
- * nothing turns, glints or rises. A look with no lid or no open look
- * crossfades too: the hinge is only ever applied to the built-in TREASURE.
+ * nothing turns, glints or rises. A look with no lid crossfades too: the
+ * hinge is only ever applied to the built-in TREASURE. A chest with no open
+ * look plays none of this (lib/looks.ts swapsOnOpen): its one model stays
+ * drawn as it is.
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -43,6 +49,7 @@ import { GLYPHS, hash01 } from '../lib/decode'
 import { glowTexture } from '../lib/glow'
 import { RAIN_MS, RAIN_SPREAD_MS, calmShare, glintLevel, lidTurn, LID_MS, rainCount, swapped as swappedAt } from '../lib/ceremony'
 import type { Look } from '../lib/looks'
+import type { LookFrame } from './LookMark'
 import { ACCENT } from '../lib/palette'
 import { ShardMesh } from './ShardMesh'
 import { breatheMaterial } from './WorldShards'
@@ -55,38 +62,74 @@ interface Props {
   /** performance.now() when the decrypt returned. */
   at: number
   calm: boolean
+  /** The look's cut, stance and budget (scene/LookMark LookFrame). */
+  frame?: LookFrame
+}
+
+/** One mesh's share of a look's frame: its own budget key, so two meshes of one look do not write over each other's demand. */
+export function meshFrame(frame: LookFrame | undefined, part: string): LookFrame {
+  return frame?.budget ? { ...frame, budget: { ...frame.budget, key: `${frame.budget.key}:${part}` } } : frame ?? {}
+}
+
+/**
+ * When the chest's resting mesh (the open look, ChestLooks RestLook) shows
+ * during an opening: at LID_MS on the lid's path, the moment LidOpening stops
+ * drawing the closed chest and its lid; never on a crossfade, which draws the
+ * open look itself until it ends. performance.now() time, or null.
+ */
+export function restShowsFrom(look: Pick<Look, 'lid' | 'open'>, ceremony: { at: number; calm: boolean }): number | null {
+  return !ceremony.calm && look.lid && look.open ? ceremony.at + LID_MS : null
+}
+
+/**
+ * How long the closed chest and its lid stay drawn after the resting open look
+ * shows: the two read the clock in separate frame callbacks, so a frame that
+ * straddles LID_MS could otherwise find the open look not yet shown and the
+ * lid already gone (review). An overlap of a few frames, with the lid at the
+ * open look's own pose, is never seen; a gap would be.
+ */
+export const LID_HANDOFF_MS = 50
+
+/** Whether the closed chest and its turning lid are drawn, this long into an opening: until LID_HANDOFF_MS after the resting open look shows (restShowsFrom). */
+export function lidPartsShown(elapsed: number): boolean {
+  return !swappedAt(elapsed - LID_HANDOFF_MS)
 }
 
 /** A chest opening, drawn in its look's frame. */
-export function ChestCeremony({ look, at, calm }: Props): JSX.Element {
+export function ChestCeremony({ look, at, calm, frame }: Props): JSX.Element {
   const open = look.open ?? look.closed
-  if (calm || !look.lid || !look.open) return <CalmSwap from={look.closed} to={open} at={at} />
+  if (calm || !look.lid || !look.open) return <CalmSwap from={look.closed} to={open} at={at} frame={frame} />
   return (
     <>
-      <LidOpening look={look} at={at} />
+      <LidOpening look={look} at={at} frame={frame} />
       <Glints model={look.open} at={at} />
       <GlyphRain at={at} />
     </>
   )
 }
 
-/** The closed chest with its lid turning, then the open look in its place. */
-function LidOpening({ look, at }: { look: Look; at: number }): JSX.Element {
+/** The closed chest with its lid turning, until the open look (the chest's resting mesh) takes its place at LID_MS. */
+function LidOpening({ look, at, frame }: { look: Look; at: number; frame?: LookFrame }): JSX.Element | null {
   const lid = look.lid!
   const turn = useRef<Group>(null)
-  const [done, setDone] = useState(() => swappedAt(performance.now() - at))
+  const [done, setDone] = useState(() => !lidPartsShown(performance.now() - at))
+  const parts = useRef<Group>(null)
   useEffect(() => {
     if (done) return
-    const t = window.setTimeout(() => setDone(true), Math.max(0, at + LID_MS - performance.now()))
+    const t = window.setTimeout(() => setDone(true), Math.max(0, at + LID_MS + LID_HANDOFF_MS - performance.now()))
     return () => window.clearTimeout(t)
   }, [done, at])
   useFrame(() => {
-    if (turn.current) turn.current.rotation.x = lidTurn(performance.now() - at, lid.hinge.angle)
+    const t = performance.now() - at
+    if (turn.current) turn.current.rotation.x = lidTurn(t, lid.hinge.angle)
+    // Hidden on the very frame the resting open look shows, ahead of the timer's re-render.
+    if (parts.current) parts.current.visible = lidPartsShown(t)
   })
-  if (done) return <ShardMesh shard={look.open!} world />
+  // The open look is the resting mesh, shown from the same moment (restShowsFrom): drawn over for a frame at most, never missing one.
+  if (done) return null
   return (
-    <>
-      <ShardMesh shard={lid.body} world />
+    <group ref={parts}>
+      <ShardMesh shard={lid.body} world clip={frame?.clip} />
       {/* The lid turns about its hinge line: moved so the hinge is the origin, turned, and moved back. */}
       <group position={[0, lid.hinge.y, lid.hinge.z]}>
         <group ref={turn}>
@@ -95,22 +138,27 @@ function LidOpening({ look, at }: { look: Look; at: number }): JSX.Element {
           </group>
         </group>
       </group>
-    </>
+    </group>
   )
+}
+
+/** The level fadeAll is writing: one visitor for every call, so a frame's fade allocates nothing. */
+let fadeLevel = 1
+function fadeOne(o: Object3D): void {
+  const m = (o as { material?: Material | Material[] }).material
+  if (!m) return
+  if (Array.isArray(m)) for (let i = 0; i < m.length; i++) breatheMaterial(m[i], fadeLevel)
+  else breatheMaterial(m, fadeLevel)
 }
 
 /** Every material under `root` at opacity `b` (WorldShards breatheMaterial, as EDIT's breath writes it). */
 export function fadeAll(root: Object3D | null, b: number): void {
-  root?.traverse((o) => {
-    const m = (o as { material?: Material | Material[] }).material
-    if (!m) return
-    if (Array.isArray(m)) m.forEach((one) => breatheMaterial(one, b))
-    else breatheMaterial(m, b)
-  })
+  fadeLevel = b
+  root?.traverse(fadeOne)
 }
 
 /** The calm path: one look fading into the other, drawn as ghosts are so their opacity is real. */
-export function CalmSwap({ from, to, at }: { from: ShardModel; to: ShardModel; at: number }): JSX.Element {
+export function CalmSwap({ from, to, at, frame }: { from: ShardModel; to: ShardModel; at: number; frame?: LookFrame }): JSX.Element {
   const a = useRef<Group>(null)
   const b = useRef<Group>(null)
   useFrame(() => {
@@ -120,8 +168,8 @@ export function CalmSwap({ from, to, at }: { from: ShardModel; to: ShardModel; a
   })
   return (
     <>
-      <group ref={a}><ShardMesh shard={from} world ghost /></group>
-      {to !== from && <group ref={b}><ShardMesh shard={to} world ghost /></group>}
+      <group ref={a}><ShardMesh shard={from} world ghost {...meshFrame(frame, 'from')} /></group>
+      {to !== from && <group ref={b}><ShardMesh shard={to} world ghost {...meshFrame(frame, 'to')} /></group>}
     </>
   )
 }
@@ -145,6 +193,11 @@ const GOLD = new Color('#ffd27d')
 /** Points of gold light at the heap, twinkling, fading with the timeline. */
 function Glints({ model, at }: { model: ShardModel; at: number }): JSX.Element | null {
   const positions = useMemo(() => glintPoints(model), [model])
+  return <Twinkles positions={positions} at={at} level={glintLevel} />
+}
+
+/** Points of gold light, each twinkling on its own clock, as bright as `level` says at each moment since `at`. */
+export function Twinkles({ positions, at, level: levelAt }: { positions: Float32Array; at: number; level: (elapsed: number) => number }): JSX.Element | null {
   const count = positions.length / 3
   const geometry = useMemo(() => {
     const g = new BufferGeometry()
@@ -159,7 +212,7 @@ function Glints({ model, at }: { model: ShardModel; at: number }): JSX.Element |
   useEffect(() => () => { geometry.dispose(); material.dispose() }, [geometry, material])
   useFrame(() => {
     const t = performance.now() - at
-    const level = glintLevel(t)
+    const level = levelAt(t)
     const c = geometry.getAttribute('color') as Float32BufferAttribute
     const arr = c.array as Float32Array
     for (let i = 0; i < count; i++) {

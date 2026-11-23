@@ -8,7 +8,7 @@
  * the honest picture. Culled past the same reach as Earth and the spawn mark.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'react'
 import { followsVersion, onFollows, readFollows, trustedPlacement } from '../lib/trust'
 import { useFrame } from '@react-three/fiber'
 import type { Group, Material, Object3D } from 'three'
@@ -17,16 +17,23 @@ import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { useCeremony } from '../store/useCeremony'
 import { editingId, useShards, type WorldItem } from '../store/useShards'
 import { WALL_BREATH_SECONDS } from './Rooms'
+import { WalkContactHint } from './WalkContactHint'
+import { glowReachDoublings } from '../lib/pointLook'
 import { ShardMesh } from './ShardMesh'
 import { GHOST_OPACITY } from './shardFaces'
 import { regionBox, type Box } from '../lib/clip'
 import { placedPose, type Pose } from '../lib/pose'
-import { neededExtent, type ShardModel } from 'sno-core/shards'
+import type { ShardModel } from 'sno-core/shards'
 import { TapTarget, farCullDoublings } from './TapTarget'
+import { passesTaps } from '../tutorial/guideBags'
 import { useMutes } from '../store/useMutes'
+import { useBuildDimmed } from './BuildOccluders'
+import { useDrawReach } from './buildZoom'
+import { GhostGlow } from './PointBillboards'
+import { softModel } from './softPick'
 
 const REACH = GRID_RADIUS * 8
-/** Past this many doublings out from its unit, a shard of the usual size with no placed objects can never be seen (TapTarget farCullDoublings). */
+/** Past this many doublings out from its unit, a shard with no placed objects can never be seen (TapTarget farCullDoublings). */
 const FAR_CULL = farCullDoublings()
 
 /**
@@ -143,38 +150,21 @@ export function placeShard(
 
 /**
  * The shards of `items` that can be drawn from here: in the view's plane, not
- * too small to show a pixel at any distance, and in reach. Placed in the
+ * too small to show a pixel at any distance, and within `reach` of the render
+ * origin (REACH, or further as the fog's end needs). Placed in the
  * render frame anchored at `anchor`. Cyberspace TV draws its own finds with
  * this (TvFinds).
  */
-export function drawableShards(items: Array<Pick<WorldItem, 'key' | 'type' | 'at' | 'height' | 'plane'> & Partial<Pick<WorldItem, 'author'>> & { shard?: ShardModel }>, anchor: Position, plane: number, scaleExp: number, axes: ViewAxes): PlacedShardDraw[] {
+export function drawableShards(items: Array<Pick<WorldItem, 'key' | 'type' | 'at' | 'height' | 'plane'> & Partial<Pick<WorldItem, 'author'>> & { shard?: ShardModel }>, anchor: Position, plane: number, scaleExp: number, axes: ViewAxes, reach = REACH): PlacedShardDraw[] {
   const origin = alignedOrigin(anchor, scaleExp)
   return items
     .filter((w) => w.type === 'shard' && w.shard && w.plane === plane)
     // Not drawn at all once it cannot show a pixel at any distance; a shard
     // with placed objects is exempt, since they can be far larger than it.
-    .filter((w) => (w.shard!.parts?.length ?? 0) > 0 || scaleExp - w.shard!.unit < (w.shard!.extent > 64 ? farCullDoublings(w.shard!.extent) : FAR_CULL))
+    // A glow reaches past its points (DECK-0003 §1.16 SHOULD keep it visible): its radius widens the cull.
+    .filter((w) => (w.shard!.parts?.length ?? 0) > 0 || scaleExp - w.shard!.unit < FAR_CULL + glowReachDoublings(w.shard!))
     .map((w) => placeShard(w, origin, scaleExp, axes))
-    // The far edge counts, not the centre: standing inside a big shard, its centre can be well past REACH.
-    .filter((w) => Number.isFinite(w.scale) && Math.hypot(...w.centre) <= REACH + shardReach(w.shard!, w.scale))
-}
-
-/**
- * How far a shard really reaches from its origin, in its own units. Its declared
- * `extent` is advisory (DECK-0003 §1.8), so a tiny object declaring 4,096 would
- * otherwise stay in the draw list thousands of cells out. Its points are what
- * count, and a walk over them is kept for as long as the model is.
- */
-const reaches = new WeakMap<ShardModel, number>()
-function drawnExtent(shard: ShardModel): number {
-  let r = reaches.get(shard)
-  if (r === undefined) reaches.set(shard, (r = Math.min(shard.extent, neededExtent(shard))))
-  return r
-}
-
-/** How far a shard can stretch from its centre in the render frame: the corner of what it holds, at its scale. */
-export function shardReach(shard: ShardModel, scale: number): number {
-  return Math.sqrt(3) * drawnExtent(shard) * scale
+    .filter((w) => Number.isFinite(w.scale) && Math.hypot(...w.centre) <= reach)
 }
 
 /** Two clip boxes that cut the same. */
@@ -244,21 +234,91 @@ export function WorldShards({ axes }: Props): JSX.Element | null {
   const me = useCyberspace((s) => s.identity.pubkey)
   useEffect(() => { readFollows() }, [me])
 
+  // As far as the fog's end needs (buildZoom.ts).
+  const reach = useDrawReach((s) => Math.max(REACH, s.reach))
+  // Kept as far as the reach went lately (keptReach): a shard past the reach
+  // now is hidden, not taken down, so coming back into reach shows it again
+  // with nothing built.
+  const keep = useKeptReach(reach)
   const fresh = useMemo(() => {
-    return drawableShards(useShards.getState().drawnItems(), anchor, anchorPlane, scaleExp, axes)
+    return drawableShards(useShards.getState().drawnItems(), anchor, anchorPlane, scaleExp, axes, keep)
     // mine and discovered are what worldShards reads.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [anchor, anchorPlane, scaleExp, axes, mine, discovered, curated, muted])
+  }, [anchor, anchorPlane, scaleExp, axes, mine, discovered, curated, muted, keep])
+  // Past the reach, only what is mounted already stays: nothing new is built
+  // where it cannot be seen (review: new shards out to the kept reach would
+  // be built hidden, and the edge where shards are built and taken down
+  // would only move outwards).
+  const mounted = useRef<ReadonlySet<string>>(new Set())
   // A move keeps each shard's cut and GPU buffers: only its place changes (steadied).
-  const placed = useSteadied(fresh)
+  const placed = useSteadied(useMemo(() => keptWithin(fresh, reach, KEEP_HIDDEN_MAX, mounted.current), [fresh, reach]))
+  useEffect(() => { mounted.current = new Set(placed.map((w) => w.key)) }, [placed])
 
   if (placed.length === 0) return null
 
   return (
     <>
-      {placed.map((w) => <PlacedShard key={w.key} w={w} birth={births[w.key]} moving={w.key === moving} />)}
+      {placed.map((w) => <PlacedShard key={w.key} w={w} birth={births[w.key]} moving={w.key === moving} occludes hidden={Math.hypot(...w.centre) > reach} />)}
     </>
   )
+}
+
+/**
+ * How long a reach the draw went out to is kept for: shards out to it stay
+ * mounted, hidden, while the reach is smaller.
+ *
+ * The reach follows the camera (Scene.tsx SceneFog): out in an orbit, in at
+ * the eye in WALK. Going into WALK took every shard past WALK's reach down,
+ * and coming out built them all again; on the owner's phone that was the
+ * scene going from 2,477 objects to 959 and back, megabytes of buffers sent
+ * to the GPU again and long frames each time (diag of 2026-11-22). Walking,
+ * a shard at the edge of the reach was taken down and built again at every
+ * crossing of it.
+ */
+export const KEEP_MS = 300_000
+/** The most shards kept hidden past the reach, nearest first: the GPU memory they hold is bounded. */
+export const KEEP_HIDDEN_MAX = 400
+
+/**
+ * The reach to keep shards mounted to: the largest one this went out to, held
+ * for KEEP_MS from the moment the reach first fell below it (`since`), never
+ * less than `reach`. From the fall, not from the last render: the scene does
+ * not render while you sit still, and five idle minutes in an orbit would
+ * otherwise let it go at WALK's first render.
+ */
+export interface KeptReach { reach: number; since: number | null }
+export function keptReach(was: KeptReach | null, reach: number, now: number): KeptReach {
+  if (!was || reach >= was.reach) return { reach, since: null }
+  if (was.since === null) return { reach: was.reach, since: now }
+  return now - was.since > KEEP_MS ? { reach, since: null } : was
+}
+
+function useKeptReach(reach: number): number {
+  const kept = useRef<KeptReach | null>(null)
+  kept.current = keptReach(kept.current, reach, Date.now())
+  return kept.current.reach
+}
+
+/**
+ * Every shard within `reach`, and up to `max` more past it, nearest first,
+ * of those already mounted (`mounted`, by key). A shard past the reach keeps
+ * its place in the scene's budget (meshBudget, nearest first): it is further
+ * than every shard on show, so it is served after them.
+ */
+export function keptWithin(placed: PlacedShardDraw[], reach: number, max: number, mounted: ReadonlySet<string>): PlacedShardDraw[] {
+  const near: PlacedShardDraw[] = []
+  const far: Array<{ w: PlacedShardDraw; d: number }> = []
+  for (const w of placed) {
+    const d = Math.hypot(...w.centre)
+    if (d <= reach) near.push(w)
+    else if (mounted.has(w.key)) far.push({ w, d })
+  }
+  if (far.length === 0 && near.length === placed.length) return placed
+  if (far.length === 0) return near
+  if (far.length > max) far.sort((a, b) => a.d - b.d).length = max
+  const keep = new Set<PlacedShardDraw>(near)
+  for (const f of far) keep.add(f.w)
+  return placed.filter((w) => keep.has(w))
 }
 
 /**
@@ -266,13 +326,71 @@ export function WorldShards({ axes }: Props): JSX.Element | null {
  * measured from the drawn group, and off while it is too small to see
  * (TapTarget; arkinox, 2026-09-30). Cyberspace TV's have no tap target, and
  * hand their drawn group to TV, which sets how they look each frame (TvFinds).
+ * The world's own (`occludes`) dim while they block the build cursor
+ * (BuildOccluders), except the one EDIT is moving, and take no taps while
+ * dimmed, so a tap reaches what is behind them.
  */
-export function PlacedShard({ w, birth, moving = false, tappable = true, drawnRef }: { w: PlacedShardDraw; birth: number | undefined; moving?: boolean; tappable?: boolean; drawnRef?: (g: Group | null) => void }): JSX.Element {
+export function PlacedShard({ w, birth, moving = false, tappable = true, drawnRef, occludes = false, hidden = false }: { w: PlacedShardDraw; birth: number | undefined; moving?: boolean; tappable?: boolean; drawnRef?: (g: Group | null) => void; occludes?: boolean; hidden?: boolean }): JSX.Element {
+  // A landing moves the anchor, and with it every shard's centre: only this
+  // group's position follows it. What the shard draws keeps its props, so
+  // React skips it (PlacedShardBody), as it skips its GPU buffers (steadied).
+  // Written during render on purpose: the same value every time for a shard
+  // that places nothing, and this render's centre for one that does.
+  const told = useRef(w.centre)
+  told.current = budgetCentre(told.current, w.centre, w.shard)
+  return (
+    // Hidden: past the reach, kept mounted (WorldShards keptReach) and drawn nowhere, taking no taps.
+    <group position={w.centre} visible={!hidden}>
+      <PlacedShardBody shardKey={w.key} shard={w.shard} trusted={trustedPlacement(w.container, w.author)} scale={w.scale} clip={w.clip} pose={w.pose} centre={told.current} birth={birth} moving={moving} tappable={tappable && !hidden && !passesTaps(w.key)} drawnRef={drawnRef} occludes={occludes && !hidden} />
+    </group>
+  )
+}
+
+/**
+ * The centre a world shard tells the scene's budget (ShardMesh `budget`),
+ * kept from `was` while it changes nothing there (arkinox, 2026-11-19: WALK
+ * "unbearable" on his phone). Every landing moves the anchor and so every
+ * shard's centre, and a new centre re-rendered every shard in the world, its
+ * mesh, wall hint and tap target, two or three times a landing: at a spot of
+ * a hundred shards that was most of what a landing cost the page. The budget
+ * reads the centre only for placed objects: how near the shard is, to share
+ * the scene's placements out nearest first, and where each of its own
+ * placements stands, to keep the nearest (scene/meshBudget.ts, ShardMesh
+ * budgeted). A shard that places nothing asks the budget for nothing, so the
+ * distance it reports from its first centre, stale after a move, is never
+ * read; one that places objects always has the new centre.
+ */
+export function budgetCentre(was: [number, number, number], now: [number, number, number], shard: ShardModel): [number, number, number] {
+  return (shard.parts?.length ?? 0) > 0 ? now : was
+}
+
+interface PlacedShardBodyProps {
+  shardKey: string
+  shard: ShardModel
+  /** Whether its placed objects draw from the trusted share (lib/trust.ts trustedPlacement): asked by the parent on each of its renders, as whom you follow changes. */
+  trusted: boolean
+  scale: number
+  clip: Box
+  pose: Pose
+  /** Where it stands in the render frame, as its budget is told (budgetCentre). */
+  centre: [number, number, number]
+  birth: number | undefined
+  moving: boolean
+  /** It takes taps: false for TV's finds, and for a shard the tutorial lets taps through (passesTaps). */
+  tappable: boolean
+  drawnRef?: (g: Group | null) => void
+  occludes: boolean
+}
+
+/** What a placed shard draws, at the place its parent group puts it: re-rendered only when one of its own props changes. */
+const PlacedShardBody = memo(function PlacedShardBody({ shardKey, shard, trusted, scale, clip, pose, centre, birth, moving, tappable, drawnRef, occludes }: PlacedShardBodyProps): JSX.Element {
   const drawn = useRef<Group | null>(null)
   const setDrawn = useCallback((g: Group | null) => { drawn.current = g; drawnRef?.(g) }, [drawnRef])
+  const dim = useBuildDimmed(occludes && !moving ? shardKey : undefined, drawn)
   // Its placed objects are drawn within the scene's budget, by trust and nearest first (scene/meshBudget.ts).
-  const trusted = trustedPlacement(w.container, w.author)
-  const budget = useMemo(() => ({ key: w.key, trusted, centre: w.centre, scale: w.scale }), [w.key, trusted, w.centre, w.scale])
+  const budget = useMemo(() => ({ key: shardKey, trusted, centre, scale }), [shardKey, trusted, centre, scale])
+  const tap = useCallback(() => useShards.getState().selectSecret(shardKey), [shardKey])
+  const softMoving = useMemo(() => moving && softModel(shard), [moving, shard])
   // Moving (EDIT): drawn as a ghost is, with ordinary blending, since a world
   // face writes its colour opaque whatever its opacity (ShardMesh TAG_BLEND),
   // and every material's opacity follows the breath each frame.
@@ -282,12 +400,18 @@ export function PlacedShard({ w, birth, moving = false, tappable = true, drawnRe
     drawn.current.traverse(breathe)
   })
   return (
-    <group position={w.centre}>
+    <>
       <group ref={setDrawn}>
-        <ShardMesh shard={w.shard} scale={w.scale} birth={birth} world ghost={moving} clip={w.clip} pose={w.pose} budget={budget} />
+        {/* Moving a shard that is only points, fog or glow: its glow always drawn and its box outlined over everything, as the placing ghost's (softPick.tsx). */}
+        <GhostGlow always={moving && softMoving}>
+          <ShardMesh shard={shard} scale={scale} birth={birth} world ghost={moving} noBloom={moving} softOutline={moving} clip={clip} pose={pose} budget={budget} dim={moving ? 1 : dim} />
+        </GhostGlow>
       </group>
+      {/* A wall you cannot see, outlined for a moment after it stopped your walk (store/wallHint.ts). */}
+      <WalkContactHint shardKey={shardKey} shard={shard} scale={scale} clip={clip} pose={pose} />
       {/* Not tappable while it moves: the ghost is the one being aimed. */}
-      {!moving && tappable && <TapTarget measure={drawn} onTap={() => useShards.getState().selectSecret(w.key)} />}
-    </group>
+      {/* Dimmed in build mode, a tap passes through it (BuildOccluders tapsPassThrough). */}
+      {!moving && tappable && <TapTarget measure={drawn} occluder={occludes ? shardKey : undefined} onTap={tap} />}
+    </>
   )
-}
+})

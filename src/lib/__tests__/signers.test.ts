@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest'
  * recorded, and it opens no socket, so no unit test touches the network
  * (this test used to open one to 127.0.0.1:9).
  */
-const bunker = vi.hoisted(() => ({ built: 0, asked: [] as string[], holds: '' }))
+const bunker = vi.hoisted(() => ({ built: 0, asked: [] as string[], holds: '', relays: [] as string[], pool: null as unknown, fail: null as unknown }))
 
 vi.mock('nostr-tools/nip46', async (importOriginal) => {
   const actual = await importOriginal<typeof import('nostr-tools/nip46')>()
@@ -13,7 +13,7 @@ vi.mock('nostr-tools/nip46', async (importOriginal) => {
     connect: async () => { bunker.asked.push('connect') },
     getPublicKey: async () => { bunker.asked.push('getPublicKey'); return bunker.holds },
     sendRequest: async (method: string) => { bunker.asked.push(method); return method === 'get_public_key' ? bunker.holds : '' },
-    signEvent: async () => { bunker.asked.push('sign_event'); throw new Error('not in this test') },
+    signEvent: async () => { bunker.asked.push('sign_event'); throw bunker.fail ?? new Error('not in this test') },
     nip44Decrypt: async () => { bunker.asked.push('nip44_decrypt'); return '' },
     nip44Encrypt: async () => { bunker.asked.push('nip44_encrypt'); return '' },
     close: async () => undefined,
@@ -22,7 +22,7 @@ vi.mock('nostr-tools/nip46', async (importOriginal) => {
     ...actual,
     BunkerSigner: {
       ...actual.BunkerSigner,
-      fromBunker: () => { bunker.built++; return fake },
+      fromBunker: (_sk: Uint8Array, bp: { relays: string[] }, params?: { pool?: unknown }) => { bunker.built++; bunker.relays = [...bp.relays]; bunker.pool = params?.pool; return { ...fake, bp } },
       fromURI: actual.BunkerSigner.fromURI,
     },
   }
@@ -47,6 +47,7 @@ import {
   loginCredentialKind,
   normalizeSignerRelay,
   signerRelays,
+  withoutRetiredSignerRelays,
 } from '../loginCredentials'
 
 /**
@@ -74,7 +75,8 @@ describe('login credential classification', () => {
 
 describe('Nostr Connect session setup', () => {
   it('normalizes WebSocket relay URLs and rejects web URLs', () => {
-    expect(normalizeSignerRelay(' wss://bucket.coracle.social/ ')).toBe(DEFAULT_SIGNER_RELAY)
+    expect(normalizeSignerRelay(' wss://relay.onosendai.tech/ ')).toBe(DEFAULT_SIGNER_RELAY)
+    expect(normalizeSignerRelay(' wss://bucket.coracle.social/ ')).toBe(BACKUP_SIGNER_RELAY)
     expect(normalizeSignerRelay('ws://localhost:7777/path/')).toBe('ws://localhost:7777/path')
     expect(() => normalizeSignerRelay('https://bucket.coracle.social')).toThrow(/wss:\/\//)
   })
@@ -87,6 +89,9 @@ describe('Nostr Connect relays', () => {
   })
 
   it('puts a backup relay in the default QR, and only the chosen one otherwise', async () => {
+    // ONOSENDAI's own relay first, then bucket.coracle.social.
+    expect(DEFAULT_SIGNER_RELAY).toBe('wss://relay.onosendai.tech')
+    expect(BACKUP_SIGNER_RELAY).toBe('wss://bucket.coracle.social')
     expect(signerRelays(DEFAULT_SIGNER_RELAY)).toEqual([DEFAULT_SIGNER_RELAY, BACKUP_SIGNER_RELAY])
     expect(signerRelays('wss://my.relay')).toEqual(['wss://my.relay'])
     const { createNostrConnectSession } = await signers()
@@ -133,5 +138,217 @@ describe('restoring a Nostr Connect session', () => {
     bunker.holds = other
     expect(await signer.heldPubkey?.()).toBe(other)
     expect(bunker.asked).toEqual(['get_public_key', 'get_public_key'])
+  })
+})
+
+/** The relay the default QR named as its backup until 2026-11-19; it no longer answers. */
+const RETIRED = 'wss://relay.nsec.app'
+const OLD_QR = 'wss://bucket.coracle.social'
+
+describe('a saved session that names a retired signer relay', () => {
+  it('drops the retired relay and keeps the others, the key and the secret', () => {
+    const remote = getPublicKey(generateSecretKey())
+    const uri = `bunker://${remote}?relay=${encodeURIComponent(OLD_QR)}&relay=${encodeURIComponent(RETIRED)}&secret=abc`
+    const cleaned = withoutRetiredSignerRelays(uri)
+    const url = new URL(cleaned)
+    expect(url.host).toBe(remote)
+    expect(url.searchParams.getAll('relay')).toEqual([OLD_QR])
+    expect(url.searchParams.get('secret')).toBe('abc')
+    // Any spelling of it: a trailing slash, upper case, unencoded, a trailing dot.
+    expect(new URL(withoutRetiredSignerRelays(`bunker://${remote}?relay=wss://relay.example&relay=WSS://Relay.NSEC.app/`)).searchParams.getAll('relay')).toEqual(['wss://relay.example'])
+    expect(new URL(withoutRetiredSignerRelays(`bunker://${remote}?relay=wss://relay.nsec.app.&relay=wss://relay.example`)).searchParams.getAll('relay')).toEqual(['wss://relay.example'])
+  })
+
+  it('leaves a URI alone when it names nothing retired, or nothing else', () => {
+    const remote = getPublicKey(generateSecretKey())
+    const fine = `bunker://${remote}?relay=wss://relay.example&relay=${OLD_QR}`
+    expect(withoutRetiredSignerRelays(fine)).toBe(fine)
+    // The signer listens only where the URI says: moving it would end the session.
+    const only = `bunker://${remote}?relay=${RETIRED}`
+    expect(withoutRetiredSignerRelays(only)).toBe(only)
+    expect(withoutRetiredSignerRelays('not a uri')).toBe('not a uri')
+    // With a path, nostr-tools would read no relays from the rewritten URI: left alone.
+    const slashed = `bunker://${remote}/?relay=${RETIRED}&relay=wss://relay.example`
+    expect(withoutRetiredSignerRelays(slashed)).toBe(slashed)
+  })
+
+  it('mends the saved preference on load, on disk too, and the session still signs without a new pairing', async () => {
+    const saved = getPublicKey(generateSecretKey())
+    const remote = getPublicKey(generateSecretKey())
+    const clientNsec = nip19.nsecEncode(generateSecretKey())
+    // What a QR login saved before 2026-11-19 (toBunkerURL encodes the relays).
+    const old = new URL(`bunker://${remote}`)
+    old.searchParams.append('relay', OLD_QR)
+    old.searchParams.append('relay', RETIRED)
+    localStorage.setItem('onosendai:signer', JSON.stringify({
+      kind: 'nip46', pubkey: saved, bunkerUri: old.toString(), clientNsec, nostrConnectSession: true,
+    }))
+
+    const { loadSignerPref, signerFromPref } = await signers()
+    const pref = loadSignerPref()
+    expect(pref?.pubkey).toBe(saved)
+    expect(pref?.clientNsec).toBe(clientNsec)
+    expect(pref?.nostrConnectSession).toBe(true)
+    expect(new URL(pref!.bunkerUri!).searchParams.getAll('relay')).toEqual([OLD_QR])
+    expect(new URL(pref!.bunkerUri!).host).toBe(remote)
+    const { parseBunkerInput } = await import('nostr-tools/nip46')
+    expect((await parseBunkerInput(pref!.bunkerUri!))?.relays).toEqual([OLD_QR])
+    const onDisk = JSON.parse(localStorage.getItem('onosendai:signer')!)
+    expect(onDisk.bunkerUri).toBe(pref!.bunkerUri)
+
+    bunker.built = 0
+    bunker.asked = []
+    bunker.relays = []
+    const signer = await signerFromPref(pref!)
+    expect(signer.pubkey).toBe(saved)
+    expect(bunker.built).toBe(1)
+    expect(bunker.relays).toEqual([OLD_QR])
+    // Restored, not paired again: the signer is asked nothing.
+    expect(bunker.asked).toEqual([])
+    await signer.close?.()
+  })
+
+  it('leaves other saved logins as they are', async () => {
+    const { loadSignerPref } = await signers()
+    const pubkey = getPublicKey(generateSecretKey())
+    const ext = JSON.stringify({ kind: 'nip07', pubkey })
+    localStorage.setItem('onosendai:signer', ext)
+    expect(loadSignerPref()).toEqual({ kind: 'nip07', pubkey })
+    expect(localStorage.getItem('onosendai:signer')).toBe(ext)
+    const lone = JSON.stringify({ kind: 'nip46', pubkey, bunkerUri: `bunker://${pubkey}?relay=${RETIRED}`, clientNsec: nip19.nsecEncode(generateSecretKey()) })
+    localStorage.setItem('onosendai:signer', lone)
+    expect(loadSignerPref()?.bunkerUri).toBe(`bunker://${pubkey}?relay=${RETIRED}`)
+    expect(localStorage.getItem('onosendai:signer')).toBe(lone)
+    localStorage.removeItem('onosendai:signer')
+  })
+})
+
+describe('a bunker\'s sockets', () => {
+  it('are its own: dropping them closes every bunker relay in the signer pool and none of the app\'s', async () => {
+    const { dropSignerSockets } = await signers()
+    const { getPool, getSignerPool } = await import('../relay')
+    expect(getSignerPool()).not.toBe(getPool())
+    const appClose = vi.spyOn(getPool(), 'close').mockImplementation(() => {})
+    const signerClose = vi.spyOn(getSignerPool(), 'close').mockImplementation(() => {})
+    try {
+      dropSignerSockets([DEFAULT_SIGNER_RELAY, BACKUP_SIGNER_RELAY])
+      expect(signerClose).toHaveBeenCalledWith([DEFAULT_SIGNER_RELAY, BACKUP_SIGNER_RELAY])
+      expect(appClose).not.toHaveBeenCalled()
+    } finally {
+      appClose.mockRestore()
+      signerClose.mockRestore()
+    }
+  })
+
+  it('carry a restored session\'s traffic, and its reconnect drops both relays, so nostr-tools subscribes again on both', async () => {
+    const { signerFromPref, createNostrConnectSession } = await signers()
+    const { getPool, getSignerPool } = await import('../relay')
+    // The relays a default QR names, as its saved session keeps them.
+    const qrRelays = new URL(createNostrConnectSession().uri).searchParams.getAll('relay')
+    const saved = new URL(`bunker://${getPublicKey(generateSecretKey())}`)
+    for (const r of qrRelays) saved.searchParams.append('relay', r)
+    const signer = await signerFromPref({
+      kind: 'nip46',
+      pubkey: getPublicKey(generateSecretKey()),
+      bunkerUri: saved.toString(),
+      clientNsec: nip19.nsecEncode(generateSecretKey()),
+      nostrConnectSession: true,
+    })
+    // Its requests and answers go over the signer pool, never the app's.
+    const appSub = vi.spyOn(getPool(), 'subscribe')
+    const signerSub = vi.spyOn(getSignerPool(), 'subscribe').mockImplementation(() => ({ close: () => {} }) as never)
+    try {
+      const pool = bunker.pool as { subscribe: (r: string[], f: object, p: object) => unknown }
+      pool.subscribe([DEFAULT_SIGNER_RELAY], { kinds: [24133] }, {})
+      expect(signerSub).toHaveBeenCalledTimes(1)
+      expect(appSub).not.toHaveBeenCalled()
+    } finally {
+      appSub.mockRestore()
+      signerSub.mockRestore()
+    }
+    const appClose = vi.spyOn(getPool(), 'close').mockImplementation(() => {})
+    const signerClose = vi.spyOn(getSignerPool(), 'close').mockImplementation(() => {})
+    try {
+      await signer.reconnect?.()
+      expect(signerClose).toHaveBeenCalledWith([DEFAULT_SIGNER_RELAY, BACKUP_SIGNER_RELAY])
+      expect(appClose).not.toHaveBeenCalled()
+    } finally {
+      appClose.mockRestore()
+      signerClose.mockRestore()
+      await signer.close?.()
+    }
+  })
+})
+
+describe('a request a relay does not confirm in time', () => {
+  it('still counts as sent: its answer may be on its way; a refusal still fails it', async () => {
+    const { signerFromPref } = await signers()
+    const { getSignerPool } = await import('../relay')
+    const remote = getPublicKey(generateSecretKey())
+    const signer = await signerFromPref({
+      kind: 'nip46',
+      pubkey: getPublicKey(generateSecretKey()),
+      bunkerUri: `bunker://${remote}?relay=${encodeURIComponent(BACKUP_SIGNER_RELAY)}`,
+      clientNsec: nip19.nsecEncode(generateSecretKey()),
+      nostrConnectSession: true,
+    })
+    const pool = bunker.pool as { publish: (r: string[], e: object) => Promise<string>[] }
+    const publish = vi.spyOn(getSignerPool(), 'publish')
+    try {
+      // The text nostr-tools rejects an unconfirmed publish with (AbstractRelay,
+      // publishTimeout): the wrapper keys on it, so a rewording must fail here.
+      const { readFileSync } = await import('node:fs')
+      expect(readFileSync('node_modules/nostr-tools/lib/esm/abstract-relay.js', 'utf8')).toContain('new Error("publish timed out")')
+      // What nostr-tools' BunkerSigner does with each request: Promise.any over the relays.
+      publish.mockImplementation(() => [Promise.reject(new Error('publish timed out'))])
+      await expect(Promise.any(pool.publish([BACKUP_SIGNER_RELAY], {}))).resolves.toMatch(/^unconfirmed: /)
+      publish.mockImplementation(() => [Promise.reject(new Error('blocked: no'))])
+      await expect(Promise.any(pool.publish([BACKUP_SIGNER_RELAY], {}))).rejects.toThrow('All promises were rejected')
+    } finally {
+      publish.mockRestore()
+      await signer.close?.()
+    }
+  })
+})
+
+describe('a signer request no relay took', () => {
+  it('says which relay answered what, and stays an AggregateError for the retry', async () => {
+    const { explainUndelivered } = await signers()
+    const err = explainUndelivered(
+      new AggregateError([new Error('Event size limit exceeded for kind'), new Error('rate-limited: slow down')], 'All promises were rejected'),
+      [DEFAULT_SIGNER_RELAY, BACKUP_SIGNER_RELAY],
+    )
+    expect(err).toBeInstanceOf(AggregateError)
+    expect((err as Error).message).toBe(
+      'No signer relay took the request: relay.onosendai.tech refused it as too large (Event size limit exceeded for kind); ' +
+      'bucket.coracle.social refused it as too fast (rate-limited: slow down).',
+    )
+    // A rate limit that "exceeded" is not too large; a policy that is "closed" is not a dropped connection.
+    const words = (reason: string) => (explainUndelivered(new AggregateError([new Error(reason)]), [DEFAULT_SIGNER_RELAY]) as Error).message
+    expect(words('blocked: rate limit exceeded')).toContain('refused it as too fast')
+    expect(words('restricted: relay closed to non-members')).toContain('relay.onosendai.tech refused it (restricted:')
+    expect(words('relay connection closed')).toContain('had no open connection')
+    const other = new Error('user rejected')
+    expect(explainUndelivered(other, [DEFAULT_SIGNER_RELAY])).toBe(other)
+  })
+
+  it('reaches the caller of a restored session\'s signEvent', async () => {
+    const { signerFromPref } = await signers()
+    const signer = await signerFromPref({
+      kind: 'nip46',
+      pubkey: getPublicKey(generateSecretKey()),
+      bunkerUri: `bunker://${getPublicKey(generateSecretKey())}?relay=${encodeURIComponent(DEFAULT_SIGNER_RELAY)}`,
+      clientNsec: nip19.nsecEncode(generateSecretKey()),
+      nostrConnectSession: true,
+    })
+    bunker.fail = new AggregateError([new Error('Event size limit exceeded for kind')], 'All promises were rejected')
+    try {
+      const err = await signer.signEvent({ kind: 1, created_at: 1, tags: [], content: '' }).then(() => null, (e: unknown) => e)
+      expect(err).toBeInstanceOf(AggregateError)
+      expect((err as Error).message).toBe('No signer relay took the request: relay.onosendai.tech refused it as too large (Event size limit exceeded for kind).')
+    } finally {
+      bunker.fail = null
+      await signer.close?.()
+    }
   })
 })

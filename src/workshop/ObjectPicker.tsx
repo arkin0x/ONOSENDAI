@@ -11,20 +11,24 @@
  */
 
 import { useEffect, useState } from 'react'
-import { createPortal } from 'react-dom'
+import { Sheet } from './shell/Sheet'
 import { nip19 } from 'nostr-tools'
 import { fromPayload, type Ref, type ShardModel } from 'sno-core/shards'
 import { GENERAL_RELAYS } from '../lib/contacts'
 import type { NostrEvent } from '../lib/events'
 import { fetchRef } from '../lib/parts'
 import { keepOwnTable } from '../lib/carried'
-import { queryAny, relaySet } from '../lib/relay'
+import { queryAny } from '../lib/relay'
+import { readRelays } from '../store/useRelays'
 import { useCyberspace } from '../store/useCyberspace'
 import { useWorkshop, type StampObject } from '../store/useWorkshop'
 import { usePublished } from '../store/usePublished'
 import { useEscape } from '../hooks/useEscape'
 import { ShardFolders, useNewestFirst } from '../hud/ShardFolders'
+import { useScrollMemory } from '../hooks/useScrollMemory'
+import { useShardFolders } from '../store/useShardFolders'
 import { ShardThumb } from '../hud/ShardThumb'
+import { SearchField } from '../hud/ui/SearchField'
 
 const OBJECT_KIND = 33331
 const NONE: Found[] = []
@@ -81,11 +85,12 @@ export function ObjectPicker({ onClose }: { onClose: () => void }): JSX.Element 
   const [address, setAddress] = useState('')
   const [status, setStatus] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [query, setQuery] = useState('')
 
   useEffect(() => {
     let live = true
     setMine(null)
-    void queryAny([...new Set([...relaySet(), ...GENERAL_RELAYS])], { kinds: [OBJECT_KIND], authors: [me] }, WAIT_MS)
+    void queryAny([...new Set([...readRelays(), ...GENERAL_RELAYS])], { kinds: [OBJECT_KIND], authors: [me] }, WAIT_MS)
       .then((events) => {
         // What the relays hold under this key is what SHARD's PUBLISH tag
         // reports (store/usePublished.ts): an object published from another
@@ -97,6 +102,10 @@ export function ObjectPicker({ onClose }: { onClose: () => void }): JSX.Element 
   }, [me])
   // Newest first, a deploy counted as an edit, as every list of your shards (hud/ShardFolders).
   const byRecent = useNewestFirst(mine ?? NONE, foundRef, foundEditedAt)
+  // The list comes back where it was scrolled to the next time STAMP's picker
+  // opens: ready once the relays answered and the folders are read.
+  const foldersRead = useShardFolders((s) => s.storage !== 'loading')
+  const listScroll = useScrollMemory('workshop-stamp-objects', mine !== null && foldersRead)
 
   const choose = (o: StampObject): void => {
     useWorkshop.getState().setStampObject(o)
@@ -117,16 +126,14 @@ export function ObjectPicker({ onClose }: { onClose: () => void }): JSX.Element 
     if (!shard) { setStatus(raw == null ? 'No relay had that object.' : 'That object is not one the format can read.'); return }
     choose({ ref, name: shard.name, shard })
   }
-  // Escape closes it as a tap outside does (arkinox, 2026-10-01).
+  // Escape closes it as its X does (arkinox, 2026-10-01).
   useEscape('modal', true, onClose)
 
-  return createPortal(
-    <div className="modal" role="dialog" aria-modal="true" aria-label="Choose an object to stamp" onPointerDown={onClose}>
-      <div className="modal__card login objpick" onPointerDown={(e) => e.stopPropagation()}>
-        <div className="login__head">
-          <h2 className="modal__title">Stamp an object</h2>
-          <button className="secret__close" onClick={onClose} aria-label="Close">✕</button>
-        </div>
+  // A sheet over the dock (workshop redesign, phase 1), standing on the strip
+  // with the bench in view above it, rather than a modal over everything.
+  return (
+    <Sheet name="Choose an object to stamp" title="STAMP AN OBJECT" onClose={onClose} tall className="objpick-sheet">
+      <div className="login objpick">
         <p className="login__note">
           Placed by reference: it stays that object, and follows it when its author edits it. Only published objects can be
           placed: PUBLISH one from SHARD first, here or in snocrash.
@@ -135,13 +142,15 @@ export function ObjectPicker({ onClose }: { onClose: () => void }): JSX.Element 
           <span className="login__label">Yours</span>
           {mine === null && <p className="login__note">Reading the relays…</p>}
           {mine !== null && mine.length === 0 && <p className="login__note">No published objects under this key yet.</p>}
+          {/* Above the list: the sheet scrolls as a whole, so under a long list the box would be out of reach. */}
+          {mine !== null && (mine.length > 1 || query !== '') && <SearchField className="workshop__search" value={query} onChange={setQuery} placeholder="Search shards and folders" label="Search your published objects and folders" />}
           {mine !== null && mine.length > 0 && (
-            <ul className="objpick__list">
-              <ShardFolders items={byRecent} refOf={foundRef} nameOf={foundName} row={(o, f) => (
+            <ul className="objpick__list" ref={listScroll}>
+              <ShardFolders items={byRecent} refOf={foundRef} nameOf={foundName} query={query} row={(o, f) => (
                 <li key={o.address} {...f.drag}>
                   <button className="objpick__row" onClick={() => choose({ ref: refOf(o.address), name: o.shard.name, shard: o.shard })}>
                     <ShardThumb shard={o.shard} />
-                    <span className="objpick__name">{o.shard.name}</span>
+                    <span className="objpick__name">{f.mark(o.shard.name)}</span>
                     <span className="objpick__meta">{o.shard.vertices.length} v · {o.shard.faces.length} f{o.shard.parts?.length ? ` · ${o.shard.parts.length} obj` : ''}</span>
                   </button>
                   {f.tool}
@@ -157,7 +166,6 @@ export function ObjectPicker({ onClose }: { onClose: () => void }): JSX.Element 
           {status && <p className="login__note" style={{ margin: 0 }}>{status}</p>}
         </div>
       </div>
-    </div>,
-    document.body,
+    </Sheet>
   )
 }

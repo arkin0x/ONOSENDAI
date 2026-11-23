@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { MESSAGE_SCALE_MAX, coinKind, markShown, type CoinState } from '../worldMarks'
+import { MESSAGE_SCALE_MAX, coinKind, heldBox, itemDrawAs, madeBy, markShown, type CoinState } from '../worldMarks'
 
 describe('coinKind', () => {
   it('only a redeemed token makes a spent coin', () => {
@@ -23,5 +23,45 @@ describe('markShown', () => {
       expect(markShown(kind, 2)).toBe(false)
       expect(markShown(kind, 33)).toBe(false)
     }
+  })
+})
+
+describe('itemDrawAs (arkinox, 2026-11-06)', () => {
+  it('draws an item you made and hold as your own: the half model in the box at half, never the solid box', () => {
+    expect(itemDrawAs(true, true, true)).toBe('own')
+  })
+  it('draws an item taken from someone else as taken: the half model, no box', () => {
+    expect(itemDrawAs(true, true, false)).toBe('taken')
+  })
+  it('draws an item not held, yours placed and not picked up or deleted from ITEMS included, as itself', () => {
+    expect(itemDrawAs(false, true, true)).toBe('item')
+    expect(itemDrawAs(false, true, false)).toBe('item')
+  })
+  it('until ITEMS is read, draws it as held, so a reload never shows a held item whole for a moment', () => {
+    expect(itemDrawAs(false, false, true)).toBe('own')
+    expect(itemDrawAs(false, false, false)).toBe('taken')
+    expect(itemDrawAs(true, false, true)).toBe('own')
+  })
+})
+
+describe('madeBy', () => {
+  it('is the signed-in identity’s own event, and nothing when nobody is signed in', () => {
+    expect(madeBy('aa', 'aa')).toBe(true)
+    expect(madeBy('bb', 'aa')).toBe(false)
+    expect(madeBy(undefined, 'aa')).toBe(false)
+    expect(madeBy('', '')).toBe(false)
+  })
+})
+
+describe('heldBox (arkinox, 2026-11-06 and 2026-11-08)', () => {
+  it('a held item you made, its model drawn: the model\u2019s own box', () => {
+    expect(heldBox(true, true)).toBe('model')
+  })
+  it('a held item taken from someone else, its model drawn: no box', () => {
+    expect(heldBox(false, true)).toBeNull()
+  })
+  it('its model loading or missing, yours or taken: the fixed box marks the place', () => {
+    expect(heldBox(true, false)).toBe('placed')
+    expect(heldBox(false, false)).toBe('placed')
   })
 })

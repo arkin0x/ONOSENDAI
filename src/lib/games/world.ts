@@ -1,0 +1,139 @@
+/**
+ * world.ts - read a game's world (DECK-0002 §5.1): the bags the game key
+ * signed and sealed with the region key of the game's region, opened with that
+ * key, their shards placed where they stand. Nobody else's bags, whoever put
+ * them in the same region.
+ *
+ * The region key costs the work of its height (§5.2); a dungeon's height of 6
+ * is a few hundred Cantor steps per axis.
+ */
+
+import { verifyEvent } from 'nostr-tools/pure'
+import { HIDDEN_KIND, ciphertextOf, dOf, innerAuthentic, rumorHolds, unbag, type Rumor } from '../hidden'
+import { coordToXyz, hexToCoord } from 'cyberspace-core'
+import { decryptForRegion } from '../shardCrypto'
+import { inRegion } from './play'
+import { regionKeyAt } from '../shardCrypto'
+import { askGame, resolverOf } from './source'
+import { worldDoorOf } from './keyDoor'
+import type { Hidden } from '../hidden'
+import type { NostrEvent } from '../events'
+import type { WorldShard } from './play'
+import type { GameDef } from './types'
+import type { Position } from '../space'
+
+/** A game's world as read (DECK-0002 §5.1, §2.2): its shards, the entry point, and its door if it has one. */
+export interface World {
+  shards: WorldShard[]
+  /** Where a player appears by virtue of entering. */
+  entry: Position
+  /**
+   * The world's DECK-0004 door, stored inline in the bag and signed by the
+   * game key (lib/games/keyDoor.ts worldDoorOf), or null. A world with one
+   * plays its key and gate as Cyberspace primitives; one without plays the
+   * LEGACY game-only key and gate (GameDef key, door), the world published
+   * 2026-11-13. Chosen by what the newest world bag holds, so this client
+   * plays either world, and the world can switch after the code deploys.
+   */
+  door: Hidden | null
+}
+
+/** The tag that marks the world item whose `C` is the entry point (DECK-0002 §2.2). */
+export const ENTRY_TAG = 'entry'
+
+/** The centre of the region, the entry point of a world that marks none: its base plus 2^(H-1) on each axis. */
+export function regionCentre(game: Pick<GameDef, 'region'>): Position {
+  const { base, height } = game.region
+  const half = height === 0 ? 0n : 1n << BigInt(height - 1)
+  return { x: base.x + half, y: base.y + half, z: base.z + half }
+}
+
+/** The highest region this reads a key for: the cap DECK-0002 §5.2 suggests, so no game can ask a phone for a key it cannot compute. */
+export const WORLD_MAX_HEIGHT = 8
+
+/** The region's key and lookup id (spec §7.2). */
+export function worldKey(game: Pick<GameDef, 'region'>): { key: Uint8Array; lookupId: string } {
+  const { base, height } = game.region
+  if (height > WORLD_MAX_HEIGHT) throw new Error(`This game's region is too large to read here (height ${height}, at most ${WORLD_MAX_HEIGHT}).`)
+  const rk = regionKeyAt(base, height, WORLD_MAX_HEIGHT)
+  return { key: rk.key, lookupId: rk.lookupId }
+}
+
+/** A bag's list of entries, opened with `key` (spec §7.6), as written: null when it does not open or is not a list. */
+export async function bagList(bag: NostrEvent, key: Uint8Array): Promise<unknown[] | null> {
+  const ct = ciphertextOf(bag)
+  const json = ct ? await decryptForRegion(key, ct) : null
+  let list: unknown
+  try { list = json ? JSON.parse(json) : null } catch { list = null }
+  return Array.isArray(list) ? list : null
+}
+
+/**
+ * Whether an inline item is authentic as an item of a bag signed by
+ * `signer`, for the entry point (DECK-0002 §2.2, spec §7.6): signed by that
+ * key, or a rumor the bag vouches for (its `pubkey` the bag's, its `id`
+ * canonical), WHATEVER ITS KIND. Not innerAuthentic, which keeps only the
+ * kinds this client draws as rumors (messages, hidden audio): an entry counts
+ * whatever its kind (§2.2), and a rumor of the bag's signer is vouched for by
+ * the bag whatever its kind (§7.6 Rumors).
+ */
+function entryAuthentic(e: Partial<Rumor>, signer: string): boolean {
+  if (e.pubkey !== signer) return false
+  return e.sig === undefined || e.sig === '' ? rumorHolds(e) : innerAuthentic(e, signer)
+}
+
+/**
+ * The entry point a bag's own list names (DECK-0002 §2.2): the `C` of its
+ * first entry stored inline that carries the `entry` tag, is authentic as an
+ * item of the bag (entryAuthentic: signed by the game key, or a rumor the bag
+ * vouches for) and lies inside the region, in its plane, whatever its kind,
+ * drawable or not. Read from the list itself, before any item is read for
+ * drawing, so a kind this client cannot read still counts. A reference never
+ * counts: its tags are its author's (review of #667). Null when none does.
+ */
+function entryOf(game: GameDef, list: readonly unknown[]): Position | null {
+  for (const e of list) {
+    if (!e || typeof e !== 'object' || Array.isArray(e)) continue
+    const tags = (e as { tags?: unknown }).tags
+    if (!Array.isArray(tags) || !tags.some((t) => Array.isArray(t) && t[0] === ENTRY_TAG)) continue
+    if (!entryAuthentic(e as Partial<Rumor>, game.pubkey)) continue
+    const c = tags.find((t) => Array.isArray(t) && t[0] === 'C')?.[1]
+    if (typeof c !== 'string' || !/^[0-9a-f]{64}$/.test(c)) continue
+    const { x, y, z, plane } = coordToXyz(hexToCoord(c))
+    const at = { x, y, z }
+    if (plane === game.region.plane && inRegion(game, at)) return at
+  }
+  return null
+}
+
+/**
+ * The world: its shards and its entry point. A bag is addressable, so of the bags with the region's
+ * `d` only the game key's newest counts, as for any author's place (spec
+ * §7.6). Every bag is checked here whatever its source: signed by the game
+ * key, a valid signature, the region's `d`.
+ */
+export async function loadWorld(game: GameDef): Promise<World> {
+  const { key, lookupId } = worldKey(game)
+  // The relays (the hint asked on its own only when it is not one of this player's, review of #697), or the DEV fixture (lib/games/source.ts).
+  const bags = (await askGame(game, { kinds: [HIDDEN_KIND], authors: [game.pubkey], '#d': [lookupId] }))
+    .filter((e) => e.kind === HIDDEN_KIND && e.pubkey === game.pubkey && dOf(e) === lookupId && verifyEvent(e))
+    .sort((a, b) => b.created_at - a.created_at || (a.id < b.id ? -1 : 1))
+  const newest = bags[0]
+  if (!newest) return { shards: [], entry: regionCentre(game), door: null }
+  const { base, height, plane } = game.region
+  const list = (await bagList(newest, key)) ?? []
+  const entry = entryOf(game, list) ?? regionCentre(game)
+  const all = await unbag(newest, key, resolverOf(game), { at: base, plane }, height)
+  // A piece the bag names by reference that did not come back would leave a hole: a floor to fall through, a wall to
+  // walk through. Said, so nobody moves in half a world (useGame step), rather than drawn as if whole (review of #697).
+  const named = list.filter((e) => Array.isArray(e) && e[0] === 'a').length
+  const missing = named - all.filter((it) => (it.ref ?? it.sealedRef)?.[0] === 'a').length
+  if (missing > 0) throw new Error(`${missing} piece${missing === 1 ? '' : 's'} of this game's world could not be read. Leave the game and try again in a minute.`)
+  // Only what lies inside the region, in its plane: the world is drawn there and nowhere else (review of #667).
+  const items = all.filter((it) => it.plane === plane && inRegion(game, it.at))
+  return {
+    shards: items.filter((it) => it.type === 'shard' && it.shard).map((it) => ({ key: it.eventId, shard: it.shard!, at: it.at, height: it.height })),
+    entry,
+    door: worldDoorOf(game, items),
+  }
+}

@@ -12,10 +12,13 @@
  * nothing to recompute until then.
  */
 
-import { useEffect, useRef } from 'react'
-import { query } from '../lib/relay'
-import { HIDDEN_KIND } from '../lib/hidden'
+import { useEffect, useRef, useState } from 'react'
+import { query, queryEach, relaySet, troubleOf } from '../lib/relay'
+import { mergeAnswers } from '../lib/relayOutcome'
+import { HIDDEN_KIND, unbag, type Hidden } from '../lib/hidden'
+import type { NostrEvent } from 'nostr-tools'
 import { unbagRemembered } from '../lib/foundCache'
+import { bagsToOpen } from '../lib/bagVersions'
 import { hexToBytes } from '../lib/events'
 import { MAX_COMPUTE_HEIGHT, useCyberspace } from '../store/useCyberspace'
 import { useCeremony } from '../store/useCeremony'
@@ -24,10 +27,41 @@ import { resolveReference } from '../lib/references'
 import { useSecrets, type CurrentKey } from '../store/useSecrets'
 import { useTv } from '../store/useTv'
 import type { RegionRequest, RegionResponse } from '../workers/region.worker'
+import { guideBagsFor, onGuideBags } from '../tutorial/guideBags'
+import { afterHop, frameBudget } from '../lib/hopStage'
 
 /** The aligned base of a value at a height: what decides "same region". */
 function base(v: bigint, h: number): bigint {
   return (v >> BigInt(h)) << BigInt(h)
+}
+
+/**
+ * How long a region the relays answered for stays answered while you are
+ * still in it. A scan runs at every crossing of the smallest cube, which in
+ * WALK is every landed step, and it asked the relays again for every bag in
+ * all thirteen cubes around you: the twelve larger ones unchanged, so the
+ * same bags came back over and over (arkinox, 2026-11-21: WALK stutters on
+ * his phone; his capture shows 200 questions and 5 to 7 MB in every 5 s).
+ * Now a scan asks only about the cubes it has not had an answer for in
+ * this long, whether you stayed in them or stepped out and back (forgetStale);
+ * one you stay in is asked again after it, for what was hidden there
+ * meanwhile.
+ */
+export const ANSWER_FRESH_MS = 60_000
+
+/** The regions a scan should ask the relays about: those without an answer newer than ANSWER_FRESH_MS. */
+export function regionsToAsk(lookupIds: Iterable<string>, answered: ReadonlyMap<string, number>, now: number): string[] {
+  const out: string[] = []
+  for (const id of lookupIds) {
+    const at = answered.get(id)
+    if (at === undefined || now - at >= ANSWER_FRESH_MS) out.push(id)
+  }
+  return out
+}
+
+/** Let go of the answers older than ANSWER_FRESH_MS: they would be asked again anyway, and the map stays as small as the regions walked through lately. */
+export function forgetStale(answered: Map<string, number>, now: number): void {
+  for (const [id, at] of answered) if (now - at >= ANSWER_FRESH_MS) answered.delete(id)
 }
 
 /** A signature of which regions the current anchor sits in, all heights. */
@@ -44,6 +78,13 @@ export function useDiscovery(): void {
   const worker = useRef<Worker | null>(null)
   const lastSig = useRef<string | null>(null)
   const reqId = useRef(0)
+  // When the relays last answered for each region you are in, and for which relays (regionsToAsk).
+  const answered = useRef<{ relays: string; at: Map<string, number> }>({ relays: '', at: new Map() })
+  // The tutorial guide's bags on this device (tutorial/guideBags.ts): when
+  // they change, where you stand is scanned again, so a blue box staged
+  // around you appears without a step.
+  const [guideVersion, setGuideVersion] = useState(0)
+  useEffect(() => onGuideBags(() => { lastSig.current = null; answered.current.at.clear(); setGuideVersion((v) => v + 1) }), [])
 
   useEffect(() => {
     worker.current = new Worker(new URL('../workers/region.worker.ts', import.meta.url), { type: 'module' })
@@ -56,6 +97,7 @@ export function useDiscovery(): void {
       // effects twice, which is exactly this: the first worker was killed
       // mid-scan and the second sat idle, so nothing was ever found.
       lastSig.current = null
+      answered.current.at.clear()
       useShards.getState().setScanning(false)
     }
   }, [])
@@ -71,6 +113,7 @@ export function useDiscovery(): void {
     // scanned again.
     if (tvOn) {
       lastSig.current = null
+      answered.current.at.clear()
       reqId.current++
       useShards.getState().setScanning(false)
       return
@@ -82,7 +125,6 @@ export function useDiscovery(): void {
     const id = ++reqId.current
     const w = worker.current
     if (!w) return
-    useShards.getState().setScanning(true)
 
     // Collect this scan's keys, then query the relay once for all of them.
     const keys = new Map<string, string>() // lookupId -> keyHex
@@ -125,30 +167,49 @@ export function useDiscovery(): void {
         void useSecrets.getState().recordPlace(anchor, cs.headPlane, [...keys].map(([lookupId, keyHex]) => ({ lookupId, keyHex, height: heights.get(lookupId) ?? 0 })))
       }
 
-      // A superseded scan must not write stale finds.
-      const events = await query({ kinds: [HIDDEN_KIND], '#d': [...keys.keys()] })
-      if (id !== reqId.current) return
-
-      const found = []
-      const opened: string[] = []
-      for (const ev of events) {
-        // A scan superseded while it opens its list stops opening it: the
-        // newer one is opening the same bags, and its finds are the ones
-        // kept. What already opened still holds its keys, below.
-        if (id !== reqId.current) break
-        const region = ev.tags.find((t) => t[0] === 'd')?.[1]
-        const keyHex = region ? keys.get(region) : undefined
-        if (!keyHex || !region) continue
-        // One envelope holds a bag; unbag flattens it to items.
-        // A reference without its own point is drawn at the base of this region.
-        // The height is the key's own, so a bag whose hider left `h` off
-        // (spec §8.6, arkinox 2026-10-01) is read at its true size.
-        const height = heights.get(region) ?? 0
-        const h = BigInt(height)
-        const origin = { at: { x: (anchor.x >> h) << h, y: (anchor.y >> h) << h, z: (anchor.z >> h) << h }, plane }
-        const items = await unbagRemembered(ev, hexToBytes(keyHex), resolveReference, origin, height)
-        if (items.length > 0) opened.push(region)
-        found.push(...items)
+      /**
+       * Open these bags with this scan's keys: the finds, the regions that
+       * opened something, and the bags that did not open with their key (not
+       * current, so what an older version of one gave stays: lib/hidden.ts
+       * BagUnreadable).
+       */
+      const openBags = async (events: readonly NostrEvent[], guideIds: ReadonlySet<string> = new Set()): Promise<{ found: Hidden[]; opened: string[]; unread: Set<string> }> => {
+        const found: Hidden[] = []
+        const opened: string[] = []
+        const unread = new Set<string>()
+        // A frame between bags whenever the opening has held the thread for
+        // 8 ms, so a full region never stalls the view while it opens.
+        const pause = frameBudget()
+        for (const ev of events) {
+          await pause()
+          // A scan superseded while it opens its list stops opening it: the
+          // newer one is opening the same bags, and its finds are the ones
+          // kept. What already opened still holds its keys, below.
+          if (id !== reqId.current) break
+          const region = ev.tags.find((t) => t[0] === 'd')?.[1]
+          const keyHex = region ? keys.get(region) : undefined
+          if (!keyHex || !region) continue
+          // One envelope holds a bag; unbag flattens it to items.
+          // A reference without its own point is drawn at the base of this region.
+          // The height is the key's own, so a bag whose hider left `h` off
+          // (spec §8.6, arkinox 2026-10-01) is read at its true size.
+          const height = heights.get(region) ?? 0
+          const h = BigInt(height)
+          const origin = { at: { x: (anchor.x >> h) << h, y: (anchor.y >> h) << h, z: (anchor.z >> h) << h }, plane }
+          let items: Hidden[]
+          try {
+            // A tutorial guide's bag is opened and forgotten: never kept in
+            // the found bags, which outlive the tutorial and ask relays about
+            // their authors (lib/foundCache.ts).
+            items = guideIds.has(ev.id) ? await unbag(ev, hexToBytes(keyHex), resolveReference, origin, height) : await unbagRemembered(ev, hexToBytes(keyHex), resolveReference, origin, height)
+          } catch {
+            unread.add(ev.id)
+            continue
+          }
+          if (items.length > 0) opened.push(region)
+          found.push(...items)
+        }
+        return { found, opened, unread }
       }
 
       /*
@@ -171,7 +232,8 @@ export function useDiscovery(): void {
        * as real as one found at your head. What it cannot be is a place, and
        * places are only recorded at your head, above.
        */
-      if (opened.length > 0) {
+      const holdOpened = (opened: readonly string[]): void => {
+        if (opened.length === 0) return
         const now = Math.floor(Date.now() / 1000)
         useSecrets.getState().hold(opened.map((region) => ({
           lookupId: region,
@@ -187,17 +249,71 @@ export function useDiscovery(): void {
           at: now,
         })))
       }
+
+      // The tutorial guide's bags here (tutorial/guideBags.ts; first-arrival
+      // tutorial design, D1), opened at once, as if a relay had sent them:
+      // a slow relay must not keep a newcomer's chest away. Filed now and
+      // again with the relays' answer below, where they join it after the
+      // relays' own checks: never asked about, never sent anywhere.
+      const guided = guideBagsFor(keys.keys())
+      const guideIds = new Set(guided.map((g) => g.id))
+      if (guided.length > 0) {
+        const early = await openBags(guided, guideIds)
+        if (id !== reqId.current) return
+        holdOpened(early.opened)
+        const fresh = useShards.getState().freshOf(early.found)
+        // A guide bag staged again (RESTART) replaces what the one before it gave.
+        useShards.getState().dropStale(guided, [], early.found)
+        useShards.getState().addDiscovered(early.found)
+        useCeremony.getState().mark(fresh)
+      }
+
+      // Only the regions not answered lately (regionsToAsk): the rest are on
+      // screen already, as the last answer for them left them. Another set of
+      // relays, or another identity, has had no answer yet.
+      const relays = `${useCyberspace.getState().identity?.pubkey ?? ''}|${relaySet().join(',')}`
+      if (answered.current.relays !== relays) answered.current = { relays, at: new Map() }
+      // A region left keeps its answer until it goes stale, as one stayed in
+      // does: walking to and fro across a cube's side asked the relays again
+      // at every crossing, and every relay sent the same bags back (owner's
+      // phone diag, 2026-11-22). Only stale answers are let go.
+      forgetStale(answered.current.at, Date.now())
+      const asking = regionsToAsk(keys.keys(), answered.current.at, Date.now())
+      if (asking.length === 0) {
+        if (id === reqId.current) useShards.getState().setScanning(false)
+        return
+      }
+      const askedAt = Date.now()
+      // A superseded scan must not write stale finds.
+      const answers = await queryEach({ kinds: [HIDDEN_KIND], '#d': asking })
+      const sent = mergeAnswers(answers)
+      // Only an answer from the canonical relay counts as an answer (relay.ts
+      // troubleOf): one it did not give (down, slow, waiting on the signer)
+      // is asked again at the next step, as every scan used to.
+      const heard = troubleOf(answers) === null
+      if (id !== reqId.current) return
+      // One version per bag, the newest, none its author deleted: relays hold
+      // different versions, and opening all of them drew what a DELETE took
+      // out (lib/bagVersions.ts; arkinox, 2026-11-03).
+      const { bags: relayBags, deletions } = await bagsToOpen(sent, query, useShards.getState().ownDoorAddresses(asking))
+      if (id !== reqId.current) return
+      const events = guided.length > 0 ? [...relayBags, ...guided] : relayBags
+      const { found, opened, unread } = await openBags(events, guideIds)
+      holdOpened(opened)
       if (id === reqId.current) {
         // Asked before addDiscovered, which records these as seen.
         const fresh = useShards.getState().freshOf(found)
+        useShards.getState().dropStale(unread.size > 0 ? events.filter((e) => !unread.has(e.id)) : events, deletions, found)
         useShards.getState().addDiscovered(found)
+        useShards.getState().honorRetractions(asking, events, deletions)
         useShards.getState().setScanning(false)
+        // Answered: not asked again while you stay in them, for a while.
+        if (heard) for (const k of asking) answered.current.at.set(k, askedAt)
         // The ceremony: only for what this scan opened for the first time.
         useCeremony.getState().mark(fresh)
       }
     }
 
-    w.addEventListener('message', onMessage)
     const request: RegionRequest = {
       id,
       x: anchor.x.toString(),
@@ -206,8 +322,20 @@ export function useDiscovery(): void {
       heights: Array.from({ length: SCAN_MAX_HEIGHT + 1 }, (_, h) => h),
       maxComputeHeight: MAX_COMPUTE_HEIGHT,
     }
-    w.postMessage(request)
+    // After your own hop, the scan starts once the avatar has arrived
+    // (lib/hopStage.ts): what it finds, the tutorial's chest among them,
+    // appears after the glide instead of stalling the frames it is drawn in
+    // (owner, 2026-11-12). Any other move of the anchor scans at once. A scan
+    // superseded or stopped while it waited never starts.
+    let listening = false
+    afterHop(() => {
+      if (id !== reqId.current || worker.current !== w) return
+      useShards.getState().setScanning(true)
+      w.addEventListener('message', onMessage)
+      listening = true
+      w.postMessage(request)
+    })
 
-    return () => w.removeEventListener('message', onMessage)
-  }, [anchor, tvOn])
+    return () => { if (listening) w.removeEventListener('message', onMessage) }
+  }, [anchor, tvOn, guideVersion])
 }

@@ -27,6 +27,7 @@
  * Nothing here knows about zustand; useSecrets and vault own the state.
  */
 
+import { kvStorage } from '../kvStore'
 import { sha256 } from '@noble/hashes/sha2.js'
 import { META_STORE, getAllPaged, openDatabase, request } from '../idb'
 import { bytesToHex } from '../events'
@@ -82,8 +83,9 @@ export interface Totals { bytes: number; places: number; placeKeys: number }
 
 export const NO_TOTALS: Totals = { bytes: 0, places: 0, placeKeys: 0 }
 
+/** The old list, where it is kept now: IndexedDB once it moved (lib/kvStore.ts), else localStorage. */
 function globalStorage(): Pick<Storage, 'getItem'> | null {
-  try { return typeof localStorage === 'undefined' ? null : localStorage } catch { return null }
+  return kvStorage
 }
 
 /**
@@ -303,6 +305,35 @@ export function writeKeys(db: IDBDatabase, puts: HeldKey[], deletes: string[]): 
     const keys = t.store(KEYS_STORE)
     for (const k of puts) t.req(keys.get(k.lookupId), (was) => { if (!was) t.put(KEYS_STORE, k) })
     for (const id of deletes) t.req(keys.get(id), (was) => { if (was) t.del(KEYS_STORE, id, was) })
+  })
+}
+
+/**
+ * Put right the corner of keys already stored, and nothing else: each row
+ * keeps everything it had but `base`. A row not there is left alone (this
+ * never adds a key, and never removes one). For a stored corner that was not
+ * an exact integer (lib/secrets/base.ts repairBase).
+ */
+export function repairKeyBases(db: IDBDatabase, fixed: HeldKey[]): Promise<Totals> {
+  const durable = fixed.some((k) => k.source === 'cloud')
+  return tallied(db, [KEYS_STORE], durable, (t) => {
+    const keys = t.store(KEYS_STORE)
+    for (const k of fixed) t.req(keys.get(k.lookupId), (was: HeldKey | undefined) => { if (was) t.put(KEYS_STORE, { ...was, base: k.base }, was) })
+  })
+}
+
+/**
+ * Store derived locks beside their keys (DECK-0004 §3.8.4: a reader "SHOULD
+ * store it with the key"): held keys and place keys, by lookup id. A row not
+ * there, or one that already has this lock, is left alone; nothing is added or
+ * removed, so the counts stay and only the bytes grow.
+ */
+export function writeLocks(db: IDBDatabase, held: Array<{ lookupId: string; lock: string }>, places: Array<{ lookupId: string; lock: string }>): Promise<Totals> {
+  return tallied(db, [KEYS_STORE, PLACE_KEYS_STORE], false, (t) => {
+    const keys = t.store(KEYS_STORE)
+    for (const l of held) t.req(keys.get(l.lookupId), (was: HeldKey | undefined) => { if (was && was.lock !== l.lock) t.put(KEYS_STORE, { ...was, lock: l.lock }, was) })
+    const pk = t.store(PLACE_KEYS_STORE)
+    for (const l of places) t.req(pk.get(l.lookupId), (was: PlaceKey | undefined) => { if (was && was.lock !== l.lock) t.put(PLACE_KEYS_STORE, { ...was, lock: l.lock }, was) })
   })
 }
 

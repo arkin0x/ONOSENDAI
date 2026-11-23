@@ -6,7 +6,7 @@
  * material props are spread onto the JSX materials there.
  *
  * Opaque faces in the world write their colour with alpha 0, a tag the bloom
- * is blind to (Scene.tsx WorldBloom), and mark the stencil so overlays can
+ * is blind to (worldBloom.tsx WorldBloom), and mark the stencil so overlays can
  * keep that tag (CoveringBox, ClipWalls OVER_FACES). Nothing about them
  * changes here.
  *
@@ -33,8 +33,8 @@
  * The draw order, low to high (each a renderOrder; three draws a lower order
  * first, and sorts by distance within one):
  *
- *   0     opaque shard faces, lines and ghosts (depth decides, as always)
- *   1     see-through faces (TRANSLUCENT_ORDER); on the bench, the inside
+ *   0     opaque shard faces and lines (depth decides, as always); ghosts
+ *   1     see-through faces and BUILD's ghosts (TRANSLUCENT_ORDER); on the bench, the inside
  *         of a see-through lit face
  *   1.5   on the bench, the front of a see-through lit face, over its inside
  *   1.75  every shard's vertex dots (DOTS_ORDER)
@@ -87,6 +87,22 @@ export const TAG_BLEND = {
   ...STENCIL_MARK,
 } as const
 
+/**
+ * Colour blended over what is behind, the alpha under it kept, and no stencil
+ * mark: SEE_THROUGH_BLEND for a line or a dot. Drawn this way a mark never
+ * blooms. Over a tagged face the face keeps its tag; over the empty
+ * background the texel stays alpha 0 with a colour, which the bloom reads as
+ * a face and the canvas shows as that colour (worldBloom.tsx OpaqueTagged);
+ * over a glowing line that line keeps its own glow. The placing ghost's lines
+ * and dots, and the deploy region box's grid and ZOOM OUT walls, are drawn so;
+ * the box's outline, the build cursor and the STEP cell stay ordinary glowing
+ * lines, thin enough to read at a phone's pixel size (owner, 2026-11-16: "can we reduce the
+ * glowiness in build mode? its hard to line up what we are placing").
+ */
+export const NO_BLOOM_BLEND = {
+  blending: CustomBlending, blendEquation: AddEquation, blendSrc: SrcAlphaFactor, blendDst: OneMinusSrcAlphaFactor, blendSrcAlpha: ZeroFactor, blendDstAlpha: OneFactor,
+} as const
+
 /** A see-through face in the world: blended colour, the alpha under it kept, the stencil marked. */
 export const SEE_THROUGH_BLEND = {
   blending: CustomBlending, blendEquation: AddEquation, blendSrc: SrcAlphaFactor, blendDst: OneMinusSrcAlphaFactor, blendSrcAlpha: ZeroFactor, blendDstAlpha: OneFactor,
@@ -122,12 +138,28 @@ export const DOTS_ORDER = 1.75
  */
 export const OVERLAY_ORDER = 2
 
-/** How see-through a ghost (a preview that is not yet real) is drawn, before its own opacity. */
+/**
+ * How see-through a ghost (a preview that is not yet real) is drawn, before
+ * its own opacity.
+ *
+ * BUILD's placing ghost is the thing as it will land: its own colours and
+ * the headlamp's shading, at this share, with crisp edges (ShardMesh
+ * GHOST_EDGES) and no bloom (ShardMesh `noBloom`). Its faces blend as a
+ * see-through face does (SEE_THROUGH_BLEND), and its lines and dots as
+ * NO_BLOOM_BLEND. A shard being moved, drawn as a ghost where it stood, takes
+ * the same blend. Other ghosts (the chest and door ceremonies, a held item)
+ * keep their ordinary blending and their glow. The placing ghost used to
+ * blend ordinarily, writing its own alpha: the bloom then read every texel of
+ * it, and of the world behind it, as light, and a placed castle courtyard
+ * washed the whole area white-green (owner, 2026-11-16: "originally the glow
+ * was to make what we placed distinct from the rest but i think that was a
+ * mistake with all the other glowing stuff").
+ */
 export const GHOST_OPACITY = 0.45
 
 /**
- * What a shard is drawn at: its own opacity (sno-core drawnOpacity, with the
- * 10% floor), times a ghost's. An avatar ignores its own (DECK-0003 §3.3:
+ * What a shard is drawn at: its own opacity (sno-core drawnOpacity, 0 to 1
+ * with no floor), times a ghost's. An avatar ignores its own (DECK-0003 §3.3:
  * proof of work prices an avatar's size, not its visibility). A placed
  * object passes its own model here, never its parent's (§1.10).
  */
@@ -143,17 +175,19 @@ export function seeThrough(opacity: number, ghost: boolean): boolean {
 /**
  * The props of an unlit face material (meshBasicMaterial) for a shard drawn
  * at `opacity`. Opaque faces are exactly as they always were; a ghost keeps
- * its two passes for cleaner self-overlap (there are few) and its ordinary
- * blending; a see-through face takes the four rules above.
+ * its two passes for cleaner self-overlap (there are few) and writes depth;
+ * a see-through face takes the four rules above. `noBloom` (the placing ghost
+ * and a shard being moved, in BUILD) blends as a see-through face does, so it
+ * never blooms (GHOST_OPACITY).
  */
-export function basicFaceProps(opacity: number, { ghost, world }: { ghost: boolean; world: boolean }): Record<string, unknown> {
+export function basicFaceProps(opacity: number, { ghost, world, noBloom = false }: { ghost: boolean; world: boolean; noBloom?: boolean }): Record<string, unknown> {
   const see = seeThrough(opacity, ghost)
   return {
     transparent: true,
     opacity,
     forceSinglePass: !ghost,
     ...(see ? { depthWrite: false } : {}),
-    ...(world && !ghost ? (see ? SEE_THROUGH_BLEND : TAG_BLEND) : {}),
+    ...(noBloom ? SEE_THROUGH_BLEND : world && !ghost ? (see ? SEE_THROUGH_BLEND : TAG_BLEND) : {}),
   }
 }
 
@@ -162,14 +196,22 @@ export function litFaceProps(opacity: number, ghost: boolean): Record<string, un
   return { transparent: true, opacity, ...(seeThrough(opacity, ghost) ? { depthWrite: false } : {}) }
 }
 
-/** The props of a line material at `opacity`: no depth written when see-through, so the lines behind still show. */
-export function lineProps(opacity: number, ghost: boolean): Record<string, unknown> {
-  return { transparent: true, opacity, ...(seeThrough(opacity, ghost) ? { depthWrite: false } : {}) }
+/**
+ * The props of a line material at `opacity`: no depth written when
+ * see-through, so the lines behind still show. `noBloom` (BUILD's ghosts)
+ * never blooms (NO_BLOOM_BLEND), so the edges stay crisp to line up with.
+ */
+export function lineProps(opacity: number, ghost: boolean, noBloom = false): Record<string, unknown> {
+  return { transparent: true, opacity, ...(seeThrough(opacity, ghost) ? { depthWrite: false } : {}), ...(noBloom ? NO_BLOOM_BLEND : {}) }
 }
 
-/** The render order of a mesh or line drawn at `opacity`: after the opaque ones when see-through. */
-export function shardOrder(opacity: number, ghost: boolean): number {
-  return seeThrough(opacity, ghost) ? TRANSLUCENT_ORDER : 0
+/**
+ * The render order of a mesh or line drawn at `opacity`: after the opaque ones
+ * when see-through, and a `noBloom` ghost too (it blends as see-through), so
+ * whatever stands behind it is drawn first and shows through it.
+ */
+export function shardOrder(opacity: number, ghost: boolean, noBloom = false): number {
+  return seeThrough(opacity, ghost) || noBloom ? TRANSLUCENT_ORDER : 0
 }
 
 /**

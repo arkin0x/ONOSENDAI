@@ -57,6 +57,8 @@ function found(ev: NostrEvent) {
 
 beforeEach(() => {
   vi.useFakeTimers()
+  // The finds below are said in plane 1; the store's own planes come from a random identity's spawn. Pinned, so the plane filters (spec §7.6 Planes) do not make this test a coin flip.
+  useCyberspace.setState({ anchorPlane: 1, headPlane: 1, plane: 1 })
   localStorage.removeItem('onosendai:chests-opened')
   resetOpenedChests()
   resetCeremonySound()
@@ -95,9 +97,9 @@ describe('OPEN on a door', () => {
     expect(contents?.length).toBe(1)
     const look = lookOf({ type: 'chest', event: ev })!
     expect(look.name).toBe('door')
-    expect(chestLoot({ look: look.name, entries: contents!, held: () => false, chest: { at, plane: 1, height: 6 }, itemsReady: true })).toEqual([])
-    // The same contents in a chest whose region does not hold their point would float out.
-    expect(chestLoot({ look: 'treasure', entries: contents!, held: () => false, chest: { at, plane: 1, height: 1 }, itemsReady: true })).not.toEqual([])
+    expect(chestLoot({ look: look.kind, entries: contents!, held: () => false, itemsReady: true })).toEqual([])
+    // The same contents in a chest float out.
+    expect(chestLoot({ look: 'chest', entries: contents!, held: () => false, itemsReady: true })).not.toEqual([])
   })
 
   it('a chest marks nothing found: its contents float out instead', async () => {

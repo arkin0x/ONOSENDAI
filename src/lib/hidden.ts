@@ -21,6 +21,9 @@
  *     lib/chests.ts; here the chest is read as an item like any other.
  *   - hidden audio, kind 1063 (DECK-0007): a NIP-94 file event naming an
  *     encrypted file on Blossom, with its key (lib/audioItem.ts).
+ *   - a seed, kind 3351 (DECK-0008): one planting of a DNA, whose bloom every
+ *     reader grows (lib/seeds/). A DNA, kind 3350, carried in the same bag is
+ *     handed to the DNA resolver and is not an item of its own.
  * All five carry their coordinate in a `C` tag, decoded on discovery, and the
  * NIP-70 `-` tag (arkinox, 2026-10-20): they only ever live inside bags, and
  * a relay that honours `-` accepts the event only from its author, so no
@@ -35,7 +38,10 @@
  * `content` and `["encrypted", "aes-256-gcm", ct, "cyberspace:region"]`,
  * sealed with the same region key as the bag and saying nothing about where
  * it is. A large shard is hidden this way, as a kind 33331 object (DECK-0003
- * §3.2, §3.4), so one big shard does not make the whole bag big.
+ * §3.2, §3.4), so one big shard does not make the whole bag big. Any other
+ * entry a full bag moves out goes as a sealed entry, kind 33335 (spec §7.6
+ * Sealed entries, lib/sealed.ts): its payload is the very item the bag would
+ * hold inline, and it reads exactly as that item would (fromReference).
  *
  * The envelope does not carry NIP-70's `-` (bagTemplate says why); the items
  * inside it do.
@@ -44,16 +50,20 @@
  * and finished events only.
  */
 
+import { doorHeightOf, isDoor } from './looks'
+import { doorRefusal } from './doors'
 import { getEventHash, getPublicKey } from 'nostr-tools/pure'
 import { verifyOnce } from './verifiedSigs'
 import { coordToXyz, hexToCoord, type Plane } from 'cyberspace-core'
 import { bytesToHex, hexToBytes, positionHex, type EventTemplate, type NostrEvent } from './events'
 import { fromPayload, toPayload, type ShardModel } from 'sno-core/shards'
+import { capsFromTags, tryParseDna } from 'sno-core/seeds'
 import { withAuthoredConstrain } from './walkConstrain'
 import { keepOwnTable } from './carried'
+import { signalRescan } from './rescanSignal'
 import { creditTags, type Credit } from 'sno-core/feed'
 import { ALGO, decryptForRegion, encryptForRegion } from './shardCrypto'
-import { hintFits, hintTags, parseHint, type HintHeights } from './hint'
+import { SECTOR_HINT, hintFits, hintTags, parseHint, type HintHeights } from './hint'
 import { imetaTag, pictureOf, type PictureDim } from './itemPicture'
 import { animationOf, modelOf, modelTags, type ItemAnimation, type ItemModelRef } from './itemModel'
 import type { Position } from './space'
@@ -61,6 +71,8 @@ import { mentionTags } from './mentions'
 import { cashuTokensAsWritten } from './cashu'
 import { countNftLinks, NFT_WORDS, replaceNftLinks } from './nftLink'
 import { AUDIO_KIND, audioItemOf, type AudioItem } from './audioItem'
+import { DNA_KIND, SEED_KIND, noteBagDna, seedItemOf, type SeedItem } from './seeds/seedItem'
+import { SEALED_KIND, openSealed, rememberSealed, sealedAddress, sealedEventRefusal, sealedItemOf, sealedPayload, sealedRefParts } from './sealed'
 
 /** The location-encrypted envelope (spec §8.6). */
 export const HIDDEN_KIND = 33330
@@ -133,6 +145,11 @@ export function isReference(x: unknown): x is Reference {
   return Array.isArray(x) && (x[0] === 'a' || x[0] === 'e') && typeof x[1] === 'string' && x[1].length > 0 && x.every((v) => typeof v === 'string')
 }
 
+/** One entry of a decrypted bag's list as it may be read: a reference, or an object with a numeric `kind`. */
+export function isEntryShaped(e: unknown): e is BagEntry {
+  return isReference(e) || (!!e && !Array.isArray(e) && typeof e === 'object' && typeof (e as NostrEvent).kind === 'number')
+}
+
 /**
  * A stable identity for an entry, for de-duplicating a bag's list. A
  * reference's point is part of it: one object placed at two points is two
@@ -155,12 +172,16 @@ export function linkKey(lookupId: string, ref: Reference): string {
 }
 
 /**
- * The most references one bag may make this client fetch, and how many at
- * once. Opening a bag is cheap; each reference is a relay query, so a bag
- * stuffed with them must not turn one find into a flood.
+ * The most references one bag may make this client fetch, and how many it
+ * opens at once. A bag of references alone holds some 850 of them under the
+ * 240,000-byte cap (spec §7.6 Size), so this is above that: a full bag opens
+ * whole. The fetches are batched (lib/references.ts: one query per kind and
+ * author, in chunks), so the bound is on work, not round trips. A bag past it
+ * says how many it did not fetch (BagReading `skipped`, spec §7.6 Reading,
+ * rule 8).
  */
-export const MAX_REFERENCES_PER_BAG = 64
-const REFERENCE_CONCURRENCY = 4
+export const MAX_REFERENCES_PER_BAG = 1024
+const REFERENCE_CONCURRENCY = 8
 
 /** Where a reference without its own point is drawn: the base of the region the bag is sealed to. */
 export interface RegionOrigin { at: Position; plane: Plane }
@@ -180,7 +201,17 @@ export function wantsReference(shard: ShardModel): boolean {
  */
 export async function objectTemplate(shard: ShardModel, regionKey: Uint8Array, d: string, createdAt: number): Promise<EventTemplate> {
   // OPAQUE for a shard whose author never chose (DECK-0003 §1.12), as every hidden shard.
-  const ciphertext = await encryptForRegion(regionKey, JSON.stringify(toPayload(withAuthoredConstrain(shard))))
+  return objectTemplateOf(JSON.stringify(toPayload(withAuthoredConstrain(shard))), regionKey, d, createdAt)
+}
+
+/**
+ * objectTemplate from a payload already written: an inline shard's `content`,
+ * sealed exactly as it was carried, for a shard that goes by reference because
+ * its bag would not hold it inline (lib/bagFit.ts). The same object, byte for
+ * byte, that a reader would have read inline.
+ */
+export async function objectTemplateOf(payload: string, regionKey: Uint8Array, d: string, createdAt: number): Promise<EventTemplate> {
+  const ciphertext = await encryptForRegion(regionKey, payload)
   return {
     kind: OBJECT_KIND,
     created_at: createdAt,
@@ -197,14 +228,25 @@ export function referenceTo(object: NostrEvent, at: Position, plane: Plane, rela
 
 /**
  * Longest hidden message. The relay is the only hard limit and it is far
- * off: the canonical relay (strfry) takes 262,140 bytes of content, and
- * the sealed envelope of a 10,000-character message is under 15 KB. Two
+ * off: the canonical relay (relay.onosendai.tech) takes events up to 524,288
+ * bytes, the former one (cyberspace.nostr1.com, strfry) 262,140 bytes of
+ * content, and the sealed envelope of a 10,000-character message is under 15 KB. Two
  * thousand was a placeholder, and it cut a Cashu token of six proofs in
  * half as it was pasted; ten thousand leaves room for thirty.
  */
 export const MAX_MESSAGE_LENGTH = 10_000
 
-export type HiddenType = 'shard' | 'message' | 'key' | 'chest' | 'audio'
+/**
+ * 'dna' is read only out of a chest (DECK-0008 §8.1, Public or hidden: a DNA
+ * carried as an item in a chest): a bag's DNA is handed to the resolver and is
+ * never an item of its own (fromInner), so nothing in the world is one.
+ */
+export type HiddenType = 'shard' | 'message' | 'key' | 'chest' | 'audio' | 'seed' | 'dna'
+
+/** A DNA carried in a chest (DECK-0008 §8.1): its name, the `dna` line of a written one, or null for a mixed one. */
+export interface DnaItem {
+  name: string
+}
 
 /** What a key item carries, read out of its event (B1 §2.1). */
 export interface KeyItem {
@@ -246,6 +288,14 @@ export interface ChestItem {
   requires: string
   /** The NIP-44 v2 payload, base64, as the chest carries it. */
   payload: string
+  /**
+   * The chest's `look` tags exactly as they were read (DECK-0004 §3.6), so
+   * every reseal and move writes them back unchanged; lib/looks.ts lookTagsOf
+   * reads them. Absent: it wears the built-in.
+   */
+  look?: string[][]
+  /** A door's height, from its `door` tag (DECK-0004 §3.7.1). Absent on a chest. */
+  door?: number
 }
 
 const HEX_64 = /^[0-9a-f]{64}$/
@@ -320,7 +370,11 @@ export function chestItemOf(ev: Pick<NostrEvent, 'kind' | 'content' | 'tags'>): 
   const lock = ev.tags.find((t) => Array.isArray(t) && t[0] === 'lock')
   if (!lock || typeof lock[1] !== 'string' || typeof lock[2] !== 'string' || !HEX_64.test(lock[1]) || !HEX_64.test(lock[2])) return null
   if (!ev.content) return null
-  return { name: nameOf(ev.tags, 'chest'), lockPubkey: lock[1], senderPubkey: lock[2], requires: capped(ev.tags, 'requires', MAX_ITEM_NAME), payload: ev.content }
+  // A door whose `door` tag lacks a well-formed height is dropped, never read as a chest (DECK-0004 §3.7.1).
+  if (doorHeightOf(ev.tags) === 'malformed') return null
+  const look = ev.tags.filter((t) => Array.isArray(t) && t[0] === 'look' && typeof t[1] === 'string')
+  const door = doorHeightOf(ev.tags)
+  return { name: nameOf(ev.tags, 'chest'), lockPubkey: lock[1], senderPubkey: lock[2], requires: capped(ev.tags, 'requires', MAX_ITEM_NAME), payload: ev.content, ...(look.length ? { look } : {}), ...(typeof door === 'number' ? { door } : {}) }
 }
 
 /** What an inline item is, by its kind: the part of a Hidden that is not about where or who. */
@@ -331,6 +385,10 @@ export interface ItemBody {
   key?: KeyItem
   chest?: ChestItem
   audio?: AudioItem
+  /** A seed (DECK-0008 §8.2), read with every check before its DNA. */
+  seed?: SeedItem
+  /** A DNA taken out of a chest (DECK-0008 §8.1). */
+  dna?: DnaItem
 }
 
 /**
@@ -365,6 +423,22 @@ export function readItem(inner: Pick<NostrEvent, 'kind' | 'content' | 'tags' | '
     const audio = audioItemOf(inner)
     return audio ? { type: 'audio', audio } : null
   }
+  if (inner.kind === SEED_KIND) {
+    // Its tags and its work at the base price, before anything is fetched for it (DECK-0008 §8.2).
+    const ev = inner as Pick<NostrEvent, 'kind' | 'content' | 'tags' | 'id'> & Partial<Pick<NostrEvent, 'pubkey' | 'created_at'>>
+    if (typeof ev.pubkey !== 'string' || typeof ev.created_at !== 'number') return null
+    const seed = seedItemOf({ id: ev.id, kind: ev.kind, pubkey: ev.pubkey, created_at: ev.created_at, tags: ev.tags, content: ev.content })
+    return seed ? { type: 'seed', seed } : null
+  }
+  if (inner.kind === DNA_KIND) {
+    // A written DNA, by its `dna` line, with caps that price (§7, §8.1); one
+    // whose text the engine refuses is skipped (a reader never grows it, §3).
+    // A mixed DNA (empty content) is not read as a chest item yet. Its
+    // signature is checked by the chest reader (lib/chests.ts readEntry).
+    if (inner.content === '' || capsFromTags(inner.tags) === null) return null
+    const read = tryParseDna(inner.content)
+    return read.ok ? { type: 'dna', dna: { name: read.dna.name } } : null
+  }
   return null
 }
 
@@ -379,11 +453,13 @@ export function messagePreview(text: string, max = 32): string {
 }
 
 /** What a hidden thing is called in a row, a chip or a ghost: a message's preview, else its name. */
-export function hiddenLabel(h: Pick<ItemBody, 'type' | 'text' | 'shard' | 'key' | 'chest' | 'audio'>, max = 32): string {
+export function hiddenLabel(h: Pick<ItemBody, 'type' | 'text' | 'shard' | 'key' | 'chest' | 'audio' | 'seed' | 'dna'>, max = 32): string {
   if (h.type === 'message') return messagePreview(h.text ?? '', max)
   if (h.type === 'audio') return h.audio?.title ?? 'audio'
   if (h.type === 'key') return h.key?.name ?? 'key'
   if (h.type === 'chest') return h.chest?.name ?? 'chest'
+  if (h.type === 'seed') return h.seed?.title || 'seed'
+  if (h.type === 'dna') return h.dna ? `${h.dna.name} DNA` : 'DNA'
   return h.shard?.name ?? 'shard'
 }
 
@@ -432,6 +508,7 @@ export interface Hidden {
   key?: KeyItem
   chest?: ChestItem
   audio?: AudioItem
+  seed?: SeedItem
   /**
    * Set when the item was hidden by reference: the entry itself, which is what
    * a rewrite of the bag must carry forward. `inner` is then the referenced
@@ -439,6 +516,15 @@ export interface Hidden {
    * the key that placed it (spec §7.6).
    */
   ref?: Reference
+  /**
+   * Set when the item was read from a sealed entry (kind 33335, spec §7.6):
+   * the bag's reference to it, and the signed sealed entry. The item itself
+   * is `inner`, read exactly as if it stood inline, so it is identified,
+   * attributed and placed by its own id, lineage and `C`; `ref` stays unset.
+   * A rewrite of the bag carries the reference, never the item inline.
+   */
+  sealedRef?: Reference
+  sealedEvent?: NostrEvent
   /**
    * Set when this was revealed from inside a chest: that chest's inner event
    * id. It is then not a bag entry but part of the chest's sealed contents,
@@ -453,6 +539,17 @@ export interface Hidden {
    * against the bag's signer or dropped.
    */
   claim?: true
+  /**
+   * Set when this was read from a room bag (DECK-0004 §3.7.2): the door whose
+   * room it stands in. Its `lookupId` and `keyHex` are then the room bag's
+   * and the room key, and its `height` the room's.
+   */
+  room?: { doorId: string }
+  /**
+   * When the bag it was read from was written: what says a bag read now is newer
+   * than something this device thinks is in it (useShards pruneGoneDoors).
+   */
+  bagAt?: number
 }
 
 /**
@@ -529,6 +626,36 @@ export function editedTemplate(next: EventTemplate, previous: Pick<NostrEvent, '
   return { ...next, tags: [...(at ? [at] : []), ['d', lineage], ...kept, ...protect] }
 }
 
+/**
+ * MOVE of an item carried inline that is not a shard (a key item, a message,
+ * hidden audio): the same item at a new place. Its kind, content and every
+ * tag stay exactly as the version it replaces had them, so nothing about it
+ * changes but where it is; editedTemplate gives it the new `C` and the
+ * lineage `d`. `replace` names tags the move sets afresh (hidden audio's
+ * `fade`, clamped to the room it has at the new place): `tags` stand where
+ * the first old one of those names stood, or at the end when there was
+ * none, and the old ones go.
+ */
+export function movedTemplate(
+  previous: Pick<NostrEvent, 'id' | 'kind' | 'tags' | 'content'>,
+  at: Position,
+  plane: Plane,
+  createdAt: number,
+  replace: { names: readonly string[]; tags: readonly string[][] } = { names: [], tags: [] },
+): EventTemplate {
+  const fresh = replace.tags.map((t) => [...t])
+  let placed = false
+  const kept = previous.tags.flatMap((t) => {
+    if (!replace.names.includes(t[0])) return [t]
+    if (placed) return []
+    placed = true
+    return fresh
+  })
+  const next: EventTemplate = { kind: previous.kind, created_at: createdAt, content: previous.content, tags: [['C', positionHex(at, plane)], [...PROTECTED_TAG]] }
+  const edited = editedTemplate(next, { id: previous.id, kind: previous.kind, tags: kept })
+  return placed ? edited : { ...edited, tags: [...edited.tags, ...fresh] }
+}
+
 /** The `d` of an addressable event, or ''. */
 export function dOf(ev: Pick<NostrEvent, 'tags'>): string {
   return ev.tags.find((t) => t[0] === 'd')?.[1] ?? ''
@@ -580,8 +707,9 @@ export function keyInnerTemplate(key: KeyItem, at: Position, plane: Plane, creat
  * The inner chest event template (kind 3341), signed by the hider (B1 §2.2).
  * The content is the sealed payload (lib/chests.ts sealEntries); `lock` names
  * the public key it is sealed to and the one-time sender's public key, and
- * `requires` is the hider's label of what opens it. `-` is NIP-70, as on
- * every item. A chest stays signed: its signature is what vouches for the
+ * `requires` is the hider's label of what opens it, and `look` what it is
+ * drawn as, closed and open (DECK-0004 §3.6), carried as read. On a door,
+ * `door` gives its height (§3.7.1). `-` is NIP-70, as on every item. A chest stays signed: its signature is what vouches for the
  * messages sealed inside it, which are rumors (lib/chests.ts readContents).
  */
 export function chestInnerTemplate(chest: ChestItem, at: Position, plane: Plane, createdAt: number): EventTemplate {
@@ -589,7 +717,7 @@ export function chestInnerTemplate(chest: ChestItem, at: Position, plane: Plane,
     kind: CHEST_KIND,
     created_at: createdAt,
     content: chest.payload,
-    tags: [['C', positionHex(at, plane)], ['title', chest.name.slice(0, MAX_ITEM_NAME)], ['lock', chest.lockPubkey, chest.senderPubkey], ['requires', chest.requires], [...PROTECTED_TAG]],
+    tags: [['C', positionHex(at, plane)], ['title', chest.name.slice(0, MAX_ITEM_NAME)], ['lock', chest.lockPubkey, chest.senderPubkey], ['requires', chest.requires], ...(chest.look ?? []).map((t) => [...t]), ...(chest.door !== undefined ? [['door', String(chest.door)]] : []), [...PROTECTED_TAG]],
   }
 }
 
@@ -711,9 +839,16 @@ export interface BagSettings {
   heightTag: boolean
   hint: HintHeights | null
   riddle: string
-  /** Publish what is inside, by kind and count (`contents` tags; bagContentsTags). */
+  /** Publish what is inside, by kind and count, money and NFTs left out unless `money` (`contents` tags; bagContentsTags). */
   contents: boolean
-  /** Publish that money is inside, when a cashu token is (a `contents` tag for cashu alone). */
+  /**
+   * Publish that money or NFTs are inside, when a cashu token or an NFT claim
+   * link is: their counts with `contents`, their rows alone without
+   * (bagContentsTags). Off unless the hider turns it on (arkinox, 2026-11-15:
+   * "money off by default"; owner ruling 2026-11-16: NFT claim links are
+   * hidden by default the same way, spec §7.7 Claimable kinds). Named for
+   * money because the saved choice was money's first (store/deployHintPrefs.ts).
+   */
   money: boolean
 }
 
@@ -721,21 +856,55 @@ export interface BagSettings {
 export const DEFAULT_BAG_SETTINGS: BagSettings = { heightTag: true, hint: null, riddle: '', contents: false, money: false }
 
 /**
+ * A NEW bag's settings with the sector hint on (owner ruling 2026-11-13: "by
+ * default sector hints should be ON for all bags"), where a sector can
+ * contain a region of `height`. The game and tutorial bags take these as
+ * they are; the deploy bar lays the player's saved hint switches over them
+ * (store/deployHintPrefs.ts, all ON until touched). A hint must be at least the bag's height (spec §7.7) and a sector
+ * is 30 on every axis, so above height 30 it starts off. DEFAULT_BAG_SETTINGS
+ * stays what a bag that names no settings means, so a bag already out, a
+ * room's bag (lib/doors.ts ROOM_BAG_SETTINGS) and a chat envelope keep theirs.
+ */
+export function newBagSettings(height: number): BagSettings {
+  return { ...DEFAULT_BAG_SETTINGS, hint: hintFits(SECTOR_HINT, height) ? SECTOR_HINT : null }
+}
+
+/**
  * What a bag holds, by kind: shards (in the bag or by reference), messages,
  * keys, chests, hidden audio, and the cashu tokens and nonfungible.cash claim links (NFTs,
  * lib/nftLink) written in its messages.
  */
-export interface BagContents { shard: number; message: number; key: number; chest: number; cashu: number; nft: number; audio: number }
+export interface BagContents { shard: number; message: number; key: number; chest: number; cashu: number; nft: number; audio: number; door: number; seed: number; dna: number }
 
-export function bagContents(inners: readonly (BagEntry | ChatRumor)[]): BagContents {
-  const out: BagContents = { shard: 0, message: 0, key: 0, chest: 0, cashu: 0, nft: 0, audio: 0 }
-  for (const e of inners) {
-    if (isReference(e)) { out.shard++; continue }
+/**
+ * What a bag holds, counted as spec §7.7 counts (Contents). An inline item by
+ * its kind. A reference to a kind 33331 object as a shard, from its
+ * coordinate alone. A sealed entry (33335) by the item it holds, exactly as if
+ * that item stood inline, when that item is known: read when its bag was
+ * opened, or kept when it was sealed (lib/sealed.ts sealedItemOf), whether
+ * the bag names it by an `a` reference or an `e`. Any other reference, and a
+ * sealed entry whose item was never read, counts as nothing.
+ */
+export function bagContents(inners: readonly (BagEntry | ChatRumor)[], held?: ReadonlyMap<string, Pick<Rumor, 'kind' | 'content' | 'tags'>>): BagContents {
+  const out: BagContents = { shard: 0, message: 0, key: 0, chest: 0, cashu: 0, nft: 0, audio: 0, door: 0, seed: 0, dna: 0 }
+  for (const entry of inners) {
+    let e: Pick<Rumor, 'kind' | 'content' | 'tags'>
+    if (isReference(entry)) {
+      if (entry[0] === 'a' && entry[1].startsWith(`${OBJECT_KIND}:`)) { out.shard++; continue }
+      // An `e` reference says no kind: it counts by its item only once it was read as a sealed entry (sealedItemOf by event id).
+      const item = sealedRefParts(entry) ? held?.get(entry[1]) ?? sealedItemOf(entry) : entry[0] === 'e' ? sealedItemOf(entry) : undefined
+      if (!item) continue
+      e = item
+    } else e = entry
     if (e.kind === SHARD_KIND) out.shard++
     else if (e.kind === MESSAGE_KIND) { out.message++; out.cashu += cashuTokensAsWritten(e.content).length; out.nft += countNftLinks(e.content) }
     else if (e.kind === KEY_KIND) out.key++
-    else if (e.kind === CHEST_KIND) out.chest++
+    // A door counts as `door`, never as `chest` (spec §7.7, #82); what its room holds is never counted.
+    else if (e.kind === CHEST_KIND) { if (isDoor(e.tags)) out.door++; else out.chest++ }
     else if (e.kind === AUDIO_KIND) out.audio++
+    // Seeds and the DNAs hidden with them (DECK-0008 §8.2, Contents).
+    else if (e.kind === SEED_KIND) out.seed++
+    else if (e.kind === DNA_KIND) out.dna++
   }
   return out
 }
@@ -743,25 +912,46 @@ export function bagContents(inners: readonly (BagEntry | ChatRumor)[]): BagConte
 /**
  * The order a bag's `contents` tags are written in, and read in. Hidden audio
  * (DECK-0007) came last, after the money kinds, so every bag written before
- * it keeps the order spec §7.7 gives.
+ * it keeps the order spec §7.7 gives; `door` (DECK-0004 §3.7, spec #82)
+ * after it, for the same reason.
  */
-export const CONTENTS_KINDS = ['shard', 'message', 'key', 'chest', 'cashu', 'nft', 'audio'] as const
+export const CONTENTS_KINDS = ['shard', 'message', 'key', 'chest', 'cashu', 'nft', 'audio', 'door', 'seed', 'dna'] as const
+
+/**
+ * The kinds anyone who reads them can redeem: a Cashu token and an NFT claim
+ * link (spec §7.7 Claimable kinds). An NFT is not money; it is claimable.
+ */
+export const CLAIMABLE_KINDS = ['cashu', 'nft'] as const
+
+function isClaimable(kind: string): boolean {
+  return (CLAIMABLE_KINDS as readonly string[]).includes(kind)
+}
 
 /**
  * The public tags a bag's contents settings write (arkinox, 2026-10-18:
  * "a hint type that indicates money is hidden" and "an optional contents
  * hint toggle that advertises what is in the bag"). Worked out from what is
- * in the bag each time it is sealed, so they are never stale: with
- * `contents`, one `["contents", kind, count]` per kind present, cashu
- * tokens and NFTs included (arkinox, 2026-10-22: an `nft` count, as the
- * `cashu` one); with `money` alone, `["contents", "cashu"]` while a
- * token is inside, and nothing once none is. Spec §7.7 "Contents" (#75).
+ * in the bag each time it is sealed, so they are never stale. Spec §7.7
+ * "Contents" (#75) and "Claimable kinds".
+ *
+ * The claimable kinds, cashu tokens and NFT claim links, are said only with
+ * `money` on (arkinox, 2026-11-15: "money off by default"; owner ruling
+ * 2026-11-16: NFTs the same way, since whoever finds a claim link can
+ * redeem it). With `contents` on and `money` off, one
+ * `["contents", kind, count]` per other kind present, and the cashu and nft
+ * rows left out entirely, count and all: no row says them another way,
+ * there is no total, and a message that holds a token or a link counts as a
+ * message, as any other does. So a bag with them says exactly what it would
+ * without them. With both on, cashu and NFTs are counted beside the rest.
+ * With `money` alone, `["contents", "cashu"]` while a token is inside and
+ * `["contents", "nft"]` while a link is, with no count, and nothing once
+ * neither is.
  */
-export function bagContentsTags(inners: readonly (BagEntry | ChatRumor)[], settings: Pick<BagSettings, 'contents' | 'money'>): string[][] {
+export function bagContentsTags(inners: readonly (BagEntry | ChatRumor)[], settings: Pick<BagSettings, 'contents' | 'money'>, held?: ReadonlyMap<string, Pick<Rumor, 'kind' | 'content' | 'tags'>>): string[][] {
   if (!settings.contents && !settings.money) return []
-  const c = bagContents(inners)
-  if (settings.contents) return CONTENTS_KINDS.filter((k) => c[k] > 0).map((k) => ['contents', k, String(c[k])])
-  return c.cashu > 0 ? [['contents', 'cashu']] : []
+  const c = bagContents(inners, held)
+  if (settings.contents) return CONTENTS_KINDS.filter((k) => c[k] > 0 && (settings.money || !isClaimable(k))).map((k) => ['contents', k, String(c[k])])
+  return CLAIMABLE_KINDS.filter((k) => c[k] > 0).map((k) => ['contents', k])
 }
 
 /**
@@ -778,25 +968,27 @@ export type ContentsCounts = Partial<Record<keyof BagContents, string>>
  * What a bag's public tags say it holds (spec §7.7 "Reading contents"). A
  * row of a kind this client does not know is ignored, and so is a row whose
  * count is there but is not a count (CONTENTS_COUNT). What is left: whether
- * money is inside (a counted cashu row, or the cashu row with no count, the
- * one form that says only that), whether the money-alone form was chosen
- * (for the bag's settings), whether an NFT is (a counted nft row; there is
- * no NFT-alone form), and the counts when given. A claim, for display only:
- * what the bag holds is its plaintext.
+ * money is inside (a counted cashu row, or the cashu row with no count),
+ * whether the money-alone form was written, whether an NFT is (a counted nft
+ * row, or the nft row with no count: the claimable kinds are the ones with a
+ * count-free form, spec §7.7 Claimable alone), and the counts when given. A
+ * row of any other kind with no count says nothing. A claim, for display
+ * only: what the bag holds is its plaintext.
  */
-export function readBagContents(tags: string[][]): { money: boolean; moneyAlone: boolean; nft: boolean; counts: ContentsCounts | null } {
+export function readBagContents(tags: string[][]): { money: boolean; moneyAlone: boolean; nft: boolean; nftAlone: boolean; counts: ContentsCounts | null } {
   const counts: ContentsCounts = {}
   let counted = false
   let moneyAlone = false
+  let nftAlone = false
   for (const t of tags) {
     if (t[0] !== 'contents' || !(CONTENTS_KINDS as readonly string[]).includes(t[1] ?? '')) continue
     const kind = t[1] as keyof BagContents
-    if (t[2] === undefined) { if (kind === 'cashu') moneyAlone = true; continue }
+    if (t[2] === undefined) { if (kind === 'cashu') moneyAlone = true; if (kind === 'nft') nftAlone = true; continue }
     if (typeof t[2] !== 'string' || !CONTENTS_COUNT.test(t[2])) continue
     counts[kind] = t[2]
     counted = true
   }
-  return { money: moneyAlone || counts.cashu !== undefined, moneyAlone, nft: counts.nft !== undefined, counts: counted ? counts : null }
+  return { money: moneyAlone || counts.cashu !== undefined, moneyAlone, nft: nftAlone || counts.nft !== undefined, nftAlone, counts: counted ? counts : null }
 }
 
 function sameHint(a: HintHeights | null, b: HintHeights | null): boolean {
@@ -822,6 +1014,7 @@ export function resolveBagSettings(chosen: BagSettings, seed: BagSettings, curre
     hint: hint && hintFits(hint, height) ? hint : null,
     riddle: (chosen.riddle !== seed.riddle ? chosen.riddle : now.riddle).trim().slice(0, MAX_RIDDLE_LENGTH),
     contents: chosen.contents !== seed.contents ? chosen.contents : now.contents,
+    // A hide then sends money as the deploy bar shows it (store/deployHintPrefs.ts asShown).
     money: chosen.money !== seed.money ? chosen.money : now.money,
   }
 }
@@ -832,15 +1025,44 @@ export function resolveBagSettings(chosen: BagSettings, seed: BagSettings, curre
  * itself states no height; a hint the spec calls malformed is read as absent
  * (§7.7). A bag read by a legacy `h` reads as `heightTag: true`, so rewriting
  * it carries its height forward as `H`.
+ *
+ * `holds` is what the bag's plaintext holds of the claimable kinds
+ * (bagContents of its entries), which `money` is read against.
  */
-export function bagSettingsOf(ev: NostrEvent, height: number): BagSettings {
+export function bagSettingsOf(ev: NostrEvent, height: number, holds: Pick<BagContents, 'cashu' | 'nft'>): BagSettings {
   const h = heightHint(ev)
   const hint = parseHint(ev.tags, h ?? height)
   const said = readBagContents(ev.tags)
-  // Money as a setting only in its own form: a counted cashu row is the
-  // contents hint speaking, and reading it as money left a bag announcing
-  // cashu after contents was turned off (review of #378).
-  return { heightTag: h !== null, hint: hint ? hint.heights : null, riddle: ev.content.slice(0, MAX_RIDDLE_LENGTH), contents: said.counts !== null, money: said.moneyAlone }
+  // The money switch (money or NFTs) in either form: since it is its own
+  // switch (arkinox, 2026-11-15), a cashu or nft row says the hider turned
+  // it on, so a rewrite that is not a hide (a DELETE, a broadcast) keeps
+  // saying it, as a bag already out keeps its hints until you hide into it
+  // again. A hide sends it as the deploy bar shows it
+  // (store/deployHintPrefs.ts asShown), so turning contents off no longer
+  // leaves money said (review of #378).
+  //
+  // ON only where the bag already says every claimable kind it holds, so
+  // that such a rewrite never says one it did not: a bag written before NFTs
+  // joined the switch (owner ruling 2026-11-16) counted its NFTs with the
+  // contents and may hold a token it kept quiet, and one that said only that
+  // money is inside never said its NFTs. Such a bag reads OFF, and a
+  // rewrite drops the row rather than add one.
+  const money = (said.money || said.nft) && (said.money || holds.cashu === 0) && (said.nft || holds.nft === 0)
+  return { heightTag: h !== null, hint: hint ? hint.heights : null, riddle: ev.content.slice(0, MAX_RIDDLE_LENGTH), contents: said.counts !== null, money }
+}
+
+/**
+ * How many cashu tokens and NFT claim links a decrypted bag's list holds, for
+ * bagSettingsOf. A list another client wrote that cannot be counted reads as
+ * holding both, so the money switch reads ON only where both are said.
+ */
+export function claimableHeld(entries: readonly unknown[]): Pick<BagContents, 'cashu' | 'nft'> {
+  try {
+    const c = bagContents(entries.filter(isEntryShaped))
+    return { cashu: c.cashu, nft: c.nft }
+  } catch {
+    return { cashu: 1, nft: 1 }
+  }
 }
 
 /** Where a bag's region is, for a hint's base: any point inside the region will do (lib/hint.ts). */
@@ -870,15 +1092,25 @@ export interface BagPlace { at: Position; plane: Plane }
  * and buys little anyway — the location encryption is the real gate, and anyone
  * who can decrypt can re-sign identical content as themselves regardless.
  */
-export async function bagTemplate(inners: readonly (BagEntry | ChatRumor)[], regionKey: Uint8Array, lookupId: string, height: number, createdAt: number, kind: number = HIDDEN_KIND, settings: BagSettings = DEFAULT_BAG_SETTINGS, place?: BagPlace): Promise<EventTemplate> {
-  const tags: string[][] = [['d', lookupId], ['encrypted', ALGO, await encryptForRegion(regionKey, JSON.stringify(inners))], ['version', '2']]
+export async function bagTemplate(inners: readonly (BagEntry | ChatRumor)[], regionKey: Uint8Array, lookupId: string, height: number, createdAt: number, kind: number = HIDDEN_KIND, settings: BagSettings = DEFAULT_BAG_SETTINGS, place?: BagPlace, held?: ReadonlyMap<string, Pick<Rumor, 'kind' | 'content' | 'tags'>>): Promise<EventTemplate> {
+  return bagTemplateAround(inners, await encryptForRegion(regionKey, JSON.stringify(inners)), lookupId, height, createdAt, kind, settings, place, held)
+}
+
+/**
+ * bagTemplate around a ciphertext already made: everything but the
+ * encryption. lib/bagFit.ts passes a stand-in of the ciphertext's exact length
+ * to measure a bag without sealing it, since the length follows the
+ * plaintext's (sealedLength).
+ */
+export function bagTemplateAround(inners: readonly (BagEntry | ChatRumor)[], ciphertext: string, lookupId: string, height: number, createdAt: number, kind: number = HIDDEN_KIND, settings: BagSettings = DEFAULT_BAG_SETTINGS, place?: BagPlace, held?: ReadonlyMap<string, Pick<Rumor, 'kind' | 'content' | 'tags'>>): EventTemplate {
+  const tags: string[][] = [['d', lookupId], ['encrypted', ALGO, ciphertext], ['version', '2']]
   if (settings.heightTag) tags.push([HEIGHT_TAG, String(height)])
   if (settings.hint) {
     if (!place) throw new Error('A hint needs the place it points to.')
     if (!hintFits(settings.hint, height)) throw new Error(`A hint box of heights ${settings.hint.join(', ')} cannot contain a height ${height} region.`)
     tags.push(...hintTags(place.at, place.plane, settings.hint))
   }
-  tags.push(...bagContentsTags(inners, settings))
+  tags.push(...bagContentsTags(inners, settings, held))
   return { kind, created_at: createdAt, content: settings.riddle.trim().slice(0, MAX_RIDDLE_LENGTH), tags }
 }
 
@@ -918,12 +1150,17 @@ export function heightHint(ev: Pick<NostrEvent, 'tags'>): number | null {
 }
 
 /** What every item of one bag shares: its region's height and its public settings. */
-interface BagFacts { height: number; bag: BagSettings }
+interface BagFacts { height: number; bag: BagSettings; room?: { doorId: string } }
 
 /** One inner event of a bag -> a Hidden, or null if it does not verify. `keyHex` is the key that opened the bag. */
-function fromInner(inner: Rumor, outer: NostrEvent, keyHex: string, facts: BagFacts): Hidden | null {
+function fromInner(inner: Rumor, outer: NostrEvent, keyHex: string, facts: BagFacts, heightKnown = true, origin?: RegionOrigin): Hidden | null {
   // By the same key that wrapped it, and signed, or a message sealed as a
   // rumor (innerAuthentic).
+  // A DNA carried for the seeds planted from it (DECK-0008 §8.1, Public or
+  // hidden): the bag is where a reader looks for it first (§8.2). One of
+  // another author's is placed unchanged, signed by them, so it is not held
+  // to the bag's signer; the resolver checks its id and signature itself.
+  if (inner && typeof inner === 'object' && inner.kind === DNA_KIND) { noteBagDna(inner as NostrEvent); return null }
   if (!innerAuthentic(inner, outer.pubkey)) return null
 
   const coordHex = tag(inner, 'C')
@@ -934,6 +1171,7 @@ function fromInner(inner: Rumor, outer: NostrEvent, keyHex: string, facts: BagFa
     inner,
     keyHex,
     bagId: outer.id,
+    bagAt: outer.created_at,
     lookupId: tag(outer, 'd') ?? '',
     author: outer.pubkey,
     at: { x, y, z },
@@ -942,6 +1180,17 @@ function fromInner(inner: Rumor, outer: NostrEvent, keyHex: string, facts: BagFa
     createdAt: inner.created_at,
   }
 
+  // A door must stand where it was found (DECK-0004 §3.7.1): no higher than
+  // its bag, and inside a room lower than the room. One that breaks either is
+  // dropped, never read as a chest.
+  // A bag of no known height has no bound to hold it to; the same for its place.
+  if (inner.kind === CHEST_KIND && isDoor(inner.tags)) {
+    if (heightKnown && doorRefusal(inner.tags, facts.height, facts.room ? facts.height : null)) return null
+    if (heightKnown && origin) {
+      const s = BigInt(facts.height)
+      if ((x >> s) !== (origin.at.x >> s) || (y >> s) !== (origin.at.y >> s) || (z >> s) !== (origin.at.z >> s)) return null
+    }
+  } else if (inner.kind === CHEST_KIND && doorRefusal(inner.tags, facts.height, null)) return null
   // innerAuthentic held it to the bag's signer, so that is whose it is.
   const body = readItem(inner, outer.pubkey)
   return body ? { ...base, ...body } : null
@@ -974,6 +1223,10 @@ export interface BagReading {
   entries: number
   readable: number
   opaque: boolean
+  /** References past MAX_REFERENCES_PER_BAG, not fetched: more is in the bag than was read (spec §7.6 Reading, rule 8). */
+  skipped?: number
+  /** Sealed entries found and refused (spec §7.6 Reading, rules 1 and 4): another signer's, a nested one, a door. */
+  refused?: number
 }
 const readings = new Map<string, BagReading>()
 const readingListeners = new Set<() => void>()
@@ -987,10 +1240,26 @@ export function onBagReadings(listener: () => void): () => void {
 }
 function noteReading(bagId: string, reading: BagReading): void {
   const prev = readings.get(bagId)
-  if (prev && prev.entries === reading.entries && prev.readable === reading.readable && prev.opaque === reading.opaque) return
+  if (prev && prev.entries === reading.entries && prev.readable === reading.readable && prev.opaque === reading.opaque && (prev.skipped ?? 0) === (reading.skipped ?? 0) && (prev.refused ?? 0) === (reading.refused ?? 0)) return
   readings.set(bagId, reading)
   readingsVersion++
   for (const listener of readingListeners) listener()
+}
+
+/**
+ * A bag that does not open with its key: no ciphertext, one that does not
+ * decrypt, or a decryption that is not a list of entries. A corrupt bag, or
+ * a hostile one under someone's lookup id. It is not an empty bag: read as
+ * one, the newest version of a bag stood for "holds nothing", and every find
+ * read from an older version went with it, a room behind a door in it too
+ * (RESCAN ALL, lib/bagVersions.ts staleFinds). So unbag throws it, and a
+ * scan leaves what it already holds from that address as it was.
+ */
+export class BagUnreadable extends Error {
+  constructor(readonly bagId: string) {
+    super('This bag does not open with its key.')
+    this.name = 'BagUnreadable'
+  }
 }
 
 /**
@@ -998,37 +1267,136 @@ function noteReading(bagId: string, reading: BagReading): void {
  * (0 when it does not open): what lib/foundCache.ts asks before keeping an
  * opening, since a reference may open differently next time (a newer version
  * of the object, or one fetched that could not be before).
+ *
+ * Throws BagUnreadable for a bag that does not open with `regionKey`.
  */
-export async function unbag(outer: NostrEvent, regionKey: Uint8Array, resolve?: ResolveReference, origin?: RegionOrigin, height?: number, seen?: { references: number }): Promise<Hidden[]> {
+export async function unbag(outer: NostrEvent, regionKey: Uint8Array, resolve?: ResolveReference, origin?: RegionOrigin, height?: number, seen?: { references: number }, room?: { doorId: string }): Promise<Hidden[]> {
   const ct = ciphertextOf(outer)
-  if (!ct) return []
+  if (!ct) throw new BagUnreadable(outer.id)
   const json = await decryptForRegion(regionKey, ct)
-  if (!json) return []
+  if (!json) throw new BagUnreadable(outer.id)
   let entries: unknown
-  try { entries = JSON.parse(json) } catch { noteReading(outer.id, { entries: 0, readable: 0, opaque: true }); return [] }
-  if (!Array.isArray(entries)) { noteReading(outer.id, { entries: 0, readable: 0, opaque: true }); return [] }
+  try { entries = JSON.parse(json) } catch { entries = null }
+  if (!Array.isArray(entries)) { noteReading(outer.id, { entries: 0, readable: 0, opaque: true }); throw new BagUnreadable(outer.id) }
   if (seen) seen.references = entries.filter(isReference).length
   const keyHex = bytesToHex(regionKey)
   const regionHeight = height ?? heightHint(outer) ?? 0
-  const facts: BagFacts = { height: regionHeight, bag: bagSettingsOf(outer, regionHeight) }
-  const out: (Hidden | null)[] = entries.map((entry) => (Array.isArray(entry) ? null : fromInner(entry as Rumor, outer, keyHex, facts)))
-  // References are fetched a few at a time, and only so many per bag; an
-  // entry that cannot be fetched or opened is a missing entry, dropped like
-  // an item that fails to verify.
+  const facts: BagFacts = { height: regionHeight, bag: bagSettingsOf(outer, regionHeight, claimableHeld(entries)), ...(room ? { room } : {}) }
+  const heightKnown = height !== undefined || heightHint(outer) !== null
+  const out: (Hidden | null)[] = entries.map((entry) => (Array.isArray(entry) ? null : fromInner(entry as Rumor, outer, keyHex, facts, heightKnown, origin)))
+  const refs = entries.map((e, i) => [e, i] as const).filter(([e]) => isReference(e))
+  const fetched = refs.slice(0, MAX_REFERENCES_PER_BAG)
+  const skipped = resolve ? refs.length - fetched.length : 0
+  const tally = { refused: 0 }
+  // Every reference is asked for at once, so a batching resolver
+  // (lib/references.ts) fetches a bag's sealed entries in a few queries; they
+  // are then opened a few at a time. An entry that cannot be fetched or opened
+  // is a missing entry, dropped like an item that fails to verify; one past
+  // the cap is not fetched at all, and the reading says how many.
   if (resolve) {
-    const refs = entries.map((e, i) => [e, i] as const).filter(([e]) => isReference(e)).slice(0, MAX_REFERENCES_PER_BAG)
+    const asked = new Map<number, Promise<NostrEvent | null>>()
+    for (const [ref, i] of fetched) {
+      if (!foreignSealed(ref as Reference, outer.pubkey)) asked.set(i, resolve(ref as Reference).catch(() => null))
+      else tally.refused++
+    }
     let next = 0
     const worker = async (): Promise<void> => {
-      while (next < refs.length) {
-        const [ref, i] = refs[next++]
-        out[i] = await fromReference(ref as Reference, outer, regionKey, keyHex, resolve, facts, origin).catch(() => null)
+      while (next < fetched.length) {
+        const [ref, i] = fetched[next++]
+        const target = asked.get(i)
+        if (!target) continue
+        out[i] = await fromReference(ref as Reference, outer, regionKey, keyHex, () => target, facts, origin, heightKnown, tally).catch(() => null)
       }
     }
-    await Promise.all(Array.from({ length: Math.min(REFERENCE_CONCURRENCY, refs.length) }, worker))
+    await Promise.all(Array.from({ length: Math.min(REFERENCE_CONCURRENCY, fetched.length) }, worker))
   }
-  const items = out.filter((h): h is Hidden => h !== null)
-  noteReading(outer.id, { entries: entries.length, readable: items.length, opaque: false })
+  const items = firstOfEach(out.filter((h): h is Hidden => h !== null))
+  // The money switch read again now that the sealed entries are open: one
+  // holding a token or a claim link the bag never said reads it OFF
+  // (bagSettingsOf). In place, since every item shares these facts.
+  if (facts.bag.money) {
+    const before = claimableHeld(entries)
+    const opened = claimableHeld(out.filter((h): h is Hidden => h !== null).map((h) => h.inner))
+    facts.bag.money = bagSettingsOf(outer, regionHeight, { cashu: Math.max(before.cashu, opened.cashu), nft: Math.max(before.nft, opened.nft) }).money
+  }
+  noteReading(outer.id, { entries: entries.length, readable: items.length, opaque: false, ...(skipped > 0 ? { skipped } : {}), ...(tally.refused > 0 ? { refused: tally.refused } : {}) })
   return items
+}
+
+/**
+ * One item per identity, the first in the bag's list (spec §7.6 Reading,
+ * rule 6): two entries that yield the same item id, or the same lineage id,
+ * are one item, wherever each was stored (inline, or in a sealed entry). A
+ * reference to an object (a LIVE LINK, a hidden object) is left as it always
+ * was: one object placed at two points is two entries (entryKey).
+ */
+function firstOfEach(items: Hidden[]): Hidden[] {
+  const seen = new Set<string>()
+  return items.filter((h) => {
+    if (h.ref) return true
+    const lineage = itemLineage(h.inner)
+    const keys = [h.eventId, ...(lineage && lineage !== h.eventId ? [lineage] : [])]
+    if (keys.some((k) => seen.has(k))) return false
+    for (const k of keys) seen.add(k)
+    return true
+  })
+}
+
+/** A reference to a sealed entry by a key other than the bag's: dropped without fetching (spec §7.6 Reading, rule 1). */
+function foreignSealed(ref: Reference, signer: string): boolean {
+  const parts = sealedRefParts(ref)
+  return parts !== null && parts.pubkey !== signer
+}
+
+/**
+ * The objects references have opened to, so a scan that finds the same signed
+ * event does not decrypt and parse it again.
+ *
+ * A bag holding references is opened again at every scan, rightly: a reference
+ * may name a newer version now (lib/foundCache.ts). But what comes back is nearly
+ * always the same event, and a city is mostly references. Parsed again, each one
+ * was a new model with new arrays, so ShardMesh, which keys its geometry on those
+ * arrays, cut and uploaded it again too. An edit is a new event, so a new key.
+ *
+ * Bounded by the events' own size, sealed text included, least recently found
+ * first out, at the same bound as opened bags (foundCache OPENED_KEPT_CHARS).
+ * About 6 bytes of heap to a sealed character, so about 48 MB at most. Holds
+ * plaintext, so it goes with the identity (forgetParsedObjects).
+ */
+export const PARSED_KEPT_CHARS = 8 * 1024 * 1024
+let parsedBudget = PARSED_KEPT_CHARS
+const parsedObjects = new Map<string, { shard: ShardModel; size: number }>()
+let parsedChars = 0
+
+function parsedObject(key: string): ShardModel | undefined {
+  const hit = parsedObjects.get(key)
+  if (!hit) return undefined
+  // The most recently found goes last, so it is the last to go.
+  parsedObjects.delete(key)
+  parsedObjects.set(key, hit)
+  return hit.shard
+}
+
+function keepParsed(key: string, shard: ShardModel, size: number): void {
+  if (size > parsedBudget) return
+  const was = parsedObjects.get(key)
+  if (was) { parsedObjects.delete(key); parsedChars -= was.size }
+  parsedObjects.set(key, { shard, size })
+  parsedChars += size
+  for (const [k, v] of parsedObjects) {
+    if (parsedChars <= parsedBudget) break
+    parsedObjects.delete(k)
+    parsedChars -= v.size
+  }
+}
+
+/** Forget every object parsed, and say how many there were: on a change of identity, and in tests, where `budget` sets the bound. */
+export function forgetParsedObjects(budget: number = PARSED_KEPT_CHARS): number {
+  const n = parsedObjects.size
+  parsedObjects.clear()
+  parsedChars = 0
+  parsedBudget = budget
+  return n
 }
 
 /**
@@ -1039,11 +1407,9 @@ export async function unbag(outer: NostrEvent, regionKey: Uint8Array, resolve?: 
  * someone else's object is a placement, attributed to the bag's author, while
  * the content stays that event's own (spec §7.6).
  */
-async function fromReference(ref: Reference, outer: NostrEvent, regionKey: Uint8Array, keyHex: string, resolve: ResolveReference, facts: BagFacts, origin?: RegionOrigin): Promise<Hidden | null> {
-  // The point is optional (spec §7.6): without one the entry is located no
-  // more precisely than the region, and is drawn at the region's base.
-  const coordHex = ref[3]
-  if (!coordHex && !origin) return null
+async function fromReference(ref: Reference, outer: NostrEvent, regionKey: Uint8Array, keyHex: string, resolve: ResolveReference, facts: BagFacts, origin?: RegionOrigin, heightKnown = true, tally?: { refused: number }): Promise<Hidden | null> {
+  // Another signer's sealed entry is never fetched (spec §7.6 Reading, rule 1).
+  if (foreignSealed(ref, outer.pubkey)) { if (tally) tally.refused++; return null }
   const target = await resolve(ref)
   if (!target || !verifyOnce(target)) return null
   if (ref[0] === 'e' && target.id !== ref[1]) return null
@@ -1051,12 +1417,22 @@ async function fromReference(ref: Reference, outer: NostrEvent, regionKey: Uint8
     const [kind, pubkey, ...rest] = ref[1].split(':')
     if (String(target.kind) !== kind || target.pubkey !== pubkey || tag(target, 'd') !== rest.join(':')) return null
   }
+  if (target.kind === SEALED_KIND) return fromSealed(ref, target, outer, regionKey, keyHex, facts, origin, heightKnown, tally)
+  // The point is optional (spec §7.6): without one the entry is located no
+  // more precisely than the region, and is drawn at the region's base.
+  const coordHex = ref[3]
+  if (!coordHex && !origin) return null
   // Sealed to this place (DECK-0003 §3.4), or another author's public object
   // placed by reference (§3.1, §3.2: a LIVE LINK from the Shard Feed), whose
   // payload is its content as published.
   const enc = target.tags.find((t) => t[0] === 'encrypted')
+  // The same signed event under the same key opens to the same object.
+  const parsedKey = `${target.id}:${target.sig}:${keyHex}`
+  const kept = target.kind === OBJECT_KIND ? parsedObject(parsedKey) : undefined
   let plain: string | null
-  if (enc) {
+  if (kept) {
+    plain = ''
+  } else if (enc) {
     if (enc[1] !== ALGO || !enc[2]) return null
     plain = await decryptForRegion(regionKey, enc[2])
   } else {
@@ -1082,17 +1458,76 @@ async function fromReference(ref: Reference, outer: NostrEvent, regionKey: Uint8
     createdAt: target.created_at,
   }
   if (target.kind === OBJECT_KIND) {
+    if (kept) {
+      // No new table this time, so a part still missing needs telling to ask again.
+      if (kept.objects) signalRescan()
+      return { ...base, type: 'shard', shard: kept }
+    }
     let raw: unknown
     try { raw = JSON.parse(plain) } catch { return null }
     const shard = fromPayload(raw, target.id)
     if (!shard) return null
-    return { ...base, type: 'shard', shard: keepOwnTable(shard, target.pubkey) }
+    const own = keepOwnTable(shard, target.pubkey)
+    // Sealed, its size is in the tag: the content is only a short public preview.
+    keepParsed(parsedKey, own, (enc?.[2]?.length ?? 0) + target.content.length)
+    return { ...base, type: 'shard', shard: own }
   }
   if (target.kind === MESSAGE_KIND) {
     if (!plain) return null
     return { ...base, type: 'message', text: plain.slice(0, MAX_MESSAGE_LENGTH) }
   }
   return null
+}
+
+/**
+ * A sealed entry (kind 33335) -> the item it holds, read exactly as if it
+ * stood inline in the bag that names it (spec §7.6 Sealed entries, Reading):
+ * signed by the bag's signer, and saying nothing of where it is, or dropped;
+ * emptied, or not opening with this bag's key (the region key, or the room key
+ * of a room bag), a missing entry; a payload that is not one event, is itself
+ * a sealed entry, or is a door, refused. Then the item goes through fromInner
+ * as an inline item does: its signature, or a rumor of the bag's signer that
+ * the bag vouches for, its own `C` for its place, its own id for its identity.
+ * The reference's coordinate is only for a reader that could not fetch it.
+ */
+async function fromSealed(ref: Reference, target: NostrEvent, outer: NostrEvent, regionKey: Uint8Array, keyHex: string, facts: BagFacts, origin: RegionOrigin | undefined, heightKnown: boolean, tally?: { refused: number }): Promise<Hidden | null> {
+  const why = sealedEventRefusal(target, outer.pubkey)
+  if (why === 'signer') { if (tally) tally.refused++; return null }
+  if (why) return null
+  const plain = await openSealed(target, regionKey)
+  if (plain === null) return null
+  const payload = sealedPayload(plain)
+  if (!payload.item) { if (tally) tally.refused++; return null }
+  const item = payload.item as Rumor
+  const read = fromInner(item, outer, keyHex, facts, heightKnown, origin)
+  if (!read) return null
+  rememberSealed(sealedAddress(target.pubkey, tag(target, 'd') ?? ''), payload.item, target)
+  return { ...read, sealedRef: ref, sealedEvent: target }
+}
+
+/**
+ * The items of a bag's own sealed entries, learned for a rewrite of it: each
+ * `a` reference to a sealed entry of `signer`'s, fetched (batched), checked
+ * and opened with the bag's key as a reader does (fromSealed), its item kept
+ * by address (lib/sealed.ts rememberSealed) for counting it (§7.7) and for
+ * matching a row of yours against it. Answers the item by the reference's
+ * entryKey. A reference that does not resolve or open is left unknown, and
+ * the rewrite carries it forward as it is.
+ */
+export async function learnSealed(entries: readonly BagEntry[], signer: string, key: Uint8Array, resolve: ResolveReference): Promise<Map<string, { item: Rumor; event: NostrEvent }>> {
+  const own = entries.filter((e): e is Reference => isReference(e) && sealedRefParts(e)?.pubkey === signer).slice(0, MAX_REFERENCES_PER_BAG)
+  const asked = own.map((ref) => resolve(ref).catch(() => null))
+  const out = new Map<string, { item: Rumor; event: NostrEvent }>()
+  await Promise.all(own.map(async (ref, i) => {
+    const ev = await asked[i]
+    if (!ev || ev.kind !== SEALED_KIND || ev.pubkey !== signer || tag(ev, 'd') !== sealedRefParts(ref)?.d || !verifyOnce(ev) || sealedEventRefusal(ev, signer)) return
+    const plain = await openSealed(ev, key)
+    const payload = plain === null ? null : sealedPayload(plain)
+    if (!payload?.item || !innerAuthentic(payload.item, signer)) return
+    rememberSealed(ref[1], payload.item, ev)
+    out.set(entryKey(ref), { item: payload.item as Rumor, event: ev })
+  }))
+  return out
 }
 
 /**
@@ -1147,7 +1582,7 @@ export async function bagEntries(outer: NostrEvent, regionKey: Uint8Array): Prom
   try {
     const arr = JSON.parse(json)
     if (!Array.isArray(arr)) return []
-    return arr.filter((e): e is BagEntry => isReference(e) || (!!e && !Array.isArray(e) && typeof e === 'object' && typeof (e as NostrEvent).kind === 'number'))
+    return arr.filter(isEntryShaped)
   } catch { return [] }
 }
 

@@ -24,6 +24,24 @@ export type Turns = [number, number, number]
 /** The plane each axis turns in, taking its first axis toward its second: right-handed positive. */
 const PLANE: Array<[0 | 1 | 2, 0 | 1 | 2]> = [[1, 2], [2, 0], [0, 1]]
 
+/** One quarter turn in the plane (a, b), taking a toward b. */
+function quarter(p: readonly number[], a: 0 | 1 | 2, b: 0 | 1 | 2): [number, number, number] {
+  const q = [p[0], p[1], p[2]] as [number, number, number]
+  q[a] = -p[b]
+  q[b] = p[a]
+  return q
+}
+
+/** A direction turned as turnShard turns a model's points: where a side of the model faces once turned. */
+export function turnDirection(d: readonly [number, number, number], turns: Turns): [number, number, number] {
+  let q = [d[0], d[1], d[2]] as [number, number, number]
+  turns.forEach((t, axis) => {
+    const [a, b] = PLANE[axis]
+    for (let k = 0; k < ((t % 4) + 4) % 4; k++) q = quarter(q, a, b)
+  })
+  return q
+}
+
 /** The shard turned; the same object when there is nothing to turn. */
 export function turnShard(s: ShardModel, turns: Turns): ShardModel {
   if (turns.every((t) => ((t % 4) + 4) % 4 === 0)) return s
@@ -32,13 +50,7 @@ export function turnShard(s: ShardModel, turns: Turns): ShardModel {
   turns.forEach((t, axis) => {
     const [a, b] = PLANE[axis]
     for (let k = 0; k < ((t % 4) + 4) % 4; k++) {
-      vertices = vertices.map((v) => {
-        const p = ticksOf(v)
-        const q = [...p] as [number, number, number]
-        q[a] = -p[b]
-        q[b] = p[a]
-        return vertexAt(q, v.c)
-      })
+      vertices = vertices.map((v) => vertexAt(quarter(ticksOf(v), a, b), v.c))
       if (parts) parts = parts.map((part) => quarterTurnPart(part, a, b, [0, 0]) ?? part)
     }
   })

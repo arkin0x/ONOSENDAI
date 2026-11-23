@@ -1,0 +1,221 @@
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+
+// signers imports the relay layer, which imports the store, which reads
+// localStorage as it loads; the test runs where there is none.
+if (typeof localStorage === 'undefined') {
+  const mem = new Map<string, string>()
+  ;(globalThis as { localStorage?: unknown }).localStorage = {
+    getItem: (k: string) => mem.get(k) ?? null,
+    setItem: (k: string, v: string) => { mem.set(k, String(v)) },
+    removeItem: (k: string) => { mem.delete(k) },
+    clear: () => { mem.clear() },
+  }
+}
+
+import { generateSecretKey, getPublicKey, nip19, verifyEvent, type EventTemplate } from 'nostr-tools'
+import { attributed } from '../client'
+import { DEFAULT_SIGNER_RELAY } from '../loginCredentials'
+import { NIP44_MAX_PLAINTEXT_BYTES, nip46PlaintextBytes, signerRequestTooBigMessage } from '../signerRequestSize'
+
+/** signers, loaded the way the app loads it: the store first (see signers.test.ts). */
+async function signers(): Promise<typeof import('../signers')> {
+  await import('../../store/useCyberspace')
+  return import('../signers')
+}
+
+/**
+ * A restored Nostr Connect session on the real nostr-tools BunkerSigner, its
+ * pool's sockets faked: every request it publishes is counted, and nothing
+ * touches the network. Its answers never come; these tests only ask whether
+ * a request went out.
+ */
+async function sessionSigner() {
+  const { signerFromPref } = await signers()
+  const { getSignerPool } = await import('../relay')
+  const pool = getSignerPool()
+  const published: unknown[] = []
+  vi.spyOn(pool, 'subscribe').mockImplementation(((_relays: string[], _filter: unknown, params: { oneose?: () => void }) => {
+    params?.oneose?.()
+    return { close: () => {} }
+  }) as never)
+  vi.spyOn(pool, 'publish').mockImplementation(((_relays: string[], event: unknown) => {
+    published.push(event)
+    return [Promise.resolve('ok')]
+  }) as never)
+  const signer = await signerFromPref({
+    kind: 'nip46',
+    pubkey: getPublicKey(generateSecretKey()),
+    bunkerUri: `bunker://${getPublicKey(generateSecretKey())}?relay=${encodeURIComponent(DEFAULT_SIGNER_RELAY)}`,
+    clientNsec: nip19.nsecEncode(generateSecretKey()),
+    nostrConnectSession: true,
+  })
+  return { signer, published }
+}
+
+/** Long enough for a request that does go out to be published (answersFirst waits on the subscription first). */
+const settle = () => new Promise((r) => setTimeout(r, 20))
+
+/**
+ * A kind 33331 template whose sign_event request needs `target` bytes of
+ * NIP-44 plaintext, give or take the request id (a few bytes, random in
+ * length: nostr-tools' idPrefix). Its content is plain letters, which JSON
+ * leaves as they are, so content length moves the size one for one.
+ */
+function sized(target: number): EventTemplate {
+  const at = (n: number): EventTemplate => ({ kind: 33331, created_at: 1_700_000_000, tags: [['d', 'big-shard']], content: 'a'.repeat(n) })
+  const bytes = (n: number) => nip46PlaintextBytes('sign_event', [JSON.stringify(attributed(at(n)))], 'abcdef-1')
+  return at(target - bytes(0))
+}
+
+// The store's first import is slow under a full parallel run; taken once here, so no test spends its own time on it.
+beforeAll(async () => { await signers() }, 60_000)
+
+afterEach(() => { vi.restoreAllMocks() })
+
+describe('a remote signer request past 65,535 bytes (Amber reads the extended NIP-44 length)', () => {
+  it('simply goes, with no question: the owner\'s big shard, hidden by reference', async () => {
+    const { signer, published } = await sessionSigner()
+    try {
+      // About 71,800 bytes of object; the answer is unasked for here, and only its request counted.
+      void signer.signEvent(sized(71_800)).catch(() => undefined)
+      await settle()
+      expect(published).toHaveLength(1)
+    } finally {
+      await signer.close?.()
+    }
+  })
+
+  it('goes just under 65,535 bytes too, as always', async () => {
+    const { signer, published } = await sessionSigner()
+    try {
+      void signer.signEvent(sized(NIP44_MAX_PLAINTEXT_BYTES - 40)).catch(() => undefined)
+      await settle()
+      expect(published).toHaveLength(1)
+    } finally {
+      await signer.close?.()
+    }
+  })
+
+  it('covers a seal and an open too: a big one of each goes', async () => {
+    const { signer, published } = await sessionSigner()
+    const them = getPublicKey(generateSecretKey())
+    try {
+      void signer.nip44Encrypt!(them, 'a'.repeat(60_000)).catch(() => undefined)
+      void signer.nip44Decrypt!(them, 'A'.repeat(70_000)).catch(() => undefined)
+      await settle()
+      expect(published).toHaveLength(2)
+    } finally {
+      await signer.close?.()
+    }
+  })
+})
+
+describe('a timeout and a big request', () => {
+  it('is said to be about the size only for the signer session the big request went to', async () => {
+    const { signWithin, noteBigAsk, bigSilence } = await import('../signWithin')
+    const never = () => new Promise<never>(() => {})
+    const settledA = noteBigAsk('session-a', 'the shard')
+    try {
+      // A big request to session A went out before this began: not this signature's.
+      await new Promise((r) => setTimeout(r, 5))
+      const late = await signWithin({ signEvent: never, session: 'session-a' }, { kind: 1, created_at: 1, tags: [], content: '' }, 30).catch((e: unknown) => e)
+      expect(bigSilence(late)).toBeNull()
+      const sigA = signWithin({ signEvent: never, session: 'session-a' }, { kind: 1, created_at: 1, tags: [], content: '' }, 30).catch((e: unknown) => e)
+      const sigB = signWithin({ signEvent: never, session: 'session-b' }, { kind: 1, created_at: 1, tags: [], content: '' }, 30).catch((e: unknown) => e)
+      const settledA2 = noteBigAsk('session-a', 'the shard')
+      expect(bigSilence(await sigA)).toBe('the shard')
+      expect(bigSilence(await sigB)).toBeNull()
+      settledA2()
+    } finally {
+      settledA()
+    }
+  })
+
+  it('once the big request is answered, a later timeout is an ordinary one again', async () => {
+    const { signWithin, noteBigAsk, bigSilence } = await import('../signWithin')
+    const never = () => new Promise<never>(() => {})
+    const sig = signWithin({ signEvent: never, session: 'session-c' }, { kind: 1, created_at: 1, tags: [], content: '' }, 30).catch((e: unknown) => e)
+    const answered = noteBigAsk('session-c', 'the shard')
+    answered()
+    expect(bigSilence(await sig)).toBeNull()
+  })
+})
+
+describe('the hard caps, unchanged', () => {
+  it('a request past what the signer relay carries in one kind 24133 event (512 KB) is refused at once, in words', async () => {
+    const { signingFailed } = await import('../signWithin')
+    const { signer, published } = await sessionSigner()
+    try {
+      const err = await signer.signEvent(sized(400_000)).then(() => null, (e: unknown) => e)
+      await settle()
+      expect(published).toHaveLength(0)
+      expect((err as Error).name).toBe('SignerRequestTooBig')
+      expect(signingFailed(err, 'nip46')).toBe((err as Error).message)
+      expect((err as Error).message).not.toContain('\u2014')
+      expect((err as Error).message).toMatch(/^This is too big to send to a signer app \(its relay takes up to 512 KB, this needs \d+ KB\)\. Make the shard smaller, or sign in with a key on this device\.$/)
+    } finally {
+      await signer.close?.()
+    }
+  })
+
+  it('the relay cap is 524,288 bytes, and a request to sign the largest bag (240,000 B) fits under it', async () => {
+    const { SIGNER_RELAY_EVENT_BYTES, nip46EventBytes } = await import('../signerRequestSize')
+    const { BAG_SAFE_BYTES, bagSizeRefusal, signedBytes } = await import('../bagSize')
+    expect(SIGNER_RELAY_EVENT_BYTES).toBe(524_288)
+    expect(BAG_SAFE_BYTES).toBe(240_000)
+    expect(bagSizeRefusal(240_000)).toBeNull()
+    expect(bagSizeRefusal(240_001)).toMatch(/^Too large for one bag: 240,001 of 240,000 bytes\. Nothing was sent\.$/)
+    // The largest bag, as a sign_event request and its answer.
+    const bag = { kind: 33333, created_at: 1, tags: [['d', 'bag']], content: '' }
+    bag.content = 'a'.repeat(BAG_SAFE_BYTES - signedBytes(bag))
+    const bytes = nip46PlaintextBytes('sign_event', [JSON.stringify(attributed(bag))], 'abcdef-1')
+    expect(bytes).toBeGreaterThan(NIP44_MAX_PLAINTEXT_BYTES)
+    expect(nip46EventBytes(bytes)).toBeLessThanOrEqual(SIGNER_RELAY_EVENT_BYTES)
+  })
+
+  it('an event past 65,535 bytes is measured with the extended prefix nostr-tools writes', async () => {
+    const { nip46EventBytes } = await import('../signerRequestSize')
+    const { v2: nip44 } = await import('nostr-tools/nip44')
+    const key = nip44.utils.getConversationKey(generateSecretKey(), getPublicKey(generateSecretKey()))
+    for (const n of [100, 65_535, 65_536, 200_000]) {
+      const payload = nip44.encrypt('a'.repeat(n), key)
+      expect(nip46EventBytes(n) - payload.length).toBe(512)
+    }
+  })
+})
+
+describe('the size a request needs', () => {
+  it('is its own JSON when that is the longer', () => {
+    const params = ['ab', 'cd']
+    expect(nip46PlaintextBytes('nip44_decrypt', params, 'x-1')).toBe(JSON.stringify({ id: 'x-1', method: 'nip44_decrypt', params }).length)
+  })
+
+  it('is the answer when that is the longer: a signed event carries id, pubkey and sig on top', () => {
+    const event = JSON.stringify({ kind: 1, created_at: 1, tags: [], content: 'a'.repeat(1000) })
+    const request = JSON.stringify({ id: 'x-1', method: 'sign_event', params: [event] }).length
+    expect(nip46PlaintextBytes('sign_event', [event], 'x-1')).toBeGreaterThan(request + 200)
+  })
+
+  it('counts bytes, not characters', () => {
+    const ascii = nip46PlaintextBytes('nip44_decrypt', ['', 'a'], 'x-1')
+    expect(nip46PlaintextBytes('nip44_decrypt', ['', 'é'], 'x-1')).toBe(ascii + 1)
+  })
+
+  it('names the noun only for a shard', () => {
+    const note = JSON.stringify({ kind: 30078, created_at: 1, tags: [], content: '' })
+    expect(signerRequestTooBigMessage('sign_event', [note], 600_000)).toContain('Make it smaller')
+    const shard = JSON.stringify({ kind: 33331, created_at: 1, tags: [], content: '' })
+    expect(signerRequestTooBigMessage('sign_event', [shard], 600_000)).toContain('Make the shard smaller')
+    expect(signerRequestTooBigMessage('nip44_decrypt', ['', ''], 600_000)).toMatch(/Sign in with a key on this device to open it\.$/)
+  })
+})
+
+describe('a key on this device', () => {
+  it('signs an event far past the limit, as before', async () => {
+    const { localSigner } = await signers()
+    const sk = generateSecretKey()
+    const signed = await localSigner(sk).signEvent({ kind: 33331, created_at: 1, tags: [], content: 'a'.repeat(200_000) })
+    expect(verifyEvent(signed)).toBe(true)
+    expect(signed.pubkey).toBe(getPublicKey(sk))
+  })
+})

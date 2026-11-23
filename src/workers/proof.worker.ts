@@ -117,12 +117,22 @@ export type ProofResponse =
     }
   | { type: 'error'; id: number; message: string; elapsedMs: number }
 
+/**
+ * Everything this worker posts: the answers, and the word that it has the
+ * request, which lib/workers.ts keeps for itself. A worker that never says it
+ * never loaded, and a proof shorter than the progress throttle posts nothing
+ * else before its answer.
+ */
+export type ProofWorkerMessage = ProofResponse | { type: 'started'; id: number }
+
 /** Throttle progress posts; the core reports far more often than we can paint. */
 const PROGRESS_INTERVAL_MS = 60
 
 self.onmessage = (event: MessageEvent<ProofRequest>) => {
   const { id, mode, from, to, plane, prevEventId, maxComputeHeight } = event.data
   const started = performance.now()
+  const hello: ProofWorkerMessage = { type: 'started', id }
+  self.postMessage(hello)
 
   let lastPost = 0
   const onProgress = (fraction: number) => {

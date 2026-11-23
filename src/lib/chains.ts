@@ -31,10 +31,11 @@
 import type { Filter } from 'nostr-tools/filter'
 import { RECOGNIZED_ACTIONS, actionLink, buildChain, chainGap, newestSpawn, parseAction, type ActionEvent, type NostrEvent } from './events'
 import { nip19 } from 'nostr-tools'
-import { CYBERSPACE_RELAY, authPending, dropRelays, query, queryEach, queryEachSettled, relaySet, subscribe } from './relay'
+import { CYBERSPACE_RELAY, signInOwed, authPending, dropRelays, query, queryEach, queryEachSettled, readRelaySet, subscribe } from './relay'
 import { normalizeURL } from 'nostr-tools/utils'
-import { PARTIAL_CHAIN_REASON, mergeAnswers, type RelayAnswer } from './relayOutcome'
+import { PARTIAL_CHAIN_REASON, mergeAnswers, type RelayAnswer, AUTH_STALLED } from './relayOutcome'
 import { chainHolders, noteHoldersFrom } from './chainHolders'
+import { isReadFallbackRelay } from '../store/useRelays'
 
 export { PARTIAL_CHAIN_REASON }
 
@@ -176,6 +177,7 @@ async function gatherChain<T>(
   have: NostrEvent[],
   byAuthor: (t: T, pubkey: string) => T,
   since?: number,
+  askBoth?: (fs: Filter[]) => Promise<T>,
 ): Promise<{ got: T; whole: boolean }> {
   // Whatever a relay sends back, only the identity's own events are kept:
   // the filter asks for that author, but a relay that ignores it must not be
@@ -188,8 +190,24 @@ async function gatherChain<T>(
     // With the chain mostly in hand (`have`), only what is newer is asked
     // for; a hole left below it is filled by the loop further down.
     const chainAsk = since !== undefined ? { ...chainFilter(pubkey, knownSpawnId), since } : chainFilter(pubkey, knownSpawnId)
-    const [spawns, chain] = await Promise.all([ask(spawnsFilter(pubkey)), ask(chainAsk)])
-    got = combine(spawns, chain)
+    // `askBoth`: the two in one REQ to each relay, which answers both or
+    // neither (a head confirmation, before every signature: half the REQs
+    // to every relay at every step of a walk, owner's diag of 2026-11-21).
+    if (askBoth) {
+      got = byAuthor(await askBoth([spawnsFilter(pubkey), chainAsk]), pubkey)
+      // A relay may cap the whole REQ rather than each filter (the canonical
+      // relay's nostrdb keeps the newest 500 of the union), and the spawns are
+      // the oldest, so they are what a long run of new moves pushes out. Moves
+      // back with no spawn among them: the spawns are asked on their own, as
+      // before, so the newest spawn is known and the hole below the moves is
+      // filled. Nothing back at all asks nothing more, so a relay that is down
+      // costs no second wait.
+      const back = eventsOf(got)
+      if (back.length > 0 && newestSpawnId(back, pubkey) === null) got = combine(got, await ask(spawnsFilter(pubkey)))
+    } else {
+      const [spawns, chain] = await Promise.all([ask(spawnsFilter(pubkey)), ask(chainAsk)])
+      got = combine(spawns, chain)
+    }
     // The relays' newest spawn, from what the relays hold and nothing else.
     // A chain held on this device has a newer spawn than any on the relays
     // (it was signed before they could answer), and choosing from it here
@@ -219,6 +237,10 @@ async function gatherChain<T>(
   return { got, whole: hole() === null }
 }
 
+/** A chain is read from every configured relay, even one that hung: it may hold a newer move (relay.ts skipHung). */
+// Each relay's answer its own (perRelay): the self-check decides which relays hold the chain from them.
+const CHAIN_READ = { evenHung: true, perRelay: true }
+
 /**
  * Everything the relays have for one pubkey's current chain, raw: every
  * spawn it has signed, and every event of the chain the newest one starts.
@@ -230,13 +252,15 @@ async function gatherChain<T>(
  * Rejects with ChainGapError when a hole could not be filled.
  */
 export async function fetchChainEvents(pubkey: string, knownSpawnId?: string, have: NostrEvent[] = [], since?: number): Promise<NostrEvent[]> {
-  const { got, whole } = await gatherChain(query, (e) => e, mergeEvents, pubkey, knownSpawnId, have, ownEvents, since)
+  const { got, whole } = await gatherChain((f) => query(f, { ...CHAIN_READ, offThread: true }), (e) => e, mergeEvents, pubkey, knownSpawnId, have, ownEvents, since)
   if (!whole) throw new ChainGapError(got)
   return got
 }
 
 /** How long the own-chain check waits for each relay's real answer, per question. */
 export const CHAIN_CHECK_MS = 6000
+/** How long a relay may take to challenge, before an empty answer is believed. */
+const LATE_CHALLENGE_MS = 1000
 
 /**
  * The same question, with each relay's answer kept: answered, refused or
@@ -245,8 +269,14 @@ export const CHAIN_CHECK_MS = 6000
  * this identity has a chain, has none, or cannot be told (chainHold.ts).
  */
 export async function askChainEvents(pubkey: string, knownSpawnId?: string, have: NostrEvent[] = []): Promise<RelayAnswer[]> {
-  const { got, whole } = await gatherChain((f) => queryEach(f, CHAIN_CHECK_MS), mergeAnswers, combineAnswers, pubkey, knownSpawnId, have,
+  const read = (): ReturnType<typeof gatherChain<RelayAnswer[]>> => gatherChain((f) => queryEach(f, CHAIN_CHECK_MS, CHAIN_READ), mergeAnswers, combineAnswers, pubkey, knownSpawnId, have,
     (answers, author) => answers.map((a) => ({ ...a, events: ownEvents(a.events, author) })))
+  let { got, whole } = await read()
+  // "No chain" signs a spawn, so an empty answer from a canonical relay that gates reads, and is not signed in, looks once more: one that challenges late has challenged by now.
+  if (mergeAnswers(got).length === 0 && !got.some((a) => a.outcome === 'refused' && a.reason === AUTH_STALLED) && signInOwed(CYBERSPACE_RELAY)) {
+    await new Promise((r) => setTimeout(r, LATE_CHALLENGE_MS))
+    ;({ got, whole } = await read())
+  }
   // Every relay that sent back one of the chain's events holds it, and a
   // move's confirmation waits for it from now on (chainHolders.ts).
   noteHoldersFrom(pubkey, got)
@@ -270,7 +300,7 @@ export const HEAD_CONFIRM_MS = 2500
  * | Canonical relay | Other configured relays | Result |
  * |---|---|---|
  * | answered | every chain-holding relay answered, or HEAD_CONFIRM_MS passed since the requests went out | the events (pass, unless they move the head) |
- * | no answer by the deadline | at least one answered holding `anchorId` | the events (degraded pass) |
+ * | no answer by the deadline | at least one answered holding `anchorId`, not the read-only former canonical relay | the events (degraded pass) |
  * | no answer | none answered holding `anchorId`, none sent a newer move | null (refuse) |
  * | any | one sent a newer move | the events, which the caller adopts and refuses on |
  *
@@ -321,7 +351,7 @@ export async function confirmChainEvents(
   opts: { since?: number; anchorId?: string; reconnect?: boolean; maxWait?: number } = {},
 ): Promise<NostrEvent[] | null> {
   const canonical = normalizeURL(CYBERSPACE_RELAY)
-  const relays = [...new Set([canonical, ...relaySet().map((r) => normalizeURL(r))])]
+  const relays = [...new Set([canonical, ...readRelaySet().map((r) => normalizeURL(r))])]
   const holders = chainHolders(pubkey)
   const waitFor = relays.filter((url) => holders.has(url))
   const maxWait = opts.maxWait ?? HEAD_CONFIRM_MS
@@ -342,14 +372,17 @@ export async function confirmChainEvents(
     timer = setTimeout(() => deadline.abort(), maxWait * 2 + 100)
   }
   const ask = async (): Promise<NostrEvent[] | null> => {
-    const { got, whole } = await gatherChain((f) => queryEachSettled(relays, f, maxWait, canonical, waitFor, { onSent: sent, stop: deadline.signal, onLate: (a) => noteHoldersFrom(pubkey, [a]) }), mergeAnswers, combineAnswers, pubkey, knownSpawnId, have,
-      (answers, author) => answers.map((a) => ({ ...a, events: ownEvents(a.events, author) })), opts.since)
+    const settledAsk = (f: Filter | Filter[]): Promise<RelayAnswer[]> => queryEachSettled(relays, f, maxWait, canonical, waitFor, { onSent: sent, stop: deadline.signal, onLate: (a) => noteHoldersFrom(pubkey, [a]) })
+    const { got, whole } = await gatherChain(settledAsk, mergeAnswers, combineAnswers, pubkey, knownSpawnId, have,
+      (answers, author) => answers.map((a) => ({ ...a, events: ownEvents(a.events, author) })), opts.since, settledAsk)
     noteHoldersFrom(pubkey, got)
     if (!whole) return null
     const merged = mergeAnswers(got)
     if (got.some((a) => a.url === canonical && a.outcome === 'answered')) return merged
     const holdsChain = (a: RelayAnswer): boolean => opts.anchorId === undefined || a.events.some((e) => e.id === opts.anchorId)
-    if (got.some((a) => a.url !== canonical && a.outcome === 'answered' && holdsChain(a))) return merged
+    // Never the read-only former canonical relay: no move of this version
+    // reaches it, so holding an older anchor says nothing of what came since.
+    if (got.some((a) => a.url !== canonical && !isReadFallbackRelay(a.url) && a.outcome === 'answered' && holdsChain(a))) return merged
     // No answer counts, but a newer move any relay sent still refuses the
     // move: handed back, the caller adopts it and the head moves.
     return extendsChain(merged, have) ? merged : null
@@ -399,6 +432,18 @@ export function watchRecent(since: number, onEvent: (ev: NostrEvent) => void): (
  */
 export function watchAuthor(pubkey: string, since: number, onEvent: (ev: NostrEvent) => void, onEose?: () => void): () => void {
   return subscribe({ kinds: [KIND], authors: [pubkey], since }, onEvent, onEose)
+}
+
+/**
+ * Your own new actions as the relays take them, whatever their created_at:
+ * no `since`, and `limit: 1`, so a (re)subscription costs one stored event
+ * and every event the relay stores from then on is delivered. A `since`
+ * would drop the moves another device of yours signed while LOCAL or
+ * offline and publishes now (owner's tablet, 2026-11-21: 458 moves, signed
+ * hours before the phone went LIVE, never reached the open tablet).
+ */
+export function watchOwnChain(pubkey: string, onEvent: (ev: NostrEvent) => void, onEose?: () => void): () => void {
+  return subscribe({ kinds: [KIND], authors: [pubkey], limit: 1 }, onEvent, onEose)
 }
 
 /** Accepts an npub, an nprofile (its relay hints dropped) or 64-char hex; returns hex, or null when it is none of them. */

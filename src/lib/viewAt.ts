@@ -3,7 +3,7 @@
  *
  * The free view (arkinox, 2026-09-07): move the view anywhere in cyberspace
  * without the chain line and the grid coming along, which is what focusing
- * does. This reads what a person types into the POSITION panel: three
+ * does. This reads what a person types into the View panel: three
  * decimal axis values separated by commas or spaces, a 64-hex coordinate as
  * the c and C tags carry it, or a latitude and longitude, which names a
  * point on Earth through the canonical GPS mapping (landfall.ts
@@ -89,16 +89,49 @@ export function rememberView(list: RecentView[], entry: RecentView): RecentView[
   return [front, ...list.filter((r) => !same(r))].filter((r) => r.pinned === true || ++unpinned <= RECENT_VIEWS_KEPT)
 }
 
-/** The stored list, as the Position panel shows it: every pinned place and three others at most; empty when storage cannot be read. */
+/** Entries as this app can use them, from whatever was stored. */
+export function cleanRecentViews(raw: unknown): RecentView[] {
+  if (!Array.isArray(raw)) return []
+  return raw.filter((r): r is RecentView => typeof r?.input === 'string' && typeof r?.label === 'string' && (r?.plane === 0 || r?.plane === 1))
+}
+
+/**
+ * The recent places of the identity signed in (store/recentViewsList.ts keeps
+ * them per identity in IndexedDB; owner ruling, 2026-11-19), held here so
+ * the View panel and addRecentView read them at once.
+ */
+let recent: RecentView[] = []
+let persist: ((list: RecentView[]) => void) | null = null
+
+/** The list as the View panel shows it: every pinned place and three others at most. */
 export function readRecentViews(): RecentView[] {
+  let unpinned = 0
+  return recent.filter((r) => r.pinned === true || ++unpinned <= RECENT_VIEWS_KEPT)
+}
+
+/** Keep the list as changed by the View panel, for the identity signed in. */
+export function saveRecentViews(list: RecentView[]): void {
+  recent = list
+  persist?.(list)
+}
+
+/** Show another identity's list (or this one's, read back): the panel reloads it without opening. */
+export function showRecentViews(list: RecentView[]): void {
+  recent = list
+  if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') window.dispatchEvent(new Event(RECENT_VIEWS_SHOWN))
+}
+
+/** Where changes go to be kept (store/recentViewsList.ts). */
+export function setRecentViewsPersister(fn: ((list: RecentView[]) => void) | null): void {
+  persist = fn
+}
+
+/** The device-wide list builds before 2026-11-19 kept in localStorage, for adoption; undefined when there is none. */
+export function legacyRecentViews(): unknown {
   try {
-    const v = JSON.parse(localStorage.getItem(RECENT_VIEWS_KEY) ?? '[]') as unknown
-    if (!Array.isArray(v)) return []
-    let unpinned = 0
-    return v
-      .filter((r): r is RecentView => typeof r?.input === 'string' && typeof r?.label === 'string' && (r?.plane === 0 || r?.plane === 1))
-      .filter((r) => r.pinned === true || ++unpinned <= RECENT_VIEWS_KEPT)
-  } catch { return [] }
+    const raw = localStorage.getItem(RECENT_VIEWS_KEY)
+    return raw === null ? undefined : JSON.parse(raw) as unknown
+  } catch { return undefined }
 }
 
 /**
@@ -111,23 +144,25 @@ export function forgetView(list: RecentView[], entry: Pick<RecentView, 'input' |
   return list.filter((r) => r.input !== entry.input || r.plane !== entry.plane)
 }
 
-/** Where the Position panel keeps its recent places on this device. */
+/** Where builds before 2026-11-19 kept the recent places, once per device; now only read, to adopt (legacyRecentViews). */
 export const RECENT_VIEWS_KEY = 'onosendai:view-recent'
 
-/** Sent on window when a place is added to the recent list from outside the Position panel, which reloads it. */
+/** Sent on window when a place is added to the recent list from outside the View panel, which reloads it. */
 export const RECENT_VIEWS_EVENT = 'onosendai:view-recent'
 
+/** Sent on window when the list shown is another identity's, or was read back: the panel reloads it and stays as it was. */
+export const RECENT_VIEWS_SHOWN = 'onosendai:view-recent:shown'
+
 /**
- * Put a place at the front of the Position panel's recent list from
- * anywhere: the stored list, through rememberView like a typed place, and an
- * event so a panel already on screen shows it. The respawn from a broken
- * chain leaves its End of Chain entry here (arkinox, 2026-10-07, Q3), so the
- * place the old chain froze at is one tap away. Storage that cannot be read
- * or written leaves the list as it was.
+ * Put a place at the front of the View panel's recent list from
+ * anywhere: the list of the identity signed in, through rememberView like a
+ * typed place, and an event so a panel already on screen shows it. The
+ * respawn from a broken chain leaves its End of Chain entry here (arkinox,
+ * 2026-10-07, Q3), so the place the old chain froze at is one tap away.
  */
 export function addRecentView(entry: RecentView): RecentView[] {
-  const next = rememberView(readRecentViews(), entry)
-  try { localStorage.setItem(RECENT_VIEWS_KEY, JSON.stringify(next)) } catch { /* private mode */ }
+  const next = rememberView(recent, entry)
+  saveRecentViews(next)
   if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') window.dispatchEvent(new Event(RECENT_VIEWS_EVENT))
   return next
 }

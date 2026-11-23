@@ -1,9 +1,10 @@
 /// <reference types="vitest/config" />
 import { execSync } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
-import { resolveVersion, UNVERSIONED } from './src/lib/version'
+import { resolveVersion, simpleVersion, UNVERSIONED } from './src/lib/version'
 import { ROUTE_PAGES, withCard } from './src/lib/routeCard'
 import { VERSION_FILE, versionFileOf } from './src/lib/chainRulesEpoch'
 
@@ -34,6 +35,50 @@ function routeCards(): Plugin {
       const page = bundle['index.html']
       if (!page || page.type !== 'asset') throw new Error('routeCards: no index.html in the bundle')
       for (const [fileName, card] of ROUTE_PAGES) this.emitFile({ type: 'asset', fileName, source: withCard(String(page.source), card) })
+    },
+  }
+}
+
+/**
+ * The app's chunk (src/boot.tsx), fetched and compiled while main.tsx waits on
+ * IndexedDB, instead of only after. main.tsx imports it dynamically, once the
+ * records that moved out of localStorage are read (lib/kvStore.ts), and Vite
+ * asks for a dynamic import's files only when the import runs: on a phone
+ * after a deploy that put the download of the whole app behind the database.
+ * A modulepreload link fetches and compiles a module without running it, so
+ * nothing in it reads a record early. Its CSS is preloaded too, with
+ * crossorigin, as Vite's own loader asks for it (a mismatch fetches it twice).
+ */
+function bootPreload(): Plugin {
+  return {
+    name: 'onosendai-boot-preload',
+    apply: 'build',
+    transformIndexHtml: {
+      order: 'post',
+      handler(html, ctx) {
+        const bundle = ctx.bundle
+        if (!bundle) return html
+        const chunks = Object.values(bundle).filter((c) => c.type === 'chunk')
+        const isBoot = (id: string | null | undefined): boolean => /[\\/]src[\\/]boot\.tsx(\?.*)?$/.test(id ?? '')
+        const boot = chunks.find((c) => c.type === 'chunk' && (isBoot(c.facadeModuleId) || (c.isDynamicEntry && c.moduleIds.some(isBoot))))
+        if (!boot || boot.type !== 'chunk') throw new Error(`bootPreload: no chunk for src/boot.tsx in the bundle (${chunks.map((c) => c.fileName + ':' + (c.type === 'chunk' ? c.facadeModuleId : '')).join(', ').slice(0, 600)})`)
+        const js = new Set<string>()
+        const css = new Set<string>()
+        const walk = (fileName: string): void => {
+          if (js.has(fileName)) return
+          const c = bundle[fileName]
+          if (!c || c.type !== 'chunk') return
+          js.add(fileName)
+          for (const f of c.viteMetadata?.importedCss ?? []) css.add(f)
+          for (const f of c.imports) walk(f)
+        }
+        walk(boot.fileName)
+        const has = (f: string): boolean => html.includes(`/${f}"`)
+        return [
+          ...[...js].filter((f) => !has(f)).map((f) => ({ tag: 'link', attrs: { rel: 'modulepreload', crossorigin: true, href: `/${f}` }, injectTo: 'head' as const })),
+          ...[...css].filter((f) => !has(f)).map((f) => ({ tag: 'link', attrs: { rel: 'preload', as: 'style', crossorigin: true, href: `/${f}` }, injectTo: 'head' as const })),
+        ]
+      },
     },
   }
 }
@@ -110,14 +155,20 @@ function commitMessage(): string | null {
 
 const BUILD = process.env.VITEST ? 'test' : buildId()
 
+/** The app's simple version (src/lib/version.ts simpleVersion), from package.json: "2.1.0" is 2.1. Empty when it is not plain numbers. */
+const APP_VERSION = simpleVersion((JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')) as { version?: string }).version) ?? ''
+
 export default defineConfig(async () => ({
-  plugins: [react(), routeCards(), composerKnowsWebGL2(), versionFile(BUILD), v1HopListGuard()],
+  plugins: [react(), routeCards(), composerKnowsWebGL2(), versionFile(BUILD), v1HopListGuard(), bootPreload()],
   define: {
     // The same id version.json names, so a tab can tell a newer deploy from its own.
     __ONOSENDAI_BUILD__: JSON.stringify(BUILD),
     // Tests never reach the network for a number; the build and the dev
     // server ask GitHub once (see src/lib/version.ts).
     __ONOSENDAI_VERSION__: JSON.stringify(process.env.VITEST ? UNVERSIONED : await resolveVersion(process.env, commitMessage())),
+    // The simple version people see (2.1, 2.2, ...), bumped once per UPGRADE
+    // ANNOUNCEMENT: the menu's footer, TV's marquee and its WELCOME screen.
+    __ONOSENDAI_APP_VERSION__: JSON.stringify(APP_VERSION),
   },
   // cyberspace-core is a file: dependency, so it resolves through a symlink.
   // Excluding it from pre-bundling keeps edits to the core package live in dev
@@ -142,7 +193,7 @@ export default defineConfig(async () => ({
   },
   test: {
     // Tests never touch a live relay: a WebSocket opened in one fails it (src/test/noNetwork.ts).
-    setupFiles: ['src/test/noNetwork.ts'],
+    setupFiles: ['src/test/noNetwork.ts', 'src/test/fluidWalkOff.ts'],
     // HOSAKA, in tests, is one that cannot be reached (src/test/noNetwork.ts
     // answers it so, without a connection): every move is routed locally, as
     // the app does when HOSAKA is down, and nothing asks the real one.

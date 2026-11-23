@@ -15,13 +15,40 @@
  * puts the dodecahedron back.
  */
 
+import { AVATAR_CONTENT_MAX, AVATAR_CONTENT_WARN, avatarContentBytes, verifyAvatar } from 'cyberspace-core'
 import { TICKS_PER_UNIT, fromPayload, ticksOf, toPayload, type ShardModel } from 'sno-core/shards'
-import { keepOwnTable } from './carried'
+import { keepOwnTable, withoutCarried } from './carried'
 import { CLIENT_TAG } from './client'
 
 export const AVATAR_KIND = 11333
 
 export interface AvatarTemplate { kind: number; created_at: number; tags: string[][]; content: string }
+
+/** What newest-wins needs of an avatar event: its time and its id. */
+export interface Versioned { created_at: number; id: string }
+
+/**
+ * Whether avatar event `a` replaces `b`, the rule for a replaceable kind
+ * (NIP-01): the later `created_at` wins, and of two with the same
+ * `created_at` the lower id, first in lexical order. The same event never
+ * replaces itself, and anything replaces nothing. Every copy an avatar comes
+ * from (the relays, the device, a signature just made) goes through this, so
+ * an older copy answering first never draws over a newer one (arkinox,
+ * 2026-11-17: "every time I start onosendai it shows my previous avatar for
+ * about 30 seconds").
+ */
+export function avatarReplaces(a: Versioned, b: Versioned | null | undefined): boolean {
+  if (!b) return true
+  if (a.created_at !== b.created_at) return a.created_at > b.created_at
+  return a.id < b.id
+}
+
+/** The newest of these avatar events by avatarReplaces, or null for none. */
+export function newestAvatar<E extends Versioned>(events: readonly (E | null | undefined)[]): E | null {
+  let best: E | null = null
+  for (const e of events) if (e && avatarReplaces(e, best)) best = e
+  return best
+}
 
 /** The event to sign: this shard as the avatar, or none for the dodecahedron. */
 export function avatarTemplate(shard: ShardModel | null, createdAt: number): AvatarTemplate {
@@ -29,11 +56,41 @@ export function avatarTemplate(shard: ShardModel | null, createdAt: number): Ava
     kind: AVATAR_KIND,
     created_at: createdAt,
     // No `d`: a replaceable kind has no second key, and writing one would
-    // only invite a reader to filter on it. The client tag is here and not
-    // added at signing because the work is mined over these tags (client.ts).
+    // only invite a reader to filter on it. The client tag is written here,
+    // where a signer would add it anyway (client.ts).
     tags: shard ? [['name', shard.name], [...CLIENT_TAG]] : [[...CLIENT_TAG]],
     content: shard ? JSON.stringify(toPayload(shard)) : '',
   }
+}
+
+/**
+ * The content an avatar of this shard is published with: what came to you
+ * sealed is left out (an avatar is public, withoutCarried), as adopt signs it.
+ */
+export function avatarContent(shard: ShardModel): string {
+  return avatarTemplate(withoutCarried(shard), 0).content
+}
+
+/** Where an avatar's content stands against the size limit (spec 8.10). */
+export interface AvatarSize {
+  /** UTF-8 bytes of the content, as the limit counts them. */
+  bytes: number
+  /** Over the 128 KB size limit: no client draws it, so it is never signed. */
+  over: boolean
+  /** Within the limit but big enough that some remote signers (NIP-46) refuse it. */
+  warn: boolean
+}
+
+/** The content against the size limit and the size some remote signers refuse. */
+export function avatarSize(content: string): AvatarSize {
+  const bytes = avatarContentBytes(content)
+  const over = bytes > AVATAR_CONTENT_MAX
+  return { bytes, over, warn: !over && bytes > AVATAR_CONTENT_WARN }
+}
+
+/** Kilobytes as the AVATAR sheet shows them: 1 KB is 1,024 bytes, so the limit reads 128 KB. */
+export function avatarKb(bytes: number, round: (n: number) => number = Math.round): number {
+  return round(bytes / 1024)
 }
 
 /** The shard an avatar event carries, or null when it carries none or is not one. */
@@ -41,11 +98,25 @@ export function avatarFromEvent(ev: { kind: number; pubkey: string; content: str
   if (ev.kind !== AVATAR_KIND) return null
   if (!ev.content) return null
   try {
-    const shard = fromPayload(JSON.parse(ev.content), `avatar:${ev.pubkey}`)
+    const raw = JSON.parse(ev.content)
+    const shard = fromPayload(raw, `avatar:${ev.pubkey}`)
+    // sno-core (0.1.31 on) reads a version 1 payload's eye into the version 2 frame itself.
     return shard && keepOwnTable(shard, ev.pubkey)
   } catch {
     return null
   }
+}
+
+/**
+ * The shard an avatar event is drawn as: none for an empty content (the
+ * dodecahedron), none for one that is not an avatar every client draws
+ * (spec 8.10, verifyAvatar: the kind, the size limit, a readable payload).
+ * Tags are not read, so a nonce tag on an older avatar changes nothing.
+ */
+export function avatarShard(ev: { kind: number; pubkey: string; content: string; tags: string[][] }): ShardModel | null {
+  if (!ev.content) return null
+  if (!verifyAvatar(ev).ok) return null
+  return avatarFromEvent(ev)
 }
 
 /**

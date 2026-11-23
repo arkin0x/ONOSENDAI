@@ -33,3 +33,46 @@ export function coinKind(state: CoinState): 'coin' | 'spent' {
 export function markShown(kind: MarkKind, scaleExp: number): boolean {
   return kind === 'coin' || scaleExp <= MESSAGE_SCALE_MAX
 }
+
+/**
+ * How the world draws an item: as itself, or held, by the hand that made it
+ * ('own') or taken from someone else ('taken').
+ */
+export type ItemDraw = 'item' | 'own' | 'taken'
+
+/** How strongly a held item is drawn: its model at half, and the box round your own at half (arkinox, 2026-11-06). */
+export const HELD_OPACITY = 0.5
+
+/**
+ * Holding an item draws it at half (arkinox, 2026-11-06, which replaces the
+ * solid blue box of 2026-11-01 that hid the model): its model at
+ * HELD_OPACITY, in motion as ever. An item you made yourself (`own`: its
+ * event is the signed-in identity's, however it came to be held) stands in
+ * its blue box at half; one taken from someone else has no box. A local
+ * reading; nothing is published and nobody else's world changes. Until ITEMS
+ * is read it is drawn as held, so a reload never shows a held item whole for
+ * a moment.
+ */
+export function itemDrawAs(held: boolean, itemsRead: boolean, own: boolean): ItemDraw {
+  if (held || !itemsRead) return own ? 'own' : 'taken'
+  return 'item'
+}
+
+/** Whether the signed-in identity (`me`) made an item: its event is theirs. Nobody signed in made nothing. */
+export function madeBy(author: string | null | undefined, me: string): boolean {
+  return !!me && author === me
+}
+
+/**
+ * The blue box a held item stands in (WorldMessages HeldItemMark), given
+ * whether you made it (`own`) and whether its model is drawn:
+ *  - 'model': one you made, its model drawn: the model's own box, the one
+ *    the placement preview draws (arkinox, 2026-11-08);
+ *  - 'placed': its model loading or missing, yours or taken: the box of a
+ *    fixed size marks the place, so the spot is never empty;
+ *  - null: one taken from someone else, its model drawn: no box (2026-11-06).
+ */
+export function heldBox(own: boolean, drawn: boolean): 'model' | 'placed' | null {
+  if (!drawn) return 'placed'
+  return own ? 'model' : null
+}

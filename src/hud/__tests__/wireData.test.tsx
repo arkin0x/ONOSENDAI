@@ -30,10 +30,22 @@ if (typeof localStorage === 'undefined') {
 }
 
 vi.mock('../../lib/relay', () => ({
+  // The backup relay's sign-in line (RelayTrouble BackupTrouble): signed in.
+  onAuthChange: () => () => {},
+  signInFailed: () => false,
   publishMany: vi.fn(async () => ({ ok: true })),
   query: vi.fn(async () => []),
   relaySet: () => ['wss://relay.test'],
 }))
+// Spies over the real derivations: a card that renders derives nothing (review of #622).
+vi.mock('../../lib/regionKeyOffThread', async (orig) => {
+  const real = await orig() as typeof import('../../lib/regionKeyOffThread')
+  return { ...real, regionKeyOffThread: vi.fn(real.regionKeyOffThread) }
+})
+vi.mock('../../lib/shardCrypto', async (orig) => {
+  const real = await orig() as typeof import('../../lib/shardCrypto')
+  return { ...real, regionKeyAt: vi.fn(real.regionKeyAt) }
+})
 
 import { newShard } from 'sno-core/shards'
 import { positionHex } from '../../lib/events'
@@ -43,7 +55,11 @@ import { positionOf, useShards, type MyDeployment } from '../../store/useShards'
 import { EventData, kindName } from '../EventData'
 import { PublishRow } from '../PublishSwitch'
 import { SecretModal } from '../SecretModal'
-import { TEST_WORDS, WireData, relayNames } from '../WireData'
+import { ROOM_TESTING, STORED_TESTING, TEST_WORDS, WireData, relayNames, storedKeyNote } from '../WireData'
+import { keepDoorSecret, resetDoorSecrets } from '../../store/rooms'
+import { regionKeyOffThread } from '../../lib/regionKeyOffThread'
+import { regionKeyAt } from '../../lib/shardCrypto'
+import { useCalibration } from '../../lib/calibration'
 
 const LOOKUP = 'ab'.repeat(32)
 const REGION_KEY = '11'.repeat(32)
@@ -76,9 +92,9 @@ describe('the wire facts (WireData)', () => {
     // The switch is the card's now, under the preview (PublishRow), not a wire fact.
     expect(html).not.toContain('<dt>published</dt>')
     expect(html).not.toContain('class="pubswitch"')
-    expect(html).toMatch(new RegExp(`<button class="eventdata__value"[^>]*>${LOOKUP}</button>`))
+    expect(html).toMatch(new RegExp(`class="copyv eventdata__value"[^>]*aria-label="${LOOKUP}, tap to copy"`))
     // The C coordinate, as the movement chain writes it.
-    expect(html).toMatch(new RegExp(`<button class="eventdata__value"[^>]*>${positionHex(positionOf(dep), 0)}</button>`))
+    expect(html).toMatch(new RegExp(`class="copyv eventdata__value"[^>]*aria-label="${positionHex(positionOf(dep), 0)}, tap to copy"`))
     expect(html).toContain('>8</span>')
     expect(html).toContain('relay.test</span>')
     expect(html).toContain('two.test</span>')
@@ -94,7 +110,7 @@ describe('the wire facts (WireData)', () => {
 
   it('shows each result of the test in its own words and color', async () => {
     const dep = await deployment({ published: true, relays: ['wss://relay.test'] })
-    for (const state of ['testing', 'found', 'missing', 'refused'] as const) {
+    for (const state of ['testing', 'found', 'missing', 'refused', 'unread', 'wrongKey', 'underived'] as const) {
       const html = renderToStaticMarkup(<WireData dep={dep} initialTest={state} />)
       expect(html).toContain(`eventdata__test--${state}`)
       expect(html).toContain(TEST_WORDS[state].replace('&', '&amp;'))
@@ -140,7 +156,7 @@ describe('the kind, named', () => {
     expect(kindName(3341)).toBe('chest')
     expect(kindName(11333)).toBeNull()
     const html = renderToStaticMarkup(<EventData event={{ id: 'a'.repeat(64), pubkey: 'b'.repeat(64), created_at: 1, kind: 3340, tags: [], content: '', sig: 'c'.repeat(128) }} />)
-    expect(html).toMatch(/<dt>kind<\/dt><dd><button class="eventdata__value"[^>]*>3340 \(item\)<\/button>/)
+    expect(html).toMatch(/<dt>kind<\/dt><dd><span role="button"[^>]*class="copyv eventdata__value"[^>]*aria-label="3340 \(item\), tap to copy"/)
   })
 })
 
@@ -262,5 +278,75 @@ describe('the store', () => {
     await useShards.getState().broadcast(LOOKUP)
     expect(useShards.getState().mine[0].eventId).toBe(back.id)
     expect(useShards.getState().selectedSecret).toBe(back.id)
+  })
+})
+
+/** As renderToStaticMarkup writes text: & and ' escaped. */
+const escaped = (t: string): string => t.replace(/&/g, '&amp;').replace(/'/g, '&#x27;')
+
+describe('TEST DISCOVERY says which key it checks with (review of #622)', () => {
+  beforeEach(() => {
+    resetDoorSecrets()
+    localStorage.removeItem('onosendai:door-secrets')
+    useCalibration.setState({ hopHeight: 17 })
+    vi.mocked(regionKeyOffThread).mockClear()
+    vi.mocked(regionKeyAt).mockClear()
+  })
+
+  it('up to the ceiling: derives, in its words and its tooltip, with no note', async () => {
+    const dep = await deployment({ published: true, relays: ['wss://relay.test'], height: 8 })
+    const testing = renderToStaticMarkup(<WireData dep={dep} initialTest="testing" />)
+    expect(testing).toContain(TEST_WORDS.testing)
+    expect(testing).toContain('Derive the region key from the coordinate, as a stranger would, check it is the key this bag was sealed with')
+    const found = renderToStaticMarkup(<WireData dep={dep} initialTest="found" initialChecked={{ via: 'derived' }} />)
+    expect(found).not.toContain('eventdata__note')
+  })
+
+  it('above the ceiling: checks with the stored key, and says this device cannot derive the height', async () => {
+    const dep = await deployment({ published: true, relays: ['wss://relay.test'], height: 25 })
+    const testing = renderToStaticMarkup(<WireData dep={dep} initialTest="testing" />)
+    expect(testing).toContain(STORED_TESTING)
+    expect(testing).not.toContain(TEST_WORDS.testing)
+    expect(testing).not.toContain('as a stranger would')
+    expect(testing).toContain(escaped("can't derive height 25"))
+    const note = storedKeyNote({ via: 'stored', why: 'height', height: 25 })!
+    expect(note).toBe("CHECKED WITH THE STORED KEY: THIS DEVICE CAN'T DERIVE HEIGHT 25")
+    const found = renderToStaticMarkup(<WireData dep={dep} initialTest="found" initialChecked={{ via: 'stored', why: 'height', height: 25 }} />)
+    expect(found).toContain(escaped(TEST_WORDS.found))
+    expect(found).toContain(`<p class="eventdata__note" role="status">${escaped(note)}</p>`)
+    // No note while the next test runs.
+    expect(renderToStaticMarkup(<WireData dep={dep} initialTest="testing" initialChecked={{ via: 'stored', why: 'height', height: 25 }} />)).not.toContain('eventdata__note')
+  })
+
+  it('a room bag: the room key with the door secret, else the stored key, said so', async () => {
+    const me = useCyberspace.getState().identity.pubkey
+    const dep = await deployment({ published: true, relays: ['wss://relay.test'], height: 8, room: { doorId: 'dd'.repeat(32) } })
+    const without = renderToStaticMarkup(<WireData dep={dep} initialTest="testing" />)
+    expect(without).toContain(STORED_TESTING)
+    expect(without).toContain('holds no secret for its door')
+    const note = storedKeyNote({ via: 'stored', why: 'door', height: 8 })!
+    expect(renderToStaticMarkup(<WireData dep={dep} initialTest="missing" initialChecked={{ via: 'stored', why: 'door', height: 8 }} />)).toContain(escaped(note))
+    keepDoorSecret(me, 'dd'.repeat(32), 'ab'.repeat(32))
+    const withSecret = renderToStaticMarkup(<WireData dep={dep} initialTest="testing" />)
+    expect(withSecret).toContain(ROOM_TESTING)
+    expect(withSecret).not.toContain(TEST_WORDS.testing)
+    expect(withSecret).toContain('Derive the room key from the coordinate and the door secret')
+  })
+
+  it('a wrong key says strangers cannot find it', async () => {
+    const dep = await deployment({ published: true, relays: ['wss://relay.test'], height: 8 })
+    const html = renderToStaticMarkup(<WireData dep={dep} initialTest="wrongKey" initialChecked={{ via: 'derived' }} />)
+    expect(html).toContain('eventdata__test--wrongKey')
+    expect(html).toContain('WRONG KEY: STRANGERS CANNOT FIND IT')
+    expect(html).toContain('is not the key this bag was sealed with')
+  })
+
+  it('derives nothing while it renders, on any path', async () => {
+    for (const over of [{ height: 3 }, { height: 13 }, { height: 20 }, { height: 25 }, { height: 3, room: { doorId: 'dd'.repeat(32) } }]) {
+      const dep = await deployment({ published: true, relays: ['wss://relay.test'], ...over })
+      for (const state of ['idle', 'testing', 'found'] as const) renderToStaticMarkup(<WireData dep={dep} initialTest={state} />)
+    }
+    expect(regionKeyOffThread).not.toHaveBeenCalled()
+    expect(regionKeyAt).not.toHaveBeenCalled()
   })
 })

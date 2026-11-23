@@ -73,6 +73,14 @@ describe('a retired relay', () => {
     expect(dialedRetired()).toEqual([])
   })
 
+  it('has no way past it by spelling: every path takes a raw URL', async () => {
+    const host = 'onosendai.feeds.relay.tools'
+    for (const spelled of [`wss://${host}//`, `https://${host}`, `http://${host}`, `ws://${host}`, `wss://${host}.`, `wss://${host}/x`]) {
+      expect(await connectRelay(spelled), spelled).toBe(false)
+    }
+    expect(dialedRetired()).toEqual([])
+  })
+
   it('a live subscription to it closes at once', async () => {
     const closed = await new Promise<string>((resolve) => {
       subscribeOne(RETIRED, { kinds: [0] }, { onevent: () => {}, oneose: () => {}, onclose: (reason) => resolve(reason ?? '') })

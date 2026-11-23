@@ -19,6 +19,7 @@
  * The decision is lib/chainHold.ts chainStatusOf; this file only draws it.
  */
 
+import { unsentOf } from '../lib/unsent'
 import { useEffect, useMemo, useSyncExternalStore, type ReactNode } from 'react'
 import { ConfirmModal } from './ConfirmModal'
 import { connected } from '../lib/relay'
@@ -98,7 +99,8 @@ export function useChainStatus(): ChainStatus | null {
   const canonicalLate = useCyberspace((s) => s.canonicalLate)
   const { online, relayUp } = useConnectivity()
   return useMemo(() => {
-    const waiting = events.filter((e) => published[e.id] !== 'ok').length
+    // The backlog, kept as the chain grows (lib/unsent.ts), not counted over the whole chain.
+    const waiting = unsentOf(events, published).length
     return chainStatusOf({ live, held, conflict, waiting, online, relayUp, canonicalLate })
   }, [live, held, conflict, events, published, online, relayUp, canonicalLate])
 }
@@ -275,12 +277,14 @@ export function ChainStatusModal(): JSX.Element | null {
     )
   }
   if (status.kind === 'canonical') {
+    // The owner's words (2026-11-09): plain, short, and no relay URL or "actions".
+    const n = status.count
     return (
       <ConfirmModal
-        title={`${status.count} action${status.count === 1 ? '' : 's'} not on ${DEFAULT_RELAY} yet`}
+        title={`${n} move${n === 1 ? '' : 's'} still syncing`}
         cardClassName="chainexplain"
-        body={<p>Published to your other relays; {DEFAULT_RELAY}, where every device looks, has not taken {status.count === 1 ? 'it' : 'them'} yet, and ONOSENDAI keeps trying.</p>}
-        confirmLabel="UNDERSTOOD"
+        body={<p>They're saved, but relay.onosendai.tech hasn't confirmed {n === 1 ? 'it' : 'them'} yet, so your other devices may not see {n === 1 ? 'it' : 'them'}. ONOSENDAI keeps trying.</p>}
+        confirmLabel="OK"
         cancelLabel={null}
         danger={false}
         onConfirm={close}

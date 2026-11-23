@@ -25,7 +25,7 @@ import { useEffect, useMemo, useRef } from 'react'
 import { useAvatarShard } from '../store/useAvatars'
 import { placeable, useTv } from '../store/useTv'
 import { objectsOf } from '../workshop/ObjectPicker'
-import { avatarFromEvent } from '../lib/avatar'
+import { avatarShard } from '../lib/avatar'
 import { QUOTE_MAX, type TapeItem } from '../lib/tv/director'
 import type { BagContents, ContentsCounts } from '../lib/hidden'
 import { ShardSpin, type Pace } from '../scene/ShardSpin'
@@ -70,7 +70,7 @@ export function typePace(chars: number, shotLength: number): number {
 /** A bag's published contents in words: 3 SHARDS · 1 MESSAGE · 1 CASHU TOKEN · 1 NFT, each count as written; null when it published none. */
 export function contentsWords(counts: ContentsCounts | null): string | null {
   if (!counts) return null
-  const names: Array<[keyof BagContents, string, string]> = [['shard', 'SHARD', 'SHARDS'], ['message', 'MESSAGE', 'MESSAGES'], ['key', 'KEY', 'KEYS'], ['chest', 'CHEST', 'CHESTS'], ['cashu', 'CASHU TOKEN', 'CASHU TOKENS'], ['nft', 'NFT', 'NFTS'], ['audio', 'AUDIO', 'AUDIO']]
+  const names: Array<[keyof BagContents, string, string]> = [['shard', 'SHARD', 'SHARDS'], ['message', 'MESSAGE', 'MESSAGES'], ['key', 'KEY', 'KEYS'], ['chest', 'CHEST', 'CHESTS'], ['cashu', 'CASHU TOKEN', 'CASHU TOKENS'], ['nft', 'NFT', 'NFTS'], ['audio', 'AUDIO', 'AUDIO'], ['door', 'DOOR', 'DOORS'], ['seed', 'SEED', 'SEEDS'], ['dna', 'DNA', 'DNAS']]
   const words = names.flatMap(([k, one, many]) => (counts[k] === undefined ? [] : [`${counts[k]} ${counts[k] === '1' ? one : many}`]))
   return words.length > 0 ? words.join(' · ') : null
 }
@@ -78,8 +78,8 @@ export function contentsWords(counts: ContentsCounts | null): string | null {
 /** What the chiron says a segment's author did. */
 export function segmentDoing(item: TapeItem): string {
   if (item.kind === 'bag') {
-    // Money said alone beside counted rows of other kinds is still said (spec 7.7: a reader keeps both).
-    const inside = [contentsWords(item.counts), item.money && item.counts?.cashu === undefined ? 'CASHU INSIDE' : null].filter(Boolean).join(' · ') || null
+    // Money or an NFT said alone beside counted rows of other kinds is still said (spec 7.7 Claimable alone: a reader keeps both).
+    const inside = [contentsWords(item.counts), item.money && item.counts?.cashu === undefined ? 'CASHU INSIDE' : null, item.nft && item.counts?.nft === undefined ? 'NFT INSIDE' : null].filter(Boolean).join(' · ') || null
     return ['SEALED A BAG', placeable(item.hint) ? 'HINT BOX PUBLIC' : null, inside].filter(Boolean).join(' · ')
   }
   if (item.kind === 'object') return 'PUBLISHED AN OBJECT'
@@ -132,7 +132,7 @@ export function TvSpinHost(): JSX.Element | null {
   const avatar = useAvatarShard(commenter)
   const shard = useMemo(() => {
     if (item?.kind === 'object') return objectsOf([item.event])[0]?.shard ?? null
-    if (item?.kind === 'avatar') return avatarFromEvent(item.event)
+    if (item?.kind === 'avatar') return avatarShard(item.event)
     if (item?.kind === 'comment' || leader) return avatar
     return null
   }, [item, avatar, leader])

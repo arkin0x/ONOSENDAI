@@ -4,7 +4,7 @@
  * The Builder does not keep a second cursor or a second camera. It rides the
  * free view (useCyberspace `focus` with `drive`), which already carries a
  * cursor of its own, independent of the avatar and of the chain: the pad, the
- * keys and the Position panel move it, the zoom sets its step and its cell
+ * keys and the View panel move it, the zoom sets its step and its cell
  * (or the finer build STEP while a deploy is lined up, buildStepOf), and
  * nothing in it can commit a move, because a commit is only taken from
  * your own head (`atHead`). So the build cursor is the free view's `cursor`,
@@ -43,14 +43,23 @@ export function buildCursorOf(s: BuildCursorSource): { position: Position; plane
 }
 
 /**
- * The build STEP in force: how far one move steps the build cursor and the
- * cell a placement snaps to (space.ts deployPoint). It is the zoom unless a
- * finer STEP is set while a deploy is lined up (arkinox, 2026-10-08: at 2^15
- * an object could only sit at the center of a 2^15 cube), and it never
- * exceeds the zoom, whatever is stored.
+ * The build STEP in force: how far one move steps the build cursor. It is the
+ * zoom unless a finer STEP is set while a deploy is lined up (arkinox,
+ * 2026-10-08: at 2^15 an object could only sit at the center of a 2^15
+ * cube), and it never exceeds the zoom, whatever is stored.
  */
-export function buildStepOf(s: { scaleExp: number; buildStep: number | null }): number {
+export function moveStepOf(s: { scaleExp: number; buildStep: number | null }): number {
   return s.buildStep === null ? s.scaleExp : Math.max(0, Math.min(s.buildStep, s.scaleExp))
+}
+
+/**
+ * The cell a placement snaps to (space.ts deployPoint): the STEP's, until a
+ * zoom puts the build cursor on the placement itself (useCyberspace
+ * `buildExact`), from when the placement is the cursor's own gibson, so no
+ * zoom can move it (arkinox, 2026-11-11).
+ */
+export function buildStepOf(s: { scaleExp: number; buildStep: number | null; buildExact?: boolean }): number {
+  return s.buildExact ? 0 : moveStepOf(s)
 }
 
 /**
@@ -78,8 +87,11 @@ export function moveUnderWay(s: { proof: { status: string }; plan: { status: str
 export interface AvatarSource {
   position: Position
   headPlane: Plane
-  spectate: object | null
+  /** `known`: where they were last seen, standing in for a chain not yet in hand (lib/spectator.ts knownStand). */
+  spectate: { known?: { position: Position; plane: Plane } | null } | null
   focusChain: () => ReadonlyArray<{ position: Position; plane: Plane }>
+  /** Where the chain on show stands at a row (store focusStand): the row's place, or where a rejected proof stops it. */
+  focusStand?: (index: number) => { position: Position; plane: Plane } | null
 }
 
 /**
@@ -91,12 +103,18 @@ export interface AvatarSource {
  * avatar drawn at a past action, beside a bar saying how far away your avatar
  * is, looks exactly like building moved you (review of #235). A spectated
  * avatar stands at the action the mark is on, or its head, as history shows
- * it outside the mode; null while their chain has not arrived.
+ * it outside the mode (where a proof the relay's rules reject stops their
+ * chain, from the stop on: store focusStand); until their chain arrives,
+ * where they were last seen, if anywhere, else null.
  */
 export function avatarInBuild(s: AvatarSource, scrub: number | null): { position: Position; plane: Plane } | null {
   if (!s.spectate) return { position: s.position, plane: s.headPlane }
   const chain = s.focusChain()
-  return chain[scrub === null ? chain.length - 1 : Math.min(scrub, chain.length - 1)] ?? null
+  if (chain.length === 0) return s.spectate.known ? { position: s.spectate.known.position, plane: s.spectate.known.plane } : null
+  const i = scrub === null ? chain.length - 1 : Math.min(scrub, chain.length - 1)
+  // Where they stand there, as among the others: a row from a rejected
+  // proof on stands at the last action that counts (owner, 2026-11-13).
+  return (s.focusStand ? s.focusStand(i) : chain[i]) ?? null
 }
 
 /** The slice of the cyberspace store `cubeAt` reads. */

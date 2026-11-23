@@ -11,7 +11,7 @@ import { bytesToHex } from '../events'
 import { sealEntries, readContents } from '../chests'
 import { chestInnerTemplate, keyInnerTemplate, keyItemOf, messageInnerTemplate, type Hidden, type KeyItem } from '../hidden'
 import {
-  KEY_TEXT_PREFIX, addHeld, chestsOpenedBy, heldFromEntry, heldFromFind, heldFromForged, keyText, openingKeys, parseKeyText, splitPanels, type HeldItem,
+  KEY_TEXT_PREFIX, addHeld, chestsOpenedBy, heldFromEntry, heldFromFind, heldFromForged, hiderKeys, keyText, madeKeys, openingKeys, parseKeyText, sealableKeys, splitPanels, type HeldItem, type MadeRow,
 } from '../inventory'
 
 const hider = generateSecretKey()
@@ -144,5 +144,45 @@ describe('the DISCOVERED and LOOT split', () => {
     const held: HeldItem = heldFromFind(me, find, 1)!
     const { discovered, loot } = splitPanels([find], [held])
     expect(discovered[0].items[0].eventId).toBe(loot.keys[0].id)
+  })
+})
+
+describe('the keys a hider made, held or not (arkinox, 2026-11-06: hiding holds nothing)', () => {
+  const place = { lookupId: 'l', bagId: 'b', at: { x: '1', y: '2', z: '3' }, plane: 0 as const, height: 4 }
+  /** A key the hider placed: their deployment row, not held. */
+  function placedRow(key: KeyItem, createdAt: number): MadeRow & { inner: ReturnType<typeof finalizeEvent> } {
+    const inner = finalizeEvent(keyInnerTemplate(key, at, 0, createdAt), hider)
+    return { eventId: inner.id, inner, createdAt, key }
+  }
+  /** A chest the hider placed, with a key forged inside it kept as sealed. */
+  function chestRow(inside: KeyItem, createdAt: number): MadeRow {
+    const inner = finalizeEvent(keyInnerTemplate(inside, at, 0, createdAt), hider)
+    return { eventId: 'chest-' + createdAt, inner: { pubkey: hiderPk, created_at: createdAt }, createdAt, sealed: [inner, { not: 'an event' }] }
+  }
+
+  it('madeKeys: every key placed and every key forged inside a chest, the hider’s own only, one per keypair', () => {
+    const a = forge('Placed'), b = forge('Inside')
+    const theirs = placedRow(forge('Theirs'), 3)
+    theirs.inner = finalizeEvent(keyInnerTemplate(theirs.key!, at, 0, 3), generateSecretKey())
+    const rows = [placedRow(a, 1), chestRow(b, 2), placedRow(a, 4), theirs]
+    expect(madeKeys(rows, hiderPk).map((k) => k.name)).toEqual(['Placed', 'Inside'])
+    expect(madeKeys(rows, '')).toEqual([])
+  })
+
+  it('hiderKeys: what is held, then what was made and not held, so the hider’s own work opens their chests', () => {
+    const a = forge('Placed'), held = forge('Held')
+    const heldRow = heldFromForged(hiderPk, finalizeEvent(keyInnerTemplate(held, at, 0, 9), hider), held, place, 9)
+    const keys = hiderKeys({ [heldRow.id]: heldRow }, [placedRow(a, 1), placedRow(held, 2)], hiderPk)
+    expect(keys.map((k) => k.itemPubkey)).toEqual([held.itemPubkey, a.itemPubkey])
+    expect(keys[1].secretHex).toBe(a.secretHex)
+    // Opening a chest in play is not the hider's work: it still takes a key held.
+    expect(openingKeys({ [heldRow.id]: heldRow }).map((k) => k.itemPubkey)).toEqual([held.itemPubkey])
+  })
+
+  it('sealableKeys: held and made, newest first, a held keypair listed once as held', () => {
+    const a = forge('Placed'), held = forge('Held')
+    const heldRow = heldFromForged(hiderPk, finalizeEvent(keyInnerTemplate(held, at, 0, 9), hider), held, place, 2)
+    const list = sealableKeys({ [heldRow.id]: heldRow }, [placedRow(a, 5), placedRow(held, 7)], hiderPk)
+    expect(list.map((k) => [k.name, k.id === heldRow.id])).toEqual([['Placed', false], ['Held', true]])
   })
 })

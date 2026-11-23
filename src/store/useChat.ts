@@ -28,6 +28,8 @@ import { mentionNotification } from '../lib/notifications'
 import { useNotifications } from './useNotifications'
 import { useMutes } from './useMutes'
 import { hidesThing } from '../lib/muteList'
+import { placeOf } from '../lib/chests'
+import { readCached, takeLocal, writeCachedSoon } from '../lib/deviceCache'
 
 export interface ChatLine {
   /** The inner event's id: the line's identity, what stops a repeat. */
@@ -46,26 +48,38 @@ export interface ChatLine {
    * 2026-10-11). Absent on lines kept before mentions existed.
    */
   mentions?: string[]
+  /** The plane its C names (DECK-0005 §3.2, The plane). Absent: it names none, or was kept before this field existed; shown in both. */
+  plane?: 0 | 1
 }
 
+/** The lines of the plane chat listens in (listeningPlane): one said in the other plane, kept before a change of plane, is not this room's talk here. */
+export function linesInPlane(lines: readonly ChatLine[], plane: 0 | 1): ChatLine[] {
+  return lines.filter((l) => l.plane === undefined || l.plane === plane)
+}
+
+/** Where older builds kept the lines: moved to the device cache once (lib/deviceCache.ts takeLocal). */
 const STORAGE_KEY = 'onosendai:chat'
+/** The device cache's record for the lines. */
+export const CHAT_CACHE_KEY = 'chat'
 const MUTE_KEY = 'onosendai:chat:muted'
 /** Lines kept on this device, oldest dropped first. */
 export const CHAT_MAX = 500
 
-function loadLines(): ChatLine[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return []
-    const list = JSON.parse(raw) as unknown
-    return Array.isArray(list) ? (list as ChatLine[]).filter((l) => l && typeof l.id === 'string' && typeof l.text === 'string') : []
-  } catch {
-    return []
-  }
+function keptLines(list: unknown): ChatLine[] {
+  return Array.isArray(list) ? (list as ChatLine[]).filter((l) => l && typeof l.id === 'string' && typeof l.text === 'string' && typeof l.at === 'number') : []
 }
 
+/** What an older build left in localStorage, moved to the device cache once: read now, so the first frame has the lines. */
+function loadLines(): ChatLine[] {
+  return keptLines(takeLocal(STORAGE_KEY, CHAT_CACHE_KEY))
+}
+
+/** Set by CLEAR: the kept lines read in a moment later must not bring back what was cleared. */
+let clearedAt: number | null = null
+
+/** Kept on the device in IndexedDB, never localStorage (arkinox, 2026-11-17). */
 function saveLines(lines: ChatLine[]): void {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(lines.slice(-CHAT_MAX))) } catch { /* private mode */ }
+  writeCachedSoon(CHAT_CACHE_KEY, lines.slice(-CHAT_MAX))
 }
 
 function loadMuted(): boolean {
@@ -130,6 +144,22 @@ export function sendKey(): { lookupId: string; keyHex: string; height: number } 
 }
 
 /** Newest last, no repeats: one line per inner event id. */
+/**
+ * The plane chat listens in (DECK-0005 §3.2, The plane): at the head, the
+ * plane you stand in, which a toggle lined up for the next hop does not
+ * change until it is committed; spectating, in free view or in your history,
+ * the plane the view is in, as the room keys follow the view.
+ */
+/** A heard line's plane from its C, as a field to spread: none when it names none. */
+function linePlane(e: Parameters<typeof placeOf>[0]): { plane?: 0 | 1 } {
+  const p = placeOf(e)?.plane
+  return p === undefined ? {} : { plane: p }
+}
+
+export function listeningPlane(s: Pick<ReturnType<typeof useCyberspace.getState>, 'atHead' | 'headPlane' | 'anchorPlane'>): 0 | 1 {
+  return s.atHead() ? s.headPlane : s.anchorPlane
+}
+
 export function mergeLines(have: ChatLine[], add: ChatLine[]): ChatLine[] {
   const seen = new Set(have.map((l) => l.id))
   const fresh = add.filter((l) => !seen.has(l.id))
@@ -152,6 +182,9 @@ export const MENTION_BUZZ_MS = 5_000
 export function buzzFor(senders: readonly string[], now = Date.now()): boolean {
   return buzzGate(senders, now, MENTION_BUZZ_MS, 60)
 }
+
+/** Said when the identity changed while a line was sealed or signed: nothing was sent. */
+const CHAT_SWITCHED = 'You switched identity while this line was on its way, so it was not sent. Send it again to say it as the identity signed in now.'
 
 export const useChat = create<ChatState>((set, get) => ({
   lines: loadLines(),
@@ -207,9 +240,32 @@ export const useChat = create<ChatState>((set, get) => ({
     try {
       set({ sendStatus: 'signing', sendError: null })
       // The line is a rumor, never signed: only the envelope is (chatRumor).
-      const inner = chatRumor(chatInnerTemplate(wire.text, cyber.position, cyber.plane, now, key.lookupId, wire.pubkeys), cyber.identity.pubkey)
+      // Its C is where you stand: the head's position in the head's plane,
+      // never the plane lined up for the next hop. The room is shared by both
+      // planes, and the C is what tells listeners which one you spoke in
+      // (DECK-0005 §3.2, The plane).
+      const inner = chatRumor(chatInnerTemplate(wire.text, cyber.position, cyber.headPlane, now, key.lookupId, wire.pubkeys), cyber.identity.pubkey)
       set({ sendStatus: 'sending' })
-      const outer = await cyber.signEvent(await bagTemplate([inner], hexToBytes(key.keyHex), key.lookupId, key.height, now, CHAT_BAG_KIND))
+      const sealed = await bagTemplate([inner], hexToBytes(key.keyHex), key.lookupId, key.height, now, CHAT_BAG_KIND)
+      // The line names its author, and the envelope is signed by whoever is
+      // signed in when the seal is done. A switch while it was sealed had the
+      // new identity sign an envelope holding the old one's line: both keys in
+      // one event anyone in the room can open, a public link between them.
+      // Looked at before the signer is asked, so the new identity is never
+      // asked to sign it, and again once the signature is back: a remote
+      // signer can answer for the old identity after the switch, and sent
+      // then, the old line went out over relays signed in as the new one, as
+      // relay.ts never lets an AUTH do (StaleIdentity). The line stays in the
+      // box to send again (identity-switch audit, 2026-11-19).
+      if (useCyberspace.getState().identity.pubkey !== inner.pubkey) {
+        set({ sendStatus: 'error', sendError: CHAT_SWITCHED })
+        return
+      }
+      const outer = await cyber.signEvent(sealed)
+      if (outer.pubkey !== inner.pubkey || useCyberspace.getState().identity.pubkey !== inner.pubkey) {
+        set({ sendStatus: 'error', sendError: CHAT_SWITCHED })
+        return
+      }
       const result = await publishMany(relaySet(), outer)
       if (!result.ok) {
         set({ sendStatus: 'error', sendError: `Not sent: ${result.reason}` })
@@ -217,7 +273,7 @@ export const useChat = create<ChatState>((set, get) => ({
       }
       // Your own line goes straight in: an ephemeral event is not echoed back
       // by every relay, and a line you said should not depend on that.
-      const line: ChatLine = { id: inner.id, from: inner.pubkey, text: inner.content, at: inner.created_at, region: key.lookupId, height: key.height, mine: true, mentions: pTagged(inner.tags) }
+      const line: ChatLine = { id: inner.id, from: inner.pubkey, text: inner.content, at: inner.created_at, region: key.lookupId, height: key.height, mine: true, mentions: pTagged(inner.tags), plane: cyber.headPlane }
       const lines = mergeLines(get().lines, [line])
       saveLines(lines)
       set({ lines, draft: '', picked: [], sendStatus: 'idle', sendError: null })
@@ -233,14 +289,22 @@ export const useChat = create<ChatState>((set, get) => ({
     const secrets = useSecrets.getState()
     const key = secrets.current[region] ?? secrets.neighbors[region]
     if (!key) return
-    const inners = await chatInners(outer, hexToBytes(key.keyHex))
+    // A room's key and d are shared by both planes (spec §7.6 Planes), so a
+    // line said at these X, Y and Z in the other plane opens here too. Only
+    // lines whose C is in the plane you listen from are heard; a line with no
+    // C names no plane and is heard in both (DECK-0005 §3.2, The plane).
+    const plane = listeningPlane(useCyberspace.getState())
+    const inners = (await chatInners(outer, hexToBytes(key.keyHex))).filter((e) => {
+      const said = placeOf(e)
+      return said === null || said.plane === plane
+    })
     if (inners.length === 0) return
     const me = useCyberspace.getState().identity.pubkey
     // A line by someone blocked, or one muted by its id, never lands: no
     // unfold, no unread, no chime, no mention (store/useMutes). Ephemeral, so
     // an UNBLOCK shows only what is said after it.
     const muted = useMutes.getState().muted
-    const add = inners.filter((e) => !hidesThing(muted, { authors: [e.pubkey], ids: [e.id] }, me)).map((e) => ({ id: e.id, from: e.pubkey, text: e.content.slice(0, MAX_CHAT_LENGTH), at: e.created_at, region, height: key.height, mine: e.pubkey === me, mentions: pTagged(e.tags) }))
+    const add = inners.filter((e) => !hidesThing(muted, { authors: [e.pubkey], ids: [e.id] }, me)).map((e) => ({ id: e.id, from: e.pubkey, text: e.content.slice(0, MAX_CHAT_LENGTH), at: e.created_at, region, height: key.height, mine: e.pubkey === me, mentions: pTagged(e.tags), ...linePlane(e) }))
     if (add.length === 0) return
     const before = get().lines
     const lines = mergeLines(before, add)
@@ -270,6 +334,7 @@ export const useChat = create<ChatState>((set, get) => ({
   },
 
   clear: () => {
+    clearedAt = Date.now()
     saveLines([])
     set({ lines: [], unread: 0, mentionsUnread: 0, revealId: null })
   },
@@ -278,3 +343,19 @@ export const useChat = create<ChatState>((set, get) => ({
 if (import.meta.env.DEV && typeof window !== 'undefined') {
   ;(window as unknown as { __chat: typeof useChat }).__chat = useChat
 }
+
+/**
+ * The lines kept on the device, merged in once at start (by id, in time
+ * order, CHAT_MAX at most), a moment after the first frame. They are history,
+ * never news: no unread, no chime, no unfold. Nothing comes back after a CLEAR.
+ */
+export const chatHydrated: Promise<void> = readCached(CHAT_CACHE_KEY).then((data) => {
+  if (clearedAt !== null) return
+  const kept = keptLines(data)
+  const cur = useChat.getState().lines
+  const lines = kept.length > 0 ? mergeLines(kept, cur) : cur
+  if (lines !== cur) useChat.setState({ lines })
+  // The merged list, in place of any write made before the kept one was read
+  // (nothing kept, or a read that failed: nothing to put back, so no write).
+  if (data !== undefined) saveLines(lines)
+}, () => undefined)

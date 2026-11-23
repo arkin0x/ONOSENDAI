@@ -10,27 +10,48 @@
  * RETURN puts the anchor back on your avatar at the zoom you left.
  */
 
-import { shortAxis } from '../lib/viewAt'
-import { useCyberspace } from '../store/useCyberspace'
+import { useCyberspace, type CyberFocus } from '../store/useCyberspace'
+import type { Position } from '../lib/space'
 import { useHyperspace } from '../store/useHyperspace'
 import { useEscape } from '../hooks/useEscape'
 import { useBuilder } from '../store/useBuilder'
+import { useScan } from '../store/useScan'
+
+/** What VIEWING says for a free view (VIEW, SCAN, a pin or a place gone to). */
+export const FREE_VIEW_LABEL = 'A COORD'
+
+/**
+ * What VIEWING says. A fixed look says what it looks at. A free view says
+ * only that it is on a coordinate, not which: the pad moves it, and the axes
+ * made the chip too long (arkinox, 2026-11-02). Unless the view has a name,
+ * a starred place or a person (arkinox, 2026-11-03, ruled): then the name,
+ * for as long as the cursor is on the very place the name was given for, in
+ * its plane (CyberFocus.named). Driven off it, re-anchored past it or turned
+ * to the other plane, it is A COORD again. A /C/ prefix's name holds in both
+ * planes (named.plane null): the region is the same box in each.
+ */
+export function viewingLabel(focus: CyberFocus | null, cursor: Position, plane: number): string | null {
+  if (focus === null) return null
+  if (!focus.drive) return focus.label
+  const at = focus.named
+  const onIt = at !== undefined && at.position.x === cursor.x && at.position.y === cursor.y && at.position.z === cursor.z && (at.plane === null || at.plane === plane)
+  return onIt && focus.label.trim() !== '' ? focus.label : FREE_VIEW_LABEL
+}
 
 export function FocusBar(): JSX.Element | null {
   const focus = useCyberspace((s) => s.focus)
-  // The cursor, not the anchor: the anchor catches up after the presses settle.
-  const anchor = useCyberspace((s) => (s.focus?.drive ? s.cursor : s.anchor))
-  const anchorPlane = useCyberspace((s) => s.anchorPlane)
-  // A free view reads where it is now, and in which plane, since the pad moves it.
-  const focusLabel = focus === null ? null : focus.drive
-    ? `${[anchor.x, anchor.y, anchor.z].map(shortAxis).join(', ')} · ${anchorPlane === 0 ? 'DATASPACE' : 'IDEASPACE'}`
-    : focus.label
+  const focusLabel = useCyberspace((s) => viewingLabel(s.focus, s.cursor, s.anchorPlane))
   const spectating = useCyberspace((s) => s.spectate !== null)
   const viewOwned = useHyperspace((s) => s.viewOwned)
   // BUILD mode rides the free view and has its own bar (BuildBar), with its
-  // own EXIT and RETURN TO AVATAR; this one comes back when the mode ends.
+  // own EXIT and RETURN TO AVATAR. EXIT ends the view with the mode (HOP);
+  // this bar comes back only for a view the mode ended under or handed on.
+  // Every VIEW has this bar, hyperspace's too; the ride's look has its own
+  // (HyperspaceViewBar).
   const building = useBuilder((s) => s.active)
-  const shown = !(focusLabel === null || spectating || viewOwned || building)
+  const shown = !(focusLabel === null || spectating || (viewOwned && !focus?.view) || building)
+  // SCAN rides VIEW's view (store/useScan.ts): the bar says so, and RETURN ends both.
+  const scanning = useScan((s) => s.active)
   // Escape is RETURN while this bar stands, a chip on the Escape stack
   // (arkinox, 2026-10-01); it used to be a fallback in the keyboard hook.
   useEscape('chip', shown, () => useCyberspace.getState().clearFocus())
@@ -39,10 +60,10 @@ export function FocusBar(): JSX.Element | null {
     <div className="hyperbar hyperbar--focus" role="status">
       <span className="hyperbar__glyph" aria-hidden="true">◈</span>
       <span className="hyperbar__text">
-        <span className="hyperbar__label">VIEWING</span>
+        <span className="hyperbar__label">{scanning ? 'SCANNING' : 'VIEWING'}</span>
         <span className="hyperbar__meta">{focusLabel}</span>
       </span>
-      {/* A free view (VIEW, or what BUILD mode leaves behind when you exit)
+      {/* A free view (VIEW, SCAN, a pin or a place gone to)
           says where RETURN goes, since the pad drives it like your head. */}
       <button className="hyperbar__end" onClick={() => useCyberspace.getState().clearFocus()} title="Back to your avatar (Esc)">{focus?.drive ? 'RETURN TO AVATAR' : 'RETURN'}</button>
     </div>

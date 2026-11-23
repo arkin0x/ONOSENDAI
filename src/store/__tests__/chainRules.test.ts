@@ -210,9 +210,16 @@ describe('presence places someone inside a game at the entry c', () => {
 })
 
 /** A finished hop proof from the current head to one gibson over, as the worker reports it. */
+/**
+ * The store's request id, which these cases never move but one: RESUME of a
+ * kept proof whose id went stale signs it under a fresh one, and records it
+ * here so the cases after it finish under the id the store expects.
+ */
+let requestNow = 0
+
 function doneFromHead(over: Partial<Extract<ProofResponse, { type: 'done' }>> = {}): Extract<ProofResponse, { type: 'done' }> {
   return {
-    type: 'done', id: 0, mode: 'hop', elapsedMs: 1, ...provedHop(S()), terrainK: 8,
+    type: 'done', id: requestNow, mode: 'hop', elapsedMs: 1, ...provedHop(S()), terrainK: 8,
     lca: { x: 1, y: 0, z: 0 }, totalOps: 1, prevEventId: S().prevEventId, ...over,
   }
 }
@@ -311,7 +318,7 @@ describe('a finished proof is signed only onto the chain it was computed for (re
     expect(S().proof.message).toMatch(/^Your chain moved while this proof waited to be signed/)
   })
 
-  it('every signing looks at the relays, even a short local proof after a stale one was resumed and dropped (arkinox, 2026-10-08)', async () => {
+  it('every signing looks at the relays, even a short local proof after a stale one was resumed (arkinox, 2026-10-08)', async () => {
     const stale = doneFromHead({ id: 999 })
     const plan = {
       target: S().position, ceilings: {}, summary: {}, done: 0,
@@ -319,8 +326,20 @@ describe('a finished proof is signed only onto the chain it was computed for (re
       status: 'paused', message: null, awaiting: stale, startedAt: 0,
     } as unknown as MovePlan
     useCyberspace.setState({ plan })
-    S().resumePlan()
-    await new Promise((r) => setTimeout(r, 0))
+    // A kept proof whose request id went stale is no longer dropped without
+    // a word: RESUME signs it under a fresh id (review of #581), so it is
+    // looked at and refused here (this stand-in has no hop tags).
+    const finish = S().finishProof
+    let resumed: Promise<void> | null = null
+    useCyberspace.setState({ finishProof: (m) => { if (m.type === 'done') requestNow = m.id; resumed = finish(m); return resumed } })
+    try {
+      S().resumePlan()
+    } finally {
+      useCyberspace.setState({ finishProof: finish })
+    }
+    expect(requestNow).not.toBe(999)
+    await resumed
+    expect(S().plan?.status).toBe('failed')
     useCyberspace.setState({ plan: null })
     // No confirmation is reused: a game entry the relays hold but the live
     // feed never delivered is found before signing, and nothing is signed.

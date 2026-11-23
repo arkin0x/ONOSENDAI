@@ -7,7 +7,8 @@
  * will center the builder at the avatar's position but the position should be
  * easily changeable." and "you can exit build mode like you exit the
  * workshop; exiting leaves the view where it is (does not snap back to
- * avatar)."
+ * avatar)." The view half of R6 is superseded (arkinox, 2026-11-17): exiting
+ * goes back to HOP, below.
  *
  * What the mode is made of:
  *
@@ -28,12 +29,23 @@
  *   you are looking if a view is up and on your avatar if not, and the deploy
  *   lands at the build cursor (useShards `deploy`). A deploy started while
  *   building leaves the cursor where you put it.
- * - Exiting leaves the view where it is: the free view stays, with its RETURN
- *   (FocusBar) to take you home. The one exception is a build cursor already
- *   on your avatar in your plane, where the view and your head are the same
- *   picture: exiting then simply ends the view, at the zoom you are at, so
- *   the movement controls come back without a RETURN that would change
- *   nothing on screen.
+ * - Leaving goes back to HOP (arkinox, 2026-11-17: "I don't like how exiting
+ *   build mode goes into a nonstandard VIEW mode. It should just go back to
+ *   HOP."). This replaces R6's "exiting leaves the view where it is": the
+ *   free view BUILD rode used to stay up, labeled BUILD but not the
+ *   standard VIEW, with the cursor off your head, COMMIT hidden and a
+ *   RETURN TO AVATAR to get out of it. Now every way out (EXIT, Esc, B, the
+ *   mode ring, a DEPLOY's end, the workshop's CANCEL, PLACE OBJECT's
+ *   workshop) ends that view, so the cursor and the camera are home at your
+ *   head and the movement controls are back. The zoom is the one you had
+ *   before BUILD (or the view it started from) began, as the old EXIT then
+ *   RETURN TO AVATAR left it, so a zoom the view chose (a /C/ region's, a
+ *   pin's, an item's) is not carried into HOP; a build cursor already on
+ *   your avatar keeps the zoom you are at, since the picture is the same.
+ *   Nothing the view came from (a Nearby list, a door's card, the Secrets
+ *   list) reopens, as when the ring leaves VIEW for BUILD (#675). A caller
+ *   that puts a view of its own up at once (SCAN, MOVE, ADD) hands over
+ *   instead (`exit` with `handoff`), and its view replaces BUILD's.
  * - Escape leaves the mode, like the workshop's close. The mode is a chip on
  *   the Escape stack (hooks/useEscape.ts), registered here when it turns on
  *   rather than by a component, because the mode outlives its bar: the bar
@@ -103,23 +115,25 @@
 
 import { create } from 'zustand'
 import { samePosition, useCyberspace } from './useCyberspace'
-import { copyLinedUp, positionOf, useShards, type DeployPending } from './useShards'
+import { copyLinedUp, movable, movingId, placingCopy, positionOf, useShards, type DeployPending } from './useShards'
 import { useWorkshop } from './useWorkshop'
-import { placedStep } from '../lib/space'
+import { deployPoint, placedStep } from '../lib/space'
 import { useHyperspace } from './useHyperspace'
-import { useToast } from './useToast'
-import { useStash } from '../hud/stash'
+import { BRIEF_TOAST_MS, useToast } from './useToast'
+import { depName, useStash } from '../hud/stash'
 import { registerEscape } from '../hooks/useEscape'
-import { buildPlane, placedCursor } from '../lib/buildCursor'
+import { buildPlane, buildStepOf, placedCursor } from '../lib/buildCursor'
+import { landFly } from '../lib/viewFly'
+import { positionHex } from '../lib/events'
+import { useRegion } from './useRegion'
+import { useSecrets } from './useSecrets'
+import { resetDoorReturn } from '../lib/doorReturn'
 
 /** How a session of BUILD mode began: the BUILD control (or B), or a DEPLOY. */
 export type BuildEntry = 'build' | 'deploy'
 
 /** The label the free view carries while it is the build cursor. */
 export const BUILD_FOCUS_LABEL = 'BUILD'
-
-/** Why BUILD mode ended without EXIT, for the toast that says so. */
-export type BuildEndReason = 'view' | 'moved' | 'identity'
 
 export interface BuilderState {
   /** BUILD mode is on: the free view is the build cursor and placements land there. */
@@ -168,12 +182,16 @@ export interface BuilderState {
    */
   enter: (via?: BuildEntry) => void
   /**
-   * Leave BUILD mode. The view stays where it is (R6). Refused while a deploy
-   * is lined up: leaving would cancel it, which is CANCEL's (or Escape's) to
+   * Leave BUILD mode, back to HOP: the build view ends, so the cursor and
+   * the camera are home at your head, at the zoom you had before it began
+   * (or, on your avatar, the zoom you are at) (arkinox, 2026-11-17). Spectating, there is no HOP: the scene goes back to watching
+   * them. With `handoff` the build view is left for the caller, which puts a
+   * view of its own up at once (SCAN, MOVE, ADD). Refused while a deploy is
+   * lined up: leaving would cancel it, which is CANCEL's (or Escape's) to
    * do, so the B key, EXIT BUILD and EXIT all agree. A copy lined up after a
    * placement (useShards `copyLinedUp`) is stood down instead.
    */
-  exit: () => void
+  exit: (opts?: { handoff?: boolean }) => void
   /** On, or off. The B key and the BUILD control. */
   toggle: () => void
   /** Bring the build cursor, and the view with it, back to your avatar. Still building. */
@@ -195,37 +213,49 @@ function viewStands(s: ReturnType<typeof useCyberspace.getState>): boolean {
 /** The center of all cyberspace, where HyperspacePanel's EARTH, CYBERSPACE and THE RIDE views point. */
 const CUBE_CENTER = 1n << 84n
 
-/** A plain view of the whole cube (EARTH, CYBERSPACE, THE RIDE), not of a place in it. */
-function wholeCube(f: { position: { x: bigint; y: bigint; z: bigint }; drive?: boolean }): boolean {
-  return !f.drive && f.position.x === CUBE_CENTER && f.position.y === CUBE_CENTER && f.position.z === CUBE_CENTER
+/** A view of the whole cube (EARTH, CYBERSPACE, THE RIDE), not of a place in it: its cursor, or a plain look, still on the centre. */
+function wholeCube(s: ReturnType<typeof useCyberspace.getState>): boolean {
+  const at = s.focus?.drive ? s.cursor : s.focus?.position
+  return at !== undefined && at.x === CUBE_CENTER && at.y === CUBE_CENTER && at.z === CUBE_CENTER
 }
 
-/** The build cursor sits on your avatar, in the plane your head shows. */
-function onAvatar(s: ReturnType<typeof useCyberspace.getState>): boolean {
+/** The build cursor sits on your avatar, in the plane your head shows: the pad's RECALL slot is WALK then (hud/TouchControls). */
+export function onAvatar(s: ReturnType<typeof useCyberspace.getState>): boolean {
   return samePosition(placedCursor(s), s.position) && buildPlane(s) === s.plane
 }
 
 /**
- * What the free view becomes once the mode is off. A free view that sits on
- * your avatar shows what your head shows: end it, keeping the zoom. One kept
- * through a spectation cannot stand without the mode, so it ends and the
- * scene goes back to watching them, at the action last aimed at (`scrub`).
+ * A view left for a mode, not for a RETURN: the Nearby list, a door's card
+ * or the Secrets list it came from stays shut (#675). The ring's VIEW to
+ * BUILD does this (padMode leaveViewForMode), and so does leaving BUILD for
+ * HOP, whichever way BUILD was entered.
  */
-function settleView(scrub: number | null): void {
+export function dropViewReturns(): void {
+  useShards.getState().setNearbyReturn(null)
+  resetDoorReturn()
+  useSecrets.getState().focus(null)
+}
+
+/**
+ * What the free view becomes once the mode is off. One kept through a
+ * spectation cannot stand without the mode, so it ends and the scene goes
+ * back to watching them, at the action last aimed at (`scrub`). A free view
+ * on your avatar shows what your head shows: it ends, keeping the zoom.
+ * Left the usual way (`home`), any other ends too, back at the zoom you had
+ * before it began: HOP at your head. Otherwise (a hand-off, or the mode
+ * ended under it) it stays for whatever comes next.
+ */
+function settleView(scrub: number | null, home = false): void {
   const cs = useCyberspace.getState()
   if (!cs.focus?.drive) return
+  if (home) dropViewReturns()
   if (cs.spectate) {
     cs.clearFocus(true)
     if (scrub !== null) useCyberspace.getState().explore(scrub)
     return
   }
   if (onAvatar(cs)) cs.clearFocus(true)
-}
-
-const END_REASON: Record<BuildEndReason, string> = {
-  view: 'The view moved somewhere you cannot build from (Earth, a stop, a deployment).',
-  moved: 'Your avatar was moved under it (a respawn, a ride arriving, or the relays\' version of your chain), and the build cursor went with it.',
-  identity: 'You switched identity; the build cursor belonged to the one you left.',
+  else if (home) cs.clearFocus()
 }
 
 export const useBuilder = create<BuilderState>((set, get) => ({
@@ -244,10 +274,11 @@ export const useBuilder = create<BuilderState>((set, get) => ({
     // A spectated pubkey with no chain on the relay: nothing to aim at.
     if (last < 0) return
     const i = index === null || index >= last ? null : Math.max(0, Math.floor(index))
-    const action = chain[i ?? last]
+    const action = cs.focusStand(i ?? last) ?? chain[i ?? last]
     // Its place, in its plane, as history would show it: the coordinate the
     // chain stands on there (a game's entry point, a broken chain's last
-    // valid place). Only the view's cursor moves (aimView).
+    // valid place, the last action that counts from a proof the relay's
+    // rules reject on: store focusStand). Only the view's cursor moves (aimView).
     cs.aimView(action.position, action.plane)
     set({ scrub: i })
   },
@@ -260,13 +291,18 @@ export const useBuilder = create<BuilderState>((set, get) => ({
 
   enter: (via = 'build') => {
     if (get().active) return
+    // Region mode is a VIEW tool: BUILD ends it (arkinox, 2026-11-11).
+    useRegion.getState().exit()
     // The camera back from a hyperspace view first, as spectating does
     // (useHyperspace.ts): its ownership hides the gibson field and stands a
     // second bar up whose RETURN would end the mode.
     const hs = useHyperspace.getState()
     if (hs.viewOwned || hs.scrubHeight !== null) {
-      useHyperspace.setState({ scrubHeight: null, viewOwned: false, returnScaleExp: null, returnFocus: null, viewedStop: null })
+      useHyperspace.setState({ scrubHeight: null, viewOwned: false, viewedStop: null })
     }
+    // VIEW's fly not yet landed lands now: the cursor below, and whether it
+    // has left your avatar, are where the view has flown (lib/viewFly.ts).
+    landFly()
     const cs = useCyberspace.getState()
     // Where you are looking is where building starts, from BUILD and from
     // DEPLOY alike (arkinox, 2026-10-07, ruling A on review finding 3): a
@@ -286,13 +322,15 @@ export const useBuilder = create<BuilderState>((set, get) => ({
       set({ active: true, via, scrub, leftAvatar: !onAvatar(useCyberspace.getState()) })
       return
     }
-    const looking = cs.focus !== null && !wholeCube(cs.focus)
+    const looking = cs.focus !== null && !wholeCube(cs)
     if (!looking) cs.focusOn(cs.position, cs.plane, BUILD_FOCUS_LABEL, undefined, true)
     else if (!cs.focus?.drive) cs.focusOn(cs.anchor, cs.anchorPlane, BUILD_FOCUS_LABEL, undefined, true)
+    // A VIEW framed on the thing frames the build cursor's cell, as BUILD always has.
+    else if (cs.focus.fit || cs.focus.item) useCyberspace.setState({ focus: { ...cs.focus, fit: undefined, item: undefined } })
     set({ active: true, via, scrub: null, leftAvatar: !onAvatar(useCyberspace.getState()) })
   },
 
-  exit: () => {
+  exit: (opts) => {
     if (!get().active) return
     // A copy lined up after a placement is not a deploy to wait on: leaving
     // stands it down, so B, Esc and EXIT end the mode right after a
@@ -303,7 +341,7 @@ export const useBuilder = create<BuilderState>((set, get) => ({
     // Off first, so the view change below is not read as the view ending
     // under a live build mode.
     set({ active: false, via: null, leftAvatar: false, scrub: null })
-    settleView(scrub)
+    settleView(scrub, opts?.handoff !== true)
   },
 
   toggle: () => { if (get().active) get().exit(); else get().enter('build') },
@@ -336,61 +374,53 @@ export const useBuilder = create<BuilderState>((set, get) => ({
 }))
 
 /**
- * BUILD mode ended by something other than EXIT. The deploy lined up at the
- * build cursor cannot stay, but what went into it is kept, and the toast says
- * why the mode ended and where the work is.
+ * BUILD mode ended by something other than EXIT: the view moved somewhere
+ * you cannot build from, your avatar was moved under it, or you switched
+ * identity. The deploy lined up at the build cursor cannot stay, but what
+ * went into it is kept for the composer that opens next. The toast says
+ * only BUILD MODE ENDED (arkinox, 2026-11-02: "none of the other text"),
+ * except when a placement already on its way still lands where it was aimed:
+ * then one line says so, so nobody places it again and makes two.
  */
-function endUnder(reason: BuildEndReason): void {
+function endUnder(switched = false): void {
   // A copy lined up after a placement was placed already: asked before the
   // mode goes off, which forgets `placedLast`. It stands down quietly, with
-  // no draft kept and nothing said about it.
+  // no draft kept.
   const copy = copyLinedUp(useShards.getState())
   useBuilder.setState({ active: false, via: null, leftAvatar: false, scrub: null })
   if (copy) useShards.getState().cancelDeploy()
   const shards = useShards.getState()
   const pending = shards.pending
-  let kept = ''
-  if (pending && shards.deployStatus === 'working') {
-    // Already hiding: the key is being computed for the place it was aimed
-    // at, and it finishes there. Nothing to keep and nothing to cancel, only
-    // to say (found in review, 2026-10-07: it used to say "kept" and publish).
-    kept = pending.type === 'message'
-      ? ' Your message was already being hidden, and it finishes at the place you chose.'
-      : pending.type === 'key' || pending.type === 'chest' || pending.type === 'audio'
-        ? ` Your ${pending.type === 'key' ? 'item' : pending.type} was already being hidden, and it finishes at the place you chose.`
-        : ` "${shards.pendingShard()?.name ?? 'The object'}" was already being hidden, and it finishes at the place you chose.`
-  } else if (pending) {
-    // What was set for this one deploy goes with it; say so plainly.
-    const riddle = shards.deployBag.riddle.trim() !== ''
-    const dropped = ` Its height and bag settings${riddle ? ', including the hint message you wrote,' : ''} were not kept.`
-    if (pending.type === 'message') {
-      useBuilder.setState({ messageDraft: pending.text })
-      // The panel is CREATE and the forged thing is an item (arkinox, 2026-10-10); the type still says key.
-      kept = ' Your message is kept: WRITE A MESSAGE in CREATE, or HIDE MESSAGE in build mode, opens it again.' + dropped
-    } else if (pending.type === 'key' || pending.type === 'chest') {
-      // Kept whole, as a message is: the item's pair, name and picture, or the chest's lock and contents.
-      useBuilder.setState({ itemDraft: pending })
-      kept = ` Your ${pending.type === 'key' ? 'item' : 'chest'} is kept: ${pending.type === 'key' ? 'FORGE AN ITEM' : 'SEAL A CHEST'} in CREATE opens it again.` + dropped
-    } else if (pending.type === 'audio') {
-      // The file is encrypted and uploaded already: the item is kept whole, so PLACE AUDIO starts from it.
-      useBuilder.setState({ itemDraft: pending })
-      kept = ' Your audio is kept: PLACE AUDIO in CREATE opens it again.' + dropped
-    } else if (pending.intoChest) {
-      // A shard being aimed into a chest: the chest comes back whole through
-      // cancelDeploy (chestBack, moved into itemDraft below), that shard not
-      // aimed. An aim has no height or bag settings of its own to lose.
-      const name = shards.pendingShard()?.name ?? 'the object'
-      kept = ` Your chest is kept: SEAL A CHEST in CREATE opens it again. "${name}" is not aimed; AIM it again from there.`
-    } else {
-      const name = shards.pendingShard()?.name ?? 'the object'
-      kept = ` The deploy of "${name}" was canceled; the model is unchanged in your workshop.` + dropped
-    }
+  // Already hiding (deployStatus working): the key is being computed for the
+  // place it was aimed at, and it finishes there, so nothing is kept or
+  // canceled (found in review, 2026-10-07: it used to say "kept" and publish).
+  const working = pending !== null && shards.deployStatus === 'working'
+  if (pending && !working) {
+    // A message, a key, a chest or hidden audio is kept whole for the
+    // composer that opens next (audio's file is uploaded already). A door
+    // holds nothing yet; a chest's move leaves it where it stood; a shard
+    // aimed into a chest gives the chest back through cancelDeploy
+    // (chestBack); a shard's deploy leaves its model unchanged in the
+    // workshop. The deploy's height and bag settings go with it.
+    // A move of anything leaves it where it stood: it is placed already, and
+    // a draft of it would hide a second copy. PLACE from ITEMS is the same:
+    // the item is still in ITEMS, one tap from PLACE again.
+    const moving = movingId(pending) !== null || placingCopy(pending)
+    if (pending.type === 'message' && !moving) useBuilder.setState({ messageDraft: pending.text })
+    else if (!moving && (pending.type === 'audio' || pending.type === 'key' || (pending.type === 'chest' && !pending.door))) useBuilder.setState({ itemDraft: pending })
     // Not back to the Models modal, or the chest composer: the view went somewhere on purpose.
     useStash.setState({ returnToModels: false, returnToFeed: false, returnToChest: false })
     shards.cancelDeploy()
   }
-  useToast.getState().show({ label: 'BUILD MODE ENDED', meta: END_REASON[reason] + kept + ' Press BUILD to start again.', mark: 'build' })
+  // A shard being signed into a chest publishes nothing: it goes back to the
+  // chest composer. After an identity switch the hide is refused unless its bag
+  // was signed already (useShards signBag), so nothing is promised then.
+  const lands = !switched && pending !== null && working && !(pending.type === 'shard' && pending.intoChest)
+  useToast.getState().show({ label: 'BUILD MODE ENDED', meta: lands ? STILL_LANDS : '', mark: 'build', ms: BRIEF_TOAST_MS })
 }
+
+/** BUILD MODE ENDED's one extra line, while a placement already on its way finishes where it was aimed. */
+export const STILL_LANDS = 'It still lands where you aimed it.'
 
 useCyberspace.subscribe((s, prev) => {
   const b = useBuilder.getState()
@@ -399,19 +429,19 @@ useCyberspace.subscribe((s, prev) => {
   // identity switch and a chain chosen from the relays also clear the view:
   // reading them as the view moving away gave the wrong reason (review of
   // #235). Another identity first: everything about the old one is gone.
-  if (s.identity.pubkey !== prev.identity.pubkey) { endUnder('identity'); settleView(null); return }
+  if (s.identity.pubkey !== prev.identity.pubkey) { endUnder(true); settleView(null); return }
   // Your position replaced under the mode, carrying the cursor to the new
   // head: a new chain head that also wrote the cursor. Only a respawn, a ride
   // arriving and a chain chosen from the relays do both. A move committed
   // before building lands without touching the cursor, and the mode stays.
   const headChanged = s.prevEventId !== prev.prevEventId || s.genesisId !== prev.genesisId
   if (headChanged && s.cursor !== prev.cursor) {
-    endUnder('moved')
+    endUnder()
     settleView(null)
     return
   }
   // The view the build cursor rides ended some other way.
-  if (!viewStands(s)) { endUnder('view'); return }
+  if (!viewStands(s)) { endUnder(); return }
   // The mark is an index into the chain on show; it stands only while that
   // index is still the same action. Another chain on show (a spectation
   // begun, switched or ended), or the same avatar's chain replaced (they
@@ -436,6 +466,14 @@ useShards.subscribe((s, prev) => {
   if (s.chestBack !== null && s.chestBack !== prev.chestBack) {
     const draft = useShards.getState().takeChestBack()
     if (draft) useBuilder.setState({ itemDraft: { type: 'chest', ...draft } })
+  }
+  // A door sealed: "then build" (chest and door design, 4.2). The mode stays on
+  // however it started, the red cube up, and the next placement starts at the
+  // door's height, so what is placed next is sealed to it.
+  if (s.pending === null && prev.pending?.type === 'chest' && prev.pending.door && !prev.pending.move && s.deployStatus === 'done' && prev.deployStatus !== 'idle') {
+    const height = s.mine[s.mine.length - 1]?.chest?.door
+    if (useBuilder.getState().active) useBuilder.setState({ via: 'build' })
+    if (height !== undefined) useShards.setState({ deployInto: height })
   }
   // A placement lines the same thing up again (useShards `placedLast`) only
   // where BUILD mode goes on after it. Where the mode ends with the placement
@@ -483,9 +521,25 @@ useShards.subscribe((s, prev) => {
  * BUILD session already on is ended first: its cursor is somewhere else.
  */
 export function editPlaced(eventId: string): void {
+  if (useShards.getState().mine.find((m) => m.eventId === eventId)?.shard) movePlaced(eventId)
+}
+
+/**
+ * MOVE on anything of yours that can move (useShards movable), from its card
+ * or its DEPLOYED row (arkinox, 2026-11-02: "need to be able to move placed
+ * items"): EDIT's way for every kind. BUILD mode comes up on the thing
+ * itself with its deploy lined up as it stands, so the ghost sits exactly
+ * on it until you aim it; PLACE puts it at the new place and only then
+ * takes it from the old one (useShards deploy). A shard goes at the zoom it
+ * was placed at or its own size, whichever is coarser; anything else at the
+ * cell it was snapped to. The STEP is that cell (lib/space.ts placedStep),
+ * so nothing shifts before you aim. A BUILD session already on is ended
+ * first: its cursor is somewhere else.
+ */
+export function movePlaced(eventId: string): void {
   let shards = useShards.getState()
   const d = shards.mine.find((m) => m.eventId === eventId)
-  if (!d?.shard) return
+  if (!d || !movable(d, useCyberspace.getState().identity.pubkey)) return
   // A copy lined up again after a placement (useShards `placedLast`) is no
   // work of yours to lose: EDIT stands it down, as CANCEL would. Any other
   // deploy lined up still refuses.
@@ -495,12 +549,14 @@ export function editPlaced(eventId: string): void {
   }
   if (shards.pending) return
   const b = useBuilder.getState()
-  if (b.active) b.exit()
+  if (b.active) b.exit({ handoff: true })
   const at = positionOf(d)
   const step = placedStep(at, d.height)
-  const zoom = Math.max(d.shard.unit, step)
-  useCyberspace.getState().focusItem(at, d.plane, d.shard.name || 'shard', zoom)
-  shards.startEditShard(eventId)
+  const zoom = Math.max(d.shard?.unit ?? 0, step)
+  useCyberspace.getState().focusItem(at, d.plane, d.type === 'shard' ? d.shard?.name || 'shard' : depName(d), zoom)
+  if (d.type === 'shard') shards.startEditShard(eventId)
+  else if (d.type === 'chest') shards.startMoveChest(eventId)
+  else shards.startMoveItem(eventId)
   if (step < useCyberspace.getState().scaleExp) useCyberspace.getState().setBuildStep(step)
 }
 
@@ -530,4 +586,83 @@ useBuilder.subscribe((s, prev) => {
   offEscape = s.active ? registerEscape('chip', () => useBuilder.getState().exit()) : null
   // What PLACE AGAIN would place belongs to one session: each starts fresh.
   if (useShards.getState().placedLast !== null) useShards.setState({ placedLast: null })
+})
+
+/**
+ * ADD on a door of yours (chest and door design, 4.8): BUILD with the cursor
+ * inside its red cube and the next placement starting at the door's height,
+ * so what you place is sealed to it; the bar's place actions are ready.
+ */
+export function addToRoom(eventId: string): void {
+  let shards = useShards.getState()
+  const d = shards.mine.find((m) => m.eventId === eventId)
+  const height = d?.chest?.door
+  if (!d || height === undefined) return
+  if (copyLinedUp(shards)) {
+    shards.cancelDeploy()
+    shards = useShards.getState()
+  }
+  if (shards.pending) return
+  const b = useBuilder.getState()
+  if (b.active) b.exit({ handoff: true })
+  const at = positionOf(d)
+  useCyberspace.getState().focusItem(at, d.plane, d.chest?.name || 'door', placedStep(at, height))
+  useBuilder.getState().enter('build')
+  useShards.setState({ deployInto: height })
+}
+
+// ADD's height lasts as long as the BUILD it started.
+useBuilder.subscribe((s, prev) => {
+  if (prev.active && !s.active && useShards.getState().deployInto !== null) useShards.setState({ deployInto: null })
+})
+
+// BUILD mode ending takes STEP with it, whatever is still lined up: a hide
+// running when the view moved away keeps its bar, and its STEP must not step
+// the cursor at your head. Here, with the mode, so it holds wherever the mode
+// is loaded (it lived in store/buildStep.ts, loaded only with the deploy bar).
+useBuilder.subscribe((s, prev) => {
+  if (!prev.active || s.active) return
+  useCyberspace.setState({ buildExact: false })
+  useCyberspace.getState().setBuildStep(null)
+})
+
+// arkinox, 2026-11-11: "if I position a shard for placement in build, and
+// then I zoom out, when I zoom back in sometimes the shard has changed
+// position." The placement was the cursor's cell at a STEP that follows the
+// zoom (lib/space.ts deployPoint), so a zoom moved it: out, to the coarse
+// cell's center, and a center at one size is never a center at another.
+// The first zoom while anything is lined up puts the build cursor on the
+// placement as it stands, and from then on the placement is the cursor
+// itself (useCyberspace `buildExact`): no zoom moves it, each move steps it
+// one cell of the zoom you are at, and the camera and the cursor cube sit on
+// it. A zoom that came with a new cursor (a place gone to at its own zoom:
+// VIEW, a starred place, the pin) is aim, not zoom: the placement is held on
+// that cursor exactly (review of #676). On your avatar, putting the cursor
+// there is not a move of yours (`buildSettle`), as with lowering STEP, so it
+// still counts as being on your avatar; anywhere else nothing is kept to go
+// back to, or ending the deploy would throw the cursor back across the
+// magnified view (review of #676).
+useCyberspace.subscribe((s, prev) => {
+  if (s.scaleExp === prev.scaleExp || s.buildExact || !useBuilder.getState().active) return
+  const sh = useShards.getState()
+  if (sh.pending === null) return
+  const was = buildStepOf({ ...s, scaleExp: prev.scaleExp })
+  const at = s.cursor !== prev.cursor ? { ...s.cursor } : deployPoint(s.cursor, was, sh.deployHeight)
+  const onAvatar = samePosition(placedCursor(s), s.position)
+  useCyberspace.setState({ cursor: at, buildExact: true, buildSettle: onAvatar ? { at, from: { ...s.position } } : null })
+  // A seed's hide height was measured for the cursor and STEP it was composed
+  // at (plant.ts seedDraftHeight). Where that is the very point now held, the
+  // measure is kept for it, at the held point and 2^0, so the zoom does not
+  // send the seed to SEED_HIDE_MAX. After the hold above, never before it:
+  // useShards keeps the deploy only because the fit now matches the held
+  // cursor and 2^0 (its `measured`). A copy lined up again stays that copy
+  // (`placedLast`), or AGAIN and its same-spot refusal would be lost.
+  const p = sh.pending
+  const plane = buildPlane(s)
+  const fit = p.type === 'seed' ? p.seed.fit : undefined
+  if (p.type === 'seed' && fit && fit.step === was && fit.cursor === positionHex(s.cursor, plane) && samePosition(deployPoint(s.cursor, was, fit.height), at)) {
+    const next = { ...p, seed: { ...p.seed, fit: { ...fit, cursor: positionHex(at, plane), step: 0 } } }
+    const last = sh.placedLast
+    useShards.setState({ pending: next, ...(last?.pending === p ? { placedLast: { ...last, pending: next } } : {}) })
+  }
 })

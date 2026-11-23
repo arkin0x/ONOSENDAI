@@ -20,6 +20,7 @@ import {
   CHEST_KIND, KEY_KIND, bagTemplate, chestInnerTemplate, chestItemOf, keyInnerTemplate, keyItemOf, messageInnerTemplate, shardInnerTemplate, unbag, type BagEntry, type ChestItem, type KeyItem,
 } from '../hidden'
 import { newShard, type ShardModel } from 'sno-core/shards'
+import moonBlossom from '../../tutorial/moon-blossom-v2-event.json'
 import { reachGibsons } from '../deployFit'
 import { MAX_PICTURE_URI } from '../itemPicture'
 
@@ -434,5 +435,27 @@ describe('what is sealed inside the chests of a bag (sealedInside), so no rewrit
     const bad: ChestItem = { name: 'Odd', lockPubkey: lock.itemPubkey, senderPubkey: sealed.senderPubkey, requires: '', payload: sealed.payload }
     const odd = finalizeEvent(chestInnerTemplate(bad, at, 0, 10), hider)
     expect(sealedInside([odd, ['e', 'a'.repeat(64)] as BagEntry], [asKey(lock)]).size).toBe(0)
+  })
+})
+
+describe('a DNA carried in a chest (DECK-0008 §8.1; tutorial feedback 2026-11-12, item 8)', () => {
+  const sk = generateSecretKey()
+  // The owner's moon blossom text, valid SEEDO.
+  const text = moonBlossom.content
+  const dna = (content: string, tags: string[][] = [['caps', '2048', '2048', '32']]) => finalizeEvent({ kind: 3350, created_at: 1_800_000_000, tags, content }, sk)
+  it('a signed written DNA is an item, named by its dna line', async () => {
+    const { readContents } = await import('../chests')
+    const { hiddenLabel } = await import('../hidden')
+    const [entry] = readContents([dna(text)])
+    expect(entry?.body.type).toBe('dna')
+    expect(entry?.body.dna?.name).toBe('moon blossom')
+    expect(entry?.verified).toBe(true)
+    expect(hiddenLabel(entry!.body)).toBe('moon blossom DNA')
+  })
+  it('skips an unsigned one, a mixed one, one with caps that do not price, and text the engine refuses', async () => {
+    const { readContents } = await import('../chests')
+    const signed = dna(text)
+    const unsigned = { ...signed, sig: '' }
+    expect(readContents([unsigned, dna(''), dna(text, [['caps', 'x', '2048', '32']]), dna('not seedo at all')])).toEqual([])
   })
 })

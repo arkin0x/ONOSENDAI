@@ -9,13 +9,14 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { CustomBlending, LineBasicMaterial, MeshBasicMaterial, OneFactor, OneMinusSrcAlphaFactor, ReplaceStencilOp, ShaderLib, SrcAlphaFactor, ZeroFactor, type LineBasicMaterialParameters, type MeshBasicMaterialParameters } from 'three'
 import { HEADLAMP_FACES, HEADLAMP_LINES, patchHeadlamp } from '../headlamp'
-import { DOTS_ORDER, FACE_TAG_STENCIL, GHOST_OPACITY, OVERLAY_ORDER, SEE_THROUGH_BLEND, TAG_BLEND, TRANSLUCENT_ORDER, basicFaceProps, benchOrders, lineProps, litFaceProps, seeThrough, shardOpacity, shardOrder } from '../shardFaces'
+import { DOTS_ORDER, FACE_TAG_STENCIL, GHOST_OPACITY, NO_BLOOM_BLEND, OVERLAY_ORDER, SEE_THROUGH_BLEND, TAG_BLEND, TRANSLUCENT_ORDER, basicFaceProps, benchOrders, lineProps, litFaceProps, seeThrough, shardOpacity, shardOrder } from '../shardFaces'
 
 describe('what a shard is drawn at', () => {
-  it('is its own opacity with the 10% floor, 1 when it has none', () => {
+  it('is its own opacity with no floor, 1 when it has none', () => {
     expect(shardOpacity({})).toBe(1)
     expect(shardOpacity({ opacity: 50 })).toBe(0.5)
-    expect(shardOpacity({ opacity: 3 })).toBe(0.1)
+    expect(shardOpacity({ opacity: 3 })).toBe(0.03)
+    expect(shardOpacity({ opacity: 0 })).toBe(0)
   })
 
   it('multiplies a ghost by the object\'s own', () => {
@@ -66,6 +67,19 @@ describe('an opaque face is exactly as it was', () => {
   })
 })
 
+describe('BUILD\u2019s ghosts never bloom (noBloom, owner 2026-11-16)', () => {
+  it('faces blend as see-through, the alpha under them kept, depth still written, drawn after the opaque faces', () => {
+    const p = basicFaceProps(0.45, { ghost: true, world: true, noBloom: true })
+    expect(p).toMatchObject({ transparent: true, opacity: 0.45, forceSinglePass: false, ...SEE_THROUGH_BLEND })
+    expect(p).not.toHaveProperty('depthWrite')
+    expect(shardOrder(0.45, true, true)).toBe(TRANSLUCENT_ORDER)
+  })
+  it('lines keep the alpha under them', () => {
+    expect(lineProps(0.45, true, true)).toEqual({ transparent: true, opacity: 0.45, ...NO_BLOOM_BLEND })
+    expect(NO_BLOOM_BLEND).toMatchObject({ blendSrcAlpha: ZeroFactor, blendDstAlpha: OneFactor })
+  })
+})
+
 describe('a ghost keeps what it had', () => {
   it('two passes, ordinary blending, depth written, the default order, at its own opacity too', () => {
     const p = basicFaceProps(0.45 * 0.5, { ghost: true, world: true })
@@ -93,17 +107,17 @@ describe('where it is wired (ShardMesh and the avatar)', () => {
 
   it('every face, line and point material takes the one opacity, and every mesh the one order', () => {
     expect(mesh).toMatch(/const opacity = shardOpacity\(given, \{ ghost, ignoreOpacity \}\)/)
-    expect(mesh).toMatch(/basicFaceProps\(opacity, \{ ghost, world \}\)/)
+    expect(mesh).toMatch(/basicFaceProps\(opacity, \{ ghost, world, noBloom \}\)/)
     // Written where singlePass.test.ts's scan reads it, so the guard still sees this material:
     // before the spread, since the scan ends a declaration at its first "})".
-    expect(mesh).toMatch(/<meshBasicMaterial[^>]*transparent forceSinglePass=\{!ghost\} \{\.\.\.basicFaceProps\(opacity, \{ ghost, world \}\)\}/)
+    expect(mesh).toMatch(/<meshBasicMaterial[^>]*transparent forceSinglePass=\{!ghost\} \{\.\.\.basicFaceProps\(opacity, \{ ghost, world, noBloom \}\)\}/)
     expect((mesh.match(/litFaceProps\(opacity, ghost\)/g) ?? []).length).toBe(2)
-    expect((mesh.match(/lineProps\(opacity, ghost\)/g) ?? []).length).toBe(2)
+    expect((mesh.match(/lineProps\(opacity, ghost, noBloom\)/g) ?? []).length).toBe(2)
     expect((mesh.match(/renderOrder=\{order\}/g) ?? []).length).toBe(1)
     expect(mesh).toMatch(/name="shard-faces"[^>]*renderOrder=\{lit \? bench\.front : order\}/)
     expect(mesh).toMatch(/geometry=\{inside\}[^>]*renderOrder=\{bench\.inside\}/)
     expect(mesh).toMatch(/<points [^>]*renderOrder=\{DOTS_ORDER\}/)
-    expect(mesh).toMatch(/l\.renderOrder = shardOrder\(opacity, ghost\)/)
+    expect(mesh).toMatch(/l\.renderOrder = shardOrder\(opacity, ghost, noBloom\)/)
     expect(mesh).toMatch(/createDiscMaterial\([^)]*\? opacity : opacity \* 0\.55, headlamp && !lit\)/)
   })
 
@@ -113,7 +127,8 @@ describe('where it is wired (ShardMesh and the avatar)', () => {
   })
 
   it('an avatar, and its parts, ignore their opacity (§3.3)', () => {
-    expect(avatar).toMatch(/<ShardMesh shard=\{shard\} world cull=\{firstPerson\} ignoreOpacity \/>/)
+    // Its own opacity is ignored; only the build dim (BuildOccluders, in BUILD alone) sees through it.
+    expect(avatar).toMatch(/<ShardMesh shard=\{shard\} world cull=\{firstPerson\} still ignoreOpacity dim=\{dim\} \/>/)
     expect(readFileSync('src/hud/PersonModal.tsx', 'utf8')).toMatch(/<Preview shard=\{shard\} ignoreOpacity \/>/)
     expect(readFileSync('src/hud/TvSegments.tsx', 'utf8')).toMatch(/ignoreOpacity=\{item\?\.kind !== 'object'\}/)
   })
@@ -143,8 +158,8 @@ describe('the draw order (review of #452)', () => {
     expect(walls).toMatch(/material=\{m\}[^>]*renderOrder=\{OVERLAY_ORDER\}/)
     // The face highlight's fill and edge, the halo, the pick loop and ADD's ghost.
     expect(bench).toMatch(/<mesh geometry=\{lit\.g\} frustumCulled=\{false\} renderOrder=\{OVERLAY_ORDER\}>/)
-    expect(bench).toMatch(/edge\.renderOrder = OVERLAY_ORDER/)
-    expect(bench).toMatch(/LineBasicMaterial\(\{ color: WARN, toneMapped: false, transparent: true \}\)/)
+    expect(bench).toMatch(/<lineSegments geometry=\{lit\.e\} frustumCulled=\{false\} renderOrder=\{OVERLAY_ORDER\}>/)
+    expect(bench).toMatch(/<lineBasicMaterial color=\{WARN\} toneMapped=\{false\} transparent \/>/)
     expect(bench).toMatch(/<primitive object=\{halos\.points\} renderOrder=\{OVERLAY_ORDER\} \/>/)
     expect(bench).toMatch(/l\.renderOrder = OVERLAY_ORDER/)
     expect(bench).toMatch(/<mesh position=\{UP\(aim\)\} renderOrder=\{OVERLAY_ORDER\}>/)
@@ -162,14 +177,14 @@ describe('the headlamp (#456) on see-through shards', () => {
   const mesh = readFileSync('src/scene/ShardMesh.tsx', 'utf8')
 
   it('a see-through world face wears the same headlamp props as an opaque one: one element for both', () => {
-    expect(mesh).toMatch(/\{\.\.\.basicFaceProps\(opacity, \{ ghost, world \}\)\} \{\.\.\.lampFaces\}/)
+    expect(mesh).toMatch(/\{\.\.\.basicFaceProps\(opacity, \{ ghost, world, noBloom \}\)\} \{\.\.\.lampFaces\}/)
     expect(mesh).toMatch(/const lampFaces = headlamp \? HEADLAMP_FACES : \{\}/)
   })
 
   it('see-through lines and dots wear it as opaque ones do', () => {
-    expect(mesh).toMatch(/\{\.\.\.lineProps\(opacity, ghost\)\} \{\.\.\.lampLines\}/)
+    expect(mesh).toMatch(/\{\.\.\.lineProps\(opacity, ghost, noBloom\)\} \{\.\.\.lampLines\}/)
     expect(mesh).toMatch(/const lampLines = headlamp && !lit \? HEADLAMP_LINES : \{\}/)
-    expect(mesh).toMatch(/LineBasicMaterial\(\{ vertexColors: true, toneMapped: false, \.\.\.lineProps\(opacity, ghost\) \}\)\n\s*if \(headlamp && !lit\) Object\.assign\(m, HEADLAMP_LINES\)/)
+    expect(mesh).toMatch(/LineBasicMaterial\(\{ vertexColors: true, toneMapped: false, \.\.\.lineProps\(opacity, ghost, noBloom\) \}\)\n\s*if \(headlamp && !lit\) Object\.assign\(m, HEADLAMP_LINES\)/)
     expect(mesh).toMatch(/opacity : opacity \* 0\.55, headlamp && !lit\)/)
   })
 

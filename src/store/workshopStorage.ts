@@ -46,6 +46,7 @@ import {
   commit, databaseExists, fingerprint, localEntries, mergeLocal, newGen, noteReconciled, restoreInto, openWorkshopDb, readAll, readMigrated, readSome, verifyAndMark,
   type MigratedMeta, type ShardRecord,
 } from '../lib/workshopDb'
+import { kvCopiesOf, kvGet, kvSet } from '../lib/kvStore'
 
 /** The list as every build before this one kept it, and the backup from now on. */
 export const LOCAL_KEY = 'onosendai:shards'
@@ -77,6 +78,21 @@ const FULL = 'Workshop storage is full. Your latest changes are only in this tab
 const UNAVAILABLE = 'Your shards\' storage could not be opened, so saving is off for now and this is the copy kept in the older storage. Reload to try again.'
 const MOVED_ELSEWHERE = 'Your shards moved to new storage in another tab. Reload this tab to keep saving.'
 const LOST = 'This browser cleared the storage your shards were in. The copy kept before they moved is back; a tab still open with newer work puts it back when it next saves.'
+const LOADING = 'Your shards are still loading. Nothing is saved until they have.'
+const LOADING_REASON = 'Your shards are still loading'
+const TORN = 'Your saved shard list could not be read, so saving is off to keep it exactly as it is.'
+const NOT_LOADED = 'Your shards did not load: their storage is not answering. They are not gone. Nothing is saved until they load. Close every other ONOSENDAI tab and window, then reload. RECOVER SHARDS in MENU looks for every copy.'
+const READABLE_NOW = 'Your shards can be read now. Reload to see them and keep saving.'
+
+/**
+ * The load's own clock (arkinox, 2026-11-22: "no shards show anymore" after
+ * a stuck import). The app draws at HYDRATE_WAIT_MS whatever this read is
+ * doing; past `slowMs` the workshop says the shards are still loading, and
+ * past `giveUpMs` a read that has not finished is given up for this session:
+ * the workshop says so, saves nothing, and never shows an unfinished read as
+ * an empty library. In one object so a test can shorten it.
+ */
+export const loadTiming = { slowMs: 4_000, giveUpMs: 25_000 }
 
 let host: StorageHost | null = null
 let mode: ShardStorage = 'pending'
@@ -108,6 +124,39 @@ let offline = { message: UNAVAILABLE, reason: 'Workshop storage could not be ope
 let decided: () => void = () => {}
 const ready = new Promise<void>((resolve) => { decided = resolve })
 
+/** Bulk imports running now: while any is, nothing is broadcast until the last ends. */
+let bulk = 0
+/** Of those, the ones whose saves gate nothing (PUBLISH off): while any is, commits ask for relaxed durability (lib/workshopDb.ts RELAXED). */
+let relaxedBulk = 0
+
+/**
+ * A bulk import starts: until the returned function is called, each commit
+ * is written without a disk sync of its own. Every change still goes through
+ * the one queue, one transaction at a time, and saveNow() still resolves
+ * only once its commit has completed. Calling the end twice ends it once.
+ */
+export function bulkWrites(opts: { relaxed?: boolean } = {}): () => void {
+  bulk++
+  if (opts.relaxed) relaxedBulk++
+  let ended = false
+  return () => {
+    if (ended) return
+    ended = true
+    bulk--
+    if (opts.relaxed) relaxedBulk--
+    // What was held while it ran goes to the other tabs once, now.
+    if (bulk === 0 && (held.put.size || held.del.size)) {
+      const put = [...held.put]
+      const del = [...held.del]
+      held.put.clear()
+      held.del.clear()
+      announce(put, del)
+    }
+  }
+}
+/** What committed during a bulk import, told to the other tabs when it ends: the latest word per id. */
+const held = { put: new Set<string>(), del: new Set<string>() }
+
 /** Which storage the library is in now. */
 export function storageMode(): ShardStorage { return mode }
 /** Records in the database that could not be read at load, and were left as they are. */
@@ -126,7 +175,7 @@ export function normalizeOne(s: unknown): ShardModel | null {
 }
 
 function readLocalRaw(): string | null {
-  try { return localStorage.getItem(LOCAL_KEY) } catch { return null }
+  return kvGet(LOCAL_KEY)
 }
 
 /** The localStorage list, each shard on its own: one that cannot be read is one shard left out, not all of them. */
@@ -188,7 +237,7 @@ function writeLocal(list: readonly ShardModel[]): boolean {
   // list there is the backup, and nothing writes it again.
   if (mode !== 'local') return false
   try {
-    localStorage.setItem(LOCAL_KEY, JSON.stringify(list))
+    kvSet(LOCAL_KEY, JSON.stringify(list))
     if (failure) report(null, null)
     return true
   } catch {
@@ -330,7 +379,7 @@ async function commitPending(): Promise<boolean> {
           if (m) puts.push(recordOf(id, m))
           else deletes.push(id)
         }
-        if (batch.size) await commit(d, puts, deletes)
+        if (batch.size) await commit(d, puts, deletes, Date.now(), relaxedBulk > 0 ? 'relaxed' : 'strict')
       } catch (e) {
         if (attempt === 0 && !isQuota(e)) {
           console.warn(`[workshop] write failed, opening the database again for one more try: ${describe(e)}`)
@@ -375,6 +424,15 @@ function askToPersist(): void {
 
 function announce(put: string[], del: string[]): void {
   if (!put.length && !del.length) return
+  // During a bulk import, held and told once at its end: every word wakes
+  // each other tab to read, and a tab frozen mid-read holds the store from
+  // the import's next commit (arkinox, 2026-11-22: "copied 4 instantly, then
+  // got stuck", his tablet).
+  if (bulk > 0) {
+    for (const id of del) { held.del.add(id); held.put.delete(id) }
+    for (const id of put) { held.put.add(id); held.del.delete(id) }
+    return
+  }
   try { channel?.postMessage({ put, del }) } catch { /* closed */ }
 }
 
@@ -413,19 +471,34 @@ function listen(): void {
       const data = ev.data as { put?: unknown; del?: unknown; moved?: unknown } | null
       if (data?.moved === true) { movedElsewhere(); return }
       const ids = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [])
-      if (mode === 'pending') {
-        for (const id of ids(data?.put)) heard.put.add(id)
-        for (const id of ids(data?.del)) heard.del.add(id)
+      // Still loading, or hidden: read in later. A hidden tab may be frozen
+      // by the browser in the middle of a read, and a read left open holds
+      // the shards' store: the tab that wrote could not commit again until
+      // this one woke (arkinox, 2026-11-22, an import that stopped after four
+      // shards on his tablet). It reads them once it is shown.
+      if (mode === 'pending' || hiddenNow()) {
+        // The latest word on an id wins: a delete and then a put of one id (the same kit imported again) is a put.
+        for (const id of ids(data?.del)) { heard.del.add(id); heard.put.delete(id) }
+        for (const id of ids(data?.put)) { heard.put.add(id); heard.del.delete(id) }
         return
       }
       void refresh(ids(data?.put), ids(data?.del))
     }
   } catch { channel = null }
+  try {
+    if (typeof document !== 'undefined') document.addEventListener('visibilitychange', () => { if (!hiddenNow() && mode !== 'pending') replayHeard() })
+  } catch { /* no document */ }
+}
+
+function hiddenNow(): boolean {
+  try { return typeof document !== 'undefined' && document.visibilityState === 'hidden' } catch { return false }
 }
 
 /** What other tabs committed while this one loaded. */
 function replayHeard(): void {
   if (!heard.put.size && !heard.del.size) return
+  // Shown again later: read then (listen).
+  if (hiddenNow()) return
   const put = [...heard.put]
   const del = [...heard.del]
   heard.put.clear()
@@ -475,20 +548,39 @@ function parseRecord(r: ShardRecord): ShardModel | null {
   return m && m.id === r.id ? m : null
 }
 
-/** The list now: what was stored, with this session's own changes made before the load answered on top. */
+/**
+ * The list now: what was stored, with this session's own changes made before
+ * the load answered on top.
+ *
+ * Except a shard the library already holds. The list starts empty while the
+ * read is out, so every change made meanwhile is a shard added then (or one
+ * added and taken off again), and one under an id the library has is a copy
+ * of a shard you already keep: OPEN IN WORKSHOP on your own published object
+ * (hud/stash.ts), the tutorial's pieces (tutorial/director.ts), a TAKE's
+ * pieces. The library's copy may be newer than that one (edited here since it
+ * was published), and it stays: the copy is dropped, never written over it.
+ * The read now starts after the first frame (boot.tsx), so such a tap can
+ * come before it lands.
+ */
 function withPending(stored: ShardModel[]): ShardModel[] {
   let list = stored.slice()
-  for (const [id, m] of pending) {
+  const kept = new Set(stored.map((s) => s.id))
+  let dropped = 0
+  for (const [id, m] of [...pending]) {
+    if (kept.has(id)) { pending.delete(id); dropped++; continue }
     if (m === null) { list = list.filter((s) => s.id !== id); continue }
     const at = list.findIndex((s) => s.id === id)
     if (at >= 0) list[at] = m
     else list.push(m)
   }
+  if (dropped) console.warn(`[workshop] ${dropped} shard(s) added while the library was reading are already in it; the stored copies stay`)
   return list
 }
 
 function become(next: ShardStorage, list: ShardModel[]): void {
   mode = next
+  // "Still loading" was said; it is decided now (a line that follows says why, if anything is wrong).
+  if (failure === LOADING_REASON) report(null, null)
   handed = new Map(list.map((s) => [s.id, s]))
   host?.replace(list)
   decided()
@@ -496,12 +588,24 @@ function become(next: ShardStorage, list: ShardModel[]): void {
 
 /** No database this session. */
 function withoutDatabase(why: unknown, moved: boolean): ShardStorage {
+  // Decided already (the load was given up on, loadTiming): a late failure changes nothing.
+  if (mode !== 'pending') return mode
   if (moved) {
     // The library is in the database and the database is out of reach: show
     // the copy from before the move rather than an empty workshop, and save
     // nothing over anything.
     console.warn(`[workshop] IndexedDB unavailable after the move, saving is off this session: ${describe(why)}`)
     become('unavailable', withPending(loadLocal()))
+    report(offline.message, offline.reason)
+    return mode
+  }
+  // A list there that cannot be read is never taken for an empty library:
+  // writing the next change would put a list over it. Nothing is saved.
+  const raw = readLocalRaw()
+  if (raw !== null && localEntries(raw) === null) {
+    console.warn(`[workshop] the localStorage list cannot be read, so saving is off this session: ${describe(why)}`)
+    offline = { message: TORN, reason: 'Your saved shard list could not be read' }
+    become('unavailable', withPending([]))
     report(offline.message, offline.reason)
     return mode
   }
@@ -561,16 +665,57 @@ async function rescue(d: IDBDatabase, raw: string, meta: MigratedMeta): Promise<
 }
 
 /**
- * Decide where the library is, and load it. Called once at startup, before
- * the app draws (main.tsx); a second call returns the first one's answer.
+ * Decide where the library is, and load it. Called once at startup, after the
+ * app's first frame (boot.tsx; before it on /workshop); a second call returns
+ * the first one's answer.
  */
 export function hydrateWorkshop(): Promise<ShardStorage> {
   if (!hydrating) hydrating = mode === 'pending' ? decide() : Promise.resolve(mode)
   return hydrating
 }
 
+/**
+ * The load while it is reading: started and not yet decided. Null before it
+ * starts (a test that never loads) and once it has decided. OPEN WORKSHOP
+ * waits on it (useWorkshop openWorkshop), so a tap in the moment after the
+ * first frame never opens an empty library or makes a new model in it.
+ */
+export function workshopReading(): Promise<ShardStorage> | null {
+  if (mode !== 'pending') return null
+  if (hydrating) return hydrating
+  // The app has drawn and its read is about to start (expectWorkshopRead): start it now.
+  return readExpected ? hydrateWorkshop() : null
+}
+
+let readExpected = false
+/** boot.tsx, at the first draw: the read will start in a frame or two, and anything that needs the library before then starts it. */
+export function expectWorkshopRead(): void { readExpected = true }
+
 async function decide(): Promise<ShardStorage> {
   listen()
+  // Still pending at slowMs: said. Still pending at giveUpMs: given up for
+  // this session (unavailable), with the backup shown as before and nothing
+  // saved; a read that lands after that changes nothing but the line.
+  const slow = setTimeout(() => { if (mode === 'pending') report(LOADING, LOADING_REASON) }, loadTiming.slowMs)
+  let giveUp: ReturnType<typeof setTimeout> | undefined
+  // The answer at give-up, while the read itself may never finish.
+  const gaveUp = new Promise<ShardStorage>((resolve) => {
+    giveUp = setTimeout(() => {
+      if (mode !== 'pending') return
+      console.warn('[workshop] the load did not finish in time: saving is off this session')
+      offline = { message: NOT_LOADED, reason: 'Your shards have not loaded' }
+      resolve(withoutDatabase(new Error('the read did not finish in time'), true))
+    }, loadTiming.giveUpMs)
+  })
+  try {
+    return await Promise.race([decideNow(), gaveUp])
+  } finally {
+    clearTimeout(slow)
+    clearTimeout(giveUp)
+  }
+}
+
+async function decideNow(): Promise<ShardStorage> {
   let d: IDBDatabase
   try { d = await database() } catch (e) {
     // Moved, as far as anything can tell: then localStorage is only the
@@ -601,20 +746,25 @@ async function decide(): Promise<ShardStorage> {
     // The database this tab's list comes from: a later reopen is checked against it.
     gen = typeof meta.gen === 'string' ? meta.gen : ''
     if (!movedFlag()) flagMoved()
-    const { records, malformed } = await readAll(d)
+    // Each page parsed as it lands (lib/workshopDb.ts readAll), so a big library is many short tasks, not one long one.
+    const parsedAs = new Map<ShardRecord, ShardModel | null>()
+    const { records, malformed } = await readAll(d, (page) => { for (const r of page) parsedAs.set(r, parseRecord(r)) })
     const stored: ShardModel[] = []
     skipped = malformed
     seqs.clear()
     nextSeq = 0
     for (const r of records) {
       nextSeq = Math.max(nextSeq, r.seq + 1)
-      const m = parseRecord(r)
+      const m = parsedAs.has(r) ? parsedAs.get(r)! : parseRecord(r)
       // One record that does not read is one shard skipped, and left in the database as it is.
       if (!m) { skipped++; continue }
       seqs.set(r.id, r.seq)
       stored.push(m)
     }
     if (skipped) console.warn(`[workshop] ${skipped} stored shard(s) could not be read and were left as they are`)
+    // Given up on while reading (loadTiming): this session shows what it
+    // showed and saves nothing; a reload reads it.
+    if (mode !== 'pending') { if (mode === 'unavailable') { offline = { message: READABLE_NOW, reason: 'Reload to keep saving' }; report(offline.message, offline.reason) } return mode }
     become('indexeddb', withPending(stored))
     replayHeard()
     if (pending.size) void flush()
@@ -623,6 +773,91 @@ async function decide(): Promise<ShardStorage> {
     return withoutDatabase(e, moved || movedFlag())
   }
 }
+
+/** What RECOVER SHARDS found: copies looked at, shards put back or brought up to date, and whether a reload is needed to see them. */
+export type Recovery = { ok: true; copies: number; restored: number; reload: boolean } | { ok: false; error: string }
+
+/** How long RECOVER SHARDS waits on storage before it says it is not answering. */
+export const RECOVER_WAIT_MS = 20_000
+
+function within<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(what)), ms)
+    p.then((v) => { clearTimeout(t); resolve(v) }, (e: unknown) => { clearTimeout(t); reject(e) })
+  })
+}
+
+/**
+ * RECOVER SHARDS (arkinox, 2026-11-22): look in every place a copy of the
+ * shard list is kept and put back the work the library lacks. The places:
+ * the list a load reads (the kv database's copy of the backup, else
+ * localStorage's), and every copy the kv database holds of it (the record,
+ * one still pending its check, each one set aside).
+ *
+ * Only work done since the move comes back: a shard the database does not
+ * hold comes back only when its copy was changed after the move was marked
+ * (the move carried everything older, so an older one missing here was
+ * deleted here, whether or not its delete left a tombstone); a shard it
+ * holds is replaced only by a newer copy, through mergeLocal, which also
+ * keeps every delete with a tombstone. Nothing is ever deleted or made
+ * older, and the copies read from are left as they are.
+ *
+ * Refused while the load is still reading, and on a database that holds no
+ * mark (the move never verified there: the load's own move decides that).
+ * A tab whose load did not finish merges into the database and is told to
+ * reload: what it shows is not the library.
+ */
+export async function recoverShards(): Promise<Recovery> {
+  if (typeof indexedDB === 'undefined') return { ok: false, error: 'This browser has no storage to recover from.' }
+  if (mode === 'pending') return { ok: false, error: 'Your shards are still loading. Try again once they have.' }
+  // On localStorage the library never moved: the list there is the library, and the database is left to the move.
+  if (mode === 'local') return { ok: true, copies: 0, restored: 0, reload: false }
+  const texts: string[] = []
+  const raw = readLocalRaw()
+  if (raw) texts.push(raw)
+  try { texts.push(...await kvCopiesOf(LOCAL_KEY)) } catch (e) { console.warn(`[workshop] recover: the kv copies could not be read: ${describe(e)}`) }
+  const live = mode === 'indexeddb'
+  // Never make the database here: one that is not there holds nothing to recover into, and the load's move makes it.
+  if (!live && (await databaseExists()) === false) return { ok: false, error: 'Your shards never finished moving to this storage. Reload, and the move runs again.' }
+  let d: IDBDatabase
+  try {
+    d = live ? await within(database(), RECOVER_WAIT_MS, 'did not open') : await openWorkshopDb()
+  } catch (e) {
+    console.warn(`[workshop] recover: the database did not open: ${describe(e)}`)
+    return { ok: false, error: SILENT_RECOVER }
+  }
+  try {
+    const mark = await within(readMigrated(d), RECOVER_WAIT_MS, 'did not answer')
+    if (!mark) return { ok: false, error: 'Your shards never finished moving to this storage. Reload, and the move runs again.' }
+    const held = new Set((await within(readAll(d), RECOVER_WAIT_MS, 'did not answer')).records.map((r) => r.id))
+    const restored = new Set<string>()
+    let copies = 0
+    for (const text of texts) {
+      const entries = localEntries(text)
+      if (!entries || entries.length === 0) continue
+      copies++
+      // A shard missing here comes back only as work done since the move.
+      const wanted = entries.filter((e) => held.has(e.id) || e.updatedAt > mark.at)
+      if (!wanted.length) continue
+      const { written } = await within(mergeLocal(d, wanted, true), RECOVER_WAIT_MS, 'did not answer')
+      for (const id of written) { restored.add(id); held.add(id) }
+    }
+    if (!live || !host) return { ok: true, copies, restored: restored.size, reload: true }
+    // This tab's list takes what the database has and it lacks, or holds older.
+    const have = new Set(host.shards().map((s) => s.id))
+    const update = new Set([...[...held].filter((id) => !have.has(id)), ...restored])
+    if (update.size) await refresh([...update], [])
+    announce([...restored], [])
+    return { ok: true, copies, restored: update.size, reload: false }
+  } catch (e) {
+    console.warn(`[workshop] recover failed: ${describe(e)}`)
+    return { ok: false, error: SILENT_RECOVER }
+  } finally {
+    if (!live) { try { d.close() } catch { /* closed */ } }
+  }
+}
+
+const SILENT_RECOVER = 'Your shards\' storage is not answering. Close every other ONOSENDAI tab and window, then try again.'
 
 /** Tests only: this module as a tab that has been closed (its connection shut, nothing more written). */
 export function closeForTests(): void {

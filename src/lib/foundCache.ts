@@ -21,8 +21,10 @@
  * that opened goes (setFoundSink), so this file imports no store.
  */
 
+import { forgetSealedLooks } from './looks'
 import { verifyEvent } from 'nostr-tools/pure'
-import { HIDDEN_KIND, ciphertextOf, entryKey, unbag, type Hidden, type Reference, type RegionOrigin, type ResolveReference } from './hidden'
+import { forgetSealedItems } from './sealed'
+import { BagUnreadable, HIDDEN_KIND, ciphertextOf, entryKey, forgetParsedObjects, unbag, type Hidden, type Reference, type RegionOrigin, type ResolveReference } from './hidden'
 import { bytesToHex, hexToBytes } from './events'
 import type { NostrEvent } from './events'
 import type { FoundBag, FoundOrigin } from './foundDb'
@@ -106,23 +108,30 @@ export async function openRow(row: FoundBag, open: typeof unbag = unbag): Promis
   return items.length > 0 ? items : null
 }
 
+/** The deletion requests (kind 5, NIP-09) whose signatures hold: checked once, then matched against any number of bags (deletedAmong). */
+export function validDeletions(deletions: readonly NostrEvent[]): NostrEvent[] {
+  return deletions.filter((d) => d.kind === 5 && verifiedFresh(d))
+}
+
 /**
- * The rows a set of deletion requests (kind 5, NIP-09) removes: signed by the
- * bag's own author, naming the bag by id, or by its address at a time no
- * earlier than this version. Anyone else's deletion is ignored, and so is a
- * relay that simply does not send the bag: silence removes nothing.
+ * Whether one of these deletions (already through validDeletions) removes
+ * this bag: signed by the bag's own author, naming it by id, or by its
+ * address at a time no earlier than this version. Anyone else's deletion is
+ * ignored. The one rule for the found cache and for a scan (bagVersions.ts).
+ */
+export function deletedAmong(outer: Pick<NostrEvent, 'id' | 'pubkey' | 'created_at' | 'tags'>, valid: readonly NostrEvent[]): boolean {
+  const address = `${HIDDEN_KIND}:${outer.pubkey}:${lookupOf(outer) ?? ''}`
+  return valid.some((d) => d.pubkey === outer.pubkey && d.tags.some((t) =>
+    (t[0] === 'e' && t[1] === outer.id) || (t[0] === 'a' && t[1] === address && d.created_at >= outer.created_at)))
+}
+
+/**
+ * The rows a set of deletion requests removes (deletedAmong). A relay that
+ * simply does not send the bag removes nothing: silence removes nothing.
  */
 export function deletedRows(rows: FoundBag[], deletions: NostrEvent[]): string[] {
-  const valid = deletions.filter((d) => d.kind === 5 && verifiedFresh(d))
-  const out: string[] = []
-  for (const row of rows) {
-    const { outer } = row
-    const address = `${HIDDEN_KIND}:${outer.pubkey}:${lookupOf(outer) ?? ''}`
-    const gone = valid.some((d) => d.pubkey === outer.pubkey && d.tags.some((t) =>
-      (t[0] === 'e' && t[1] === outer.id) || (t[0] === 'a' && t[1] === address && d.created_at >= outer.created_at)))
-    if (gone) out.push(row.rowKey)
-  }
-  return out
+  const valid = validDeletions(deletions)
+  return rows.filter((row) => deletedAmong(row.outer, valid)).map((row) => row.rowKey)
 }
 
 /**
@@ -203,7 +212,8 @@ export function rememberBag(outer: NostrEvent, regionKey: Uint8Array, items: Hid
  */
 export const OPENED_KEPT_CHARS = 8 * 1024 * 1024
 let openedBudget = OPENED_KEPT_CHARS
-const openedBags = new Map<string, { items: Hidden[]; size: number }>()
+/** `items` null: the bag did not open with that key (lib/hidden.ts BagUnreadable), which is kept too, so it is not decrypted again either. */
+const openedBags = new Map<string, { items: Hidden[] | null; size: number }>()
 let openedChars = 0
 /** What one bag counts against the budget at least, so even one that opened to nothing is bounded in number. */
 export const OPENED_MIN_CHARS = 1024
@@ -221,7 +231,7 @@ function openedKey(outer: NostrEvent, regionKey: Uint8Array, origin: RegionOrigi
   return `${outer.id}:${outer.sig}:${bytesToHex(regionKey)}:${height ?? '-'}:${place}`
 }
 
-function keepOpened(key: string, items: Hidden[], size: number): void {
+function keepOpened(key: string, items: Hidden[] | null, size: number): void {
   if (size > openedBudget) return
   // Kept again under the same key (two scans that overlapped): counted once.
   const was = openedBags.get(key)
@@ -248,6 +258,11 @@ const opening = new Map<string, Promise<{ items: Hidden[]; refs: Record<string, 
  * (OPENED_KEPT_CHARS by default).
  */
 export function forgetOpened(budget: number = OPENED_KEPT_CHARS): number {
+  // What references opened to is plaintext of this identity's too, sealed entries' items with it.
+  forgetParsedObjects()
+  forgetSealedItems()
+  // A chest's sealed looks were opened with this identity's bag keys too (lib/looks.ts).
+  forgetSealedLooks()
   const n = openedBags.size
   openedBags.clear()
   opening.clear()
@@ -264,6 +279,7 @@ export async function unbagRemembered(outer: NostrEvent, regionKey: Uint8Array, 
     // The most recently opened goes last, so it is the last to go.
     openedBags.delete(key)
     openedBags.set(key, hit)
+    if (hit.items === null) throw new BagUnreadable(outer.id)
     rememberBag(outer, regionKey, hit.items, {}, height, origin)
     return hit.items
   }
@@ -282,6 +298,9 @@ export async function unbagRemembered(outer: NostrEvent, regionKey: Uint8Array, 
   let opened: { items: Hidden[]; refs: Record<string, NostrEvent> }
   try {
     opened = await run
+  } catch (err) {
+    if (key !== null && err instanceof BagUnreadable) keepOpened(key, null, openedSize(outer))
+    throw err
   } finally {
     if (key !== null && opening.get(key) === run) opening.delete(key)
   }

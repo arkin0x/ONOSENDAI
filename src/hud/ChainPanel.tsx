@@ -30,16 +30,38 @@ import { useEffect, useMemo, useRef } from 'react'
 import { formatMs, formatOps } from '../lib/space'
 import { expectedRidePairs } from '../lib/hyperspace/ride'
 import { TriangleAlert } from 'lucide-react'
-import { actionKind, actionLabel, firstBreak, openBracket } from '../lib/events'
-import { BrokenChainNotice } from './BrokenChain'
+import { actionKind, actionLabel, openBracket } from '../lib/events'
+import { BrokenChainNotice, RelayCeilingNote, RelayStopNotice } from './BrokenChain'
+import { useChainStop } from '../hooks/useChainStop'
+import { relayStopWords } from '../lib/chainBreak'
 import { PUBLISH_TAG_LABEL, PUBLISH_TAG_TITLE, publishTag } from '../lib/release'
 import { useCyberspace } from '../store/useCyberspace'
+import { enterTutorialDungeon, gamesEnabled, useGame } from '../store/useGame'
+import { choiceOffered, useTutorial } from '../store/useTutorial'
+import { DUNGEON_CHOICE } from '../tutorial/dungeon'
+import { TUTORIAL_GAME } from '../lib/games/tutorialGame'
+import { canLeave, gameFor } from '../lib/games/registry'
 import { useBuilder, walkChain } from '../store/useBuilder'
 import { CYBERSPACE_RELAY } from '../lib/relay'
 import { Explanation } from './Explanation'
 import { useChainStatus } from './ChainStatus'
 import { holdReason } from '../lib/chainHold'
 import { useChainUi } from '../store/useChainUi'
+import { CopyValue } from './ui/CopyValue'
+
+/**
+ * The rows drawn: the newest this many. Every row is about eighteen DOM nodes,
+ * and a long chain drew all of them: arkinox's ~1,300 actions were ~20,000
+ * nodes in the open menu, redrawn on every publish result (?diag=1,
+ * 2026-11-18). The chain explorer (the ACTIONS tag, or the line above the
+ * rows) walks the rest.
+ */
+export const CHAIN_ROWS_SHOWN = 100
+
+/** The index of the first row drawn, of a chain this long: the newest CHAIN_ROWS_SHOWN. */
+export function firstShownRow(length: number, shown: number = CHAIN_ROWS_SHOWN): number {
+  return Math.max(0, length - shown)
+}
 
 export function ChainPanel(): JSX.Element {
   const chain = useCyberspace((s) => s.chain)
@@ -47,13 +69,18 @@ export function ChainPanel(): JSX.Element {
   const prevEventId = useCyberspace((s) => s.prevEventId)
   const genesisId = useCyberspace((s) => s.genesisId)
   const events = useCyberspace((s) => s.events)
+  // Why the last ENTER GAME was refused, while no game is on screen to say it.
+  const gameNote = useGame((s) => (s.session ? null : s.message))
+  const entering = useGame((s) => s.busy === 'entering')
+  const leaving = useGame((s) => s.busy === 'exiting')
+  // While the tutorial runs and offers the dungeon (tutorial/dungeon.ts), its final card is the way in.
+  const tutorialDoor = useTutorial((s) => s.active && choiceOffered({ when: DUNGEON_CHOICE }))
   const published = useCyberspace((s) => s.published)
   const publishError = useCyberspace((s) => s.publishError)
   const live = useCyberspace((s) => s.live)
   const exploreIndex = useCyberspace((s) => s.exploreIndex)
-  // BUILD mode: the ACTIONS tag opens and closes the explorer instead of stepping.
+  // BUILD mode: the ACTIONS tag stands down, as the CHAIN chip does.
   const building = useBuilder((s) => s.active)
-  const explorerOpen = useChainUi((s) => s.explorerOpen)
   const respawns = useCyberspace((s) => s.respawns)
   const held = useCyberspace((s) => s.held)
   const check = useCyberspace((s) => s.selfCheck)
@@ -67,8 +94,12 @@ export function ChainPanel(): JSX.Element {
   const byId = useMemo(() => new Map(actions.map((a) => [a.id, a])), [actions])
   // A game holds the avatar: its entry, when the chain ends inside a bracket.
   const game = useMemo(() => openBracket(actions), [actions])
-  // The first row a verifier rejects, if any (events.ts firstBreak).
-  const broken = useMemo(() => firstBreak(actions), [actions])
+  // Where the chain stops, if it does (lib/chainStop.ts): the first row a
+  // verifier rejects, structurally or by its proof's form, or a hop above
+  // the relay's ceiling.
+  const stop = useChainStop()
+  const broken = stop?.source === 'rules' ? stop.broken : null
+  const relayStop = stop?.source === 'relay' ? stop.stop : null
 
   // The newest action is at the bottom, because that is the order the
   // publisher sends in and the order the chain is read in. Keep it in view as
@@ -79,6 +110,7 @@ export function ChainPanel(): JSX.Element {
     if (el) el.scrollTop = el.scrollHeight
   }, [events.length])
 
+  const from = firstShownRow(events.length)
   const statuses = events.map((e) => published[e.id])
   const sent = statuses.filter((st) => st === 'ok').length
   // HELD first: whatever LIVE says, a held chain is going nowhere until the
@@ -104,17 +136,22 @@ export function ChainPanel(): JSX.Element {
         <h2>Proof chain</h2>
         {/* The whole chain, spawn included, not this session's proofs; a tap
             opens the chain explorer at the head, a second tap puts it away. */}
-        {/* In BUILD mode a step along the chain aims the build cursor, so the
-            tag only opens and closes the explorer there (review of #235: it
-            sent the build cursor back to your avatar). */}
+        {/* Not in BUILD mode: the explorer is the CHAIN chip's, which is not
+            drawn while building (arkinox, 2026-11-02), and a step here would
+            aim the build cursor (review of #235: it sent the build cursor
+            back to your avatar). It used to open and close the explorer
+            there; with the chip hidden that lit the tag, opened nothing, and
+            left the explorer to spring open when the mode ended. [ ] Home
+            End still walk a chain while building. */}
         <button
           className="tag tag--tap"
+          disabled={building}
           onClick={() => {
-            if (useBuilder.getState().active) useChainUi.getState().setExplorerOpen(!explorerOpen)
-            else walkChain(exploreIndex === null ? Math.max(0, events.length - 1) : null)
+            if (useBuilder.getState().active) return
+            walkChain(exploreIndex === null ? Math.max(0, events.length - 1) : null)
           }}
-          aria-pressed={building ? explorerOpen : exploreIndex !== null}
-          title="Open the chain explorer"
+          aria-pressed={!building && exploreIndex !== null}
+          title={building ? 'Not while building: [ ] Home End aim the build cursor along the chain' : 'Open the chain explorer'}
         >
           {events.length} ACTION{events.length === 1 ? '' : 'S'}
         </button>
@@ -170,25 +207,39 @@ export function ChainPanel(): JSX.Element {
         </div>
       </dl>
 
-      {/* Every action, oldest first, and where it is. State only: there is no
-          control on a row. */}
+      {/* The newest actions (CHAIN_ROWS_SHOWN), oldest of them first, and where
+          each is. State only: there is no control on a row. */}
       <ol className="chainrows" ref={list}>
-        {events.map((e, i) => {
+        {from > 0 && (
+          <li className="chainrows__older">
+            <button
+              className="tag tag--tap"
+              disabled={building}
+              onClick={() => { if (!useBuilder.getState().active) walkChain(from - 1) }}
+              title={building ? 'Not while building' : 'Open the chain explorer at the newest of these'}
+            >
+              {from.toLocaleString()} OLDER ACTION{from === 1 ? '' : 'S'}
+            </button>
+          </li>
+        )}
+        {events.slice(from).map((e, k) => {
+          const i = from + k
           const tag = publishTag(published[e.id])
           const a = byId.get(e.id)
           // A row that breaks a rule reads BROKEN whatever its role, with the
           // warning glyph, so it is never mistaken for a game's pink row.
           const kind = a ? actionKind(a) : 'broken'
-          const breaks = kind === 'broken'
+          // The row a rejected proof stops the chain at reads BROKEN too.
+          const breaks = kind === 'broken' || (relayStop?.kind === 'broken' && relayStop.action.id === e.id)
           const label = a ? actionLabel(a) : 'UNREADABLE'
           return (
             <li key={e.id} className={`chainrows__row ${breaks ? 'chainrows__row--broken' : ''}`}>
               <span className="chainrows__n">{i}</span>
-              <span className={`chainrows__type chainrows__type--${kind}`} title={a?.breaks ?? a?.name}>
+              <span className={`chainrows__type chainrows__type--${breaks ? 'broken' : kind}`} title={a?.breaks ?? (breaks && relayStop ? relayStopWords(relayStop).why : a?.name)}>
                 {breaks && <TriangleAlert size={10} strokeWidth={2.5} aria-hidden className="chainrows__warn" />}
                 {label}
               </span>
-              <code className="chainrows__id" title={e.id}>{e.id.slice(0, 8)}…</code>
+              <code className="chainrows__id"><CopyValue value={e.id} shown={`${e.id.slice(0, 8)}…`} /></code>
               <span className={`tag tag--${tag}`} title={PUBLISH_TAG_TITLE[tag]}>{PUBLISH_TAG_LABEL[tag]}</span>
             </li>
           )
@@ -197,11 +248,11 @@ export function ChainPanel(): JSX.Element {
 
       <div className="hash">
         <span className="hash__label">genesis</span>
-        <code>{genesisId}</code>
+        <code><CopyValue value={genesisId} /></code>
       </div>
       <div className="hash">
         <span className="hash__label">chain head{events.length <= 1 ? ' (spawn)' : ''}</span>
-        <code>{prevEventId}</code>
+        <code><CopyValue value={prevEventId} /></code>
       </div>
 
       {publishError && <p className="notice">{CYBERSPACE_RELAY}: {publishError}</p>}
@@ -217,6 +268,19 @@ export function ChainPanel(): JSX.Element {
           CHAIN CONFLICT: this identity has a chain on the relays as well as the one held here. Nothing moves until you choose.
           <button className="tag tag--tap" onClick={() => useChainUi.getState().setPromptAside(false)}>SHOW THE CHOICE</button>
         </p>
+      ) : game && gameFor(game.game?.pubkey) ? (
+        // A game ONOSENDAI plays (DECK-0002 §7): back into it, or leave it from here, the exit built from the chain alone.
+        <p className="notice notice--game">
+          IN A GAME: {gameFor(game.game?.pubkey)?.name}. You stand where you entered it until you leave it.{gameNote ? ` ${gameNote}` : ''}
+          <button className="tag tag--tap" disabled={leaving} onClick={() => useGame.getState().resume()}>BACK INTO THE GAME</button>
+          <button className="tag tag--tap" disabled={leaving} onClick={() => { void useGame.getState().exit() }}>{leaving ? 'LEAVING' : 'LEAVE THE GAME'}</button>
+        </p>
+      ) : game && canLeave(game.game?.pubkey) ? (
+        // A game ONOSENDAI once played, not here now: it can still be left (registry canLeave).
+        <p className="notice notice--game">
+          IN A GAME that ONOSENDAI played. You stand where you entered it until you leave it.{gameNote ? ` ${gameNote}` : ''}
+          <button className="tag tag--tap" onClick={() => { void useGame.getState().exit() }}>LEAVE THE GAME</button>
+        </p>
       ) : game ? (
         // Below the publishing states, which are choices waiting on you; this
         // one waits on the game's client (store GAME_HOLDS_MESSAGE).
@@ -231,6 +295,18 @@ export function ChainPanel(): JSX.Element {
         </p>
       ) : null}
 
+      {/* With this device's games switch on (lib/games/flag.ts gamesEnabled,
+          never on the production host, even once the game is live: there the
+          tutorial's final card is the door), a way into the tutorial dungeon
+          except while the first-arrival tutorial runs and its final card
+          offers it instead (DECK-0002 §2): one door at a time. */}
+      {gamesEnabled() && !tutorialDoor && !game && events.length > 0 && (
+        <p className="notice notice--game">
+          {TUTORIAL_GAME.name}{entering ? ': ENTERING' : gameNote ? `: ${gameNote}` : ''}
+          <button className="tag tag--tap" onClick={() => { void enterTutorialDungeon() }}>ENTER GAME</button>
+        </p>
+      )}
+
       {/* Apart from the states above: a broken row is a fact about the chain
           itself, and it can stand alongside any of them. You stand frozen at
           the last valid position until you respawn (arkinox, 2026-10-07). */}
@@ -242,6 +318,15 @@ export function ChainPanel(): JSX.Element {
           </>
         )} />
       )}
+      {relayStop?.kind === 'broken' && (
+        <RelayStopNotice stop={relayStop} actions={(
+          <>
+            <button className="tag tag--tap" onClick={() => walkChain(relayStop.index)}>SHOW THE ROW</button>
+            <button className="brokenchain__respawn" onClick={() => useChainUi.getState().setBrokenView('confirm')}>RESPAWN</button>
+          </>
+        )} />
+      )}
+      {relayStop?.kind === 'tall' && <RelayCeilingNote stop={relayStop} />}
 
       <Explanation>
         To alter your position in cyberspace, you must compute the cantor root for

@@ -7,23 +7,97 @@
  *
  * Positions are computed from the raw coordinates rather than from anything
  * already in render space, because a target is usually far outside the drawn
- * volume. cellDelta does the division in fixed-point bigint, so a landmark 10^25
- * gibsons away still lands on a real number instead of collapsing to Infinity.
+ * volume. cellDelta (under placeCentre and pointCentre) does the division in
+ * fixed-point bigint, so a landmark 10^25 gibsons away still lands on a real
+ * number instead of collapsing to Infinity.
+ *
+ * Everything is measured in the frame the scene on screen is drawn in, as it
+ * is at this moment (arkinox, 2026-11-18: "every chain action that resolves
+ * causes the other avatar in my hud to jitter"). A landing re-centres render
+ * space on your new chain head, and the rig moves the camera by that shift
+ * in the same frame. This used to read the drawn avatar's world matrix as
+ * the last render left it, from before the shift, against the camera after
+ * it, so for one frame at every landing the name, picture and ring under
+ * another avatar were drawn as far off as the walk had come (a whole
+ * segment), then snapped back. Now the avatar's world matrix is brought up
+ * to date, parents included, before it is measured (drawnLabelAnchor), and
+ * the projector runs late in the frame (PROJECTOR_PRIORITY), after the rig
+ * and every avatar have moved, so the label never depends on which of them
+ * happened to subscribe first. The marker's own point is placed against the
+ * committed anchor (lib/renderFrame.ts), as the rig and your own avatar are.
  */
 
 import { useFrame } from '@react-three/fiber'
 import { useMemo } from 'react'
-import { Box3, Vector3 } from 'three'
+import { Box3, Vector3, type Camera, type Object3D } from 'three'
 
-import { cellDelta, stepFor, type ViewAxes } from '../lib/space'
+import { placeCentre, pointCentre, stepFor, type Position, type ViewAxes } from '../lib/space'
 import { drawnAvatars, targetScreens, viewAxis, type CyberTarget } from '../lib/targets'
 import { viewAxisNdc } from '../lib/coverBand'
 import { labelAnchor, type LabelAnchor } from '../lib/avatarLabel'
+import { committedAnchor } from '../lib/renderFrame'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 
 interface Props {
   axes: ViewAxes
   targets: CyberTarget[]
+}
+
+/**
+ * Where a target's marker points, in render space: where the scene draws it.
+ *
+ * A person (you, a target, anyone present) is drawn at placeCentre, the
+ * centre of their gibson's cell at this zoom (Avatar, OtherAvatar), so the
+ * marker is too. It used to be the raw coordinate less half a cell, which
+ * is the cell's low corner: the YOU circle and every other avatar's hung on
+ * the corner of the cube they stood in (arkinox, 2026-11-02). Something with
+ * an extent (Earth) keeps the continuous point its sphere is drawn about.
+ * From CONTINUOUS_SCALE_MIN up the two agree, as placeCentre is pointCentre
+ * there.
+ */
+export function targetPoint(
+  t: { at: Position; radius?: bigint }, origin: Position, scaleExp: number, axes: ViewAxes,
+): [number, number, number] {
+  return t.radius === undefined ? placeCentre(t.at, origin, scaleExp, axes) : pointCentre(t.at, origin, scaleExp, axes)
+}
+
+/**
+ * When the projector reads the avatars and the camera: after everything that
+ * moves them (the Rig and every avatar at 0, Cyberspace TV's camera at 0.5)
+ * and before the composer draws the frame at 1, as HeadlampRig does.
+ */
+export const PROJECTOR_PRIORITY = 0.6
+
+/**
+ * Where the label hangs under a drawn avatar, on the screen (lib/avatarLabel
+ * labelAnchor), or undefined when none of it is in front of the camera.
+ * `camera`'s matrices must be current (the caller updates them once a frame).
+ *
+ * The avatar's world matrix is brought up to date first, parents included:
+ * a frame's callbacks move groups, and three only recomputes world matrices
+ * when it renders. Box3.setFromObject updates the object itself but not its
+ * parents, so an avatar whose group was just re-placed (a landing's
+ * re-centring, in the commit before this frame) was measured where the last
+ * render drew it, against a camera the rig had already moved.
+ */
+export function drawnLabelAnchor(drawn: Object3D, camera: Camera, box: Box3 = new Box3(), corner: Vector3 = new Vector3()): LabelAnchor | undefined {
+  drawn.updateWorldMatrix(true, false)
+  box.setFromObject(drawn)
+  if (box.isEmpty()) return undefined
+  return labelAnchor(
+    { min: [box.min.x, box.min.y, box.min.z], max: [box.max.x, box.max.y, box.max.z] },
+    (p) => {
+      corner.set(p[0], p[1], p[2]).applyMatrix4(camera.matrixWorldInverse)
+      if (corner.z >= 0) return null
+      corner.applyMatrix4(camera.projectionMatrix)
+      return [corner.x, corner.y]
+    },
+  ) ?? undefined
+}
+
+/** The origin a frame measures targets from: the anchor the scene on screen was committed with (lib/renderFrame.ts), else the store's. */
+export function projectorOrigin(s: { anchor: Position; scaleExp: number }): Position {
+  return alignedOrigin(committedAnchor() ?? s.anchor, s.scaleExp)
 }
 
 export function TargetProjector({ axes, targets }: Props): null {
@@ -37,7 +111,11 @@ export function TargetProjector({ axes, targets }: Props): null {
     const s = useCyberspace.getState()
     // Everything is measured from the anchor: the avatar being looked at, which
     // is you at the head and whoever or whenever else the scene is anchored on.
-    const origin = alignedOrigin(s.anchor, s.scaleExp)
+    // The one the scene on screen was drawn with, which a landing moves a
+    // commit after the store (lib/renderFrame.ts), as the camera is.
+    const origin = projectorOrigin(s)
+    // The camera as the rig has left it this frame, once for every target (drawnLabelAnchor).
+    state.camera.updateMatrixWorld()
     const step = stepFor(s.scaleExp)
     const cam = state.camera as unknown as { fov?: number; position: Vector3 }
     state.camera.getWorldDirection(forward)
@@ -48,9 +126,7 @@ export function TargetProjector({ axes, targets }: Props): null {
     const axis = viewAxisNdc(state.camera.projectionMatrix, viewAxis)
 
     for (const t of targets) {
-      const [x, y, z] = [axes.right, axes.up, axes.out].map(
-        (a) => (cellDelta(t.at[a.axis], origin[a.axis], s.scaleExp) - 0.5) * a.dir,
-      )
+      const [x, y, z] = targetPoint(t, origin, s.scaleExp, axes)
       scratch.set(x, y, z)
 
       const depth = Math.max(0.001, cam.position.distanceTo(scratch))
@@ -85,24 +161,10 @@ export function TargetProjector({ axes, targets }: Props): null {
 
       // The avatar as drawn, when the scene draws one for this target: the
       // label goes under its lowest point, centered on it (lib/avatarLabel;
-      // arkinox, 2026-10-11), not at its cell's corner, which is where the
-      // raw coordinate above lands.
-      let avatar: LabelAnchor | undefined
+      // arkinox, 2026-10-11). Without one (your own, or one not drawn) the
+      // marker is the point above, the centre of the avatar's cell.
       const drawn = drawnAvatars[t.id]
-      if (drawn) {
-        box.setFromObject(drawn)
-        if (!box.isEmpty()) {
-          avatar = labelAnchor(
-            { min: [box.min.x, box.min.y, box.min.z], max: [box.max.x, box.max.y, box.max.z] },
-            (p) => {
-              corner.set(p[0], p[1], p[2]).applyMatrix4(state.camera.matrixWorldInverse)
-              if (corner.z >= 0) return null
-              corner.applyMatrix4(state.camera.projectionMatrix)
-              return [corner.x, corner.y]
-            },
-          ) ?? undefined
-        }
-      }
+      const avatar: LabelAnchor | undefined = drawn ? drawnLabelAnchor(drawn, state.camera, box, corner) : undefined
 
       targetScreens[t.id] = {
         ...(avatar ? { avatar } : {}),
@@ -115,7 +177,7 @@ export function TargetProjector({ axes, targets }: Props): null {
           : (Number((t.radius * 10_000n) / step) / 10_000) * projScale / depth,
       }
     }
-  })
+  }, PROJECTOR_PRIORITY)
 
   return null
 }

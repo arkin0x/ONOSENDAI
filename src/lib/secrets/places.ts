@@ -61,6 +61,8 @@ export interface PlaceKey {
   /** The cube's aligned corner, as decimal strings. */
   base: { x: string; y: string; z: string }
   plane: Plane
+  /** Its lock (DECK-0004 §3.8.1), stored once derived (§3.8.4), so a reload does not derive it again. */
+  lock?: string
 }
 
 /** The place's id: the 2^0 cube's lookup id, in its plane. */

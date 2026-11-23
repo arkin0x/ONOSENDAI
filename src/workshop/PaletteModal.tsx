@@ -16,14 +16,14 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
-import { Check, Download, Plus, Trash2, Upload, X } from 'lucide-react'
+import { Check, Download, Pipette, Plus, Trash2, Upload } from 'lucide-react'
 import { BUILT_IN, BUILT_IN_NAME, explainPasteProblem, hexAt, parsePaletteText, type Palette } from 'sno-core/snoPalette'
 import { rgbToHex } from 'sno-core/shards'
 import { paletteNevent, usePaletteNet } from '../store/usePaletteNet'
 import { useWorkshop, type NamedPalette } from '../store/useWorkshop'
 import { ConfirmModal } from '../hud/ConfirmModal'
 import { useEscape } from '../hooks/useEscape'
+import { ModalClose } from '../hud/ui/ModalClose'
 
 /** How the built-in is laid out, so the sheet can be read rather than scanned. */
 const BANDS = [
@@ -42,7 +42,51 @@ const BANDS = [
  */
 const FOLD_MS = 190
 
-export function PaletteModal({ onClose }: { onClose: () => void }): JSX.Element {
+type Bytes = [number, number, number]
+const bytes = (hex: string): Bytes => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)) as Bytes
+
+/** WCAG relative luminance, each channel taken to linear light first. */
+function luminance(c: Bytes): number {
+  const [r, g, b] = c.map((v) => {
+    const x = v / 255
+    return x <= 0.04045 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4
+  })
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b
+}
+
+/** The two inks a swatch's number can be written in, and how faded (styles.css, .palettes__sw and .palettes__n). */
+const DARK_INK = bytes('#05070d')
+const LIGHT_INK = bytes('#eef6ff')
+const INK_ALPHA = 0.85
+
+/** Contrast of faded ink over a swatch: the ink is blended over it as the browser paints it, then measured. */
+function contrast(ink: Bytes, bg: Bytes): number {
+  const seen = luminance(ink.map((v, i) => v * INK_ALPHA + bg[i] * (1 - INK_ALPHA)) as Bytes)
+  const under = luminance(bg)
+  return (Math.max(seen, under) + 0.05) / (Math.min(seen, under) + 0.05)
+}
+
+/**
+ * Whether a swatch's number is written in light ink rather than dark.
+ *
+ * The number is how a color is named in a DNA (`'(171)`), so it has to read on
+ * every swatch, from the deep grounds to the near whites. Whichever ink, faded
+ * as it is drawn, stands out more against the swatch wins. A threshold on the
+ * raw hex got the saturated mid tones wrong (171, the cyans, pure red and
+ * magenta: review of PR 671).
+ */
+export function lightInk(hex: string): boolean {
+  const bg = bytes(hex)
+  return contrast(LIGHT_INK, bg) > contrast(DARK_INK, bg)
+}
+
+/** The contrast ratio a swatch's number is drawn at, for tests to hold a floor under. */
+export function inkContrast(hex: string): number {
+  const bg = bytes(hex)
+  return Math.max(contrast(LIGHT_INK, bg), contrast(DARK_INK, bg))
+}
+
+export function PaletteModal({ onClose, foldAsk = 0 }: { onClose: () => void; foldAsk?: number }): JSX.Element {
   const shard = useWorkshop((s) => s.current())
   const palettes = useWorkshop((s) => s.palettes)
   const color = useWorkshop((s) => s.color)
@@ -51,6 +95,9 @@ export function PaletteModal({ onClose }: { onClose: () => void }): JSX.Element 
   const busy = usePaletteNet((s) => s.publishing)
   /** Colors this author has reached for, newest first (useWorkshop.palette). */
   const recent = useWorkshop((s) => s.palette)
+  const canSample = useWorkshop((s) => s.selection.length === 1 || s.selectedFaces.length > 0)
+  // In PAINT nothing is held: the dropper arms the next tap instead, and the palette folds away so it can be made.
+  const painting = useWorkshop((s) => s.tool === 'paint')
 
   const active: Palette = shard?.palette ?? BUILT_IN
   const activeName = shard?.palette ? (shard.paletteName ?? 'a palette of its own') : BUILT_IN_NAME
@@ -190,33 +237,48 @@ export function PaletteModal({ onClose }: { onClose: () => void }): JSX.Element 
     fold()
   }
 
+  /**
+   * The palette drawn below, and so the one every pick indexes into: the
+   * built-in while building a palette (which starts from the built-in's
+   * colors), the object's own otherwise. Picking and making read it rather
+   * than `active`, so a pick always means the swatch the author saw.
+   */
+  const sheet = making ? BUILT_IN : active
+
   const take = (index: number): void => {
     if (making) {
       setPicked((p) => (p.includes(index) ? p.filter((i) => i !== index) : p.length < 256 ? [...p, index] : p))
       return
     }
-    useColor(hexAt(active, index))
+    useColor(hexAt(sheet, index))
   }
 
   const create = (): void => {
     if (picked.length < 2) return
-    const colors = picked.map((i) => active[i]) as Palette
+    const colors = picked.map((i) => sheet[i]) as Palette
     const id = w().savePalette(newName, colors)
     setMaking(false); setNewName(''); setPicked([])
     setSwitching({ id, name: newName.trim() || 'untitled' })
   }
 
-  const sheet = making ? BUILT_IN : active
   // Escape folds it as the close button does, back into the chip (arkinox,
   // 2026-10-01). Its own confirmations open later, so they close first.
   useEscape('modal', true, fold)
+  // So does a second tap on the color chip in the dock (the workshop counts them).
+  const asked = useRef(foldAsk)
+  useEffect(() => {
+    if (foldAsk === asked.current) return
+    asked.current = foldAsk
+    fold()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [foldAsk])
 
-  // Through a portal, for the reason ConfirmModal gives: this is rendered from
-  // inside .ws__corner, which has a z-index and a backdrop-filter and is
-  // therefore a stacking context, so a full-screen modal left in there paints
-  // under the chip row that follows it.
-  return createPortal(
-    <div className={`modal palettes${folding ? ' is-folding' : ''}`} ref={rootRef} role="dialog" aria-modal="true" aria-label="Palette">
+  // A sheet over the dock (workshop redesign, phase 1), standing on the strip
+  // with the object in view above it, rather than a modal over everything.
+  // It is rendered in the workshop's bottom group, beside the strip and the
+  // dock, so no stacking context lies between it and them.
+  return (
+    <div className={`palettes ws__sheet ws__sheet--tall${folding ? ' is-folding' : ''}`} ref={rootRef} role="dialog" aria-label="Palette">
       <div className="palettes__head">
         <div>
           <h2 className="palettes__title">PALETTE</h2>
@@ -225,8 +287,29 @@ export function PaletteModal({ onClose }: { onClose: () => void }): JSX.Element 
               ? `Tap colors to take them. ${picked.length} chosen, 2 or more makes a palette.`
               : `${activeName} · ${active.length} colors · a color on the wire is an index into this`}
           </p>
+          {/*
+            The color in hand, by number, without hovering anything.
+
+            The number is what a DNA names a color by, and the tooltips that
+            used to be the only place it was written never show on a phone
+            (arkinox, 2026-11-11). Hidden while building a palette, where the
+            sheet is the built-in and its numbers are about to change.
+          */}
+          {!making && (
+            <p className="palettes__now">
+              <span className="palettes__label">COLOR</span>
+              <span className="palettes__now-sw" style={{ background: hex }} />
+              {current >= 0 ? <b className="palettes__now-n">{current}</b> : null}
+              <span className="palettes__now-hex">{current >= 0 ? hex : `${hex} · not in this palette`}</span>
+            </p>
+          )}
         </div>
-        <button className="chip ws__icon" onClick={fold} aria-label="Close"><X size={16} strokeWidth={2.25} /></button>
+        <span className="palettes__headkeys">
+          {/* The dropper, in the palette's header (workshop redesign, phase 2):
+              the held point's or face's color into hand, as MORE's TAKE COLOR. */}
+          <button className="chip ws__icon" disabled={!canSample && !painting} onClick={() => { if (canSample) w().sampleColor(); else { w().setPaintTake(true); fold() } }} title={canSample ? 'Take the color of the point or face you hold' : 'The next tap takes the color of the point or face it meets'} aria-label="Take the selected color"><Pipette size={16} strokeWidth={2.25} /></button>
+          <ModalClose onClose={fold} />
+        </span>
       </div>
 
       <div className="palettes__body">
@@ -248,13 +331,13 @@ export function PaletteModal({ onClose }: { onClose: () => void }): JSX.Element 
                 return (
                   <button
                     key={h}
-                    className={`palettes__sw ${h === hex ? 'is-on' : ''}`}
+                    className={`palettes__sw ${h === hex ? 'is-on' : ''}${lightInk(h) ? ' is-light' : ''}`}
                     style={{ background: h }}
                     title={i >= 0 ? `${i} · ${h}` : `${h}, not in this palette`}
-                    aria-label={`Recently used color ${h}`}
+                    aria-label={i >= 0 ? `Recently used color ${i}, ${h}` : `Recently used color ${h}`}
                     aria-pressed={h === hex}
                     onClick={() => useColor(h)}
-                  />
+                  >{i >= 0 ? <span className="palettes__n" aria-hidden="true">{i}</span> : null}</button>
                 )
               })}
             </div>
@@ -267,16 +350,19 @@ export function PaletteModal({ onClose }: { onClose: () => void }): JSX.Element 
               {sheet.slice(band.from, Math.min(band.to, sheet.length - 1) + 1).map((_, n) => {
                 const i = band.from + n
                 const on = making ? picked.includes(i) : i === current
+                // No numbers while building a palette: a color's number in the
+                // new one is its place in the picks, not this one, and a DNA
+                // written from the built-in's would name the wrong colors.
                 return (
                   <button
                     key={i}
-                    className={`palettes__sw ${on ? 'is-on' : ''}`}
+                    className={`palettes__sw ${on ? 'is-on' : ''}${lightInk(hexAt(sheet, i)) ? ' is-light' : ''}`}
                     style={{ background: hexAt(sheet, i) }}
                     title={`${i} · ${hexAt(sheet, i)}`}
                     aria-label={`Color ${i}, ${hexAt(sheet, i)}`}
                     aria-pressed={on}
                     onClick={() => take(i)}
-                  >{making && on ? <Check size={11} strokeWidth={3} /> : null}</button>
+                  >{making ? (on ? <Check size={11} strokeWidth={3} /> : null) : <span className="palettes__n" aria-hidden="true">{i}</span>}</button>
                 )
               })}
             </div>
@@ -415,8 +501,7 @@ export function PaletteModal({ onClose }: { onClose: () => void }): JSX.Element 
           onCancel={() => setForgetting(null)}
         />
       )}
-    </div>,
-    document.body,
+    </div>
   )
 }
 

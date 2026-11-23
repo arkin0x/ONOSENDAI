@@ -40,7 +40,7 @@ const INSIDE = ['gate', 'arch', 'drain', 'wall', 'corner1', 'corner2', 'pond']
 const id = (s: string): string => s
 
 function setup(): FolderNode<string> {
-  useShardFolders.setState({ owner: 'ee'.repeat(32), tree: applyOps(EMPTY_TREE, OPS), storage: 'indexeddb' })
+  useShardFolders.setState({ tree: applyOps(EMPTY_TREE, OPS), storage: 'indexeddb' })
   return node('kit')
 }
 function node(folder: string): FolderNode<string> {
@@ -171,6 +171,6 @@ describe('where it is offered', () => {
   it('only the workshop\'s own list is handed DELETE CONTENTS; the pickers are not', () => {
     const src = join(__dirname, '..', '..')
     const handing = sources(src).filter((p) => /<ShardFolders\b[^>]*deleteContents=/.test(readFileSync(p, 'utf8')))
-    expect(handing.map((p) => p.slice(src.length + 1))).toEqual([join('workshop', 'Workshop.tsx')])
+    expect(handing.map((p) => p.slice(src.length + 1))).toEqual([join('workshop', 'sheets', 'MenuSheet.tsx')])
   })
 })

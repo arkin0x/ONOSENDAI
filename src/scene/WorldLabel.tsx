@@ -12,7 +12,7 @@
  * lag behind the cube it is supposed to be stuck to.
  */
 
-import { useMemo, useRef } from 'react'
+import { useMemo, useRef, type MutableRefObject } from 'react'
 import { Text } from '@react-three/drei'
 import { useFrame, type RootState } from '@react-three/fiber'
 import { Group, Quaternion, Vector3, type Object3D } from 'three'
@@ -76,6 +76,8 @@ interface Props {
   /** Height in CSS pixels, held constant at any camera distance. */
   px?: number
   opacity?: number
+  /** A fade read each frame, for one driven per frame and not by React (scene/ItemVanish). Needs `recede`. */
+  fade?: MutableRefObject<number>
   /** Left for labels that hang off a point, centre for labels that cap a face. */
   align?: 'left' | 'center'
   /**
@@ -113,8 +115,17 @@ interface Props {
    * pixel size it is never drawn smaller than. The label is centred on the
    * anchor and lifted by the marker's on-screen reach plus a small gap,
    * recomputed every frame from depth; `offsetPx` is added on top.
+   *
+   * `nearFace`, for a marker that is a box in the world (a message's or a
+   * model-less key's one-gibson cube): the reach is measured where the box
+   * comes nearest the eye, so a box up close never runs into its name, and
+   * the label is lifted a further `sub` line so its credit line clears the
+   * box too. Above, not under: a box resting on the ground has the ground in
+   * front of whatever hangs under it on screen, and the ground hid the name
+   * there (#870, #887), while a name above stands over the ground from any
+   * camera above it. A wall in front still hides it, as it hides any label.
    */
-  clear?: { trueSide: number; minPx: number }
+  clear?: { trueSide: number; minPx: number; nearFace?: boolean }
   /**
    * Where the label's parent stands from the camera, for a parent that is
    * always at the same offset from it and carries no turn or scale: the
@@ -138,8 +149,18 @@ interface Props {
   recede?: 'name' | 'credit' | 'mark'
 }
 
+/** How far under the name's middle its credit line's middle is, in the name's line heights. */
+function subCentre(subScale: number): number {
+  return 0.5 + subScale * 0.85
+}
+
+/** How far under the name's middle its credit line's bottom is, in the name's line heights. */
+export function subBottom(subScale: number): number {
+  return subCentre(subScale) + subScale / 2
+}
+
 export function WorldLabel({
-  text, color, at, follow, offset = [0, 0, 0], offsetPx = [0, 0], px = 14, opacity = 1, align = 'left',
+  text, color, at, follow, offset = [0, 0, 0], offsetPx = [0, 0], px = 14, opacity = 1, fade, align = 'left',
   small, smallScale = 0.68, sub, subScale = 0.72, subColor, subOpacity = 0.7, clear, fromCamera, recede,
 }: Props): JSX.Element {
   const group = useRef<Group>(null)
@@ -173,7 +194,15 @@ export function WorldLabel({
     const near = recede && recede !== 'mark' ? mark : 1
     // Lifted clear of its marker: one local unit is `unitPx` pixels.
     if (inner.current && clear) {
-      inner.current.position.y = labelLiftPx(clear.trueSide, clear.minPx * mark, depth, projScale, unitPx) / unitPx + (offsetPx[1] / px) * near
+      // A box in the world is measured where it comes nearest the eye (its near face), so up close it never runs into its name.
+      const at = clear.nearFace ? Math.max(depth - clear.trueSide / 2, depth * 0.05) : depth
+      const lift = labelLiftPx(clear.trueSide, clear.minPx * mark, at, projScale, unitPx) / unitPx
+      // Its credit line hangs under the name (the caption below), so the name
+      // stands that much higher; far off, as the credit line fades out
+      // (CREDIT_FADE, below), the name settles down over the box with it.
+      const credit = recede === 'name' || recede === 'credit' ? fadeShare(depth, reach, CREDIT_FADE[0], CREDIT_FADE[1]) : 1
+      const creditLift = clear.nearFace && sub !== undefined ? (subBottom(subScale) - 0.5) * credit : 0
+      inner.current.position.y = lift + creditLift + (offsetPx[1] / px) * near
     } else if (inner.current && recede) {
       // Every frame while it recedes: back at full size the prop is never
       // re-applied (R3F skips equal array props), so a jump from far to near
@@ -183,9 +212,10 @@ export function WorldLabel({
     // Far off a name fades, its credit line first (lib/markerSize.ts fadeShare).
     if (recede === 'name' || recede === 'credit') {
       const own = recede === 'name' ? fadeShare(depth, reach, NAME_FADE[0], NAME_FADE[1]) : fadeShare(depth, reach, CREDIT_FADE[0], CREDIT_FADE[1])
-      fadeTo(line.current, opacity, own)
-      fadeTo(second.current, opacity, own)
-      fadeTo(caption.current, opacity * subOpacity, Math.min(own, fadeShare(depth, reach, CREDIT_FADE[0], CREDIT_FADE[1])))
+      const level = fade?.current ?? 1
+      fadeTo(line.current, opacity, own * level)
+      fadeTo(second.current, opacity, own * level)
+      fadeTo(caption.current, opacity * subOpacity, Math.min(own, fadeShare(depth, reach, CREDIT_FADE[0], CREDIT_FADE[1])) * level)
     }
     // Face the camera exactly as it is drawn: the camera's own turn, undone
     // by whatever turns the label's parents. drei's Billboard did this at
@@ -251,7 +281,7 @@ export function WorldLabel({
             fillOpacity={opacity * subOpacity}
             outlineWidth={0.06}
             outlineColor="#05070d"
-            position={[0, -(0.5 + subScale * 0.85), 0]}
+            position={[0, -subCentre(subScale), 0]}
           >
             {sub}
           </Text>

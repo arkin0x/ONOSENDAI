@@ -10,8 +10,8 @@
  * more than once.
  */
 
-import { computeHopProofV2, type Plane } from 'cyberspace-core'
-import type { HopTags } from '../../workers/proof.worker'
+import { bytesToHex, computeHopProofV2, computeSidestepProof, encodeNonce, encodeOpenings, type Plane } from 'cyberspace-core'
+import type { HopTags, SidestepTags } from '../../workers/proof.worker'
 import { buildChain, chainHead, type NostrEvent } from '../../lib/events'
 
 interface Move {
@@ -21,16 +21,33 @@ interface Move {
   prevEventId: string
 }
 
-/** The proof fields for this move: real for a hop, a stand-in for anything else (a sidestep's checks are not this one's). */
-export function provedHop(m: Move, mode: string = 'hop'): { proofHash: string; hop?: HopTags } {
-  if (mode !== 'hop' || !m.pendingTarget || !/^[0-9a-f]{64}$/.test(m.prevEventId)) return { proofHash: 'dd'.repeat(32) }
+/**
+ * The proof fields for this move: real for a hop and for a sidestep, which
+ * finishProof checks at Level 1 the same way (lib/sidestepCheck.ts), as the
+ * proof worker would send them. A stand-in for anything else. A sidestep is
+ * proved for real, so keep a test's walls short.
+ */
+export function provedHop(m: Move, mode: string = 'hop'): { proofHash: string; hop?: HopTags; sidestep?: SidestepTags } {
+  if ((mode !== 'hop' && mode !== 'sidestep') || !m.pendingTarget || !/^[0-9a-f]{64}$/.test(m.prevEventId)) return { proofHash: 'dd'.repeat(32) }
   const { position: a, pendingTarget: b } = m
+  if (mode === 'sidestep') {
+    const p = computeSidestepProof(a.x, a.y, a.z, b.x, b.y, b.z, m.plane, m.prevEventId)
+    return {
+      proofHash: p.proofHash,
+      sidestep: {
+        merkleRoots: [bytesToHex(p.merkleX), bytesToHex(p.merkleY), bytesToHex(p.merkleZ)],
+        openings: [encodeOpenings(p.openings.x), encodeOpenings(p.openings.y), encodeOpenings(p.openings.z)],
+        mnHex: encodeNonce(p.nonce),
+        lcaHeights: p.lcaHeights,
+      },
+    }
+  }
   const p = computeHopProofV2(a.x, a.y, a.z, b.x, b.y, b.z, m.plane, m.prevEventId)
   return { proofHash: p.tags.proof, hop: { sealHex: p.tags.proof, mnHex: p.tags.mn, mpHex: p.tags.mp } }
 }
 
 /** The same from a posted proof request. */
-export function provedFor(request: unknown, events?: NostrEvent[]): { proofHash: string; hop?: HopTags } {
+export function provedFor(request: unknown, events?: NostrEvent[]): { proofHash: string; hop?: HopTags; sidestep?: SidestepTags } {
   // The request as lib/workers posted it (ProofRequest); tests type it narrowly.
   const req = request as { mode: string; from: Move['position']; to: Move['position']; plane?: Plane; prevEventId?: string }
   // A test that stood the avatar somewhere by hand, without a move, signs

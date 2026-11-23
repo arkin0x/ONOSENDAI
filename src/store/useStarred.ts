@@ -1,9 +1,13 @@
 /**
- * useStarred.ts - the Starred Places list (lib/starred.ts), kept on this
- * device under onosendai:starred-places and shared by every identity
- * signed in here. Read once when the module loads; every change is written
- * straight back. A storage that cannot be read or written leaves the list
- * working for this visit.
+ * useStarred.ts - the Starred Places list (lib/starred.ts), one identity's
+ * own, kept on this device under its pubkey (store/personalLists.ts): a new
+ * or different identity starts with none, and each finds its own again when
+ * it logs back in here (owner ruling, 2026-11-19: "my starred places ...
+ * should be cleared out if i roll a new npub, but be restored if i login with
+ * arkinox again"). The list builds before kept once per device goes to the
+ * identity signed in when it is first read. Every change is written straight
+ * back; a storage that cannot be written leaves the list working for this
+ * visit.
  *
  * Two short-lived things ride along, neither of them stored:
  * - `naming`: the place just starred, while its nickname field is up
@@ -14,7 +18,8 @@
  */
 
 import { create } from 'zustand'
-import { addPlace, cleanNickname, isStarred, loadPlaces, placeName, removePlace, savePlaces, type StarredPlace, type StarSpot } from '../lib/starred'
+import { addPlace, cleanNickname, cleanPlaces, isStarred, legacyPlaces, placeName, removePlace, unionPlaces, type StarredPlace, type StarSpot } from '../lib/starred'
+import { personalList } from './personalLists'
 import type { RecentView } from '../lib/viewAt'
 import { BRIEF_TOAST_MS, useToast } from './useToast'
 
@@ -48,13 +53,15 @@ interface StarredState {
 const find = (list: StarredPlace[], e: PlaceRef): StarredPlace | undefined =>
   list.find((p) => p.input === e.input && p.plane === e.plane)
 
+export const STARRED_LIST = 'starred-places'
+
 export const useStarred = create<StarredState>((set, get) => {
   const commit = (places: StarredPlace[]): void => {
     set({ places })
-    savePlaces(places)
+    starredList.save(places)
   }
   return {
-    places: loadPlaces(),
+    places: [],
     add: (spot, scaleExp) => {
       const place: StarredPlace = { input: spot.input, label: spot.label, plane: spot.plane, at: Date.now() }
       if (scaleExp !== undefined) place.scaleExp = scaleExp
@@ -88,9 +95,30 @@ export const useStarred = create<StarredState>((set, get) => {
       set({ naming: null })
       const place = find(get().places, naming)
       if (!place) return
-      useToast.getState().show({ label: 'Added to your Starred Places in the Position panel', meta: placeName(place), mark: 'star', ms: BRIEF_TOAST_MS })
+      useToast.getState().show({ label: 'Added to your Starred Places in the View panel', meta: placeName(place), mark: 'star', ms: BRIEF_TOAST_MS })
     },
     selected: null,
     select: (entry) => set({ selected: entry ? { input: entry.input, plane: entry.plane } : null }),
   }
+})
+
+/**
+ * Whose list is shown follows the identity (store/personalStart.ts). A
+ * nickname field or a card stays up only while its place is on the list
+ * shown, so a switch closes the old identity's.
+ */
+export const starredList = personalList<StarredPlace[]>({
+  name: STARRED_LIST,
+  legacy: legacyPlaces,
+  clean: cleanPlaces,
+  empty: [],
+  merge: unionPlaces,
+  show: (places) => {
+    const { naming, selected } = useStarred.getState()
+    useStarred.setState({
+      places,
+      naming: naming && find(places, naming) ? naming : null,
+      selected: selected && find(places, selected) ? selected : null,
+    })
+  },
 })

@@ -1,15 +1,16 @@
 /**
  * takenTidy.test.ts: the TAKEN list (arkinox, 2026-10-11). One shard per
  * model, so a chest's two identical Columns are taken once; a row moved
- * into the workshop or cleared leaves the list but stays held, so its chest
- * still says TAKEN; CLEAR ALL never clears a coin.
+ * into the workshop or cleared leaves the list and is out of ITEMS, so its
+ * chest offers it again (arkinox, 2026-11-09: "it should check each item
+ * against my ITEMS current state. anything missing should appear again",
+ * chestRowsFollowItems.test). CLEAR ALL is gone (owner, 2026-11-14).
  */
 
 import { describe, expect, it } from 'vitest'
 import { newShard, vertexAt } from 'sno-core/shards'
 import type { ShardModel } from 'sno-core/shards'
-import { clearsWithAll, holdsModel, modelPrint, splitPanels, type HeldItem } from '../inventory'
-import { hasNftLink } from '../nftLink'
+import { holdsModel, modelPrint, splitPanels, type HeldItem } from '../inventory'
 
 const column = (name: string, id: string, x = 0): ShardModel => ({
   ...newShard(name),
@@ -29,28 +30,17 @@ describe('one shard per model', () => {
     expect(modelPrint(column('Column', 'a'))).not.toBe(modelPrint(column('Column', 'a', 3)))
   })
 
-  it('a model already held, cleared or not, counts as held', () => {
-    const items = { a: held('a', { shard: column('Column', 'a'), cleared: 5 }) }
-    expect(holdsModel(items, column('Column', 'other'))).toBe(true)
-    expect(holdsModel(items, column('Pool', 'pool', 7))).toBe(false)
+  it('a model in ITEMS counts as held under any name; one cleared off TAKEN does not', () => {
+    expect(holdsModel({ a: held('a', { shard: column('Column', 'a') }) }, column('Column', 'other'))).toBe(true)
+    expect(holdsModel({ a: held('a', { shard: column('Column', 'a'), archived: 4 }) }, column('Column', 'other'))).toBe(true)
+    expect(holdsModel({ a: held('a', { shard: column('Column', 'a'), cleared: 5 }) }, column('Column', 'other'))).toBe(false)
+    expect(holdsModel({ a: held('a', { shard: column('Column', 'a') }) }, column('Pool', 'pool', 7))).toBe(false)
   })
 })
 
 describe('leaving the TAKEN list', () => {
-  it('a cleared row is not listed, and is still held', () => {
+  it('a cleared row is not listed', () => {
     const items = [held('a', { cleared: 5 }), held('b', {})]
     expect(splitPanels([], items).loot.taken.map((t) => t.id)).toEqual(['b'])
-  })
-
-  it('CLEAR ALL leaves coins, which are money', () => {
-    const coin = (t: string | undefined) => (t ?? '').startsWith('cashuB')
-    expect(clearsWithAll({ type: 'message', text: 'cashuBo2F0...' }, coin)).toBe(false)
-    expect(clearsWithAll({ type: 'message', text: 'hello' }, coin)).toBe(true)
-    expect(clearsWithAll({ type: 'shard', text: undefined }, coin)).toBe(true)
-    // An unclaimed NFT swept up by CLEAR ALL could never be taken again (review of #440).
-    const kept = (t: string | undefined): boolean => coin(t) || hasNftLink(t)
-    const nft = `for you https://nonfungible.cash/claim/${'6f'.repeat(16)}#${'A'.repeat(43)}`
-    expect(clearsWithAll({ type: 'message', text: nft }, kept)).toBe(false)
-    expect(clearsWithAll({ type: 'message', text: 'hello' }, kept)).toBe(true)
   })
 })

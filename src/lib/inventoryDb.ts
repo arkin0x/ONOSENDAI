@@ -52,3 +52,14 @@ export async function readHeld(db: IDBDatabase, owner: string): Promise<HeldItem
 export function writeHeld(db: IDBDatabase, rows: HeldItem[]): Promise<void> {
   return rows.length === 0 ? Promise.resolve() : putMany(db, ITEMS_STORE, rows)
 }
+
+/** Stop holding one item: its row is gone once the transaction has committed. */
+export function deleteHeld(db: IDBDatabase, rowKey: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(ITEMS_STORE, 'readwrite')
+    tx.objectStore(ITEMS_STORE).delete(rowKey)
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error)
+    tx.onabort = () => reject(tx.error)
+  })
+}

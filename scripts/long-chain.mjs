@@ -52,7 +52,7 @@ await page.addInitScript(([k, s]) => {
   try {
     if (s && !sessionStorage.getItem('restored')) { for (const [a, b] of Object.entries(s)) localStorage.setItem(a, b); sessionStorage.setItem('restored', '1') }
     localStorage.setItem('onosendai:live', '0')
-    localStorage.setItem('onosendai:signer', JSON.stringify({ kind: 'local', pubkey: k.pubkey, nsec: k.nsec }))
+    { localStorage.setItem('onosendai:nsec', k.nsec); localStorage.setItem('onosendai:signer', JSON.stringify({ kind: 'local', pubkey: k.pubkey, nsec: k.nsec })) }
   } catch {}
 }, [key, saved])
 await page.goto(url, { waitUntil: 'load' })

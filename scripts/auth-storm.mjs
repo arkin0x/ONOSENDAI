@@ -64,6 +64,7 @@ await page.addInitScript(([k, s, ext, live]) => {
     // LIVE=1 is only ever set against these in-process relays: the network
     // is refused outright above, so a publish has nowhere real to go.
     localStorage.setItem('onosendai:live', live ? '1' : '0')
+    if (ext === 'local') localStorage.setItem('onosendai:nsec', k.nsec)
     localStorage.setItem('onosendai:signer', JSON.stringify(ext === 'local' ? { kind: 'local', pubkey: k.pubkey, nsec: k.nsec } : { kind: 'nip07', pubkey: k.pubkey }))
     window.__extCalls = 0
     const answer = ext === 'hang' ? () => new Promise(() => {}) : () => Promise.reject(new Error('User rejected'))

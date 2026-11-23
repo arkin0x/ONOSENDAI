@@ -2,7 +2,7 @@
  * tvStandby.test.tsx: the stream's stand-by card (hud/TvStandby): a render
  * error anywhere under it, WebGL refused above all, puts up TV's own NO
  * SIGNAL with the stream's address, drawn without WebGL, and stands by
- * once (lib/tv/standby); and main.tsx puts it round the app on the stream
+ * once (lib/tv/standby); and boot.tsx puts it round the app on the stream
  * only.
  */
 import { readFileSync } from 'node:fs'
@@ -51,8 +51,8 @@ describe('the stream\'s stand-by', () => {
     expect(stop).toHaveBeenCalledTimes(1)
   })
 
-  it('is round the app on the stream only (main.tsx)', () => {
-    const main = readFileSync(join(__dirname, '../../main.tsx'), 'utf8')
+  it('is round the app on the stream only (boot.tsx)', () => {
+    const main = readFileSync(join(__dirname, '../../boot.tsx'), 'utf8')
     expect(main).toMatch(/isBroadcast\(\) \? <TvStandby><App \/><\/TvStandby> : <App \/>/)
   })
 })

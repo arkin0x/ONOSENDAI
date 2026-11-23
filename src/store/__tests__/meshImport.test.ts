@@ -41,7 +41,7 @@ async function importInto(file: File): Promise<boolean> {
 
 describe('IMPORT in the workshop', () => {
   beforeEach(() => {
-    useWorkshop.setState({ shards: [], currentId: null, selection: [], partSel: [], selectedFace: null, facePick: [], clip: null, level: 0, plane: 1, past: [], future: [], notice: null, tool: 'select', stampKind: 'block', stampSize: 2, stampFacing: 0, stampMode: 'shape', stampObject: null, color: [0, 0.9, 1] })
+    useWorkshop.setState({ shards: [], currentId: null, selection: [], partSel: [], selectedFaces: [], facePick: [], clip: null, level: 0, plane: 1, past: [], future: [], notice: null, tool: 'select', stampKind: 'block', stampSize: 2, stampFacing: 0, stampMode: 'shape', stampObject: null, color: [0, 0.9, 1] })
   })
 
   it('puts the file down selected on the working plane, says what it did, and one UNDO takes it all back', async () => {

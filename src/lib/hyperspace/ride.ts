@@ -414,6 +414,12 @@ export interface RideVerifyResult {
   /** True when the ride has no `mn` and is on the §5.8 list, so its root and
    * openings were accepted unchecked. Everything else still needs checking. */
   grandfathered: boolean
+  /**
+   * The block whose opening did not verify. Set only for that failure, the one
+   * that depends on the hash this reader holds for that block: it says the proof
+   * and this line disagree, and not which of them is wrong.
+   */
+  openingHeight?: number
 }
 
 /**
@@ -448,7 +454,7 @@ export async function verifyRideLevel1(input: RideVerifyInput): Promise<RideVeri
     const hash = await input.blockHashFor(height)
     const leaf = computeRideLeaf(input.previousEventIdHex, height, hash)
     if (!verifyInclusion(leaf, idx, paths[s], root)) {
-      return fail(s, `opening ${s} (block ${height}) does not verify`)
+      return { ...fail(s, `opening ${s} (block ${height}) does not verify`), openingHeight: height }
     }
   }
   return { ok: true, checked: indices.length, reason: null, grandfathered: false }
@@ -476,11 +482,83 @@ export function exactRidePairs(blockHashes: string[]): number {
 }
 
 /**
+ * What one Cantor pairing costs in a tree of each height, relative to the
+ * others: wall-clock ns per pairing for a ride leaf of height K + K_LINE,
+ * K = 0 to 16, the mean of three runs in headless Chromium on one core
+ * (V8 BigInt, 2026-11-23; the runs agree to a few percent). A pairing
+ * doubles the size of its operands, so a taller tree's pairings work on
+ * bigger numbers and each costs more: a K=16 block's pairing costs about
+ * three times a K=8 block's. Only the shape matters here, never the device's
+ * speed, which the calibration measures. The shape comes mostly from V8's
+ * multiplication algorithms, so it should carry over to a phone's V8, though
+ * it was measured on a desktop; re-measure on an ARM phone if the estimate
+ * drifts there. V8 is the engine that matters: Firefox caps a BigInt at
+ * 2^20 bits (proofCapability.ts), below the root of a K=8 leaf, so most of a
+ * ride's leaves cannot be built there at all.
+ */
+export const PAIR_NS_BY_K: readonly number[] = [
+  651.5, 651.9, 693.2, 805.1, 982.3, 1206.2, 1363.6, 1595.1, 1999.9,
+  2374.1, 2896.1, 3402.8, 3879.3, 4276.8, 4790.5, 5403.4, 5948.3,
+]
+
+/** C(16, k) / 2^16: how often a block has line terrain K = k (§5.3 step 1, sixteen fair bits). */
+function blockShareOfK(k: number): number {
+  let c = 1
+  for (let i = 0; i < k; i++) c = (c * (16 - i)) / (i + 1)
+  return c / 2 ** 16
+}
+
+/** ns per pairing over a typical ride, every block weighted by its pairings. */
+const MEAN_PAIR_NS = (() => {
+  let ns = 0
+  let pairs = 0
+  for (let k = 0; k <= 16; k++) {
+    const p = blockShareOfK(k) * 2 ** k
+    ns += p * PAIR_NS_BY_K[k]
+    pairs += p
+  }
+  return ns / pairs
+})()
+
+/**
+ * One pairing in a tree of `height` (K_LINE to RIDE_MAX_HEIGHT), as a share
+ * of the mean pairing over a whole ride. Below 1 for light trees, above for
+ * heavy ones, exactly 1 averaged over the binomial mix of blocks a ride
+ * passes.
+ */
+export function pairCost(height: number): number {
+  const k = Math.min(16, Math.max(0, height - K_LINE))
+  return PAIR_NS_BY_K[k] / MEAN_PAIR_NS
+}
+
+/**
+ * The work of known blocks in mean pairings: each block's 2^(K + K_LINE)
+ * pairings weighted by what a pairing costs at its height. A ride's
+ * expected work in these units is expectedRidePairs, by construction.
+ */
+export function exactRideWork(blockHashes: string[]): number {
+  let total = 0
+  for (const h of blockHashes) {
+    const height = lineTerrainK(h) + K_LINE
+    total += 2 ** height * pairCost(height)
+  }
+  return total
+}
+
+/** One re-roll attempt (§5.5), one GRIND_HEIGHT tree, in mean pairings. */
+export function attemptWork(): number {
+  return 2 ** GRIND_HEIGHT * pairCost(GRIND_HEIGHT)
+}
+
+/**
  * The K values the calibration sample spans. Low through average, never the
  * heavy tail: a K=16 block alone is 2^22 pairings and would make calibration
- * itself seconds long. The measurement is normalized per pairing and scaled
- * to the binomial mean block, so excluding the tail does not bias the result,
- * it only bounds the cost.
+ * itself seconds long. The tail is not left out of the result, though: the
+ * sample's time is divided by its work (exactRideWork), which weighs each
+ * pairing by what it costs at its height, so the number it gives is ms per
+ * mean pairing over the whole mix, heavy blocks included. Dividing by plain
+ * pairings instead priced every pairing like the sample's, lighter on
+ * average than a ride's, and left the estimate about a tenth short.
  */
 export const CALIBRATION_KS = [4, 5, 6, 7, 8, 9, 10, 11]
 
@@ -496,16 +574,16 @@ export function calibrationHashes(): string[] {
   return CALIBRATION_KS.filter((k) => found.has(k)).map((k) => found.get(k) as string)
 }
 
-/** The calibration sample, timed wherever it runs: elapsed wall-clock and the
- * exact pairings it took, from which ms per mean block follows. */
-export function timeCalibrationSample(): { elapsedMs: number; pairs: number } {
+/** The calibration sample, timed wherever it runs: elapsed wall-clock and its
+ * work in mean pairings (exactRideWork), from which ms per mean block follows. */
+export function timeCalibrationSample(): { elapsedMs: number; work: number } {
   const previousEventIdHex = 'ca'.repeat(32)
   const hashes = calibrationHashes()
   const started = performance.now()
   for (let i = 0; i < hashes.length; i++) {
     computeRideLeaf(previousEventIdHex, 1_000 + i, hashes[i])
   }
-  return { elapsedMs: performance.now() - started, pairs: exactRidePairs(hashes) }
+  return { elapsedMs: performance.now() - started, work: exactRideWork(hashes) }
 }
 
 /**

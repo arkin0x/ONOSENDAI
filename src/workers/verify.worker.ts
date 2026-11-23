@@ -12,9 +12,15 @@
  * recomputes 32 sampled leaves, each a Cantor tree of up to 2^22 pairings,
  * which is seconds of work. The caller looks up the sampled blocks' hashes
  * first and sends them along, since the stop index lives on the main thread.
+ *
+ * And a sidestep this machine computed, after it is signed and before it is
+ * kept (lib/sidestepCheck.ts): its temporal root alone is up to 65,536
+ * pairings, a few hundred ms here and more on a phone.
  */
 
+import type { SidestepClaim } from 'cyberspace-core'
 import { verifyCloud, type CloudMove } from '../lib/cloudVerify'
+import { checkSidestepClaim } from '../lib/sidestepLevel1'
 import type { HosakaAction } from '../lib/hosaka'
 import { verifyRideLevel1, type RideVerifyResult } from '../lib/hyperspace/ride'
 
@@ -34,7 +40,14 @@ export interface RideVerifyRequest {
   hashes: Record<number, string>
 }
 
-export type VerifyRequest = MoveVerifyRequest | RideVerifyRequest
+/** A sidestep this client just signed, checked at Level 1 under its own tags (lib/sidestepCheck.ts). */
+export interface SidestepVerifyRequest {
+  id: number
+  kind: 'sidestep'
+  claim: SidestepClaim
+}
+
+export type VerifyRequest = MoveVerifyRequest | RideVerifyRequest | SidestepVerifyRequest
 
 export type VerifyResponse =
   | { id: number; failed: string[] }
@@ -56,6 +69,8 @@ self.onmessage = async (event: MessageEvent<VerifyRequest>) => {
         },
       })
       response = { id: req.id, ride }
+    } else if (req.kind === 'sidestep') {
+      response = { id: req.id, failed: checkSidestepClaim(req.claim) }
     } else {
       response = { id: req.id, failed: verifyCloud(req.action, req.result, req.move) }
     }

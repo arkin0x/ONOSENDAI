@@ -5,15 +5,15 @@
  * every point, and a ghost of what the next tap would make. Taps do the work:
  * on the grid, STAMP lands a shape and ADD a vertex at the snapped point; on
  * a handle, SELECT picks it and FACE collects it; on a face, FACE selects it
- * and its corners, so the pad moves and turns it and DELETE can take it.
- * Dragging orbits on every tool but SELECT, and the orbit ball at the bottom
- * right orbits on every tool. In SELECT a drag is the box instead (arkinox,
- * 2026-10-10): each box adds the points inside it, so several little boxes
- * build a selection, and INVERT makes taps and boxes take away. (FACE had the
- * box for an evening and got its orbit back: the box was not needed there.)
- * In SELECT and FACE nothing on the bench deselects by itself: a tap on
- * empty space is nothing, and DESELECT, the pad's hub and Esc let go. In
- * VIEW a tap on empty space lets go, since VIEW has none of those rows. R3F
+ * and its corners, so the move handles move it and DELETE can take it.
+ * One finger orbits in every tool (workshop redesign, phase 2, decision 1),
+ * and so does the view ball at the top right. In SELECT, the BOX switch makes
+ * a drag draw a box instead (arkinox, 2026-10-10): each box adds the points
+ * inside it, so several little boxes build a selection, and REMOVE makes taps
+ * and boxes take away. Two fingers pan and pinch; a two-finger tap undoes and
+ * a three-finger tap redoes. Nothing on the bench lets go by itself: a tap on
+ * empty space is nothing in every tool, and the held bar's count and Esc let
+ * go. R3F
  * reports how far the pointer travelled between down and up, and the bench
  * compares that with a dead zone that depends on what pressed (deadZone.ts):
  * wide for a finger or a pen, narrow for a mouse. Inside the zone the orbit
@@ -29,24 +29,38 @@
 import { Canvas, useFrame, useThree, type ThreeEvent } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
 import { memo, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
-import { BufferGeometry, DoubleSide, EdgesGeometry, Float32BufferAttribute, Group, IcosahedronGeometry, Line, LineBasicMaterial, PerspectiveCamera, Vector3, Matrix4 } from 'three'
+import { BufferGeometry, DoubleSide, Float32BufferAttribute, Group, Line, LineBasicMaterial, PerspectiveCamera, Vector3, Matrix4 } from 'three'
+import { markerEdges } from '../scene/avatarMarker'
 import { ACCENT, BG, WARN } from '../lib/palette'
 import { glowTexture } from '../lib/glow'
 import { GRID_HALF, TICKS_PER_UNIT, centroid, pointKey, rgbToHex, ticksOf, toRender } from 'sno-core/shards'
 import { BenchGrid } from './benchGrid'
-import { benchAxes, benchPose, nudgeFor, orbitOffset, planeAfter, sameAxes, setOrbitSink, useBenchView, type NudgeName } from './benchAxes'
+import { VIEW_DIRS, benchAxes, notePose, frameOffset, frameZoom, nudgeFor, reportHandles, orbitOffset, planeAfter, sameAxes, setOrbitSink, useBenchView, type NudgeName } from './benchAxes'
 import { landing, preview, type WorkPlane } from 'sno-core/stamps'
 import { ShardMesh, faceOfHit } from '../scene/ShardMesh'
+import { AnimClock, movingOn, reducedMotionNow } from '../scene/animMotion'
+import { animOf, hasAnim } from '../lib/anim'
+import { cycleSeconds } from '../lib/animEdit'
+import type { ClockReading } from '../lib/worldClock'
+import { useAnimPreview } from '../store/animPreview'
 import { OVERLAY_ORDER } from '../scene/shardFaces'
 import { ShardLights } from '../scene/shardLight'
 import { nextSelection, ownAddress, useWorkshop, type Tool } from '../store/useWorkshop'
 import { partMatrix } from 'sno-core/parts'
-import { OwnPartsContext } from '../lib/parts'
+import { OwnPartsContext, fetchRef, useResolved } from '../lib/parts'
+import { PartBadges } from './PartBadges'
+import { BASE_FAR, BASE_NEAR, MIN_DISTANCE, clipPlanes, fitDistance, nextMaxDistance, reachFor, reachRadius, shardSphere, type Sphere } from './benchReach'
 import { useCyberspace } from '../store/useCyberspace'
-import { Hold, noteGesture, tapSlop } from './deadZone'
+import { Hold, multiPress, noteGesture, noteMultiTouch, slopFor, tapSlop } from './deadZone'
 import { HandleDots, HandleHalos, HandleHits, PressMemory, dotCapacity, type Halo } from './handleDots'
 import { keepPrograms } from '../lib/keepPrograms'
-import { BENCH_NEAR, benchNear, benchReach, nearMoved } from './gridSize'
+import { useBeginner } from './beginner'
+import { BenchLookRig, BenchShard } from './benchLook'
+import { isLook } from './lookTool'
+import { BenchBloom } from './benchBloom'
+import { usedBenchEye } from '../lib/avatarEye'
+import { FacingArrow, FacingPreviewGroup } from './FacingPreview'
+import { useFacingPreview } from '../store/facingPreview'
 
 type P3 = [number, number, number]
 
@@ -63,7 +77,7 @@ function snap(p: Vector3, level: number, step: number, plane: WorkPlane): P3 {
   if (plane === 2) return [q(p.x), q(p.y), level]
   return [q(p.x), level, -q(p.z)]
 }
-/** Where the camera sits from its target when sent home: the bench's opening view. */
+/** Where the camera sits from its target when sent home: the bench's opening view, pulled back along it for a shard too big to fit there. */
 const HOME: P3 = [10, 9, 12]
 /** Ticks to render units, one axis (for Y, which is not mirrored). */
 const U = (t: number): number => t / TICKS_PER_UNIT
@@ -78,7 +92,8 @@ const UP = toRender
  */
 function ScaleAvatar(): JSX.Element {
   const unit = useWorkshop((s) => s.current()?.unit ?? 0)
-  const geometry = useMemo(() => new EdgesGeometry(new IcosahedronGeometry(0.5, 1)), [])
+  // Standing on the grid, its lowest point its origin, as in the world (scene/avatarMarker.ts).
+  const geometry = useMemo(() => markerEdges(true), [])
   useEffect(() => () => geometry.dispose(), [geometry])
   const k = Math.pow(2, -unit)
   return (
@@ -115,7 +130,9 @@ function Grid(): JSX.Element {
   const division = useWorkshop((s) => s.division)
   const extent = useWorkshop((s) => s.current()?.extent ?? GRID_HALF)
   const tool = useWorkshop((s) => s.tool)
-  const places = tool === 'add' || tool === 'stamp'
+  // Not while FACING turns the shape on the bench: a tap would land where the turned shape is not (FacingPreview).
+  const facingShown = useFacingPreview((s) => s.on)
+  const places = (tool === 'add' || tool === 'stamp') && !facingShown
   const invalidate = useThree((s) => s.invalidate)
   // One quad and a shader, whatever the division and the extent (benchGrid.ts).
   const grid = useMemo(() => new BenchGrid(), [])
@@ -123,7 +140,7 @@ function Grid(): JSX.Element {
   useLayoutEffect(() => { grid.set(extent, division); invalidate() }, [grid, extent, division, invalidate])
 
   const onClick = (e: ThreeEvent<MouseEvent>): void => {
-    if (e.delta > tapSlop()) return
+    if (e.delta > tapSlop() || multiPress()) return
     e.stopPropagation()
     // Read the store at tap time rather than from the render closure: a level
     // changed a moment ago must apply to this tap even if the bench has not
@@ -197,7 +214,7 @@ function Ghost(): JSX.Element | null {
     const m = new Matrix4().fromArray(partMatrix({ ref: 0, at: aim, turn: [0, (90 * facing) % 360, 0], step: 0 }, unit, object.shard.unit))
     return (
       <group matrix={m} matrixAutoUpdate={false}>
-        <ShardMesh shard={object.shard} ghost />
+        <ShardMesh shard={object.shard} ghost still />
       </group>
     )
   }
@@ -212,7 +229,7 @@ function Ghost(): JSX.Element | null {
   if (!model) return null
   return (
     <group position={UP(landing(kind, size, facing, aim, extent, plane))}>
-      <ShardMesh shard={model} ghost />
+      <ShardMesh shard={model} ghost still />
     </group>
   )
 }
@@ -248,7 +265,7 @@ const HIT_FACE_R = 16
 const HIT_NARROW_R = 5.5
 function hitRadiusFor(tool: Tool): number {
   if (tool === 'add') return HIT_NARROW_R
-  if (tool === 'face') return HIT_FACE_R
+  if (tool === 'face' || tool === 'paint') return HIT_FACE_R
   return HIT_R
 }
 
@@ -262,7 +279,7 @@ function ScreenScale({ position, children }: { position: [number, number, number
     const g = ref.current
     if (!g) return
     const cam = state.camera as PerspectiveCamera
-    const perPixel = 2 * Math.tan((cam.fov * Math.PI) / 360) / state.size.height
+    const perPixel = 2 * Math.tan((cam.fov * Math.PI) / 360) / fieldHeight(cam, state.size.height)
     g.scale.setScalar(Math.max(1e-5, cam.position.distanceTo(g.position) * perPixel))
   })
   return <group ref={ref} position={position}>{children}</group>
@@ -281,11 +298,13 @@ function ScreenScale({ position, children }: { position: [number, number, number
  * minute after opening it"). A corner picked for a face keeps its ring, as
  * its own object: a face has few corners.
  */
-function Handles(): JSX.Element | null {
+export function Handles(): JSX.Element | null {
   const shard = useWorkshop((s) => s.current())
   const selection = useWorkshop((s) => s.selection)
   const facePick = useWorkshop((s) => s.facePick)
   const tool = useWorkshop((s) => s.tool)
+  const previewing = useAnimPreview((s) => s.on)
+  const moving = previewing
   const invalidate = useThree((s) => s.invalidate)
   const chosen = useMemo(() => new Set(selection), [selection])
   const groups = useMemo(() => {
@@ -322,39 +341,56 @@ function Handles(): JSX.Element | null {
   }, [dots, halos, hits, groups, shard, chosen, pickedSet, invalidate])
   useLayoutEffect(() => { hits.radiusPx = hitRadiusFor(tool) }, [hits, tool])
   useFrame((state) => {
-    dots.update(state.camera as PerspectiveCamera, state.size.height)
-    hits.heightPx = state.size.height
+    dots.update(state.camera as PerspectiveCamera, fieldHeight(state.camera as PerspectiveCamera, state.size.height))
+    hits.heightPx = fieldHeight(state.camera as PerspectiveCamera, state.size.height)
   })
   const pressed = useMemo(() => new PressMemory(), [])
   if (!shard) return null
+  // LOOK shows the shard as the world does, with no handles (benchLook.tsx).
+  if (isLook(tool)) return null
+  // In the motion preview a shard with `anim` is drawn moving (ShardMesh \`still\`): handles at its rest pose would hang in the air beside it.
+  if (moving && hasAnim(shard)) return null
 
   const onPress = (e: ThreeEvent<PointerEvent>): void => { pressed.press(e.nativeEvent, e.index) }
 
   const onClick = (e: ThreeEvent<MouseEvent>): void => {
-    if (e.delta > tapSlop()) return
+    if (e.delta > tapSlop() || multiPress()) return
     const g = e.index === undefined ? undefined : groups[e.index]
     if (!g || !pressed.met(e.index as number)) return
-    e.stopPropagation()
     const first = g[0]
     const isSel = g.some((i) => chosen.has(i))
     const w = useWorkshop.getState()
-    if (tool === 'face') {
-      // The sphere stands proud of the faces, so it meets the ray first even when
-      // the tap was on a face beside the corner. If a face is under the tap and
-      // the ray passes farther from the corner than its drawn dot, the face wins.
+    // The sphere stands proud of the faces, so it meets the ray first even when
+    // the tap was on a face beside the corner. If a face is under the tap and
+    // the ray passes farther from the corner than its drawn dot, the face won.
+    // Either side of a face, the nearer first (ShardMesh faceOfHit).
+    const face = e.intersections.map(faceOfHit).find((f) => f !== null) ?? null
+    const faceWins = (): boolean => {
+      if (face === null) return false
       const centre = new Vector3(...UP(ticksOf(shard.vertices[first])))
-      // Either side of a face, the nearer first (ShardMesh faceOfHit).
-      const face = e.intersections.map(faceOfHit).find((f) => f !== null) ?? null
       // The dot's drawn radius in world units: its pixels times a pixel's size there.
       const cam = e.camera as PerspectiveCamera
-      const drawn = DOT_ON_R * hits.pixelAt(e.index as number, cam.position, cam.fov)
-      if (face !== null && e.ray.distanceToPoint(centre) > drawn) { w.selectFace(face); return }
-      // Under INVERT a corner tap takes the point out of the selection, as the
-      // key promises of every tap; it picks no corner for a face. Off INVERT
-      // and the tap is the pick it always was.
-      if (w.invert) w.toggleVertex(first)
-      else w.pickForFace(first)
+      return e.ray.distanceToPoint(centre) > DOT_ON_R * hits.pixelAt(e.index as number, cam.position, cam.fov)
     }
+    // SELECT takes what its switch says: a point here, a face under the tap,
+    // or nothing, so a placed object under the dot gets the tap.
+    if (tool === 'select' && w.selectKind !== 'points') {
+      if (w.selectKind === 'faces' && face !== null) { e.stopPropagation(); w.selectFace(face) }
+      return
+    }
+    e.stopPropagation()
+    if (tool === 'paint') {
+      // POINT paints the point it met, however wide the hit; FACE paints the
+      // face under the tap, however near a corner; the rest go by which the
+      // tap was nearer to, the dot or the face.
+      const onFace = face !== null && w.paintMode !== 'point' && (w.paintMode === 'face' || faceWins())
+      const hit = onFace ? { face: face as number } : { vertex: first }
+      // The dropper, armed: this tap takes a color instead, once.
+      if (w.paintTake) { w.takeColorAt(hit); w.setPaintTake(false) } else w.paintTap(hit)
+      return
+    }
+    // FACE only makes faces (phase 3, decision 3): a tap picks a corner.
+    if (tool === 'face') w.pickForFace(first)
     // In SELECT a tap adds or removes the point; elsewhere it picks that point alone.
     else if (tool === 'select') w.toggleVertex(first)
     else w.selectVertex(isSel ? null : first)
@@ -381,6 +417,7 @@ function Handles(): JSX.Element | null {
 function PickLoop(): JSX.Element | null {
   const shard = useWorkshop((s) => s.current())
   const facePick = useWorkshop((s) => s.facePick)
+  const look = useWorkshop((s) => isLook(s.tool))
   const line = useMemo(() => {
     if (!shard || facePick.length < 2) return null
     const pts = facePick.map((i) => shard.vertices[i]).filter((v) => !!v).map((v) => UP(ticksOf(v)))
@@ -393,36 +430,50 @@ function PickLoop(): JSX.Element | null {
     return l
   }, [shard, facePick])
   useEffect(() => () => { line?.geometry.dispose(); line?.material.dispose() }, [line])
-  return line ? <primitive object={line} /> : null
+  return line && !look ? <primitive object={line} /> : null
 }
 
-/** The face tapped in FACE mode, lit in the selection color so DELETE FACE has a visible target. */
-function FaceHighlight(): JSX.Element | null {
+/**
+ * The faces tapped in FACE mode, each lit in the selection color so DELETE and
+ * the bucket have a visible target. Every one in hand stays lit (arkinox,
+ * 2026-10-31). One fill and one set of outlines however many there are: made
+ * when the faces in hand or the shard change, never per frame.
+ */
+export function FaceHighlight(): JSX.Element | null {
   const shard = useWorkshop((s) => s.current())
-  const face = useWorkshop((s) => s.selectedFace)
+  const faces = useWorkshop((s) => s.selectedFaces)
+  const look = useWorkshop((s) => isLook(s.tool))
   const lit = useMemo(() => {
-    const f = face === null ? undefined : shard?.faces[face]
-    if (!shard || !f) return null
-    const pts = f.map((i) => UP(ticksOf(shard.vertices[i])))
-    // Four points: the mesh draws the first three as its one triangle, the line closes the loop.
+    if (!shard || faces.length === 0) return null
+    const fill: number[] = []
+    const lines: number[] = []
+    for (const k of faces) {
+      const f = shard.faces[k]
+      if (!f) continue
+      const [a, b, c] = f.map((i) => UP(ticksOf(shard.vertices[i])))
+      fill.push(...a, ...b, ...c)
+      lines.push(...a, ...b, ...b, ...c, ...c, ...a)
+    }
+    if (fill.length === 0) return null
     const g = new BufferGeometry()
-    g.setAttribute('position', new Float32BufferAttribute([...pts, pts[0]].flat(), 3))
-    // Transparent, at OVERLAY_ORDER like the fill: both draw after a
-    // see-through shard's faces (order 1), or the face blends over them and
-    // the highlight vanishes on a see-through shard (shardFaces.ts).
-    const edge = new Line(g, new LineBasicMaterial({ color: WARN, toneMapped: false, transparent: true }))
-    edge.frustumCulled = false
-    edge.renderOrder = OVERLAY_ORDER
-    return { g, edge }
-  }, [shard, face])
-  useEffect(() => () => { lit?.g.dispose(); lit?.edge.material.dispose() }, [lit])
-  if (!lit) return null
+    g.setAttribute('position', new Float32BufferAttribute(fill, 3))
+    const e = new BufferGeometry()
+    e.setAttribute('position', new Float32BufferAttribute(lines, 3))
+    return { g, e }
+  }, [shard, faces])
+  useEffect(() => () => { lit?.g.dispose(); lit?.e.dispose() }, [lit])
+  if (!lit || look) return null
+  // Transparent, at OVERLAY_ORDER, the fill and the outlines alike: both draw
+  // after a see-through shard's faces (order 1), or a face blends over them
+  // and the highlight vanishes on a see-through shard (shardFaces.ts).
   return (
     <>
       <mesh geometry={lit.g} frustumCulled={false} renderOrder={OVERLAY_ORDER}>
         <meshBasicMaterial color={WARN} transparent opacity={0.5} side={DoubleSide} forceSinglePass depthWrite={false} polygonOffset polygonOffsetFactor={-4} toneMapped={false} />
       </mesh>
-      <primitive object={lit.edge} />
+      <lineSegments geometry={lit.e} frustumCulled={false} renderOrder={OVERLAY_ORDER}>
+        <lineBasicMaterial color={WARN} toneMapped={false} transparent />
+      </lineSegments>
     </>
   )
 }
@@ -502,25 +553,24 @@ function Aim(): null {
 }
 
 /**
- * A box dragged on the bench in SELECT and in FACE: every point whose
- * projection falls inside is added to the selection, live as the box grows,
- * and the box's own additions shrink back as it does. Each box adds to what
- * was in hand when the finger touched, so several little boxes build a
- * selection (arkinox, 2026-10-10, decision A); under INVERT a box takes
- * away instead. Shift does nothing any more, and is harmless. The box is a
- * plain element over the canvas, drawn here without React. A tap (no drag)
- * is left to the handles; orbit is off in SELECT (Bench), so a one-finger
- * drag is the box's alone, and the orbit ball turns the view meanwhile. SELECT
- * only: FACE had the box for an evening and did not need it (arkinox,
- * 2026-10-10), so a drag there orbits as it always did. A second finger
- * means a pan: the box cancels and the selection is put back.
+ * A box dragged on the bench in SELECT with BOX on (workshop redesign,
+ * phase 2): every point whose projection falls inside is added to the
+ * selection, live as the box grows, and the box's own additions shrink back
+ * as it does. Each box adds to what was in hand when the finger touched, so
+ * several little boxes build a selection (arkinox, 2026-10-10, decision A);
+ * under REMOVE a box takes away instead. The box is a plain element over the
+ * canvas, drawn here without React. A tap (no drag) is left to the handles;
+ * orbit is off while BOX is on (Bench), so a one-finger drag is the box's
+ * alone, and the view ball turns the view meanwhile. A second finger means a
+ * pan: the box cancels and the selection is put back.
  */
 function Marquee(): null {
   const gl = useThree((s) => s.gl)
   const camera = useThree((s) => s.camera)
-  const tool = useWorkshop((s) => s.tool)
+  const facingShown = useFacingPreview((s) => s.on)
+  const on = useWorkshop((s) => s.tool === 'select' && s.boxSelect) && !facingShown
   useEffect(() => {
-    if (tool !== 'select') return
+    if (!on) return
     const canvas = gl.domElement
     const host = canvas.parentElement
     if (!host) return
@@ -531,8 +581,11 @@ function Marquee(): null {
     let start: { x: number; y: number } | null = null
     let base: number[] = []
     let baseParts: number[] = []
+    let baseFaces: number[] = []
     let partsIn: number[] = []
     let invert = false
+    // POINTS, FACES or OBJECTS, read at the press (workshop redesign, phase 3).
+    let kind: 'points' | 'faces' | 'objects' = 'points'
     let active = false
     // Written only when the box changes something: the store re-renders every
     // handle on each write, and a box over empty space wrote on every move.
@@ -569,7 +622,7 @@ function Marquee(): null {
     const cancel = (): void => {
       // A second finger has landed: this is a pan, not a box. Put the
       // selection back as it was when the first finger touched.
-      if (start && active) { useWorkshop.getState().setSelection(base); useWorkshop.getState().setPartSelection(baseParts) }
+      if (start && active) { useWorkshop.getState().setSelection(base); useWorkshop.getState().setPartSelection(baseParts); useWorkshop.setState({ selectedFaces: baseFaces }) }
       start = null
       active = false
       box.hidden = true
@@ -581,6 +634,8 @@ function Marquee(): null {
       const w = useWorkshop.getState()
       base = w.selection
       baseParts = w.partSel
+      baseFaces = w.selectedFaces
+      kind = w.selectKind
       // Read at the press: INVERT toggled mid-drag applies to the next box.
       invert = w.invert
       active = false
@@ -593,11 +648,26 @@ function Marquee(): null {
       const x0 = Math.min(start.x, x), y0 = Math.min(start.y, y), x1 = Math.max(start.x, x), y1 = Math.max(start.y, y)
       box.hidden = false
       box.style.left = `${x0}px`; box.style.top = `${y0}px`; box.style.width = `${x1 - x0}px`; box.style.height = `${y1 - y0}px`
-      const points = nextSelection(base, inside(x0, y0, x1, y1), invert)
-      const parts = nextSelection(baseParts, partsIn, invert)
+      const within = inside(x0, y0, x1, y1)
       const w = useWorkshop.getState()
+      if (kind === 'objects') {
+        const parts = nextSelection(baseParts, partsIn, invert)
+        if (!same(parts, w.partSel)) w.setPartSelection(parts)
+        return
+      }
+      if (kind === 'faces') {
+        // A face is in the box when every corner is; it comes with its corners, as a tapped face does.
+        const shard = w.current()
+        if (!shard) return
+        const set = new Set(within)
+        const facesIn = shard.faces.map((f, k) => (f.every((v) => set.has(v)) ? k : -1)).filter((k) => k >= 0)
+        const faces = nextSelection(baseFaces, facesIn, invert)
+        // Held with every vertex on their corners' points, as a tapped face is.
+        if (!same(faces, w.selectedFaces)) w.holdFaces(faces)
+        return
+      }
+      const points = nextSelection(base, within, invert)
       if (!same(points, w.selection)) w.setSelection(points)
-      if (!same(parts, w.partSel)) w.setPartSelection(parts)
     }
     const up = (): void => { start = null; if (active) { active = false; box.hidden = true } }
     canvas.addEventListener('pointerdown', down)
@@ -611,21 +681,145 @@ function Marquee(): null {
       window.removeEventListener('pointercancel', up)
       box.remove()
     }
-  }, [tool, gl, camera])
+  }, [on, gl, camera])
   return null
 }
 
-/** Keyboard on the bench: undo, tools, nudge, fill, delete, level, turn. */
-function Keys(): null {
+/**
+ * Two fingers tapped together undo; three redo (workshop redesign, phase 2;
+ * as Procreate, Nomad and Shapr3D do). A tap is every finger down within a
+ * moment of the first, and all of them up again soon, none having moved past
+ * the slop: a pinch or a pan moves, and is never a tap. The buttons stay.
+ */
+const MULTI_TAP_MS = 300
+function MultiTap(): null {
+  const gl = useThree((s) => s.gl)
+  useEffect(() => {
+    const canvas = gl.domElement
+    const down = new Map<number, { x: number; y: number }>()
+    let most = 0
+    let first = 0
+    let spoiled = false
+    const press = (e: PointerEvent): void => {
+      if (e.pointerType !== 'touch') return
+      if (down.size === 0) { first = e.timeStamp; most = 0; spoiled = false; noteMultiTouch(false) }
+      if (down.size >= 1) noteMultiTouch(true)
+      if (e.timeStamp - first > MULTI_TAP_MS) spoiled = true
+      down.set(e.pointerId, { x: e.clientX, y: e.clientY })
+      most = Math.max(most, down.size)
+    }
+    const move = (e: PointerEvent): void => {
+      const at = down.get(e.pointerId)
+      if (at && Math.hypot(e.clientX - at.x, e.clientY - at.y) > slopFor('touch')) spoiled = true
+    }
+    const lift = (e: PointerEvent): void => {
+      if (!down.delete(e.pointerId)) return
+      if (e.type === 'pointercancel') spoiled = true
+      if (down.size > 0) return
+      if (spoiled || e.timeStamp - first > MULTI_TAP_MS * 2) return
+      if (most === 2) useWorkshop.getState().undo()
+      else if (most === 3) useWorkshop.getState().redo()
+    }
+    canvas.addEventListener('pointerdown', press, true)
+    window.addEventListener('pointermove', move, true)
+    window.addEventListener('pointerup', lift, true)
+    window.addEventListener('pointercancel', lift, true)
+    return () => {
+      canvas.removeEventListener('pointerdown', press, true)
+      window.removeEventListener('pointermove', move, true)
+      window.removeEventListener('pointerup', lift, true)
+      window.removeEventListener('pointercancel', lift, true)
+    }
+  }, [gl])
+  return null
+}
+
+/**
+ * Reports where the move handles stand (benchAxes reportHandles): the middle
+ * of the held points and placed objects, and how far one unit along each
+ * model axis reaches on screen from there. Measured each frame something is
+ * held, since the camera or the selection may have moved; the middle itself
+ * only when the shard or what is held changes.
+ */
+function HandleProjector(): null {
+  const camera = useThree((s) => s.camera)
+  const size = useThree((s) => s.size)
+  const invalidate = useThree((s) => s.invalidate)
+  const shard = useWorkshop((s) => s.current())
+  const selection = useWorkshop((s) => s.selection)
+  const partSel = useWorkshop((s) => s.partSel)
+  // LOOK has no move handles (benchLook.tsx). A shard drawn moving (the
+  // motion preview) has no rest pose on screen to hang them from, as Handles has none.
+  const look = useWorkshop((s) => isLook(s.tool))
+  const previewing = useAnimPreview((s) => s.on)
+  const moving = previewing && !!shard && hasAnim(shard)
+  // SET EYE: the handles stand on the eye, in any tool (shell/EyeBar).
+  const eyeEdit = useWorkshop((s) => s.eyeEdit)
+  // FACING turns the shape on the bench while the AVATAR sheet is open: no handles on where it is not.
+  const facingShown = useFacingPreview((s) => s.on)
+  const center = useMemo(() => {
+    // The eye WALK uses (an eye past the size limit pulled in), where the row and the numbers say it is.
+    if (shard && eyeEdit) { const r = UP(usedBenchEye(shard)); return new Vector3(r[0], r[1], r[2]) }
+    if (!shard || look || moving || facingShown || (selection.length === 0 && partSel.length === 0)) return null
+    const seen = new Set<string>()
+    let x = 0, y = 0, z = 0, n = 0
+    for (const i of selection) {
+      const v = shard.vertices[i]
+      if (!v) continue
+      const t = ticksOf(v)
+      const k = t.join(',')
+      if (seen.has(k)) continue
+      seen.add(k)
+      const r = UP(t); x += r[0]; y += r[1]; z += r[2]; n++
+    }
+    for (const i of partSel) {
+      const q = shard.parts?.[i]
+      if (!q) continue
+      const r = UP(q.at); x += r[0]; y += r[1]; z += r[2]; n++
+    }
+    return n ? new Vector3(x / n, y / n, z / n) : null
+  }, [shard, look, moving, selection, partSel, eyeEdit, facingShown])
+  // Held, or let go: a frame, so the handles come or go even on a still bench.
+  useEffect(() => { if (!center) reportHandles(null); invalidate() }, [center, invalidate])
+  useEffect(() => () => reportHandles(null), [])
+  const v = useMemo(() => new Vector3(), [])
+  // Model axes in render units: X and Y as they are, model +Z is render -Z.
+  const dirs = useMemo(() => [new Vector3(1, 0, 0), new Vector3(0, 1, 0), new Vector3(0, 0, -1)], [])
+  useFrame(() => {
+    if (!center) return
+    const toPx = (p: Vector3): [number, number] | null => {
+      v.copy(p).project(camera)
+      if (v.z > 1 || v.z < -1) return null
+      return [((v.x + 1) / 2) * size.width, ((1 - v.y) / 2) * size.height]
+    }
+    const c = toPx(center)
+    if (!c) { reportHandles(null); return }
+    const perUnit = dirs.map((d) => {
+      const e = toPx(v.copy(center).add(d))
+      return e ? [e[0] - c[0], e[1] - c[1]] as [number, number] : [0, 0] as [number, number]
+    }) as [[number, number], [number, number], [number, number]]
+    reportHandles(eyeEdit ? { center: c, perUnit, origin: toPx(v.set(0, 0, 0)) } : { center: c, perUnit })
+  })
+  return null
+}
+
+/** Keyboard on the bench: undo, tools, nudge, fill, delete, level, turn, SET EYE. Exported for its tests. */
+export function Keys(): null {
   const camera = useThree((s) => s.camera)
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       const tag = (e.target as HTMLElement | null)?.tagName
       if (tag === 'INPUT' || tag === 'TEXTAREA') return
       const w = useWorkshop.getState()
+      // While FACING turns the shape on the bench, only UNDO and REDO: the rest would act on a shape drawn elsewhere.
+      if (useFacingPreview.getState().on && !((e.metaKey || e.ctrlKey) && (e.code === 'KeyZ' || e.code === 'KeyY'))) return
       if ((e.metaKey || e.ctrlKey) && !e.altKey) {
         if (e.code === 'KeyZ') { e.preventDefault(); if (e.shiftKey) w.redo(); else w.undo() }
         if (e.code === 'KeyY') { e.preventDefault(); w.redo() }
+        // COPY and PASTE (workshop redesign, phase 2): what is held, and back where it came from.
+        // Text selected on the page (a shard's name in MENU) copies as text, as anywhere else.
+        if (e.code === 'KeyC' && (w.selection.length || w.partSel.length) && !window.getSelection()?.toString()) { e.preventDefault(); w.copySelection() }
+        if (e.code === 'KeyV' && w.clip) { e.preventDefault(); w.pasteClip('exact', ownAddress(useCyberspace.getState().identity.pubkey, w.currentId)) }
         return
       }
       if (e.altKey) return
@@ -644,21 +838,36 @@ function Keys(): null {
         ArrowUp: 'up', ArrowDown: 'down', KeyW: 'up', KeyS: 'down',
         KeyR: 'away', KeyF: 'toward',
       }
-      if (nudge[e.code]) { e.preventDefault(); const n = nudgeFor(benchAxes(camera), nudge[e.code]); w.moveSelected(n.axis, n.delta * w.step()); return }
-      if (e.code === 'Delete' || e.code === 'Backspace') { e.preventDefault(); if (w.selectedFace !== null) w.deleteSelectedFace(); else w.deleteSelected(); return }
-      if (e.code === 'Enter') { e.preventDefault(); if (w.facePick.length >= 3) w.fill(); else if (w.selection.length >= 3) w.fillSelection(); return }
+      // LOOK only looks: what is held is out of sight there, so its keys leave it alone (benchLook.tsx).
+      const look = isLook(w.tool)
+      // SET EYE: the same keys step the eye, in any tool (shell/EyeBar).
+      if (nudge[e.code] && w.eyeEdit) { e.preventDefault(); const n = nudgeFor(benchAxes(camera), nudge[e.code]); w.moveEye(n.axis, n.delta * w.step()); return }
+      if (nudge[e.code]) { e.preventDefault(); if (look) return; const n = nudgeFor(benchAxes(camera), nudge[e.code]); w.moveSelected(n.axis, n.delta * w.step()); return }
+      if (e.code === 'Delete' || e.code === 'Backspace') { e.preventDefault(); if (look) return; if (w.selectedFaces.length > 0) w.deleteSelectedFace(); else w.deleteSelected(); return }
+      if (e.code === 'Enter') { e.preventDefault(); if (look) return; if (w.facePick.length >= 3) w.fill(); else if (w.selection.length >= 3) w.fillSelection(); return }
       // Escape is not here: it goes through the Escape stack (useEscape), so
       // the palette sheet and the confirmations over the bench close before
       // the bench does. Workshop registers what it clears and closes.
-      if (e.code === 'KeyC') { w.selectConnected(); return }
+      if (e.code === 'KeyC') { if (!look) w.selectConnected(); return }
+      // B, the held bar's COLOR: the color in hand onto what is held (points, or a face's corners).
+      if (e.code === 'KeyB') { if (w.selection.length && !look) w.colorSelected(w.color); return }
+      // The keys run 1 to 6 along the dock, left to right (Dock.tsx DOCK).
       if (e.code === 'Digit1') w.setTool('view')
       if (e.code === 'Digit2') w.setTool('stamp')
-      if (e.code === 'Digit3') w.setTool('add')
-      if (e.code === 'Digit4') w.setTool('select')
-      if (e.code === 'Digit5') w.setTool('face')
+      if (e.code === 'Digit3') w.setTool('select')
+      if (e.code === 'Digit4') w.setTool('paint')
+      // ADD and FACE by key bring them onto a beginner's dock (phase 4).
+      if ((e.code === 'Digit5' || e.code === 'Digit6') && useBeginner.getState().tools === 'four') useBeginner.getState().setTools('all')
+      if (e.code === 'Digit5') w.setTool('add')
+      if (e.code === 'Digit6') w.setTool('face')
       // Q and E turn the selection a quarter turn while SELECT holds one; Q turns the stamp otherwise.
-      if (e.code === 'KeyQ') { if ((w.tool === 'select' || w.tool === 'view') && (w.selection.length || w.partSel.length)) w.rotateSelected(-1); else w.turnStamp() }
-      if (e.code === 'KeyE') { if ((w.tool === 'select' || w.tool === 'view') && (w.selection.length || w.partSel.length)) w.rotateSelected(1) }
+      if (e.code === 'KeyQ') { if (w.tool === 'select' && (w.selection.length || w.partSel.length)) w.rotateSelected(-1); else if (!look) w.turnStamp() }
+      // E: a quarter turn while SELECT holds something; with nothing held and no corners picked, SET EYE in hand or put down (AVATAR's FIRST-PERSON EYE).
+      if (e.code === 'KeyE') {
+        const holding = w.selection.length > 0 || w.partSel.length > 0 || w.selectedFaces.length > 0
+        if (w.tool === 'select' && (w.selection.length || w.partSel.length)) w.rotateSelected(1)
+        else if (!holding && w.facePick.length === 0) w.setEyeEdit(!w.eyeEdit)
+      }
       if (e.code === 'BracketRight') w.setLevel(w.level + w.step())
       if (e.code === 'BracketLeft') w.setLevel(w.level - w.step())
     }
@@ -670,20 +879,45 @@ function Keys(): null {
 
 /** Publishes the camera's snapped axes for the pad outside the canvas, only when they change. */
 /**
- * Sends the camera home on request (the default oblique view, the target kept),
- * and shares its orientation with the compass every frame.
+ * Turns the camera on request from the view ball's menu (benchAxes ViewKind):
+ * HOME, the default oblique view with the target kept; TOP, FRONT and SIDE,
+ * straight down an axis at the distance HOME would take; FIT, the whole
+ * shard from where the camera already looks. Shares the camera's orientation
+ * with the view ball every frame.
  */
-function ViewDriver(): null {
+function ViewDriver({ sphere }: { sphere: { current: Sphere | null } }): null {
   const camera = useThree((s) => s.camera)
+  const size = useThree((s) => s.size)
   const controls = useThree((s) => s.controls) as unknown as { target: Vector3; update: () => void } | null
   const request = useBenchView((s) => s.request)
-  useFrame(() => { benchPose.copy(camera.quaternion) })
+  useFrame(() => { notePose(camera.quaternion) })
   useEffect(() => {
     if (!request || !controls) return
-    camera.position.copy(controls.target).add(new Vector3(HOME[0], HOME[1], HOME[2]))
+    const cam = camera as PerspectiveCamera
+    if (request.kind === 'fit') {
+      // The whole shard, from the way the camera faces now: aimed at the
+      // middle of what it draws, as far back as that needs.
+      const s = sphere.current
+      const dir = camera.position.clone().sub(controls.target)
+      if (dir.lengthSq() === 0) dir.set(HOME[0], HOME[1], HOME[2])
+      if (s) controls.target.set(s.center[0], s.center[1], s.center[2])
+      dir.setLength(Math.max(MIN_DISTANCE, fitDistance(s ? s.radius : reachRadius(null, controls.target), cam.fov, canvasAspect(size))))
+      camera.position.copy(controls.target).add(dir)
+      controls.update()
+      return
+    }
+    // Home is the opening view's direction, at its distance or farther: as far
+    // as the whole shard needs to fit from the target (benchReach.ts), so a
+    // court sent home is seen whole rather than from inside its walls. TOP,
+    // FRONT and SIDE take the same distance down their own axis.
+    const home = new Vector3(HOME[0], HOME[1], HOME[2])
+    const length = Math.max(home.length(), fitDistance(reachRadius(sphere.current, controls.target), cam.fov, canvasAspect(size)))
+    const dir = request.kind === 'home' ? home : new Vector3(...VIEW_DIRS[request.kind])
+    dir.setLength(length)
+    camera.position.copy(controls.target).add(dir)
     controls.update()
   }, [request]) // eslint-disable-line react-hooks/exhaustive-deps
-  // The orbit ball (Workshop OrbitSphere) turns the camera about the controls'
+  // The view ball (shell/ViewBall) turns the camera about the controls'
   // target through this sink, outside React: a drag arrives at pointer rate.
   // OrbitControls rebuilds its own angles from the camera's position on every
   // update, so moving the camera and calling update keeps the two agreed.
@@ -701,26 +935,104 @@ function ViewDriver(): null {
 }
 
 /**
- * The camera follows the grid out (gridSize.ts): how far it draws goes with the
- * grid's size, and the near plane goes with how far back it stands, because a
- * depth buffer spent on the first few centimetres cannot sort a grid hundreds of
- * gibsons across. Close in, the near plane is where it always was. Nothing here
- * allocates, and the projection is rebuilt only when a plane really moves.
+ * The canvas height the camera's field of view spans, in CSS pixels: the
+ * canvas's own, or the taller virtual view Framer frames the shard in.
+ * What keeps a handle or a dot its size on screen divides by this.
  */
-function CameraReach({ extent }: { extent: number }): null {
+function fieldHeight(camera: PerspectiveCamera, height: number): number {
+  const v = camera.view
+  return (v && v.enabled && v.height > 0 ? v.fullHeight * (height / v.height) : height) * camera.zoom
+}
+
+/**
+ * The canvas's own shape. The camera's aspect is the virtual view's while
+ * Framer offsets it, which is not what fits a shard on the screen.
+ */
+function canvasAspect(size: { width: number; height: number }): number {
+  return size.height > 0 ? size.width / size.height : 1
+}
+
+/** How far the framing moves toward where it is going, per frame. */
+const FRAME_EASE = 0.25
+
+/**
+ * Frames the shard into the part of the bench nothing covers (workshop
+ * redesign, phase 1): the top bar above, the strip and dock below, or a sheet
+ * risen over them. The canvas stays the whole screen, so nothing under a
+ * finger moves or resizes; the camera's view offset (benchAxes frameOffset)
+ * puts the middle of its picture in the middle of the uncovered band, eased
+ * there over a few frames, and the camera's zoom keeps the scale (frameZoom):
+ * as it always was at rest, smaller by the share a sheet takes. Both are part
+ * of the projection, so taps, the box and the handles all read them as they
+ * read the camera.
+ */
+function Framer(): null {
   const camera = useThree((s) => s.camera) as PerspectiveCamera
-  const controls = useThree((s) => s.controls) as unknown as { target: Vector3 } | null
+  const size = useThree((s) => s.size)
   const invalidate = useThree((s) => s.invalidate)
-  useEffect(() => {
-    camera.far = benchReach(extent).far
-    camera.updateProjectionMatrix()
-    invalidate()
-  }, [camera, extent, invalidate])
+  const now = useRef({ top: 0, bottom: 0, rest: 0, right: 0 })
+  const applied = useRef('')
+  useEffect(() => useBenchView.subscribe((s, prev) => { if (s.insets !== prev.insets) invalidate() }), [invalidate])
+  useEffect(() => () => { camera.clearViewOffset(); camera.zoom = 1; camera.updateProjectionMatrix() }, [camera])
   useFrame(() => {
-    const near = controls ? benchNear(camera.position.distanceTo(controls.target)) : BENCH_NEAR
-    if (!nearMoved(camera.near, near)) return
-    camera.near = near
-    camera.updateProjectionMatrix()
+    const goal = useBenchView.getState().insets
+    const n = now.current
+    const still = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    const ease = (a: number, b: number): number => (still || Math.abs(b - a) < 0.5 ? b : a + (b - a) * FRAME_EASE)
+    n.top = ease(n.top, goal.top)
+    n.bottom = ease(n.bottom, goal.bottom)
+    n.rest = goal.rest ?? goal.bottom
+    n.right = ease(n.right, goal.right ?? 0)
+    const o = frameOffset(size.width, size.height, n)
+    const zoom = frameZoom(size.height, o ? o.fullHeight : size.height, n, size.width)
+    // The aspect is in the key because R3F puts its own back on a resize.
+    const keyOf = (): string => `${o ? `${o.fullWidth}:${o.fullHeight}:${o.x}:${o.y}` : 'none'}:${zoom.toFixed(4)}:${camera.aspect}`
+    if (keyOf() !== applied.current) {
+      camera.zoom = zoom
+      if (o) camera.setViewOffset(o.fullWidth, o.fullHeight, o.x, o.y, o.width, o.height)
+      else {
+        camera.clearViewOffset()
+        camera.aspect = canvasAspect(size)
+        camera.updateProjectionMatrix()
+      }
+      applied.current = keyOf()
+    }
+    if (n.top !== goal.top || n.bottom !== goal.bottom || n.right !== (goal.right ?? 0)) invalidate()
+  })
+  return null
+}
+
+/**
+ * The orbit's reach and the camera's depth, for the shard on the bench
+ * (benchReach.ts; arkinox, 2026-11-09, a Maze Kit court that would not fit
+ * the view). The sphere round everything the shard draws, its placed objects
+ * resolved as ShardMesh resolves them, is measured when the shard or what it
+ * places changes; each frame then sets how far the controls may pull back to
+ * see it whole from where they aim, and pulls the far plane out past it and
+ * the near plane out with the distance. A small shard keeps 60 and the planes
+ * the bench always had.
+ */
+function Reach({ sphere }: { sphere: { current: Sphere | null } }): null {
+  const shard = useWorkshop((s) => s.current())
+  const size = useThree((s) => s.size)
+  const resolved = useResolved(shard ?? null)
+  const camera = useThree((s) => s.camera) as PerspectiveCamera
+  const controls = useThree((s) => s.controls) as unknown as { target: Vector3; maxDistance: number } | null
+  const invalidate = useThree((s) => s.invalidate)
+  const measured = useMemo(() => (shard ? shardSphere(shard, resolved) : null), [shard, resolved])
+  useLayoutEffect(() => { sphere.current = measured; invalidate() }, [sphere, measured, invalidate])
+  useFrame(() => {
+    if (!controls) return
+    const distance = camera.position.distanceTo(controls.target)
+    const r = reachRadius(sphere.current, controls.target)
+    controls.maxDistance = nextMaxDistance(reachFor(r, camera.fov, canvasAspect(size)), distance)
+    const { near, far } = clipPlanes(distance, r)
+    // Only on a real change: a still bench must not rebuild its projection every frame.
+    if (Math.abs(near - camera.near) > camera.near * 0.05 || Math.abs(far - camera.far) > camera.far * 0.05) {
+      camera.near = near
+      camera.far = far
+      camera.updateProjectionMatrix()
+    }
   })
   return null
 }
@@ -754,6 +1066,87 @@ function BenchWake(): null {
   return null
 }
 
+/**
+ * An object with `anim` moves on the VIEW tool (ShardMesh `still` is off
+ * there): the bench draws on demand, so while anything on it moves, every
+ * frame is asked for (scene/animMotion.ts movingOn).
+ */
+function AnimWake(): null {
+  const invalidate = useThree((s) => s.invalidate)
+  const gl = useThree((s) => s.gl)
+  // Every frame only while it actually moves: playing (or VIEW with no preview), and motion not reduced.
+  // Paused, scrubbed or held still, one frame for each change of the preview is enough.
+  useFrame(() => {
+    if (movingOn(gl) === 0 || reducedMotionNow()) return
+    const p = useAnimPreview.getState()
+    if (!p.on || p.playing) invalidate()
+  })
+  const tool = useWorkshop((s) => s.tool)
+  useEffect(() => { invalidate() }, [tool, invalidate])
+  useEffect(() => useAnimPreview.subscribe(() => invalidate()), [invalidate])
+  return null
+}
+
+/**
+ * The bench's own clock for moving objects (scene/animMotion.ts AnimClock):
+ * the motion editor's preview (store/animPreview.ts). Playing, it is the
+ * world clock; paused, the moment it was paused at; scrubbed, a share of the
+ * longest motion's cycle, a time chosen by hand and so drawn under reduced
+ * motion too.
+ */
+const benchReading: ClockReading = { t: 0, version: 0, nowS: 0, chosen: false }
+export function benchClock(shared: ClockReading): ClockReading {
+  const p = useAnimPreview.getState()
+  benchReading.version = shared.version
+  benchReading.nowS = shared.nowS
+  benchReading.chosen = p.scrub !== null
+  if (p.scrub !== null) {
+    const cur = useWorkshop.getState().current()
+    benchReading.t = p.scrub * cycleSeconds(cur ? animOf(cur) : [])
+  } else if (p.on && !p.playing) benchReading.t = p.frozen
+  else benchReading.t = shared.t
+  return benchReading
+}
+
+/**
+ * A path's points on the bench while the motion editor previews it (not in
+ * LOOK, which shows only what the world shows): a dot for each and the loop through them, where the object's
+ * origin travels, the point being edited larger. The field's frame is the
+ * render frame (lib/anim.ts), so a point is drawn at its ticks over 120.
+ */
+function PathMarks({ show }: { show: boolean }): JSX.Element | null {
+  const shard = useWorkshop((s) => s.current())
+  const point = useAnimPreview((s) => s.point)
+  const paths = useMemo(() => (shard ? animOf(shard).map((m, i) => ({ m, i })).filter(({ m }) => m.word === 'path') : []), [shard])
+  const lines = useMemo(() => paths.map(({ m }) => {
+    const pts: number[] = []
+    for (let k = 0; k < m.pts.length; k += 4) pts.push(m.pts[k] / 120, m.pts[k + 1] / 120, m.pts[k + 2] / 120)
+    pts.push(pts[0], pts[1], pts[2])
+    const g = new BufferGeometry()
+    g.setAttribute('position', new Float32BufferAttribute(pts, 3))
+    const l = new Line(g, new LineBasicMaterial({ color: WARN, transparent: true, opacity: 0.8, depthTest: false, toneMapped: false }))
+    l.renderOrder = OVERLAY_ORDER
+    return l
+  }), [paths])
+  useEffect(() => () => { for (const l of lines) { l.geometry.dispose(); (l.material as LineBasicMaterial).dispose() } }, [lines])
+  if (!show || paths.length === 0) return null
+  return (
+    <group renderOrder={OVERLAY_ORDER}>
+      {paths.map(({ m, i }, n) => (
+        <group key={i}>
+          <primitive object={lines[n]} />
+          {Array.from({ length: m.pts.length / 4 }, (_, k) => (
+            <mesh key={k} position={[m.pts[k * 4] / 120, m.pts[k * 4 + 1] / 120, m.pts[k * 4 + 2] / 120]} renderOrder={OVERLAY_ORDER}>
+              <sphereGeometry args={[point && point[0] === i && point[1] === k ? 0.16 : 0.09, 12, 12]} />
+              <meshBasicMaterial color={point && point[0] === i && point[1] === k ? ACCENT : WARN} depthTest={false} toneMapped={false} />
+            </mesh>
+          ))}
+        </group>
+      ))}
+    </group>
+  )
+}
+
 function AxesReporter(): null {
   const camera = useThree((s) => s.camera)
   useFrame(() => {
@@ -762,6 +1155,9 @@ function AxesReporter(): null {
   })
   return null
 }
+
+/** How soon a second tap on a placed object must follow the first to open it, ms. */
+export const DOUBLE_TAP_MS = 400
 
 /**
  * Memoized: Bench takes no props, so its only legitimate reason to redraw is
@@ -783,43 +1179,59 @@ function AxesReporter(): null {
 function BenchImpl(): JSX.Element {
   const shard = useWorkshop((s) => s.current())
   const tool = useWorkshop((s) => s.tool)
+  const boxSelect = useWorkshop((s) => s.boxSelect)
+  const look = isLook(tool)
+  // The motion editor's preview, with its path marks, whatever the tool (store/animPreview.ts).
+  const previewing = useAnimPreview((s) => s.on)
   const extent = shard?.extent ?? GRID_HALF
   const showAvatar = useWorkshop((s) => s.showAvatar)
-  const partSel = useWorkshop((s) => s.partSel)
+  const facingShown = useFacingPreview((s) => s.on)
+  // What the shard on the bench draws, round: Reach measures it, the home view fits it.
+  const sphere = useRef<Sphere | null>(null)
   const first = useRef(true)
   useEffect(() => { first.current = false }, [])
 
   // A tap on a drawn face in FACE mode selects it. Corners still win: their hit
   // spheres stand proud of the face, so the raycast meets them first.
-  // A placed object is one whole thing (DECK-0003 §1.10). In SELECT and in
-  // VIEW a tap puts it in or out of the selection, so the pad can move, turn
-  // and delete a stamped object with the tool put down (arkinox, 2026-10-10);
-  // in FACE it is caught here, so a tap on it never selects a face of this
-  // object hidden behind it. In the placing tools it lets the tap through, to
-  // the grid it stands on.
+  // A placed object is one whole thing (DECK-0003 §1.10). In SELECT with
+  // OBJECTS a tap puts it in or out of the selection, so the pad can move,
+  // turn and delete it; in PAINT and FACE it is caught here, so a tap on it
+  // never paints or selects a face hidden behind it; in VIEW it is only caught.
+  // In the placing tools it lets the tap through, to the grid it stands on.
+  // A second tap on the same placed object, soon after the first, opens it to
+  // edit in place (useWorkshop enterPart); BACK goes up again (owner, 2026-11-22).
+  const lastTap = useRef<{ part: number; at: number; shard: string | null; sel: number[] } | null>(null)
   const onPart = (e: ThreeEvent<MouseEvent>, part: number): void => {
-    if (e.delta > tapSlop()) return
+    if (e.delta > tapSlop() || multiPress()) return
     e.stopPropagation()
-    const t = useWorkshop.getState().tool
-    // VIEW too (arkinox, 2026-10-10): with the tool put down, a tap on a
-    // stamped object picks it, and the pad moves, turns and deletes it.
-    if (t === 'select' || t === 'view') useWorkshop.getState().togglePart(part)
+    const w = useWorkshop.getState()
+    const now = performance.now()
+    const prev = lastTap.current
+    if (prev && prev.part === part && prev.shard === w.currentId && now - prev.at < DOUBLE_TAP_MS) {
+      lastTap.current = null
+      // The selection as it was before the first tap: the double-tap opens, it does not select.
+      if (w.tool === 'select' && w.selectKind === 'objects') w.setPartSelection(prev.sel)
+      void w.enterPart(part, fetchRef)
+      return
+    }
+    lastTap.current = { part, at: now, shard: w.currentId, sel: [...w.partSel] }
+    if (w.tool === 'select' && w.selectKind === 'objects') w.togglePart(part)
   }
 
   const onFace = (e: ThreeEvent<MouseEvent>, face: number): void => {
-    if (e.delta > tapSlop()) return
+    if (e.delta > tapSlop() || multiPress()) return
     e.stopPropagation()
-    useWorkshop.getState().selectFace(face)
+    const w = useWorkshop.getState()
+    if (w.tool === 'paint') { if (w.paintTake) { w.takeColorAt({ face }); w.setPaintTake(false) } else w.paintTap({ face }) }
+    else if (w.tool === 'select' && w.selectKind === 'faces') w.selectFace(face)
   }
 
-  // A tap that hits nothing lets go only in VIEW (arkinox, 2026-10-10): there
-  // a tap on a stamped object or a point selects it and VIEW has no DESELECT
-  // row, so empty space is the way out. In SELECT and FACE empty space is
-  // nothing, because a thumb that missed a point by a hair used to lose the
-  // whole selection; DESELECT, the pad's hub and Esc let go there.
+  // A tap that hits nothing is nothing, in every tool (workshop redesign,
+  // phase 2): a thumb that missed a point by a hair used to lose the whole
+  // selection. The held bar's count and Esc let go.
   return (
     <Canvas
-      camera={{ fov: 50, position: [10, 9, 12], near: BENCH_NEAR, far: 200 }}
+      camera={{ fov: 50, position: HOME, near: BASE_NEAR, far: BASE_FAR }}
       dpr={[1, 2]}
       gl={{ antialias: true }}
       frameloop="demand"
@@ -828,11 +1240,6 @@ function BenchImpl(): JSX.Element {
       // again, which on Direct3D stops the main thread for a second or more
       // each (lib/keepPrograms.ts; every other canvas already did this).
       onCreated={({ gl: renderer, scene }) => keepPrograms(renderer, scene)}
-      onPointerMissed={(e) => {
-        if ((e as PointerEvent).button !== 0) return
-        const w = useWorkshop.getState()
-        if (w.tool === 'view' && (w.selection.length || w.partSel.length)) w.selectVertex(null)
-      }}
       style={{ background: BG }}
     >
       {/* Your own pieces from your workshop, published or not: the bench is where they are made (lib/parts.ts). */}
@@ -843,30 +1250,44 @@ function BenchImpl(): JSX.Element {
           One rig for the bench, the avatar preview and the thumbnails
           (shardLight.tsx; arkinox, 2026-10-12). */}
       <ShardLights />
-      {/* One finger or left drag orbits, except in SELECT where that drag is
-          the marquee's and the orbit ball turns the view (arkinox,
-          2026-10-10). Two fingers, or the right button, pan
+      {/* One finger or left drag orbits in every tool, except in SELECT with
+          BOX on, where that drag is the box's and the view ball turns the
+          view (decision 1 of the workshop redesign). Two fingers, or the right button, pan
           the view in the screen plane; pinch or the wheel dollies, in to 0.6 of a
-          gibson so a fifth-gibson step fills a good share of a phone's screen.
-          These are the controls' own bindings. */}
-      <OrbitControls makeDefault enablePan screenSpacePanning panSpeed={0.9} enableRotate={tool !== 'select'} minDistance={0.6} maxDistance={benchReach(extent).maxDistance} dampingFactor={0.12} />
+          gibson so a fifth-gibson step fills a good share of a phone's screen,
+          and out as far as the whole shard needs to fit, 60 at the least
+          (Reach sets maxDistance each frame). These are the controls' own bindings. */}
+      <OrbitControls makeDefault enablePan screenSpacePanning panSpeed={0.9} enableRotate={!(tool === 'select' && boxSelect)} minDistance={MIN_DISTANCE} dampingFactor={0.12} />
+      <Reach sphere={sphere} />
       <OrbitHold />
       <Marquee />
+      <MultiTap />
+      <HandleProjector />
       <Aim />
       <Keys />
       <BenchWake />
+      <AnimWake />
       <AxesReporter />
-      <ViewDriver />
-      <CameraReach extent={extent} />
+      <ViewDriver sphere={sphere} />
+      <Framer />
       {/* Axes, in the compass's colors, so X is red here and out there. */}
       <BenchAxes reach={extent + 1} />
       <Grid />
       {showAvatar && <ScaleAvatar />}
-      {shard && <ShardMesh shard={shard} lit onFaceClick={tool === 'face' ? onFace : undefined} onPartClick={tool === 'view' || tool === 'select' || tool === 'face' ? onPart : undefined} selectedParts={partSel} />}
-      <Ghost />
-      <PickLoop />
-      <FaceHighlight />
-      <Handles />
+      {/* The shard: as the world draws it in LOOK, under the world's bloom; lit, with handles, in every other tool (benchLook.tsx). */}
+      {/* While the AVATAR sheet is open, turned as FACING would turn it on a move up and to the right (FacingPreview). */}
+      <FacingPreviewGroup><AnimClock.Provider value={benchClock}><BenchShard onFace={onFace} onPart={onPart} /></AnimClock.Provider></FacingPreviewGroup>
+      <FacingArrow />
+      {/* LINK or COPY, in a corner of every placed object (lib/partForm.ts). */}
+      {!facingShown && <PartBadges />}
+      {look && <BenchLookRig />}
+      {look && <BenchBloom />}
+      <PathMarks show={previewing} />
+      {/* The handles, the ghost and the face highlight stand where the shape is unturned: aside while FACING shows. */}
+      {!facingShown && <Ghost />}
+      {!facingShown && <PickLoop />}
+      {!facingShown && <FaceHighlight />}
+      {!facingShown && <Handles />}
       </OwnPartsContext.Provider>
     </Canvas>
   )

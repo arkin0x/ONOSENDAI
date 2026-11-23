@@ -14,6 +14,11 @@
  * The empty state is something to act on: pick from the FEED, or OPEN
  * WORKSHOP, which leaves BUILD mode the way EXIT does and opens the workshop,
  * where a model is made and its DEPLOY brings you straight back.
+ *
+ * The modal grows to the screen's height as the list needs, and a search box
+ * sits pinned under the list, one for both tabs (arkinox, 2026-11-16): MINE
+ * filters through the folders (hud/ShardFolders, lib/shardSearch.ts), FEED
+ * filters its list by name. The search is kept when the tab changes.
  */
 
 import { useState } from 'react'
@@ -25,6 +30,9 @@ import { FeedList } from './FeedList'
 import { Explanation } from './Explanation'
 import { ShardFolders, modelEditedAt, modelName, modelRef, useNewestFirst } from './ShardFolders'
 import { ShardThumb } from './ShardThumb'
+import { useScrollMemory } from '../hooks/useScrollMemory'
+import { useShardFolders } from '../store/useShardFolders'
+import { SearchField } from './ui/SearchField'
 
 /** Where objects to place come from. */
 export type SourceId = 'mine' | 'feed'
@@ -49,17 +57,19 @@ export function openWorkshopFromPicker(): void {
 export function PlaceObjectPicker(): JSX.Element {
   // The tab last picked from, so a cancelled deploy comes back to it; else MINE, or FEED with no models.
   const [source, setSource] = useState<SourceId>(() => useStash.getState().pickTab ?? defaultSource(useWorkshop.getState().shards))
+  const [query, setQuery] = useState('')
+  const hasModels = useWorkshop((s) => s.shards.length > 0)
   return (
-    <>
+    <div className="objpick__body">
       <div className="objpick__tabs" role="tablist">
         {SOURCES.map((s) => (
           <button key={s.id} role="tab" aria-selected={source === s.id} className={`objpick__tab ${source === s.id ? 'is-on' : ''}`} onClick={() => setSource(s.id)}>{s.label}</button>
         ))}
       </div>
-      {source === 'mine' && <ModelsSource toFeed={() => setSource('feed')} />}
+      {source === 'mine' && <ModelsSource toFeed={() => setSource('feed')} query={query} />}
       {source === 'feed' && (
         <>
-          <FeedList onPick={(o) => useStash.getState().deployObject(o)} />
+          <FeedList onPick={(o) => useStash.getState().deployObject(o)} query={query} />
           <Explanation>
             <ul className="objpick__explain">
               <li>A pick goes out as a copy: it stays exactly as you placed it.</li>
@@ -69,13 +79,26 @@ export function PlaceObjectPicker(): JSX.Element {
           </Explanation>
         </>
       )}
-    </>
+      {(source === 'feed' || hasModels) && (
+        <SearchField
+          className="objpick__search"
+          holdHeight
+          value={query}
+          onChange={setQuery}
+          placeholder={source === 'mine' ? 'Search shards and folders' : 'Search the feed'}
+          label={source === 'mine' ? 'Search your shards and folders' : 'Search the feed'}
+        />
+      )}
+    </div>
   )
 }
 
-function ModelsSource({ toFeed }: { toFeed: () => void }): JSX.Element {
+function ModelsSource({ toFeed, query }: { toFeed: () => void; query: string }): JSX.Element {
   const shards = useWorkshop((s) => s.shards)
   const list: ShardModel[] = useNewestFirst(shards, modelRef, modelEditedAt)
+  // Back where it was scrolled to after a deploy is canceled or placed, as the workshop's MENU is.
+  const foldersRead = useShardFolders((s) => s.storage !== 'loading')
+  const listScroll = useScrollMemory('place-object-mine', foldersRead)
   if (list.length === 0) {
     return (
       <div className="objpick__empty">
@@ -90,14 +113,14 @@ function ModelsSource({ toFeed }: { toFeed: () => void }): JSX.Element {
   return (
     <>
       <p className="login__note">Choose one of your models. You aim and place it next; CANCEL before placing brings you back here.</p>
-      <ul className="objpick__list">
-        <ShardFolders items={list} refOf={modelRef} nameOf={modelName} row={(s, f) => {
+      <ul className="objpick__list" ref={listScroll}>
+        <ShardFolders items={list} refOf={modelRef} nameOf={modelName} query={query} row={(s, f) => {
           const empty = s.vertices.length === 0 && (s.parts?.length ?? 0) === 0
           return (
             <li key={s.id} {...f.drag}>
               <button className="objpick__row" disabled={empty} onClick={() => useStash.getState().deployModel(s.id)} title={empty ? 'Nothing in it to place yet' : `Place "${s.name}"`}>
                 <ShardThumb shard={s} />
-                <span className="objpick__name">{s.name}</span>
+                <span className="objpick__name">{f.mark(s.name)}</span>
                 <span className="objpick__meta">{empty ? 'EMPTY' : `${s.vertices.length} v · ${s.faces.length} f${s.parts?.length ? ` · ${s.parts.length} obj` : ''}`}</span>
               </button>
               {f.tool}

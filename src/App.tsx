@@ -466,7 +466,7 @@ export default function App(): JSX.Element {
         {/* Not while placing: the deploy bar docks in this same corner
             (arkinox, 2026-10-12), and placing moves no avatar, so there is
             no route to show. */}
-        {showPad && !offerUp && !deploying && shows('route') && <RouteOverlay />}
+        {shows('route') && showPad && !offerUp && !deploying && <RouteOverlay />}
         {/* WALK's look ball, in the bottom right over JUMP and DOWN
             (WalkLookSphere.tsx). Not tied to the pad, which a tap on the scene
             folds; not while the menu covers the scene or while placing. */}

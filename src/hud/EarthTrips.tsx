@@ -27,6 +27,9 @@ import { chooseTrip, currentShortTrips, isShortTrip, measureTripSpeed, rideStart
 import { useRideQuote } from './useRideQuote'
 import { viewStop } from './HyperspacePanel'
 
+/** What the list says when no stop is a short trip from here (no landfall in reach, or a device too slow). */
+export const NO_SHORT_TRIP = 'No short trip from here right now. SKIP to try something else.'
+
 /** What a trip's row says under its place. */
 export function tripMeta(t: ShortTrip): string {
   return t.ms === null ? 'A few min at most' : `About ${tripTime(t.ms)}`
@@ -50,8 +53,8 @@ export function EarthTrips(): JSX.Element | null {
   const quoted = picked ?? trips[0]?.height ?? null
   const quote = useRideQuote(quoted !== null ? from : null, quoted)
 
-  // On the BOARD step the list is there only to pick a trip when none is.
-  if (stepId === 'earth-board' && picked !== null) return null
+  // On the BOARD and RIDE steps the list is there only to pick a trip when no short one is.
+  if ((stepId === 'earth-board' || stepId === 'earth-ride') && picked !== null) return null
 
   const pick = (t: ShortTrip): void => {
     if (!chooseTrip(t.height)) return
@@ -62,7 +65,7 @@ export function EarthTrips(): JSX.Element | null {
   return (
     <div className="earth-trips" role="group" aria-label="Short trips">
       {trips.length === 0 ? (
-        <p className="earth-trips__wait">{status === 'ready' ? 'Finding a short trip from your nearest stop.' : 'Loading the stops.'}</p>
+        <p className="earth-trips__wait">{status !== 'ready' ? 'Loading the stops.' : from === null ? 'Finding your nearest stop.' : NO_SHORT_TRIP}</p>
       ) : trips.map((t) => {
         const on = picked === t.height
         return (

@@ -67,6 +67,8 @@ export const REVEAL: Readonly<Record<RevealId, RevealAt>> = {
   'panel.targets': 'friend',
   'panel.links': 'straylight',
   'pad.modes': 'build-place',
+  // HOSAKA's price comes in with the short trips; a job bought then is kept, resumed or discarded in Cloud compute.
+  'panel.cloud': 'earth-pick',
   // Not part of the newcomer view: movement proof terms and expert panels.
   route: 'never',
   'proof-labels': 'never',
@@ -77,7 +79,6 @@ export const REVEAL: Readonly<Record<RevealId, RevealAt>> = {
   'panel.position': 'never',
   'panel.viewat': 'never',
   'panel.proof': 'never',
-  'panel.cloud': 'never',
   'panel.chain': 'never',
   'panel.legend': 'never',
   'panel.derezz': 'never',

@@ -319,6 +319,8 @@ export const EARTH_RIDE: TutorialStep = {
   scene: { target: 'keep', highlight: `${MENU_SHUT}, [data-panel-id="hyperspace"] .hyper__actions .hyper__btn--ride, [data-panel-id="hyperspace"] .hyper__choicebtn--here` },
   // HYPERSPACE first, and the step says how long the trip takes here (tutorial/earthRoute.ts 'ride-step').
   effect: 'ride-step',
+  // Only while the destination is not a short trip (set some other way, or re-priced once the speed is measured): RIDE is not offered then.
+  panel: 'earth-trips',
   wait: 'ride',
   advanceOn: 'ride-over',
   branch: true,

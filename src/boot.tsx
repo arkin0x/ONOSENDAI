@@ -17,6 +17,7 @@ import { markBoot } from './lib/bootMarks'
 import { isWorkshopPath } from './lib/workshopRoute'
 import { hudFlags } from './lib/hudFlags'
 import { applyNewcomerFlag } from './newcomer/flag'
+import { loadNewcomer } from './newcomer/useNewcomer'
 import { applyTutorialFlag, applyTutorialRoute, landedPath, noteLanding } from './tutorial/gate'
 import { takeArrivalMode } from './store/arrivalMode'
 import { inject } from '@vercel/analytics'
@@ -32,7 +33,8 @@ noteLanding(location.pathname)
 applyTutorialFlag()
 applyTutorialRoute()
 // ?newcomer=1: this tab plays a newcomer, the tour asked for (newcomer/flag.ts); =0 ends it.
-applyNewcomerFlag()
+// The newcomer store read its record as the app's modules loaded: read it again for the tab's newcomer, or the stored one again after =0.
+if (applyNewcomerFlag() !== null) loadNewcomer()
 // ?mode=view or ?mode=region: taken off the address now, applied once the app can (store/arrivalMode.ts).
 takeArrivalMode()
 // /tv?broadcast=1, the 24/7 stream: no pointer on the page (lib/tv/broadcast.ts).

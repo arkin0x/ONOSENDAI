@@ -238,6 +238,30 @@ describe('Settings > Interface: Show everything or Newcomer view', () => {
     expect(shows('proof-labels')).toBe(false)
   })
 
+  it('Newcomer view turned on mid-tour shows at once everything the step needs, never less', async () => {
+    localStorage.removeItem(MINTED_KEY)
+    useCyberspace.setState({ events: [{} as never] })
+    useTutorial.getState().start()
+    await settle()
+    await reach('to-course')
+    expect(state().newcomer).toBe(false)
+    setHudChoice('newcomer')
+    expect(state()).toMatchObject({ newcomer: true, staged: true })
+    for (const id of ['pad.go', 'pad.arrows', 'pad.recall', 'menu'] as RevealId[]) expect(shows(id), id).toBe(true)
+  })
+
+  it('a newcomer who turns the tutorial off gets the full HUD back, and it returns with the switch', async () => {
+    useTutorial.getState().start()
+    await settle()
+    useTutorial.getState().pause()
+    expect(state().newcomer).toBe(true)
+    setTutorialSwitch(false)
+    expect(state().newcomer).toBe(false)
+    expect(shows('panel.scale')).toBe(true)
+    setTutorialSwitch(true)
+    expect(state().newcomer).toBe(true)
+  })
+
   it('Show everything for a newcomer mid-tour: the full HUD at once, and it holds', async () => {
     useTutorial.getState().start()
     await settle()

@@ -122,6 +122,17 @@ describe('the Earth route', () => {
     expect(s.EARTH_LOOK.then).toBeUndefined()
     expect(s.EARTH_LOOK.wait).toBeUndefined()
     expect(TUTORIAL_SCRIPT.steps.some((st) => st.id === 'earth-look')).toBe(true)
+    // Walked: SEE EARTH, then FINISH back to the choices with it checked off.
+    t.useTutorial.setState({ script: s.TUTORIAL_SCRIPT, doneChoices: [] })
+    t.useTutorial.getState().start({ at: 'choice' })
+    t.useTutorial.getState().choose('earth-look')
+    await Promise.resolve(); await Promise.resolve(); await Promise.resolve()
+    const at = (): string => t.useTutorial.getState().script.steps[t.useTutorial.getState().index].id
+    expect(at()).toBe('earth-look')
+    t.useTutorial.getState().next()
+    expect(at()).toBe('choice')
+    expect(t.useTutorial.getState().doneChoices).toEqual(['earth-look'])
+    t.useTutorial.getState().pause()
   })
 
   it('the RIDE step on such a browser says why and how to go on', () => {

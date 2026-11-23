@@ -35,7 +35,7 @@ import { create } from 'zustand'
 import { kvGet, kvSet } from '../lib/kvStore'
 import { keyMintedOnLoad, useCyberspace } from '../store/useCyberspace'
 import { isNewArrival, onTutorialLifecycle, tutorialMayRun, useTutorial } from '../store/useTutorial'
-import { arrivalModeAsked, readProgress } from '../tutorial/gate'
+import { arrivalModeAsked, readProgress, tutorialOn, useTutorialSwitch } from '../tutorial/gate'
 import { useDemo } from '../store/useDemo'
 import { useTv } from '../store/useTv'
 import { SESSION_PREFIX, session, sessionNewcomer } from './flag'
@@ -91,10 +91,15 @@ export function writeRecord(pubkey: string, rec: NewcomerRecord): void {
   kvSet(NEWCOMER_PREFIX + pubkey, text)
 }
 
-/** Whether the newcomer view is on for a record: the choice in Settings, else the stage. */
-export function newcomerViewOf(rec: NewcomerRecord): boolean {
+/**
+ * Whether the newcomer view is on for a record: the choice in Settings, else
+ * the stage, while the tour can still run on this device (its switch on): a
+ * newcomer who turns the tutorial off is never left in a partial HUD with
+ * nothing to bring the rest.
+ */
+export function newcomerViewOf(rec: NewcomerRecord, tourOn: boolean = tutorialOn()): boolean {
   if (rec.choice) return rec.choice === 'newcomer'
-  return rec.stage === 'newcomer'
+  return rec.stage === 'newcomer' && tourOn
 }
 
 interface NewcomerState {
@@ -133,6 +138,8 @@ function update(pubkey: string, change: (rec: NewcomerRecord) => NewcomerRecord)
 export function setHudChoice(choice: HudChoice): void {
   const pubkey = useNewcomer.getState().pubkey ?? useCyberspace.getState().identity.pubkey
   update(pubkey, (rec) => (rec.choice === choice ? rec : { ...rec, choice }))
+  // Turned on mid-run: what the run has reached shows at once, never less than its step needs.
+  if (choice === 'newcomer') noteStep(pubkey, false)
 }
 
 /**
@@ -151,17 +158,18 @@ function noteStep(pubkey: string, fresh: boolean): void {
   const t = useTutorial.getState()
   if (!t.active || t.pubkey !== pubkey) return
   const passed = stepsThrough(t.script.steps, t.index)
-  update(pubkey, (rec) => {
-    // A run begun from the first step starts the staging over.
-    const base = fresh && t.index === 0 ? [] : rec.seen
-    const add = passed.filter((id) => !base.includes(id))
-    if (add.length === 0 && base === rec.seen) return rec
+  const rec = useNewcomer.getState().pubkey === pubkey ? useNewcomer.getState().record : readRecord(pubkey)
+  // A run begun from the first step starts the staging over.
+  const base = fresh && t.index === 0 ? [] : rec.seen
+  const add = passed.filter((id) => !base.includes(id))
+  if (add.length === 0 && base === rec.seen) return
+  if (useNewcomer.getState().pubkey === pubkey) {
     const now = Date.now()
     const arrivals = { ...useNewcomer.getState().arrivals }
     for (const [id, at] of Object.entries(REVEAL) as Array<[RevealId, string]>) if (add.includes(at)) arrivals[id] = now
-    if (useNewcomer.getState().pubkey === pubkey) useNewcomer.setState({ arrivals })
-    return { ...rec, seen: [...base, ...add] }
-  })
+    useNewcomer.setState({ arrivals })
+  }
+  update(pubkey, (r) => ({ ...r, seen: [...base, ...add] }))
 }
 
 /**
@@ -251,13 +259,15 @@ export function useRevealState(): RevealState {
   const moved = useCyberspace((s) => s.events.length > 0)
   const tour = useDemo((s) => s.active)
   const tv = useTv((s) => s.on)
+  const tourSwitch = useTutorialSwitch((s) => s.value)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  return useMemo(() => revealStateOf(rec, pubkey, tourMine), [rec, pubkey, tourMine, moved, tour, tv])
+  return useMemo(() => revealStateOf(rec, pubkey, tourMine), [rec, pubkey, tourMine, moved, tour, tv, tourSwitch])
 }
 
 /** Whether the newcomer view is on (plain names) for the identity on screen. */
 export function useNewcomerView(): boolean {
-  return useNewcomer((s) => newcomerViewOf(s.record))
+  const on = useTutorialSwitch((s) => s.value !== false)
+  return useNewcomer((s) => newcomerViewOf(s.record, on))
 }
 
 /** Whether the newcomer view is on, outside React. */

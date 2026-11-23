@@ -136,11 +136,13 @@ registerTutorialEffect('board-step', () => {
     const dest = useHyperspace.getState().destination
     const none = dest === null || !isShortTrip(dest)
     useTutorial.getState().noteStep(index, none ? (dest === null ? BOARD_PICK_FIRST_NOTE : tooFarNote(dest)) : null)
-    useTutorial.getState().highlightStep(index, none ? BOARD_PICK_FIRST_GLOW : null)
+    // A long destination: the glow is on the short trips listed under the caption, never on BOARD.
+    useTutorial.getState().highlightStep(index, none ? (dest === null ? BOARD_PICK_FIRST_GLOW : TRIPS_GLOW) : null)
   }
   note()
   const off = useHyperspace.subscribe((s, prev) => { if (s.destination !== prev.destination) note() })
-  return () => { off(); unpick(); unfront() }
+  const offBench = useTripBench.subscribe(note)
+  return () => { off(); offBench(); unpick(); unfront() }
 })
 
 /**
@@ -156,16 +158,24 @@ registerTutorialEffect('ride-step', () => {
     return unfront
   }
   measureTripSpeed()
+  // A short trip of a few blocks may still take the tap that changes it; a long one never glows RIDE.
+  const unpick = shortPicks(index)
   const note = (): void => {
     const dest = useHyperspace.getState().destination
     const blocks = dest === null ? null : tripBlocks(dest)
     const bench = useTripBench.getState().bench
-    useTutorial.getState().noteStep(index, blocks !== null && bench ? rideNote(rideEstimateMs(blocks, bench)) : null)
+    const long = dest !== null && !isShortTrip(dest)
+    useTutorial.getState().noteStep(index, long ? tooFarNote(dest) : blocks !== null && bench ? rideNote(rideEstimateMs(blocks, bench)) : null)
+    useTutorial.getState().highlightStep(index, long ? TRIPS_GLOW : null)
   }
   note()
   const off = useTripBench.subscribe(note)
-  return () => { off(); unfront() }
+  const offDest = useHyperspace.subscribe((s, prev) => { if (s.destination !== prev.destination) note() })
+  return () => { off(); offDest(); unpick(); unfront() }
 })
+
+/** What glows while the destination is not a short trip: the short trips under the caption (hud/EarthTrips.tsx). */
+export const TRIPS_GLOW = '.earth-trips'
 
 /** What the RIDE step says on a browser that cannot ride. */
 export const RIDE_CANNOT_NOTE = `${RIDE_CAPABILITY_ISSUE} Tap SKIP to try something else.`

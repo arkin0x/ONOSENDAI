@@ -409,7 +409,8 @@ export function TouchControls(): JSX.Element {
   // The ring stays out of the newcomer view until the tour reaches BUILD:
   // its slot holds a resting GO instead, so the slot never empties or moves.
   const ringShown = veil('pad.modes') !== ' nc-veiled'
-  const ring = (m: WalkFrom): JSX.Element => ringShown ? modeButton(m, true) : (
+  // Only HOP's: in VIEW, BUILD or SCAN the mode button is the way back to HOP, so it always shows.
+  const ring = (m: WalkFrom): JSX.Element => ringShown || m !== 'hop' ? modeButton(m, true) : (
     <button key="commit" className={`touchops__commit${veil('pad.go')}`} disabled title="Move the cursor somewhere first">
       {withKey(say('COMMIT', plain), 'SPACE')}
     </button>
@@ -445,7 +446,7 @@ export function TouchControls(): JSX.Element {
                 (useRegion toggleRegion; owner, 2026-11-13). */}
             {viewing && !building && !scanning && (
               <button
-                className={`touchpad__key touchpad__key--region${regionActive ? ' is-on' : ''}`}
+                className={`touchpad__key touchpad__key--region${regionActive ? ' is-on' : ''}${veil('pad.modes')}`}
                 title="Region: pick a region for a private speakeasy"
                 aria-label="Region selector"
                 aria-pressed={regionActive}

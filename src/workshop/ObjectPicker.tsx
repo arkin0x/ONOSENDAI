@@ -1,5 +1,9 @@
 /**
- * ObjectPicker.tsx - choosing the object OBJECT stamps (DECK-0003 §1.10).
+ * ObjectPicker.tsx - reading published objects for STAMP's LINK (DECK-0003
+ * §1.10): an address typed or pasted, and the objects a key has published.
+ * The picker itself is STAMP's library now (workshop/StampLibrary.tsx, owner
+ * 2026-11-23), which lists your whole workshop library for COPY and LINK and
+ * uses these for what LINK reaches beyond it. Before it:
  *
  * ONOSENDAI has no public feed, so the choice is the objects this key has
  * published (kind 33331, from snocrash or anywhere else), newest first, and a
@@ -10,31 +14,14 @@
  * 2026-09-25: NIP-01 lets relays drop old versions, so an `e` may find nothing).
  */
 
-import { useEffect, useState } from 'react'
-import { Sheet } from './shell/Sheet'
 import { nip19 } from 'nostr-tools'
-import { fromPayload, type Ref, type ShardModel } from 'sno-core/shards'
-import { GENERAL_RELAYS } from '../lib/contacts'
+import { fromPayload, type ShardModel } from 'sno-core/shards'
 import type { NostrEvent } from '../lib/events'
-import { fetchRef } from '../lib/parts'
 import { keepOwnTable } from '../lib/carried'
-import { queryAny } from '../lib/relay'
-import { readRelays } from '../store/useRelays'
-import { useCyberspace } from '../store/useCyberspace'
-import { useWorkshop, type StampObject } from '../store/useWorkshop'
-import { usePublished } from '../store/usePublished'
-import { useEscape } from '../hooks/useEscape'
-import { ShardFolders, useNewestFirst } from '../hud/ShardFolders'
-import { useScrollMemory } from '../hooks/useScrollMemory'
-import { useShardFolders } from '../store/useShardFolders'
-import { ShardThumb } from '../hud/ShardThumb'
-import { SearchField } from '../hud/ui/SearchField'
 
 const OBJECT_KIND = 33331
-const NONE: Found[] = []
-const WAIT_MS = 5000
 
-interface Found { address: string; relay?: string; shard: ShardModel; at: number }
+export interface Found { address: string; relay?: string; shard: ShardModel; at: number }
 
 /** An `naddr1…` or a bare `33331:<pubkey hex>:<d>`, as the address and an optional relay hint; null otherwise. */
 export function parseObjectAddress(input: string): { address: string; relay?: string } | null {
@@ -75,97 +62,3 @@ export function objectsOf(events: NostrEvent[]): Found[] {
  * in (hud/ShardFolders).
  */
 export const foundRef = (o: Found): string => o.address.split(':').slice(2).join(':')
-const foundName = (o: Found): string => o.shard.name
-/** When a published object was last edited, ms: its event's time. */
-const foundEditedAt = (o: Found): number => o.at * 1000
-
-export function ObjectPicker({ onClose }: { onClose: () => void }): JSX.Element {
-  const me = useCyberspace((s) => s.identity.pubkey)
-  const [mine, setMine] = useState<Found[] | null>(null)
-  const [address, setAddress] = useState('')
-  const [status, setStatus] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
-  const [query, setQuery] = useState('')
-
-  useEffect(() => {
-    let live = true
-    setMine(null)
-    void queryAny([...new Set([...readRelays(), ...GENERAL_RELAYS])], { kinds: [OBJECT_KIND], authors: [me] }, WAIT_MS)
-      .then((events) => {
-        // What the relays hold under this key is what SHARD's PUBLISH tag
-        // reports (store/usePublished.ts): an object published from another
-        // browser or from snocrash reads as PUBLISHED here from this read on.
-        usePublished.getState().learn(events)
-        if (live) setMine(objectsOf(events))
-      }, () => { if (live) setMine([]) })
-    return () => { live = false }
-  }, [me])
-  // Newest first, a deploy counted as an edit, as every list of your shards (hud/ShardFolders).
-  const byRecent = useNewestFirst(mine ?? NONE, foundRef, foundEditedAt)
-  // The list comes back where it was scrolled to the next time STAMP's picker
-  // opens: ready once the relays answered and the folders are read.
-  const foldersRead = useShardFolders((s) => s.storage !== 'loading')
-  const listScroll = useScrollMemory('workshop-stamp-objects', mine !== null && foldersRead)
-
-  const choose = (o: StampObject): void => {
-    useWorkshop.getState().setStampObject(o)
-    onClose()
-  }
-  const refOf = (addr: string, relay?: string): Ref => (relay ? ['a', addr, relay] : ['a', addr])
-
-  const byAddress = async (): Promise<void> => {
-    const parsed = parseObjectAddress(address)
-    if (!parsed) { setStatus('That is not an object address. Paste an naddr1… or 33331:<pubkey>:<d>.'); return }
-    setBusy(true)
-    setStatus('Asking the relays…')
-    const ref = refOf(parsed.address, parsed.relay)
-    const raw = await fetchRef(ref)
-    setBusy(false)
-    const read = raw == null ? null : fromPayload(raw, parsed.address)
-    const shard = read && keepOwnTable(read, parsed.address.split(':')[1])
-    if (!shard) { setStatus(raw == null ? 'No relay had that object.' : 'That object is not one the format can read.'); return }
-    choose({ ref, name: shard.name, shard })
-  }
-  // Escape closes it as its X does (arkinox, 2026-10-01).
-  useEscape('modal', true, onClose)
-
-  // A sheet over the dock (workshop redesign, phase 1), standing on the strip
-  // with the bench in view above it, rather than a modal over everything.
-  return (
-    <Sheet name="Choose an object to stamp" title="STAMP AN OBJECT" onClose={onClose} tall className="objpick-sheet">
-      <div className="login objpick">
-        <p className="login__note">
-          Placed by reference: it stays that object, and follows it when its author edits it. Only published objects can be
-          placed: PUBLISH one from SHARD first, here or in snocrash.
-        </p>
-        <div className="login__section">
-          <span className="login__label">Yours</span>
-          {mine === null && <p className="login__note">Reading the relays…</p>}
-          {mine !== null && mine.length === 0 && <p className="login__note">No published objects under this key yet.</p>}
-          {/* Above the list: the sheet scrolls as a whole, so under a long list the box would be out of reach. */}
-          {mine !== null && (mine.length > 1 || query !== '') && <SearchField className="workshop__search" value={query} onChange={setQuery} placeholder="Search shards and folders" label="Search your published objects and folders" />}
-          {mine !== null && mine.length > 0 && (
-            <ul className="objpick__list" ref={listScroll}>
-              <ShardFolders items={byRecent} refOf={foundRef} nameOf={foundName} query={query} row={(o, f) => (
-                <li key={o.address} {...f.drag}>
-                  <button className="objpick__row" onClick={() => choose({ ref: refOf(o.address), name: o.shard.name, shard: o.shard })}>
-                    <ShardThumb shard={o.shard} />
-                    <span className="objpick__name">{f.mark(o.shard.name)}</span>
-                    <span className="objpick__meta">{o.shard.vertices.length} v · {o.shard.faces.length} f{o.shard.parts?.length ? ` · ${o.shard.parts.length} obj` : ''}</span>
-                  </button>
-                  {f.tool}
-                </li>
-              )} />
-            </ul>
-          )}
-        </div>
-        <div className="login__section">
-          <label className="login__label" htmlFor="objpick-address">Anyone's, by address</label>
-          <input id="objpick-address" className="avatars__input login__input" type="text" spellCheck={false} autoComplete="off" placeholder="naddr1… or 33331:<pubkey>:<d>" value={address} onChange={(e) => setAddress(e.target.value)} />
-          <button className="secret__act login__act" disabled={busy || !address.trim()} onClick={() => void byAddress()}>{busy ? 'LOOKING…' : 'USE THIS OBJECT'}</button>
-          {status && <p className="login__note" style={{ margin: 0 }}>{status}</p>}
-        </div>
-      </div>
-    </Sheet>
-  )
-}

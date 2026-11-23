@@ -34,7 +34,7 @@
  * `extra` until sno-core learns it; a top-level `anim` is read first.
  */
 
-import type { ShardModel } from 'sno-core/shards'
+import { TICK_REACH, type ShardModel } from 'sno-core/shards'
 
 /** The payload field. */
 export const ANIM_FIELD = 'anim'
@@ -47,8 +47,8 @@ export const MAX_MOTIONS = 4
 export const MAX_PER_SECOND = 2
 /** Largest `b`, seconds: a year of 365 days (§1.14). */
 export const MAX_SECONDS = 31_536_000
-/** Largest distance in ticks (the 64-unit position bound of §1.8). */
-export const REACH = 64 * 120
+/** Largest distance in ticks: the position bound of §1.8, 4,096 units since 2026-11-23 (sno-core TICK_REACH). */
+export const REACH = TICK_REACH
 /** Largest path leg weight. */
 export const MAX_WEIGHT = 1_000
 /** Waypoints a `path` may have (§1.14). */
@@ -149,14 +149,14 @@ export const MOTIONS: Readonly<Record<string, MotionDef>> = {
     read: axisShape(1, ([reach]) => reach >= 1 && reach <= 180),
     pose: (m, u, out) => { still(out); out.axis = m.axis; out.angle = (m.p[0] * Math.PI / 180) * Math.sin(TAU * u) },
   },
-  /** `["slide", axis, reach, c, b, φ]`: along the axis, offset = reach × sin(2πu), reach 1..7680 ticks. */
+  /** `["slide", axis, reach, c, b, φ]`: along the axis, offset = reach × sin(2πu), reach 1..REACH ticks. */
   slide: {
     read: axisShape(1, ([reach]) => reach >= 1 && reach <= REACH),
     pose: (m, u, out) => { still(out); out.t[m.axis] = m.p[0] * Math.sin(TAU * u) },
   },
   /**
    * `["orbit", axis, radius, c, b, φ]`: the origin goes round a circle of
-   * `radius` ticks (1..7680) about the axis, without turning. At u = 0 it
+   * `radius` ticks (1..REACH) about the axis, without turning. At u = 0 it
    * sits at `radius` along the next axis (x->y, y->z, z->x), and it goes
    * round the way a turn does (right-handed).
    */
@@ -173,7 +173,7 @@ export const MOTIONS: Readonly<Record<string, MotionDef>> = {
   },
   /**
    * `["lift", axis, travel, dwell, c, b, φ]`: rests at the origin, travels
-   * `travel` ticks (signed, nonzero, within 7680) eased, rests, comes back;
+   * `travel` ticks (signed, nonzero, within REACH) eased, rests, comes back;
    * `dwell` is the share of the cycle resting at EACH stop, whole percent 0..49.
    */
   lift: {
@@ -191,7 +191,7 @@ export const MOTIONS: Readonly<Record<string, MotionDef>> = {
   },
   /**
    * `["path", c, b, φ, [x, y, z, w], ...]`: the origin travels a closed loop
-   * of 2 to 32 waypoints in ticks (each within 7680), linearly. Leg i runs
+   * of 2 to 32 waypoints in ticks (each within REACH), linearly. Leg i runs
    * from the waypoint before it to waypoint i and takes w_i / Σw of the cycle
    * (w 1..1000), so at u = 0 the origin is at the last waypoint.
    */

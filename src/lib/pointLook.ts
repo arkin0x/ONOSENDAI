@@ -135,7 +135,7 @@ export function haloFade({ ghostShare = 1, dim = 1 }: { ghostShare?: number; dim
 /**
  * How many doublings further off an object's glow keeps it worth drawing
  * (WorldShards FAR_CULL): log2(1 + radius in model units), 0 with no glow. A
- * glow of the 64-unit reach widens the cull by six.
+ * glow of 64 units widens the cull by six, and one of the 4,096-unit cap by twelve.
  */
 export function glowReachDoublings(s: Looked): number {
   const g = drawnGlow(s)

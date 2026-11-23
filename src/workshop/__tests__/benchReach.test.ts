@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { newShard, TICKS_PER_UNIT, type ShardModel, type Ref } from 'sno-core/shards'
+import { MAX_EXTENT, newShard, TICKS_PER_UNIT, type ShardModel, type Ref } from 'sno-core/shards'
 import { refKey } from 'sno-core/parts'
 import type { Resolved } from '../../lib/parts'
-import { BASE_FAR, BASE_NEAR, MIN_REACH, clipPlanes, fitDistance, nextMaxDistance, reachFor, reachRadius, shardSphere } from '../benchReach'
+import { BASE_FAR, BASE_NEAR, MIN_REACH, clipPlanes, fitDistance, gridReach, gridSphere, nextMaxDistance, reachFor, reachRadius, shardSphere } from '../benchReach'
 
 /** The bench's lens (Bench.tsx Canvas). */
 const FOV = 50
@@ -164,5 +164,42 @@ describe('shardSphere and reachRadius (what the bench draws, round)', () => {
     expect(reachFor(reachRadius(big, at(big)), FOV, DESKTOP)).toBeGreaterThan(120)
     expect(reachFor(reachRadius(small, at(small)), FOV, DESKTOP)).toBe(60)
     expect(reachFor(reachRadius(small, at(small)), FOV, PHONE)).toBe(60)
+  })
+})
+
+/** GRID SIZE runs to 4,096 (DECK-0003 §1.8, 2026-11-23): an empty grid that size must fit the view too. */
+describe('gridSphere and gridReach (the grid as well as the shard)', () => {
+  const ORIGIN = { x: 0, y: 0, z: 0 }
+  /** The orbit's reach as Bench Reach sets it, for an empty shard on a grid of `extent`. */
+  const reachOf = (extent: number, aspect: number): number => {
+    const g = reachRadius(gridSphere(extent, 1, 0), ORIGIN)
+    return Math.max(reachFor(reachRadius(null, ORIGIN), FOV, aspect), gridReach(g, FOV, aspect))
+  }
+
+  it('lies in its plane at the level, the outermost lines included', () => {
+    expect(gridSphere(8, 1, 3)).toEqual({ center: [0, 3, 0], radius: Math.SQRT2 * 8.5 })
+    expect(gridSphere(8, 0, 3).center).toEqual([3, 0, 0])
+    // Render Z is model Z mirrored.
+    expect(gridSphere(8, 2, 3).center).toEqual([0, 0, -3])
+  })
+
+  it('keeps the 60 the bench always had for a small grid on a desktop', () => {
+    for (const e of [1, 8, 15]) expect(reachOf(e, DESKTOP)).toBe(MIN_REACH)
+  })
+
+  it('lets the whole of the largest grid fit the view, on a desktop and on a phone', () => {
+    for (const aspect of [DESKTOP, PHONE]) {
+      const d = reachOf(MAX_EXTENT, aspect)
+      expect(fits(gridSphere(MAX_EXTENT, 1, 0).radius, d, FOV, aspect)).toBe(true)
+    }
+  })
+
+  it('draws the whole grid from the far end, with depth to sort it', () => {
+    const r = gridSphere(MAX_EXTENT, 1, 0).radius
+    const d = reachOf(MAX_EXTENT, PHONE)
+    const { near, far } = clipPlanes(d, r)
+    expect(far).toBeGreaterThan(d + r)
+    expect(near).toBeLessThan(d - r)
+    expect(far / near).toBeLessThan(4000)
   })
 })

@@ -47,7 +47,7 @@ describe('withEye', () => {
   it('never writes a malformed value: a fraction or an eye out of reach removes the field', () => {
     const chosen = withEye(ship(), [0, 200, 0])
     expect(withEye(chosen, [0, 1.5, 0]).extra).toBeUndefined()
-    expect(withEye(chosen, [0, 7681, 0]).extra).toBeUndefined()
+    expect(withEye(chosen, [0, 491521, 0]).extra).toBeUndefined()
     expect(withEye(chosen, [NaN, 0, 0]).extra).toBeUndefined()
   })
 })

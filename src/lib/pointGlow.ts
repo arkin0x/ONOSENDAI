@@ -15,7 +15,7 @@
  */
 
 import { GLOW_REACH, suggestGlowStyle, type GlowStyle } from 'sno-core/glow'
-import { TICKS_PER_UNIT, type ShardModel } from 'sno-core/shards'
+import { MAX_EXTENT, TICKS_PER_UNIT, type ShardModel } from 'sno-core/shards'
 import { gibsonsLabel, ticksToGibsons } from './pointLook'
 
 /** Ticks in one model unit (§1.2). */
@@ -41,11 +41,17 @@ export const STRENGTH_MAX = 100
 /** The radius and strength a glow starts with the first time it is turned on in a session. */
 export const GLOW_START = { radius: TICKS, strength: 40 } as const
 
-/** − and + on POINT SIZE, in ticks (0, 0.05 units, 0.1 ... 64 units). AUTO is one step under 0. */
-export const POINT_LADDER = [0, 6, 12, 18, 24, 30, 36, 48, 60, 72, 90, 120, 150, 180, 240, 300, 360, 480, 600, 720, 960, 1200, 1440, 1920, 2400, 3600, 4800, 6000, GLOW_REACH] as const
+/**
+ * Past 64 units the ladders double to the cap, 4,096 units since 2026-11-23
+ * (DECK-0003 §1.8): 64, 128 ... 2,048, then GLOW_REACH.
+ */
+const PAST_64 = [7680, 15360, 30720, 61440, 122880, 245760] as const
 
-/** − and + on RADIUS, in ticks (1 tick, 0.05 units ... 64 units). */
-export const RADIUS_LADDER = [1, 6, 12, 24, 36, 48, 60, 90, 120, 180, 240, 360, 480, 720, 960, 1200, 1440, 1920, 2400, 3600, 4800, 6000, GLOW_REACH] as const
+/** − and + on POINT SIZE, in ticks (0, 0.05 units, 0.1 ... 4,096 units). AUTO is one step under 0. */
+export const POINT_LADDER = [0, 6, 12, 18, 24, 30, 36, 48, 60, 72, 90, 120, 150, 180, 240, 300, 360, 480, 600, 720, 960, 1200, 1440, 1920, 2400, 3600, 4800, 6000, ...PAST_64, GLOW_REACH] as const
+
+/** − and + on RADIUS, in ticks (1 tick, 0.05 units ... 4,096 units). */
+export const RADIUS_LADDER = [1, 6, 12, 24, 36, 48, 60, 90, 120, 180, 240, 360, 480, 720, 960, 1200, 1440, 1920, 2400, 3600, 4800, 6000, ...PAST_64, GLOW_REACH] as const
 
 /** − and + on GLOW STRENGTH, in percent: 1, then fives. */
 export const STRENGTH_LADDER = [1, ...Array.from({ length: 20 }, (_, i) => (i + 1) * 5)] as const
@@ -159,12 +165,12 @@ export function typedTicks(text: string, unit: number, min: number): number | nu
 
 /**
  * The most gibsons # takes at `unit`, as plain digits the field can hold
- * (64 units, the 7,680-tick cap), for its placeholder: "64" at unit 0,
- * "67108864" at unit 20.
+ * (MAX_EXTENT units, the GLOW_REACH-tick cap), for its placeholder: "4096" at
+ * unit 0, "4294967296" at unit 20.
  */
 export function maxGibsonsTyped(unit: number): string {
   const u = Math.round(unit)
-  return u >= 0 ? (64n << BigInt(u)).toString() : String(64 / 2 ** -u)
+  return u >= 0 ? (BigInt(MAX_EXTENT) << BigInt(u)).toString() : String(MAX_EXTENT / 2 ** -u)
 }
 
 // ---- the style pre-pick --------------------------------------------------------

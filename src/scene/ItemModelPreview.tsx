@@ -15,7 +15,7 @@ import type { ItemAnimation } from '../lib/itemModel'
 import type { LoadedModel } from '../hooks/useItemModel'
 import { keepPrograms } from '../lib/keepPrograms'
 import { ShardLights } from './shardLight'
-import { framedDistance } from './ThumbStage'
+import { framedDistance, holdInClip } from './ThumbStage'
 import { ModelInMotion, useItemBox } from './ItemModel'
 
 /** The camera's field of view, in degrees, as for the feed's pictures. */
@@ -36,6 +36,7 @@ function Framed({ model, animation }: { model: LoadedModel; animation: readonly 
     const n = Math.hypot(0.62, 0.42, 0.66)
     camera.position.set((d * 0.62) / n, (d * 0.42) / n, (d * 0.66) / n)
     camera.lookAt(0, 0, 0)
+    holdInClip(camera, d, reach, 0.001)
     camera.updateProjectionMatrix()
   }, [box, camera])
   return <ModelInMotion model={model} animation={animation} id={model.shard.id} box={box} amplitude={size.amplitude} lit />

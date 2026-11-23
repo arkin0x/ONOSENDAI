@@ -42,7 +42,7 @@ describe('presets write the canonical motions', () => {
   it('size with the object, within the field\'s range', () => {
     expect(objectReach({ vertices: [{ p: [0, 0, 0], c: [1, 1, 1] }] } as never)).toBe(120)
     expect(objectReach({ vertices: [{ p: [3, -5, 1], c: [1, 1, 1] }] } as never)).toBe(600)
-    expect(rawOf(addPreset([], 'slide', 99_999).list)[0][2]).toBe(REACH)
+    expect(rawOf(addPreset([], 'slide', 999_999).list)[0][2]).toBe(REACH)
     expect(rawOf(addPreset([], 'bob', 120).list)[0][2]).toBe(15)
   })
   it('a fifth is refused with a plain message', () => {
@@ -129,10 +129,11 @@ describe('amounts: degrees, and gibsons <-> ticks at the object\'s unit', () => 
     expect(rawOf(setAmount(list, 1, 4, 2).list)[1]).toEqual(['orbit', 'y', 120, 1, 1, 0])
     expect(rawOf(setAmount(list, 2, 45, 0).list)[2]).toEqual(['swing', 'z', 45, 1, 1, 0])
   })
-  it('limits: within 64 units, never zero, a pendulum 1 to 180 degrees', () => {
+  it('limits: within 4,096 units, never zero, a pendulum 1 to 180 degrees', () => {
     const list = readAnim([['slide', 'x', 120, 1, 1, 0], ['swing', 'z', 30, 1, 1, 0], ['lift', 'y', 240, 10, 1, 1, 0]])
-    expect(setAmount(list, 0, 1000, 0)).toMatchObject({ note: LIMITS.reach })
-    expect(rawOf(setAmount(list, 0, 1000, 0).list)[0][2]).toBe(REACH)
+    expect(rawOf(setAmount(list, 0, 1000, 0).list)[0][2]).toBe(120_000)
+    expect(setAmount(list, 0, 5000, 0)).toMatchObject({ note: LIMITS.reach })
+    expect(rawOf(setAmount(list, 0, 5000, 0).list)[0][2]).toBe(REACH)
     expect(rawOf(setAmount(list, 0, -5, 0).list)[0][2]).toBe(1)
     expect(rawOf(setAmount(list, 1, 400, 0).list)[1][2]).toBe(180)
     expect(rawOf(setAmount(list, 1, 0, 0).list)[1][2]).toBe(1)
@@ -182,7 +183,7 @@ describe('the list and a path\'s points', () => {
     expect(rawOf(list)[0].slice(4)).toEqual([[120, 240, -360, 1], [0, 0, 0, 1]])
     expect(rawOf(setPoint(list, 0, 0, 'z', -1, 0).list)[0][4]).toEqual([120, 240, 120, 1])
     expect(rawOf(setPoint(list, 0, 1, 'time', 6, 0).list)[0].slice(4)).toEqual([[120, 240, -360, 1], [0, 0, 0, 3]])
-    expect(setPoint(list, 0, 0, 'x', 500, 0).note).toBe(LIMITS.reach)
+    expect(setPoint(list, 0, 0, 'x', 5000, 0).note).toBe(LIMITS.reach)
     const capped = setPoint(list, 0, 0, 'time', 5000, 0)
     expect(capped.list[0].pts[3]).toBe(1000)
     expect(capped.note).toBe(LIMITS.time)

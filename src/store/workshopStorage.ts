@@ -42,11 +42,13 @@
  */
 
 import { GRID_HALF, neededExtent, normalizeStored, type ShardModel } from 'sno-core/shards'
+import { forOlderReaders } from './olderReaders'
 import {
   commit, databaseExists, fingerprint, localEntries, mergeLocal, newGen, noteReconciled, restoreInto, openWorkshopDb, readAll, readMigrated, readSome, verifyAndMark,
   type MigratedMeta, type ShardRecord,
 } from '../lib/workshopDb'
 import { kvCopiesOf, kvGet, kvSet } from '../lib/kvStore'
+import { saneGroups } from '../lib/shardGroups'
 
 /** The list as every build before this one kept it, and the backup from now on. */
 export const LOCAL_KEY = 'onosendai:shards'
@@ -170,7 +172,8 @@ export function normalizeOne(s: unknown): ShardModel | null {
     const x = s as ShardModel | null
     if (!x || typeof x !== 'object' || typeof x.id !== 'string' || !Array.isArray(x.vertices)) return null
     const n = normalizeStored(x)
-    return { ...n, extent: Number.isInteger(n.extent) ? n.extent : Math.max(GRID_HALF, neededExtent(n)) }
+    // The workshop's own groups (lib/shardGroups.ts), read back only as far as they fit this shard.
+    return saneGroups({ ...n, extent: Number.isInteger(n.extent) ? n.extent : Math.max(GRID_HALF, neededExtent(n)) })
   } catch { return null }
 }
 
@@ -237,7 +240,7 @@ function writeLocal(list: readonly ShardModel[]): boolean {
   // list there is the backup, and nothing writes it again.
   if (mode !== 'local') return false
   try {
-    kvSet(LOCAL_KEY, JSON.stringify(list))
+    kvSet(LOCAL_KEY, JSON.stringify(list.map(forOlderReaders)))
     if (failure) report(null, null)
     return true
   } catch {
@@ -354,7 +357,7 @@ async function checkStillThere(d: IDBDatabase): Promise<boolean> {
 }
 
 function recordOf(id: string, m: ShardModel): ShardRecord {
-  return { id, seq: seqFor(id), updatedAt: typeof m.updatedAt === 'number' && Number.isFinite(m.updatedAt) ? m.updatedAt : 0, json: JSON.stringify(m) }
+  return { id, seq: seqFor(id), updatedAt: typeof m.updatedAt === 'number' && Number.isFinite(m.updatedAt) ? m.updatedAt : 0, json: JSON.stringify(forOlderReaders(m)) }
 }
 
 async function commitPending(): Promise<boolean> {

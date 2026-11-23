@@ -23,8 +23,8 @@ import { ShardMesh } from './ShardMesh'
 import { GHOST_OPACITY } from './shardFaces'
 import { regionBox, type Box } from '../lib/clip'
 import { placedPose, type Pose } from '../lib/pose'
-import type { ShardModel } from 'sno-core/shards'
-import { TapTarget, farCullDoublings } from './TapTarget'
+import { neededExtent, type ShardModel } from 'sno-core/shards'
+import { CULL_EXTENT_MIN, TapTarget, farCullDoublings } from './TapTarget'
 import { passesTaps } from '../tutorial/guideBags'
 import { useMutes } from '../store/useMutes'
 import { useBuildDimmed } from './BuildOccluders'
@@ -33,8 +33,42 @@ import { GhostGlow } from './PointBillboards'
 import { softModel } from './softPick'
 
 const REACH = GRID_RADIUS * 8
-/** Past this many doublings out from its unit, a shard with no placed objects can never be seen (TapTarget farCullDoublings). */
+/** Past this many doublings out from its unit, a shard of the usual size with no placed objects can never be seen (TapTarget farCullDoublings). */
 const FAR_CULL = farCullDoublings()
+
+/**
+ * How far a shard really reaches from its origin, in its own units. Its declared
+ * `extent` is advisory (DECK-0003 §1.8), so a tiny object declaring 4,096 would
+ * otherwise stay in the draw list thousands of cells out. Its points are what
+ * count, and a walk over them is kept for as long as the model is.
+ */
+const reaches = new WeakMap<ShardModel, number>()
+function drawnExtent(shard: ShardModel): number {
+  let r = reaches.get(shard)
+  if (r === undefined) reaches.set(shard, (r = Math.min(shard.extent, neededExtent(shard))))
+  return r
+}
+
+/** How far a shard can stretch from its centre in the render frame: the corner of what it holds, at its scale. */
+export function shardReach(shard: ShardModel, scale: number): number {
+  return Math.sqrt(3) * drawnExtent(shard) * scale
+}
+
+/**
+ * How near the render origin a placed shard can come: its centre's distance
+ * less its reach. The centre alone is not enough on a large grid: standing
+ * inside a shard 4,096 units across, its centre can be far past the reach
+ * while the shard stands all around you (review of #555).
+ */
+export function nearEdge(w: Pick<PlacedShardDraw, 'centre' | 'shard' | 'scale'>): number {
+  return Math.max(0, Math.hypot(...w.centre) - shardReach(w.shard, w.scale))
+}
+
+/** The far cull for this shard: its own bound past the usual size (TapTarget farCullDoublings). */
+function farCullFor(shard: ShardModel): number {
+  const e = drawnExtent(shard)
+  return e > CULL_EXTENT_MIN ? farCullDoublings(e) : FAR_CULL
+}
 
 /**
  * A shard being moved by EDIT stays where it stands while the ghost shows
@@ -162,9 +196,9 @@ export function drawableShards(items: Array<Pick<WorldItem, 'key' | 'type' | 'at
     // Not drawn at all once it cannot show a pixel at any distance; a shard
     // with placed objects is exempt, since they can be far larger than it.
     // A glow reaches past its points (DECK-0003 §1.16 SHOULD keep it visible): its radius widens the cull.
-    .filter((w) => (w.shard!.parts?.length ?? 0) > 0 || scaleExp - w.shard!.unit < FAR_CULL + glowReachDoublings(w.shard!))
+    .filter((w) => (w.shard!.parts?.length ?? 0) > 0 || scaleExp - w.shard!.unit < farCullFor(w.shard!) + glowReachDoublings(w.shard!))
     .map((w) => placeShard(w, origin, scaleExp, axes))
-    .filter((w) => Number.isFinite(w.scale) && Math.hypot(...w.centre) <= reach)
+    .filter((w) => Number.isFinite(w.scale) && nearEdge(w) <= reach)
 }
 
 /** Two clip boxes that cut the same. */
@@ -258,7 +292,7 @@ export function WorldShards({ axes }: Props): JSX.Element | null {
 
   return (
     <>
-      {placed.map((w) => <PlacedShard key={w.key} w={w} birth={births[w.key]} moving={w.key === moving} occludes hidden={Math.hypot(...w.centre) > reach} />)}
+      {placed.map((w) => <PlacedShard key={w.key} w={w} birth={births[w.key]} moving={w.key === moving} occludes hidden={nearEdge(w) > reach} />)}
     </>
   )
 }
@@ -309,7 +343,7 @@ export function keptWithin(placed: PlacedShardDraw[], reach: number, max: number
   const near: PlacedShardDraw[] = []
   const far: Array<{ w: PlacedShardDraw; d: number }> = []
   for (const w of placed) {
-    const d = Math.hypot(...w.centre)
+    const d = nearEdge(w)
     if (d <= reach) near.push(w)
     else if (mounted.has(w.key)) far.push({ w, d })
   }

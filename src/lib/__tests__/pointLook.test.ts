@@ -125,6 +125,7 @@ describe('unseenObject and the glow cull', () => {
     expect(glowReachDoublings(model('points'))).toBe(0)
     expect(glowReachDoublings(model('points', { glow: ['light', 7680, 50] }))).toBeCloseTo(Math.log2(65))
     expect(glowReachDoublings(model('solid', { glow: ['light', 7680, 50] }))).toBe(0)
+    expect(glowReachDoublings(model('points', { glow: ['light', 491520, 50] }))).toBeCloseTo(Math.log2(4097))
   })
 })
 

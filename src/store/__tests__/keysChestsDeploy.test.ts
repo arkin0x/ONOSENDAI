@@ -6,8 +6,9 @@
  * into the hider's own LOOT at once. A chest's contents are signed one by one
  * and sealed to the lock before the bag is written; a key forged inside the
  * chest is held too; the chest opens with the key it was sealed to. A chest
- * whose contents pass NIP-44's limit is refused in words, and nothing is
- * hidden. A key a scan reads is found, and held once on TAKE. Relays are
+ * whose contents pass a chest's cap (131,072 bytes, DECK-0004 §3.2) is
+ * refused in words, and nothing is hidden; one past 65,535 bytes, sealed with
+ * NIP-44's extended length prefix, hides and opens. A key a scan reads is found, and held once on TAKE. Relays are
  * mocked; no network.
  */
 
@@ -145,13 +146,32 @@ describe('hiding a chest', () => {
     expect(Object.values(I().items).some((it) => it.key?.itemPubkey === lock.itemPubkey)).toBe(false)
   })
 
-  it('refuses contents past 65,535 bytes in words, and hides nothing', async () => {
+  it('hides contents past 65,535 bytes, near the cap, and they open with the lock, every message whole', async () => {
+    const lock = forgeKey('k')
+    const texts = Array.from({ length: 12 }, (_, i) => 'abcdefghijkl'[i].repeat(10_000))
+    S().startDeployChest({
+      name: 'Hoard',
+      lock: { pubkey: lock.itemPubkey, label: 'k' },
+      requires: 'k',
+      contents: texts.map((text) => ({ kind: 'message' as const, text })),
+    })
+    await S().deploy()
+    expect(S().deployError).toBeNull()
+    expect(S().deployStatus).toBe('done')
+    const d = S().mine.find((x) => x.type === 'chest')!
+    const chest = chestItemOf(d.inner)!
+    const raw = openWithSecret(chest, lock.secretHex)
+    expect(new TextEncoder().encode(JSON.stringify(raw)).length).toBeGreaterThan(65_535)
+    expect(readContents(raw, d.inner.pubkey).map((c) => c.body.text)).toEqual(texts)
+  })
+
+  it('refuses contents past 131,072 bytes in words, and hides nothing', async () => {
     const lock = forgeKey('k')
     S().startDeployChest({
       name: 'Too much',
       lock: { pubkey: lock.itemPubkey, label: 'k' },
       requires: '',
-      contents: Array.from({ length: 7 }, () => ({ kind: 'message' as const, text: 'x'.repeat(10_000) })),
+      contents: Array.from({ length: 14 }, () => ({ kind: 'message' as const, text: 'x'.repeat(10_000) })),
     })
     await S().deploy()
     expect(S().deployStatus).toBe('error')

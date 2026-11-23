@@ -21,7 +21,7 @@ import { hiddenLabel, unbag, type Hidden } from '../../lib/hidden'
 import { decryptForRegion } from '../../lib/shardCrypto'
 import { DNA_KIND } from '../../lib/seeds/seedItem'
 import { lockOf } from '../../lib/locks'
-import { NIP44_MAX_PLAINTEXT, openWithSecret, plaintextBytes, readContents } from '../../lib/chests'
+import { openWithSecret, plaintextBytes, readContents } from '../../lib/chests'
 import { BAG_SAFE_BYTES } from '../../lib/bagSize'
 import { CLIENT_TAG } from '../../lib/client'
 import { BOX_HEIGHT, COVER_MAX, FOOTPRINT, arrivalCell, chestCell, inRegion, regionBase, toFrame, toWorld, tutorialLayout } from '../layout'
@@ -211,7 +211,8 @@ describe('the stage', () => {
     const finishLock = lockOf(regionKeyAt(finishBase, BOX_HEIGHT, MAX_COMPUTE).key)!
     expect(inFinish[0].chest?.lockPubkey).toBe(finishLock.pubkey)
     const raw = openWithSecret(inFinish[0].chest!, finishLock.secretHex)
-    expect(plaintextBytes(raw)).toBeLessThan(NIP44_MAX_PLAINTEXT)
+    // Within NIP-44's two-byte length, 65,535 bytes, so a reader with a strict NIP-44 opens the tutorial's chest too (DECK-0004 §3.2, Older readers).
+    expect(plaintextBytes(raw)).toBeLessThanOrEqual(65_535)
     const kit = readContents(raw, stage.guide)
     expect(kit.map((c) => c.id)).toEqual(stage.ids.finishContents)
     expect(kit.filter((c) => c.body.type === 'shard').map((c) => c.body.shard?.name)).toEqual(['Platform 4', 'Bounce pad', 'Trampoline', 'Start line', 'Finish line'])

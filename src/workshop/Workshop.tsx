@@ -47,13 +47,13 @@ import { Guide } from './shell/Guide'
 import { ToolHint } from './shell/ToolHint'
 import { guideDone, startingTools, useBeginner } from './beginner'
 import { useTutorial } from '../store/useTutorial'
-import { ObjectPicker } from './ObjectPicker'
+import { StampLibrary } from './StampLibrary'
 import { PaletteModal } from './PaletteModal'
 import { ZipImport } from './ZipImport'
 import { Dock } from './shell/Dock'
 import { MoveHandles } from './shell/MoveHandles'
 import { isLook } from './lookTool'
-import { Rail } from './shell/Rail'
+import { Rail, gOpensGroups } from './shell/Rail'
 import { Sheet } from './shell/Sheet'
 import { Strip } from './shell/Strip'
 import { TopBar, backToName } from './shell/TopBar'
@@ -64,10 +64,11 @@ import { AvatarBody } from './sheets/AvatarSheet'
 import { GridBody } from './sheets/GridSheet'
 import { MenuBody } from './sheets/MenuSheet'
 import { MoreBody } from './sheets/MoreSheet'
+import { GroupsBody, GroupsSub, typingDevice } from './sheets/GroupsSheet'
 import { MotionBody } from './sheets/MotionSheet'
 import { ShardBody } from './sheets/ShardSheet'
 
-const isArea = (s: SheetKind | null): s is Area => s !== null && s !== 'palette' && s !== 'object' && s !== 'more'
+const isArea = (s: SheetKind | null): s is Area => s !== null && s !== 'palette' && s !== 'object' && s !== 'more' && s !== 'groups'
 
 /** The bodies of the area sheets, by area. */
 const BODY: Record<Exclude<Area, 'menu'>, () => JSX.Element | null> = { shard: ShardBody, grid: GridBody, avatar: AvatarBody, motion: MotionBody }
@@ -174,6 +175,44 @@ export function Workshop(): JSX.Element | null {
   useEffect(() => { if (eyeEdit) setSheet(null) }, [eyeEdit])
   useEffect(() => { if (sheet !== null && useWorkshop.getState().eyeEdit) useWorkshop.getState().setEyeEdit(false) }, [sheet])
   useEffect(() => { if (holding && useWorkshop.getState().eyeEdit) useWorkshop.getState().setEyeEdit(false) }, [holding])
+  // GROUPS (sheets/GroupsSheet): a group made from outside the sheet (Ctrl+G,
+  // MORE's NEW GROUP), handed to it to glow and, with a keyboard, to be named
+  // at once. LOOK holds nothing and shows every group, so it puts GROUPS away.
+  const [made, setMade] = useState<{ id: string; rename: boolean } | null>(null)
+  const madeSeen = useCallback(() => setMade(null), [])
+  const look = useWorkshop((s) => isLook(s.tool))
+  useEffect(() => { if (look) setSheet((cur) => (cur === 'groups' ? null : cur)) }, [look])
+  const groupMade = useCallback((id: string | null): void => {
+    if (!id) return
+    setSheet('groups')
+    setMade({ id, rename: typingDevice() })
+  }, [])
+  // G opens and closes GROUPS; Ctrl+G (Cmd+G) makes a group of what is held
+  // and opens it. Bench Keys' guards: not while typing, not while FACING turns
+  // the shape, not in LOOK. With nothing held, createGroup says so itself.
+  useEffect(() => {
+    // The tests' stand-in window has no listeners; every browser's has.
+    if (!open || typeof window.addEventListener !== 'function') return
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.code !== 'KeyG' || e.altKey || e.shiftKey || e.repeat) return
+      const tag = (e.target as HTMLElement | null)?.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return
+      // Ctrl+G is find-next in Chrome and Firefox: never that here, whatever else happens.
+      if (e.ctrlKey || e.metaKey) e.preventDefault()
+      if (useFacingPreview.getState().on) return
+      // A question on screen (DELETE CONTENTS, any confirmation) keeps the keys.
+      if (document.querySelector('[aria-modal="true"]')) return
+      const ws = useWorkshop.getState()
+      if (isLook(ws.tool)) return
+      if (e.ctrlKey || e.metaKey) { groupMade(ws.createGroup()); return }
+      // In STAMP's OBJECT plain G is SNAP TO ITS SIZE (Bench Keys).
+      if (!gOpensGroups(ws)) return
+      // Not over the palette or the object picker: G never throws away a choice half made.
+      setSheet((cur) => (cur === 'palette' || cur === 'object' ? cur : cur === 'groups' ? null : 'groups'))
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [open, groupMade])
   useEffect(() => {
     if (!viewOpen) return
     const shut = (e: PointerEvent): void => {
@@ -291,7 +330,7 @@ export function Workshop(): JSX.Element | null {
       <TopBar open={area} onArea={toggle} />
       {/* The tour's word here while the tutorial runs: what to do first, and the way back (new-user feedback 2026-11-21). */}
       <TutorialTip sheet={sheet} eyeEdit={eyeEdit} />
-      <Rail />
+      <Rail groupsOpen={sheet === 'groups'} onGroups={() => toggle('groups')} />
       <ViewBall open={viewOpen} onToggle={toggleView} onClose={() => setViewOpen(false)} />
       {/* SET EYE's WHAT YOU SEE, under the view ball and under the handles too, so a handle is never hidden behind it. */}
       {eyeEdit && !viewOpen && <EyePreview />}
@@ -311,11 +350,17 @@ export function Workshop(): JSX.Element | null {
         )}
         {sheet === 'more' && (
           <Sheet name="More" title="MORE" sub={shard?.name} onClose={closeSheet}>
-            <MoreBody onClose={closeSheet} />
+            <MoreBody onClose={closeSheet} onNewGroup={groupMade} />
+          </Sheet>
+        )}
+        {/* GROUPS stands on the strip (phone upright), so the held bar stays in sight under it. */}
+        {sheet === 'groups' && shard && (
+          <Sheet name="Groups" title="GROUPS" sub={<GroupsSub />} className="ws__sheet--onstrip" onClose={closeSheet}>
+            <GroupsBody made={made} onMadeSeen={madeSeen} />
           </Sheet>
         )}
         {sheet === 'palette' && <PaletteModal onClose={closeSheet} foldAsk={foldAsk} />}
-        {sheet === 'object' && <ObjectPicker onClose={closeSheet} />}
+        {sheet === 'object' && <StampLibrary onClose={closeSheet} />}
         {/* The first visit's guide and the tool's fading hint, over the strip; neither over a sheet. */}
         {sheet === null && !eyeEdit && <Guide />}
         <ToolHint hidden={sheet !== null || eyeEdit} />

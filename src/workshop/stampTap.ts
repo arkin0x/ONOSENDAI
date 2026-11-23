@@ -17,6 +17,9 @@ import { useWorkshop } from '../store/useWorkshop'
 
 type P3 = [number, number, number]
 
+/** An object's address (DECK-0003 §1.10): kind 33331, its author's key, its `d`. */
+const ADDRESS = /^33331:[0-9a-f]{64}:/
+
 /** A shard's payload in UTF-8 bytes, as the hide writes it. */
 export const payloadBytes = (s: ShardModel): number => new TextEncoder().encode(JSON.stringify(toPayload(withAuthoredConstrain(s)))).length
 
@@ -39,8 +42,9 @@ export function stampTap(at: P3, self?: string): StampedRange | null {
   // A tap snapped to the object's size can land a little past this grid's edge: COPY grows the grid, as far as any grid goes.
   if (!validPoint(at, MAX_EXTENT)) return say('Not stamped: that is past the edge of the grid.')
   const form = w.stampForm
-  if (form === 'link' && self && object.ref[1] === self) return say('An object cannot place itself.')
-  const r = stampedShard(s, { ref: object.ref, copy: object.copy ?? null }, form, at, w.stampFacing)
+  // A reference must name an author: a shard picked while signed out has none to name.
+  if (form === 'link' && !(object.ref[0] === 'a' && ADDRESS.test(object.ref[1]))) return say('Sign in to link a shard: a link names its author. COPY works without.')
+  const r = stampedShard(s, object, form, at, w.stampFacing, true, self)
   if (!r.ok) return say(r.why)
   const why = stampRefusal(payloadBytes(s), payloadBytes(r.shard))
   if (why) return say(why)
@@ -51,8 +55,9 @@ export function stampTap(at: P3, self?: string): StampedRange | null {
   const points = r.added.vertices[1] - r.added.vertices[0]
   const faces = r.added.faces[1] - r.added.faces[0]
   const extra = [
+    r.solid ? 'Switched to SOLID so the faces show.' : '',
     r.snapped > 0 ? `${plural(r.snapped, 'color')} had no room in the palette and took the nearest.` : '',
-    object.copy && object.copy.rounded > 0 ? `${plural(object.copy.rounded, 'point')} between grid ticks moved to the nearest.` : '',
+    r.rounded > 0 ? `${plural(r.rounded, 'point')} between grid ticks moved to the nearest.` : '',
   ].filter(Boolean).join(' ')
   return w.commitStamp(r.shard, r.added, `"${object.name}" copied in: ${plural(points, 'point')} and ${plural(faces, 'face')}, yours to edit.${extra ? ` ${extra}` : ''}`)
 }

@@ -30,7 +30,7 @@
  * top, a quiet list, the cost of the choice pinned where the thumb is.
  */
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Copy, Crosshair, Grid2x2Check, Link } from 'lucide-react'
 import { fromPayload, toPayload, type Ref, type ShardModel } from 'sno-core/shards'
 import { Sheet } from './shell/Sheet'
@@ -111,26 +111,32 @@ export function StampLibrary({ onClose }: { onClose: () => void }): JSX.Element 
   const localIds = useMemo(() => new Set(shards.map((s) => s.id)), [shards])
   const notHere = useMemo(() => (elsewhere ?? []).filter((o) => !localIds.has(o.address.split(':').slice(2).join(':'))), [elsewhere, localIds])
 
+  // The last pick asked: a slower read of an earlier pick never replaces it.
+  const asked = useRef(0)
   const choose = async (shard: ShardModel, ref: Ref, author: string | null, own: boolean): Promise<void> => {
+    const ticket = ++asked.current
     setReading(shard.id)
     setProblem(null)
     try {
       const prepared = await prepareStamp(shard, ref, author, own)
+      if (ticket !== asked.current) return
       const { missing, ...object } = prepared
-      if (missing > 0) setProblem(`${missing === 1 ? 'One object' : `${missing} objects`} it places could not be read. LINK places it as it is; COPY needs them all.`)
+      if (missing > 0) setProblem(`${missing === 1 ? 'One object' : `${missing} objects`} it places could not be read: COPY needs them all.`)
       w().setStampObject(object as StampObject)
+    } catch {
+      if (ticket === asked.current) setProblem('That shard could not be read. Try it again.')
     } finally {
-      setReading(null)
+      if (ticket === asked.current) setReading(null)
     }
   }
-  const pickLocal = (s: ShardModel): void => { void choose(s, ['a', `${OBJECT_KIND}:${me}:${s.id}`], me, true) }
+  const pickLocal = (s: ShardModel): void => { if (me) void choose(s, ['a', `${OBJECT_KIND}:${me}:${s.id}`], me, true) }
 
   const byAddress = async (): Promise<void> => {
     const parsed = parseObjectAddress(address)
     if (!parsed) { setAddressNote('That is not an object address. Paste an naddr1… or 33331:<pubkey>:<d>.'); return }
     setAddressNote('Asking the relays…')
     const ref: Ref = parsed.relay ? ['a', parsed.address, parsed.relay] : ['a', parsed.address]
-    const raw = await fetchRef(ref)
+    const raw = await fetchRef(ref).catch(() => null)
     const read = raw == null ? null : fromPayload(raw, parsed.address)
     const author = parsed.address.split(':')[1]
     const shard = read && keepOwnTable(read, author)
@@ -141,15 +147,18 @@ export function StampLibrary({ onClose }: { onClose: () => void }): JSX.Element 
 
   // What one stamp would leave this shard as, at the middle of the grid on the working level: the bar's hatched run.
   const nowBytes = useMemo(() => (current ? bytes(current) : 0), [current])
+  const selfAddress = me && current ? `${OBJECT_KIND}:${me}:${current.id}` : undefined
   const projection = useMemo(() => {
     if (!current || !chosen) return null
     const at: [number, number, number] = [0, 0, 0]
     at[plane] = level
-    const r = stampedShard(current, { ref: chosen.ref, copy: chosen.copy ?? null }, form, at, facing, false)
+    const r = stampedShard(current, chosen, form, at, facing, false, selfAddress)
     if (!r.ok) return { why: r.why, after: null as number | null }
     const after = bytes(r.shard)
     return { why: stampRefusal(nowBytes, after), after }
-  }, [current, chosen, form, facing, plane, level, nowBytes])
+  }, [current, chosen, form, facing, plane, level, nowBytes, selfAddress])
+  // Whether each shard of yours is published and unedited, once per change of the library or the ledger, not per row and keystroke.
+  const published = useMemo(() => (form === 'link' ? new Set(shards.filter((s) => stillPublished(s, ledger, me)).map((s) => s.id)) : new Set<string>()), [form, shards, ledger, me])
   const size = chosen?.size && current ? stampSize(chosen.size, facing, current.unit) : null
   const isSelf = (s: ShardModel): boolean => s.id === current?.id
   const blocked = !chosen || !!projection?.why || reading !== null
@@ -177,9 +186,9 @@ export function StampLibrary({ onClose }: { onClose: () => void }): JSX.Element 
             const empty = s.vertices.length === 0 && (s.parts?.length ?? 0) === 0
             const self = isSelf(s)
             // LINK never places the shard into itself; COPY of it puts a second copy of its points down, as DUPLICATE in place would.
-            const off = empty || (form === 'link' && (self || !me))
+            const off = empty || !me || reading !== null || (form === 'link' && self)
             const on = chosen?.local === true && chosen.shard.id === s.id
-            const state = empty ? 'EMPTY' : form === 'link' && self ? 'THIS SHARD' : form === 'link' ? (stillPublished(s, ledger, me) ? 'PUBLISHED: FOLLOWS ITS EDITS' : 'NOT PUBLISHED: SEALED WITH YOUR HIDE') : self ? 'THIS SHARD' : ''
+            const state = empty ? 'EMPTY' : !me ? 'SIGN IN TO STAMP YOUR SHARDS' : form === 'link' && self ? 'THIS SHARD' : form === 'link' ? (published.has(s.id) ? 'PUBLISHED: FOLLOWS ITS EDITS' : 'NOT PUBLISHED: SEALED WITH YOUR HIDE') : self ? 'THIS SHARD' : ''
             return (
               <li key={s.id} {...f.drag} className={on ? 'is-on' : undefined}>
                 <button className="stamplib__row" disabled={off} aria-pressed={on} onClick={() => { if (f.selecting) { f.toggle(); return } pickLocal(s) }} title={off ? state : `${form === 'copy' ? 'Copy' : 'Link'} "${s.name}"`}>
@@ -198,6 +207,8 @@ export function StampLibrary({ onClose }: { onClose: () => void }): JSX.Element 
 
         {form === 'link' && (
           <>
+            {/* A line kept while the relays are asked, so the address field below never jumps. */}
+            {notHere.length === 0 && <p className="login__note stamplib__addrnote">{me && elsewhere === null ? 'Reading your published objects…' : ''}</p>}
             {notHere.length > 0 && (
               <div className="login__section">
                 <span className="login__label">Published from elsewhere</span>
@@ -206,7 +217,7 @@ export function StampLibrary({ onClose }: { onClose: () => void }): JSX.Element 
                     const on = chosen?.local !== true && chosen?.ref[1] === o.address
                     return (
                       <li key={o.address} className={on ? 'is-on' : undefined}>
-                        <button className="stamplib__row" aria-pressed={on} onClick={() => { void choose(o.shard, ['a', o.address], me, false) }}>
+                        <button className="stamplib__row" aria-pressed={on} disabled={reading !== null} onClick={() => { void choose(o.shard, ['a', o.address], o.address.split(':')[1] ?? null, false) }}>
                           <Chamfer className="stamplib__thumb"><ShardThumb shard={o.shard} size={THUMB_PX} /></Chamfer>
                           <span className="stamplib__name">{o.shard.name}</span>
                           <span className="stamplib__meta"><span>{o.shard.vertices.length} points · {o.shard.faces.length} faces</span><span className="stamplib__state">PUBLISHED: FOLLOWS ITS EDITS</span></span>

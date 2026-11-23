@@ -61,11 +61,13 @@ interface Props {
   lead: boolean
   /** Under the pointer, being dragged. */
   lifting: boolean
+  /** Just brought into the newcomer view by the tour (newcomer/reveal.ts): it fades in once. */
+  arriving?: boolean
   onGrab: (id: PanelId, e: ReactPointerEvent<HTMLButtonElement>) => void
   children: ReactNode
 }
 
-export function PanelSlot({ id, lead, lifting, onGrab, children }: Props): JSX.Element {
+export function PanelSlot({ id, lead, lifting, onGrab, arriving = false, children }: Props): JSX.Element {
   const ref = useRef<HTMLDivElement>(null)
   const saved = usePanelLayout((s) => s.collapsed[id] === true)
   // A panel a priority state pins to the top (a ride destination, a proof,
@@ -102,7 +104,7 @@ export function PanelSlot({ id, lead, lifting, onGrab, children }: Props): JSX.E
     toggle()
   }
 
-  const cls = ['slot', collapsed && 'slot--collapsed', lifting && 'slot--lifting'].filter(Boolean).join(' ')
+  const cls = ['slot', collapsed && 'slot--collapsed', lifting && 'slot--lifting', arriving && 'nc-arrive'].filter(Boolean).join(' ')
 
   return (
     <div ref={ref} className={cls} data-panel-id={id} onClick={onClick} onKeyDown={onKeyDown}>

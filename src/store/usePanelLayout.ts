@@ -272,6 +272,9 @@ interface PanelLayoutState extends PanelLayout {
    */
   front: PanelId | null
   setFront: (id: PanelId | null) => void
+  /** With `front`: the menu shows that panel alone (the tour's build steps: ITEMS by itself). */
+  frontOnly: boolean
+  setFrontOnly: (only: boolean) => void
   /** Fold `id` to its title line, or unfold it. */
   toggle: (id: PanelId) => void
   /** Put `id` in `column` before `before` (null: last). A move that changes nothing writes nothing. */
@@ -282,6 +285,8 @@ export const usePanelLayout = create<PanelLayoutState>((set, get) => ({
   ...loadLayout(),
   front: null,
   setFront: (id) => { if (get().front !== id) set({ front: id }) },
+  frontOnly: false,
+  setFrontOnly: (only) => { if (get().frontOnly !== only) set({ frontOnly: only }) },
   toggle: (id) => {
     set({ collapsed: toggleCollapsed(get().collapsed, id) })
     saveLayout(get())

@@ -3,8 +3,8 @@
  *
  * On COMMIT in the box step the spin stops, the camera is asked to frame the
  * hop (start and end), and the avatar is held where it is while the camera
- * gets there. Once the avatar has landed AND arrived, the camera is asked in
- * close over its shoulder, from behind it as seen from the chest. A hop that
+ * gets there. Once the avatar has landed AND arrived, the camera is asked for
+ * the chest shot (the chest, its loot and the avatar, owner 2026-11-23). A hop that
  * does not land puts the box step back as it was.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -75,7 +75,7 @@ describe('the first hop, shown', () => {
     expect(glideStart(before)).toBeGreaterThanOrEqual(before + HOP_FRAME_MS - 1)
   })
 
-  it('once landed and arrived, eases in over the avatar\'s shoulder, behind it from the chest, and stops framing', async () => {
+  it('once landed and arrived, takes the chest shot: the chest, its loot and the avatar, and stops framing (owner, 2026-11-23)', async () => {
     await atBox()
     const layout = useTutorialStage.getState().layout!
     const to = { ...useCyberspace.getState().cursor }
@@ -84,16 +84,19 @@ describe('the first hop, shown', () => {
     hopLanding()
     useCyberspace.setState({ position: to, pendingTarget: null })
     // Still gliding: the camera stays on the framed hop.
-    expect(useTutorialCam.getState().zoom).toBe(null)
+    expect(useTutorialCam.getState().shot).toBe(null)
     expect(useTutorialCam.getState().frame).not.toBe(null)
     glideDone()
-    await vi.waitFor(() => { expect(useTutorialCam.getState().zoom).not.toBe(null) })
+    await vi.waitFor(() => { expect(useTutorialCam.getState().shot).not.toBe(null) })
     expect(useTutorialCam.getState().frame).toBe(null)
-    expect(useTutorialCam.getState().zoom).toBeLessThan(12)
-    // From the avatar away from the chest: the camera is behind it, the chest ahead.
+    // The chest, the top of its loot and the avatar where it landed, the chest first; easing in.
     const cell = chestCell(layout)
     const chest = toWorld(layout.frame, cell.f, cell.r, cell.u)
-    expect(useTutorialCam.getState().from).toEqual({ x: Number(to.x - chest.x), y: Number(to.y - chest.y), z: Number(to.z - chest.z) })
+    const shot = useTutorialCam.getState().shot!
+    expect(shot.chest).toEqual(chest)
+    expect(shot.points[0]).toEqual(chest)
+    expect(shot.points[shot.points.length - 1]).toEqual(to)
+    expect(shot.ease).toBe(true)
   })
 
   it('a hop that does not land puts the spin back and stops framing', async () => {
@@ -117,6 +120,7 @@ describe('the first hop, shown', () => {
     glideDone()
     await new Promise((r) => setTimeout(r, 30))
     expect(useTutorialCam.getState().zoom).toBe(null)
+    expect(useTutorialCam.getState().shot).toBe(null)
     expect(useTutorialCam.getState().frame).toBe(null)
   })
 

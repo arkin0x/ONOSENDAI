@@ -25,7 +25,7 @@ import { regionBox, type Box } from '../lib/clip'
 import { placedPose, type Pose } from '../lib/pose'
 import { neededExtent, type ShardModel } from 'sno-core/shards'
 import { CULL_EXTENT_MIN, TapTarget, farCullDoublings } from './TapTarget'
-import { passesTaps } from '../tutorial/guideBags'
+import { drawnByMark, passesTaps } from '../tutorial/guideBags'
 import { useMutes } from '../store/useMutes'
 import { useBuildDimmed } from './BuildOccluders'
 import { useDrawReach } from './buildZoom'
@@ -364,7 +364,9 @@ export function keptWithin(placed: PlacedShardDraw[], reach: number, max: number
  * (BuildOccluders), except the one EDIT is moving, and take no taps while
  * dimmed, so a tap reaches what is behind them.
  */
-export function PlacedShard({ w, birth, moving = false, tappable = true, drawnRef, occludes = false, hidden = false }: { w: PlacedShardDraw; birth: number | undefined; moving?: boolean; tappable?: boolean; drawnRef?: (g: Group | null) => void; occludes?: boolean; hidden?: boolean }): JSX.Element {
+export function PlacedShard({ w, birth, moving = false, tappable = true, drawnRef, occludes = false, hidden: farHidden = false }: { w: PlacedShardDraw; birth: number | undefined; moving?: boolean; tappable?: boolean; drawnRef?: (g: Group | null) => void; occludes?: boolean; hidden?: boolean }): JSX.Element {
+  // Step 1's green box is drawn by the tour's own mark in its place (scene/TutorialTarget.tsx).
+  const hidden = farHidden || drawnByMark(w.key)
   // A landing moves the anchor, and with it every shard's centre: only this
   // group's position follows it. What the shard draws keeps its props, so
   // React skips it (PlacedShardBody), as it skips its GPU buffers (steadied).

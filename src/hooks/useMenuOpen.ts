@@ -15,6 +15,7 @@
  * getting that default as the window changes size.
  */
 
+import { create } from 'zustand'
 import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react'
 
 export const MENU_OPEN_KEY = 'onosendai:menu-open'
@@ -52,6 +53,9 @@ export function setMenuOpen(open: boolean): void {
   external?.(open)
 }
 
+/** Whether the mounted menu is open, mirrored for code outside React (the tutorial's build steps read it). */
+export const useMenuIsOpen = create<{ open: boolean }>(() => ({ open: false }))
+
 /** useState for the menu's open state, starting where it was last left and saving every change. */
 export function useMenuOpen(defaultOpen: boolean): [boolean, Dispatch<SetStateAction<boolean>>] {
   const [open, setOpen] = useState(() => loadMenuOpen(defaultOpen))
@@ -61,6 +65,7 @@ export function useMenuOpen(defaultOpen: boolean): [boolean, Dispatch<SetStateAc
     saved.current = open
     saveMenuOpen(open)
   }, [open])
+  useEffect(() => { useMenuIsOpen.setState({ open }) }, [open])
   // Lend the setter while this menu is mounted, so the tutorial can drive it.
   useEffect(() => { external = setOpen; return () => { if (external === setOpen) external = null } }, [])
   return [open, setOpen]

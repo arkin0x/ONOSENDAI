@@ -100,6 +100,8 @@ export const MOVED_PREFIXES: readonly string[] = [
   'onosendai:deployments-gone:',
   // The tutorial's staged pieces per player (tutorial/stage.ts): whole shards, a few hundred thousand characters.
   'onosendai:tutorial:stage:',
+  // The newcomer view's record per player (newcomer/useNewcomer.ts): stage, steps seen, Settings choice.
+  'onosendai:newcomer:',
 ]
 
 /**

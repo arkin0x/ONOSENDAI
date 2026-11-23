@@ -18,6 +18,15 @@
  *     "the user can tell oh I just moved and this red ball is me"). The rig
  *     eases there over HOP_FRAME_MS; the director clears it once the avatar
  *     has arrived.
+ *   - `shot`: things to frame together, a chest, its floating loot and the
+ *     avatar beside it (owner, 2026-11-23: "this is a good angle that the
+ *     camera should automatically take when we arrive at the chest"). The
+ *     orbit's centre moves to the middle of them for as long as the shot is
+ *     asked, and the camera eases round to below and to the right of the
+ *     chest, at the distance that fits them in what the tour card and the
+ *     pad leave uncovered (the BUILD framing's lens shift, lib/coverBand.ts).
+ *     A press on the scene ends the ease but not the centre: the player then
+ *     orbits about the chest, and nothing pulls the camera back.
  * A finger or the mouse on the scene, or WALK, ends any of them: the player
  * has taken the camera.
  */
@@ -27,6 +36,20 @@ import type { Position } from '../lib/space'
 
 /** A direction in cyberspace axes (x, y, z), any length. */
 export interface CamDir { x: number; y: number; z: number }
+
+/** Things to frame together (the `shot`): their gibsons, the chest first, and the room left round them. */
+export interface TutorialShot {
+  /** The same key is the same shot: a step that asks for it again keeps it as it is, eased or not (the director keys it by the chest and where the avatar stands). */
+  key: string
+  /** The chest's gibson. */
+  chest: Position
+  /** Every gibson to keep in view: the chest, the top of its floating loot, the avatar. */
+  points: Position[]
+  /** Room past the farthest point, in gibsons (the loot row's half width). */
+  margin: number
+  /** The camera still eases to the shot; false once it is there or the player took the camera. */
+  ease: boolean
+}
 
 /** A hop to keep in view: where it starts and where it lands. */
 export interface HopFrame { from: Position; to: Position }
@@ -47,9 +70,24 @@ interface TutorialCamState {
   from: CamDir | null
   /** A hop to frame, or null. */
   frame: HopFrame | null
+  /** Things to frame together, or null. */
+  shot: TutorialShot | null
 }
 
-export const useTutorialCam = create<TutorialCamState>(() => ({ spin: false, zoom: null, from: null, frame: null }))
+export const useTutorialCam = create<TutorialCamState>(() => ({ spin: false, zoom: null, from: null, frame: null, shot: null }))
+
+/** Ask for a shot, or none (null). The same key already asked keeps the shot as it is. */
+export function setTutorialShot(shot: TutorialShot | null): void {
+  const cur = useTutorialCam.getState().shot
+  if (shot !== null && cur !== null && cur.key === shot.key) return
+  if (cur !== shot) useTutorialCam.setState({ shot })
+}
+
+/** The rig calls this once the camera is at the shot, or the player took the camera: the centre stays, the ease ends. */
+export function endShotEase(): void {
+  const cur = useTutorialCam.getState().shot
+  if (cur && cur.ease) useTutorialCam.setState({ shot: { ...cur, ease: false } })
+}
 
 /** Turn the idle orbit spin on or off (the first-move step, while it is up). */
 export function setTutorialSpin(on: boolean): void {

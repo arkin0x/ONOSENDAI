@@ -11,7 +11,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   BufferGeometry, DoubleSide, Float32BufferAttribute, Group, LineBasicMaterial, LineSegments, Mesh, MeshLambertMaterial,
-  PlaneGeometry, BoxGeometry, ShaderLib, Vector3, type Material,
+  PlaneGeometry, BoxGeometry, InstancedBufferGeometry, ShaderLib, Vector3, type Material,
 } from 'three'
 import { fromPayload, type ShardModel } from 'sno-core/shards'
 import {
@@ -156,6 +156,36 @@ describe('the shader patch', () => {
     run(f, behind, me, 1000, 30)
     expect((g.children[0] as Mesh).material).toBe(face)
     expect(face.version).toBe(version)
+  })
+})
+
+describe('each shard\'s fade reaches its own materials', () => {
+  it('the compile hook binds the shard\'s own level, and a shard registered again keeps it', () => {
+    const f = new OcclusionFade()
+    const g = slab([0, 0, 1.6], [4, 3, 0.5])
+    const off = f.register('between', g)
+    const face = (g.children[0] as Mesh).material as Material
+    const shader = { vertexShader: ShaderLib.lambert.vertexShader, fragmentShader: ShaderLib.lambert.fragmentShader, uniforms: {} as Record<string, { value: unknown }> }
+    face.onBeforeCompile(shader as never, null as never)
+    const level = shader.uniforms.uGfLevel as { value: number }
+    expect(level).toBeDefined()
+    run(f, behind, me, 1000, 30)
+    expect(level.value).toBe(1)
+    // Unmounted and mounted again (a remount, a hot reload): the patched material still reads the same level, which still fades.
+    off()
+    f.register('between', g)
+    run(f, behind, me, 2000, 2)
+    expect(level.value).toBe(f.levelOf('between'))
+    expect(level.value).toBeGreaterThan(0)
+  })
+
+  it('leaves billboards (glow halos, point cores) unpatched', () => {
+    const f = new OcclusionFade()
+    const g = slab([0, 0, 1.6], [4, 3, 0.5])
+    const halo = new Mesh(new InstancedBufferGeometry(), createDiscMaterial(SHARD_POINTS, 1))
+    g.add(halo)
+    f.register('between', g)
+    expect((halo.material as Material).userData.gameFade).toBeUndefined()
   })
 })
 

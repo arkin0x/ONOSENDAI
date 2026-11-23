@@ -53,7 +53,11 @@ import { bvhOf, cellPoints, fadeToward, nineVectors, pickWithin, rayCrossings, s
  */
 export const FADE_RADIUS = 1.1
 export const FADE_SOFT = 0.55
-/** The share of a faded face's pixels kept, so the wall still reads as there: the build dim's DIM (scene/BuildOccluders.tsx). */
+/**
+ * The share of a faded face's pixels kept, so the wall still reads as there:
+ * about the build dim's DIM (scene/BuildOccluders.tsx). The 4x4 pattern has
+ * sixteen steps, so 3 of every 16 pixels stay.
+ */
 export const FADE_KEEP = 0.2
 /** How long a fade takes, in or out, ms. */
 export const FADE_MS = 180
@@ -91,7 +95,7 @@ export interface FadeShared {
 const MARK = '// game occlusion fade'
 
 const DITHER_GLSL = /* glsl */ `
-float gfBayer2(vec2 a) { a = floor(a); return fract(a.x / 2.0 + a.y * a.y * 0.75); }
+float gfBayer2(vec2 a) { a = floor(a); return fract(a.x * 0.5 + mod(a.y, 2.0) * 0.75); }
 float gfBayer4(vec2 a) { return gfBayer2(0.5 * a) * 0.25 + gfBayer2(a); }
 `
 
@@ -203,23 +207,27 @@ const wL = new Vector3()
 const CAP = 64
 const crossT = new Float64Array(CAP)
 const crossY = new Float64Array(CAP)
-let crossN = 0
 let armFrom: Vector3 = new Vector3()
 let armTo: Vector3 = new Vector3()
+let armFloor = 0
+/** The nearest share of the arm at a ground crossing found so far (1: none). */
+let armNearest = 1
 
-/** One object of a shard, its face crossings along the arm added to crossT (unsorted; armShare takes the nearest that counts). */
+/** One object of a shard: its face crossings along the arm, the nearest at ground kept in armNearest (armShare). */
 function crossOne(o: Object3D): void {
   if (!(o as Mesh).isMesh) return
   const mesh = o as Mesh
   const g = mesh.geometry
   if (!g?.attributes?.position || !mesh.material || (g as { isInstancedBufferGeometry?: boolean }).isInstancedBufferGeometry) return
   const b = bvhOf(g)
-  if (!b || crossN >= CAP) return
+  if (!b) return
   inv.copy(mesh.matrixWorld).invert()
   fL.copy(armFrom).applyMatrix4(inv)
   wL.copy(armTo).applyMatrix4(inv)
   // Either side: ground is ground seen from above or below, and only the nearest crossing is wanted.
-  crossN += rayCrossings(b, fL.x, fL.y, fL.z, wL.x - fL.x, wL.y - fL.y, wL.z - fL.z, 1, DoubleSide, crossT, crossN)
+  const n = rayCrossings(b, fL.x, fL.y, fL.z, wL.x - fL.x, wL.y - fL.y, wL.z - fL.z, 1, DoubleSide, crossT, 0)
+  for (let i = 0; i < n; i++) crossY[i] = armFrom.y + (armTo.y - armFrom.y) * crossT[i]
+  armNearest = Math.min(armNearest, armShare(crossT, crossY, n, armFloor))
 }
 
 let patchLevel: { value: number } | null = null
@@ -227,7 +235,8 @@ let patchShared: FadeShared | null = null
 
 function patchOne(o: Object3D): void {
   const m = (o as { material?: Material | Material[] }).material
-  if (!m) return
+  // Billboards (glow halos, point cores: scene/glowHalos.ts) place each square by an instance offset the patch does not read.
+  if (!m || (o as { geometry?: { isInstancedBufferGeometry?: boolean } }).geometry?.isInstancedBufferGeometry) return
   if (Array.isArray(m)) m.forEach(patchMaterial)
   else patchMaterial(m)
 }
@@ -259,6 +268,7 @@ export class OcclusionFade {
     uGfKeep: { value: FADE_KEEP },
   }
   private entries: Entry[] = []
+  private levels = new Map<string, { value: number }>()
   private seen = new Map<string, number>()
   private blocking: ReadonlySet<string> = new Set()
   /** The faded set after the hold: what eases toward full fade. */
@@ -275,7 +285,12 @@ export class OcclusionFade {
 
   /** Registers a world shard's group under `key`; the returned function takes it out. Its materials are patched now. */
   register(key: string, object: Object3D): () => void {
-    const entry: Entry = { key, object, level: { value: 0 } }
+    // One level per key for the canvas's life: a material patched once reads this object, so a shard registered again reuses it.
+    let level = this.levels.get(key)
+    if (!level) { level = { value: 0 }; this.levels.set(key, level) }
+    // Its world matrix as it will be drawn: R3F sets it only at the render, after the next cast.
+    object.updateWorldMatrix(true, true)
+    const entry: Entry = { key, object, level }
     this.entries = [...this.entries.filter((e) => e.key !== key), entry]
     this.patch(entry)
     this.dirty = true
@@ -344,11 +359,10 @@ export class OcclusionFade {
   armFor(focus: Vector3, want: Vector3, floor: number): number {
     const len = focus.distanceTo(want)
     if (len <= ARM_MIN) return 1
-    armFrom = focus; armTo = want
-    crossN = 0
+    armFrom = focus; armTo = want; armFloor = floor
+    armNearest = 1
     for (let i = 0; i < this.entries.length; i++) this.entries[i].object.traverseVisible(crossOne)
-    for (let i = 0; i < crossN; i++) crossY[i] = focus.y + (want.y - focus.y) * crossT[i]
-    const share = armShare(crossT, crossY, crossN, floor)
+    const share = armNearest
     if (share >= 1) return 1
     return Math.max(ARM_MIN, share * len - ARM_MARGIN) / len
   }

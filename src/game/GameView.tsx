@@ -28,7 +28,7 @@
  * Space to jump (or up), E or Enter for TAKE and OPEN, Shift, Q or C down.
  */
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { KeyRound } from 'lucide-react'
 import { BoxGeometry, EdgesGeometry, Vector3, type Group } from 'three'
@@ -82,7 +82,8 @@ export function stepFor(yaw: number, press: 'forward' | 'back' | 'left' | 'right
 /** One world shard, registered with the canvas's occlusion so it fades while it stands between the camera and you. */
 function FadingShard({ fade, id, centre, children }: { fade: OcclusionFade; id: string; centre: [number, number, number]; children: ReactNode }): JSX.Element {
   const group = useRef<Group>(null)
-  useEffect(() => (group.current ? fade.register(id, group.current) : undefined), [fade, id])
+  // Before the first draw, so its materials compile once, already patched.
+  useLayoutEffect(() => (group.current ? fade.register(id, group.current) : undefined), [fade, id])
   return <group ref={group} position={centre}>{children}</group>
 }
 

@@ -51,6 +51,29 @@ export function shardSphere(shard: ShardModel, byRef: ReadonlyMap<string, Resolv
 }
 
 /**
+ * The sphere round the grid on the bench: GRID SIZE each side of the origin,
+ * and the half unit the outermost lines are drawn past it, lying in its plane
+ * (0 faces X, 1 the floor, 2 faces Z) at the level, in units. GRID SIZE runs
+ * to 4,096 (DECK-0003 §1.8, 2026-11-23), so the grid, not the shard, can be
+ * what the camera needs to see whole: an empty grid that size must still fit
+ * the view at the far end of the orbit. Centred as the bench draws it, with
+ * render Z mirrored (Bench Grid).
+ */
+export function gridSphere(extent: number, plane: number, level: number): Sphere {
+  const center: [number, number, number] = plane === 0 ? [level, 0, 0] : plane === 2 ? [0, 0, -level] : [0, level, 0]
+  return { center, radius: Math.SQRT2 * (Math.max(0, extent) + 0.5) }
+}
+
+/**
+ * How far the orbit may pull back to see the grid whole: just the fit, with
+ * none of the shard's extra room, so a small grid keeps the reach the bench
+ * always had (reachFor's 60 is larger) and a large one fits snugly.
+ */
+export function gridReach(radius: number, fovDeg: number, aspect: number): number {
+  return fitDistance(radius, fovDeg, aspect)
+}
+
+/**
  * The radius round the orbit's target that holds the whole sphere: the
  * camera turns about its target, not the shard's centre (a pan moves the
  * target, and it opens on the vertices' centroid), so the sphere grows by how

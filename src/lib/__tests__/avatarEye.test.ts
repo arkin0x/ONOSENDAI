@@ -33,12 +33,13 @@ describe('readEye', () => {
   it('reads three whole numbers of ticks', () => {
     expect(readEye([0, 159, 0])).toEqual([0, 159, 0])
     expect(readEye([-7680, 7680, 12])).toEqual([-7680, 7680, 12])
+    expect(readEye([-491520, 491520, 7681])).toEqual([-491520, 491520, 7681])
     expect(readEye([0, 0, 0])).toEqual([0, 0, 0])
     expect(Object.is(readEye([-0, 5, 0])![0], 0)).toBe(true)
   })
 
   it('reads every malformed value as absent, never throwing', () => {
-    for (const bad of [null, undefined, 5, '0,159,0', {}, [], [0, 1], [0, 1, 2, 3], [0, 1.5, 0], [0, '1', 0], [0, null, 0], [0, 7681, 0], [-7681, 0, 0], [0, NaN, 0], [0, Infinity, 0], [true, 0, 0]]) {
+    for (const bad of [null, undefined, 5, '0,159,0', {}, [], [0, 1], [0, 1, 2, 3], [0, 1.5, 0], [0, '1', 0], [0, null, 0], [0, 491521, 0], [-491521, 0, 0], [0, NaN, 0], [0, Infinity, 0], [true, 0, 0]]) {
       expect(readEye(bad)).toBeUndefined()
     }
   })

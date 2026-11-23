@@ -25,6 +25,15 @@
  * faint tint, and zooming in brings them out. The unit grid stays on top
  * throughout, so the tint never reads as a coarser snap, which is exactly
  * what the old divisor lines did.
+ *
+ * Adaptive past the unit (GRID SIZE runs to 4,096 since 2026-11-23, DECK-0003
+ * §1.8): a grid 8,192 units across, seen whole, has several units to a pixel,
+ * and the unit lines alone would leave one even tint with nothing to read a
+ * place by. So as the unit lines fade, lines every 8 units come in, in the
+ * unit lines' colour; as those fade, every 64; then 512 and 4,096. Each comes
+ * in only where the one finer has gone, so close in, and on any grid seen at
+ * the distances it always was, nothing changes. Still one quad: the lines
+ * are arithmetic, never geometry, whatever the size.
  */
 import { BufferGeometry, Color, DoubleSide, Float32BufferAttribute, Mesh, ShaderMaterial } from 'three'
 import { ACCENT } from '../lib/palette'
@@ -88,6 +97,12 @@ vec2 cellsPerPixel(vec2 c) {
   return max(vec2(length(vec2(dx.x, dy.x)), length(vec2(dx.y, dy.y))), vec2(1e-6));
 }
 
+// How well one family of lines resolves here: 1 where they are FADE_HIGH pixels apart or more, 0 under FADE_LOW.
+float resolves(vec2 g, float cells) {
+  vec2 rate = cellsPerPixel(g * cells);
+  return smoothstep(FADE_LOW, FADE_HIGH, 1.0 / max(rate.x, rate.y));
+}
+
 // One family of lines, a whole number of 1/cells from the origin: how much of this pixel they cover.
 float lines(vec2 g, float cells) {
   vec2 c = g * cells;
@@ -109,6 +124,14 @@ void main() {
   float alpha = lines(vGrid, uDivision);
 
   float a = lines(vGrid, 1.0);
+  // Coarser lines, every 8, 64, 512 and 4,096 units, each only where the one finer no longer resolves.
+  float finer = resolves(vGrid, 1.0);
+  float cells = 1.0;
+  for (int k = 0; k < 4; k++) {
+    cells /= 8.0;
+    a = max(a, lines(vGrid, cells) * (1.0 - finer));
+    finer = resolves(vGrid, cells);
+  }
   float over = a + alpha * (1.0 - a);
   color = over > 0.0 ? (uUnitColor * a + color * alpha * (1.0 - a)) / over : color;
   alpha = over;

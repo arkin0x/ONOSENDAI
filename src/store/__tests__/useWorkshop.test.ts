@@ -986,7 +986,7 @@ describe('stacked by a move is not welded (2026-10-12)', () => {
 describe('GRID SIZE held down (review of #555)', () => {
   const w2 = () => useWorkshop.getState()
   beforeEach(() => {
-    useWorkshop.setState({ shards: [], currentId: null, selection: [], selectedFace: null, facePick: [], past: [], future: [] })
+    useWorkshop.setState({ shards: [], currentId: null, selection: [], selectedFaces: [], facePick: [], past: [], future: [] })
     w2().create('t')
   })
 

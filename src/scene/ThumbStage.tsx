@@ -110,19 +110,26 @@ export function knownBlank(shard: ShardModel, placed: readonly Placed[] | null):
 
 /** How far these cameras draw, which every object fitted until a grid could grow past 64 units. */
 const CLIP_FAR = 100000
+/** The far side of a framed object to the near plane, at most: what a 24-bit depth buffer sorts well. */
+const DEPTH_RATIO = 10000
+/** Up to this depth a frame keeps the near plane it is given: a 64-unit shard, the old largest, frames to about 620. */
+const SMALL_FRAME = 1000
 
 /**
- * Keep a framed object inside the camera's clipping planes. Past CLIP_FAR an
- * object would frame perfectly and draw nothing, so a frame that overruns takes
- * the far plane out with it, and the near plane too, or its depth buffer could
- * not sort it. Both are set every time: these cameras are reused, and the next
- * object may be small, which a near plane left out there would slice in half.
- * Any object that fits gets exactly the planes it always had.
+ * Keep a framed object inside the camera's clipping planes, with depth to sort
+ * it. Past CLIP_FAR an object would frame perfectly and draw nothing, so a
+ * frame that overruns takes the far plane out with it. The near plane follows
+ * the frame's depth: a 4,096-unit object (DECK-0003 §1.8, 2026-11-23) stands
+ * 25,000 out, where a near plane of 0.01 leaves the depth buffer unable to
+ * tell apart faces thousands of units deep. A framed object is never nearer
+ * the camera than 2.5 times its reach, far beyond this near plane. Both are
+ * set every time: these cameras are reused, and the next object may be small.
+ * Any object of up to the old 64 units gets exactly the planes it always had.
  */
 export function holdInClip(camera: { near: number; far: number }, distance: number, reach: number, near = 0.01): void {
   const needed = distance + 2 * reach
   camera.far = Math.max(CLIP_FAR, needed)
-  camera.near = needed > CLIP_FAR ? needed / CLIP_FAR : near
+  camera.near = needed > SMALL_FRAME ? Math.max(near, needed / DEPTH_RATIO) : near
 }
 
 /** How far a camera with this field of view stands for a sphere of `reach` to fit with a little room. */

@@ -49,7 +49,7 @@ import { nextSelection, ownAddress, useWorkshop, type Tool } from '../store/useW
 import { partMatrix } from 'sno-core/parts'
 import { OwnPartsContext, fetchRef, useResolved } from '../lib/parts'
 import { PartBadges } from './PartBadges'
-import { BASE_FAR, BASE_NEAR, MIN_DISTANCE, clipPlanes, fitDistance, nextMaxDistance, reachFor, reachRadius, shardSphere, type Sphere } from './benchReach'
+import { BASE_FAR, BASE_NEAR, MIN_DISTANCE, clipPlanes, fitDistance, gridReach, gridSphere, nextMaxDistance, reachFor, reachRadius, shardSphere, type Sphere } from './benchReach'
 import { useCyberspace } from '../store/useCyberspace'
 import { Hold, multiPress, noteGesture, noteMultiTouch, slopFor, tapSlop } from './deadZone'
 import { HandleDots, HandleHalos, HandleHits, PressMemory, dotCapacity, type Halo } from './handleDots'
@@ -1021,12 +1021,20 @@ function Reach({ sphere }: { sphere: { current: Sphere | null } }): null {
   const invalidate = useThree((s) => s.invalidate)
   const measured = useMemo(() => (shard ? shardSphere(shard, resolved) : null), [shard, resolved])
   useLayoutEffect(() => { sphere.current = measured; invalidate() }, [sphere, measured, invalidate])
+  // The grid as well as the shard: GRID SIZE runs to 4,096, and an empty grid that size must fit too.
+  const extent = shard?.extent ?? GRID_HALF
+  const plane = useWorkshop((s) => s.plane)
+  const level = useWorkshop((s) => s.level)
+  const grid = useMemo(() => gridSphere(extent, plane, U(level)), [extent, plane, level])
+  useLayoutEffect(() => { invalidate() }, [grid, invalidate])
   useFrame(() => {
     if (!controls) return
     const distance = camera.position.distanceTo(controls.target)
     const r = reachRadius(sphere.current, controls.target)
-    controls.maxDistance = nextMaxDistance(reachFor(r, camera.fov, canvasAspect(size)), distance)
-    const { near, far } = clipPlanes(distance, r)
+    const g = reachRadius(grid, controls.target)
+    const aspect = canvasAspect(size)
+    controls.maxDistance = nextMaxDistance(Math.max(reachFor(r, camera.fov, aspect), gridReach(g, camera.fov, aspect)), distance)
+    const { near, far } = clipPlanes(distance, Math.max(r, g))
     // Only on a real change: a still bench must not rebuild its projection every frame.
     if (Math.abs(near - camera.near) > camera.near * 0.05 || Math.abs(far - camera.far) > camera.far * 0.05) {
       camera.near = near

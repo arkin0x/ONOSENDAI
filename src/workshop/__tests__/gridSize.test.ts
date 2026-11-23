@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { MAX_EXTENT, MIN_EXTENT } from 'sno-core/shards'
-import { BENCH_NEAR, benchNear, benchReach, nearMoved, stepExtent } from '../gridSize'
+import { stepExtent } from '../gridSize'
 import { holdInClip } from '../../scene/ThumbStage'
 
 describe('GRID SIZE stepping', () => {
@@ -40,44 +40,13 @@ describe('GRID SIZE stepping', () => {
   })
 })
 
-describe('the bench camera follows the grid', () => {
-  it('leaves a small grid with the 60 and the 200 it always had', () => {
-    for (const e of [1, 8, 17]) expect(benchReach(e)).toEqual({ maxDistance: 60, far: 200 })
-  })
-
-  it('fits the whole grid in view at the far end, and draws past it', () => {
-    for (const e of [64, 1000, MAX_EXTENT]) {
-      const { maxDistance, far } = benchReach(e)
-      const corner = e * Math.SQRT2
-      expect(Math.atan(corner / maxDistance) * (180 / Math.PI)).toBeLessThanOrEqual(25)
-      expect(far).toBeGreaterThanOrEqual(maxDistance + 2 * Math.sqrt(3) * e)
-    }
-  })
-
-  it('keeps the near plane where it was for all close work', () => {
-    for (const d of [0.6, 10, 60, 200]) expect(benchNear(d)).toBe(BENCH_NEAR)
-  })
-
-  it('keeps depth usable far out, where 0.05 could not sort a thing', () => {
-    const resolution = (d: number, near: number): number => (d * d) / (near * 2 ** 24)
-    const d = benchReach(MAX_EXTENT).maxDistance
-    expect(resolution(d, BENCH_NEAR) / d).toBeGreaterThan(0.01)
-    expect(resolution(d, benchNear(d)) / d).toBeLessThan(0.001)
-  })
-
-  it('does not rebuild the projection for a small drift', () => {
-    expect(nearMoved(1, 1.05)).toBe(false)
-    expect(nearMoved(1, 1.2)).toBe(true)
-    expect(nearMoved(BENCH_NEAR, BENCH_NEAR)).toBe(false)
-  })
-})
-
 describe('holdInClip', () => {
   it('gives a model that fits exactly the planes it always had', () => {
     const c = { near: 0, far: 0 }
-    holdInClip(c, 1000, 100)
+    // A 64-unit shard, the largest there was: reach about 111, framed about 400 out.
+    holdInClip(c, 400, 111)
     expect(c).toEqual({ near: 0.01, far: 100000 })
-    holdInClip(c, 1000, 100, 0.001)
+    holdInClip(c, 400, 111, 0.001)
     expect(c.near).toBe(0.001)
   })
 
@@ -85,7 +54,20 @@ describe('holdInClip', () => {
     const c = { near: 0, far: 0 }
     holdInClip(c, 300000, 113000)
     expect(c.far).toBe(526000)
-    expect(c.near).toBeCloseTo(5.26)
+    expect(c.near).toBeCloseTo(52.6)
+  })
+
+  it('pulls the near plane out for a large model inside the far plane, so its depth still sorts', () => {
+    // A 4,096-unit shard: reach about 7,094, framed about 25,500 out.
+    const c = { near: 0, far: 0 }
+    holdInClip(c, 25500, 7094)
+    expect(c.far).toBe(100000)
+    expect(c.near).toBeCloseTo(3.97, 2)
+    const resolution = (d: number, near: number): number => (d * d) / (near * 2 ** 24)
+    expect(resolution(25500, 0.01) / 7094).toBeGreaterThan(0.5)
+    expect(resolution(25500, c.near) / 7094).toBeLessThan(0.002)
+    // Never past what is nearest the camera: the sphere's near side is 18,406 out.
+    expect(c.near).toBeLessThan(25500 - 7094)
   })
 
   it('puts them back for the next small one on a reused camera', () => {

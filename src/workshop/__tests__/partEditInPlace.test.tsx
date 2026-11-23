@@ -1,7 +1,7 @@
 /**
  * partEditInPlace.test.tsx: a placed object opened to edit in place by a
  * double-tap (useWorkshop enterPart), BACK up one level at any depth, the
- * workshop's ✕ only at the top, and the LINK or COPY mark on every placed
+ * workshop's ✕ only at the top, and the LINK or SEALED mark on every placed
  * object and beside the publish status (lib/partForm.ts; owner, 2026-11-22).
  */
 
@@ -49,14 +49,14 @@ beforeEach(() => {
   useWorkshop.setState({ shards: [], currentId: null, backStack: [], past: [], future: [], selection: [], partSel: [], notice: null, tool: 'view' })
 })
 
-describe('the LINK or COPY rule (lib/partForm.ts)', () => {
+describe('the LINK or SEALED rule (lib/partForm.ts)', () => {
   it('a shard of yours is a link while published under your key and unedited, a copy otherwise', () => {
     const tile = tri('Tile', 'tile')
     const published: Ledger = { tile: { at: 1, fp: shardFingerprint(tile), pubkey: me() } }
     expect(stillPublished(tile, published, me())).toBe(true)
     expect(shardForm(tile, published, me())).toBe('link')
-    expect(shardForm({ ...tile, name: 'Tile, edited' }, published, me())).toBe('copy')
-    expect(shardForm(tile, {}, me())).toBe('copy')
+    expect(shardForm({ ...tile, name: 'Tile, edited' }, published, me())).toBe('sealed')
+    expect(shardForm(tile, {}, me())).toBe('sealed')
     expect(shardForm(tile, { tile: { at: 1, fp: shardFingerprint(tile), pubkey: THEM } }, me())).toBe('link')
   })
 
@@ -67,27 +67,30 @@ describe('the LINK or COPY rule (lib/partForm.ts)', () => {
     const parent = { objects: { [carried]: toPayload(piece) } } as unknown as ShardModel
     expect(partForm(['a', `33331:${me()}:piece`, 'wss://relay.test'], parent, me(), find, {})).toBe('link')
     expect(partForm(['a', `33331:${THEM}:theirs`], parent, me(), find, {})).toBe('link')
-    expect(partForm(['a', carried], parent, me(), find, {})).toBe('copy')
-    expect(partForm(own('piece'), parent, me(), find, {})).toBe('copy')
+    expect(partForm(['a', carried], parent, me(), find, {})).toBe('sealed')
+    expect(partForm(own('piece'), parent, me(), find, {})).toBe('sealed')
     expect(partForm(own('not-here'), parent, me(), find, {})).toBe('link')
     expect(partForm(['e', 'f'.repeat(64)], parent, me(), find, {})).toBe('link')
   })
 
   it('the badge says it in colour, icon and words, the same everywhere', () => {
     const link = renderToStaticMarkup(<PartFormBadge form="link" />)
-    const copy = renderToStaticMarkup(<PartFormBadge form="copy" size="inline" />)
+    const sealed = renderToStaticMarkup(<PartFormBadge form="sealed" size="inline" />)
     expect(link).toContain('partform--link')
     expect(link).toContain(`aria-label="${FORM_LABEL.link}"`)
     expect(link).toContain('lucide-link')
-    expect(copy).toContain('partform--copy')
-    expect(copy).toContain(`aria-label="${FORM_LABEL.copy}"`)
-    expect(copy).toContain('lucide-copy')
+    expect(sealed).toContain('partform--sealed')
+    expect(sealed).toContain(`aria-label="${FORM_LABEL.sealed}"`)
+    expect(FORM_LABEL.sealed).toMatch(/^Sealed: /)
+    expect(sealed).toContain('lucide-lock')
     // Beside the publish status the word shows too: a phone has no hover.
-    expect(copy).toContain('>COPY<')
+    expect(sealed).toContain('>SEALED<')
+    // COPY is STAMP's word now (its points and faces put in as yours): never the badge's.
+    expect(sealed).not.toContain('COPY')
     expect(link).not.toContain('>LINK<')
   })
 
-  it('the badge and the hide read one rule: what is sealed is a COPY, what is not is a LINK', () => {
+  it('the badge and the hide read one rule: what is sealed says SEALED, what is not is a LINK', () => {
     const tile = tri('Tile', 'tile')
     const empty: ShardModel = { ...newShard('Empty'), id: 'empty' }
     const cases: Array<[ShardModel, Ledger, boolean]> = [
@@ -99,14 +102,14 @@ describe('the LINK or COPY rule (lib/partForm.ts)', () => {
     ]
     for (const [s, ledger, sealed] of cases) {
       expect(sealedAsPiece(s, ledger, me())).toBe(sealed)
-      expect(shardForm(s, ledger, me())).toBe(sealed ? 'copy' : 'link')
+      expect(shardForm(s, ledger, me())).toBe(sealed ? 'sealed' : 'link')
     }
   })
 
   it('a mark stands on the top corner of every placed object, and none on a floor of very many', () => {
     const parent = placing('Arch', 'arch', [own('a'), own('b')])
-    const spots = badgeSpots(parent, new Map(), (i) => (i === 0 ? 'copy' : 'link'))
-    expect(spots.map((s) => [s.index, s.form])).toEqual([[0, 'copy'], [1, 'link']])
+    const spots = badgeSpots(parent, new Map(), (i) => (i === 0 ? 'sealed' : 'link'))
+    expect(spots.map((s) => [s.index, s.form])).toEqual([[0, 'sealed'], [1, 'link']])
     // An unresolved object is the unit placeholder cube: its top corner is half a unit up.
     expect(spots[0].at).toEqual([0.5, 0.5, 0.5])
     expect(spots[1].at[0]).toBeCloseTo(2.5)
@@ -161,7 +164,7 @@ describe('double-tap opens a placed object to edit in place; BACK goes up', () =
     editHere()
     expect(byId('plaza')!.refs).toEqual([own(copyId)])
     W().back()
-    expect(partForm(byId('plaza')!.refs![0], byId('plaza')!, me(), byId, {})).toBe('copy')
+    expect(partForm(byId('plaza')!.refs![0], byId('plaza')!, me(), byId, {})).toBe('sealed')
     W().undo()
     expect(byId('plaza')!.refs).toEqual([link])
   })
@@ -211,7 +214,7 @@ describe('double-tap opens a placed object to edit in place; BACK goes up', () =
     await W().enterPart(0)
     editHere()
     W().back()
-    expect(partForm(own('tile'), byId('floor')!, me(), byId, ledger)).toBe('copy')
+    expect(partForm(own('tile'), byId('floor')!, me(), byId, ledger)).toBe('sealed')
   })
 })
 

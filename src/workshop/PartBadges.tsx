@@ -1,7 +1,7 @@
 /**
- * PartBadges.tsx: the LINK or COPY mark (PartFormBadge) in a corner of every
+ * PartBadges.tsx: the LINK or SEALED mark (PartFormBadge) in a corner of every
  * object the shard on the bench places (owner, 2026-11-22): green for a link
- * to a public object, orange for a copy carried with what you hide
+ * to a public object, orange for one sealed inside what you hide
  * (lib/partForm.ts, the rule the hide itself follows).
  *
  * Each mark stands on the top corner of its object's box, in the object's own

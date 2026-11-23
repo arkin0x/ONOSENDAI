@@ -528,13 +528,13 @@ describe('the strip', () => {
     await m.unmount()
   })
 
-  it('opens the object picker as a sheet from OBJECT', async () => {
+  it('opens STAMP\'s library as a sheet from OBJECT', async () => {
     useWorkshop.getState().setTool('stamp')
     useWorkshop.setState({ stampObject: null, stampMode: 'shape' })
     const m = await mount(<Workshop />)
     await m.press(/^BLOCK|^WEDGE|^PYRAMID|^COLUMN|^RING|^STAR|^ARROW/)
     await m.press('OBJECT')
-    expect(m.all().some((h) => h.props['aria-label'] === 'Choose an object to stamp')).toBe(true)
+    expect(m.all().some((h) => h.props['aria-label'] === 'Choose what STAMP places')).toBe(true)
     expect(places(m.all()).dock).toEqual(DOCK)
     await m.unmount()
   })

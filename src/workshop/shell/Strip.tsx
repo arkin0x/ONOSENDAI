@@ -21,7 +21,7 @@
  */
 
 import { useEffect, useState } from 'react'
-import { ArrowBigUp, Box, Boxes, House, Scan, ChevronDown, CircleDot, CircleHelp, Cylinder, Ellipsis, Pyramid, RotateCw, SquareDashedMousePointer, Star, Torus, TriangleRight, Undo2, WandSparkles, Waypoints, X, Triangle, type LucideIcon } from 'lucide-react'
+import { ArrowBigUp, Box, Boxes, Copy, Grid2x2Check, House, Link, Scan, ChevronDown, CircleDot, CircleHelp, Cylinder, Ellipsis, Pyramid, RotateCw, SquareDashedMousePointer, Star, Torus, TriangleRight, Undo2, WandSparkles, Waypoints, X, Triangle, type LucideIcon } from 'lucide-react'
 import { FACED, FACING_LABEL, MAX_SIZE, MIN_SIZE, STAMPS, STAMP_HELP, type StampKind } from 'sno-core/stamps'
 import { useEscape } from '../../hooks/useEscape'
 import { noCallout, useRepeatable } from '../../hooks/useRepeatable'
@@ -35,7 +35,7 @@ import { isLook } from '../lookTool'
 /** What a tap does with each tool, behind the strip's ?. */
 export const TOOL_HELP: Record<Tool, string> = {
   view: 'See it as it looks in cyberspace. One finger orbits, two pan, pinch zooms. Tap the view ball for views, or to tip or roll the grid a quarter so the next points go on another plane. Pick a tool to build.',
-  stamp: 'Tap the grid to place the shape where the ghost shows. Q turns it.',
+  stamp: 'Tap the grid to place the shape where the ghost shows. Q turns it. OBJECT stamps one of your shards: COPY puts its points and faces in, LINK places it as one object; SNAP (G) steps by its own size.',
   add: 'Tap the grid to place a vertex at the current level.',
   select: 'Tap to gather points, faces or objects, as the first chip says. BOX makes a drag draw a box; REMOVE makes taps and boxes take out. The count in the bar lets go.',
   face: 'Tap corners in order, then the first again or FILL. A dark face shows its back: AUTO turns every face outward. To hold a face, SELECT FACES.',
@@ -52,23 +52,26 @@ function StampOptions({ onPickObject, tiles, setTiles }: { onPickObject: () => v
   const stampKind = useWorkshop((s) => s.stampKind)
   const stampSize = useWorkshop((s) => s.stampSize)
   const stampFacing = useWorkshop((s) => s.stampFacing)
+  const stampForm = useWorkshop((s) => s.stampForm)
+  const stampSnap = useWorkshop((s) => s.stampSnap)
   const bind = useRepeatable()
   const w = useWorkshop.getState
   const object = stampMode === 'object'
-  const Icon = object ? Box : SHAPE_ICON[stampKind]
+  const Icon = object ? (stampForm === 'copy' ? Copy : Link) : SHAPE_ICON[stampKind]
   return (
     <>
       <button className="ws__stripbtn ws__shapechip is-on" onClick={() => setTiles(!tiles)} aria-haspopup="menu" aria-expanded={tiles} aria-label={`Shape: ${object ? 'OBJECT' : stampKind.toUpperCase()}. Tap for the shapes.`} title="Choose what STAMP places">
         <Icon size={16} strokeWidth={2.25} aria-hidden />
-        <span className="ws__shapechip-name">{object ? (stampObject?.name ?? 'OBJECT') : stampKind.toUpperCase()}</span>
+        {/* For an object the slot beside it names it: the chip keeps to its picture (COPY or LINK), so TURN still fits a phone. */}
+        {!object && <span className="ws__shapechip-name">{stampKind.toUpperCase()}</span>}
         <ChevronDown size={14} strokeWidth={2.25} aria-hidden />
       </button>
       {object
         ? (
-          <button className={`ws__slot${stampObject ? ' is-full' : ''}`} onClick={onPickObject} title={stampObject ? 'Choose another object' : 'Choose an object'}>
+          <button className={`ws__slot${stampObject ? ' is-full' : ''}`} onClick={onPickObject} title={stampObject ? 'Choose another shard, or COPY or LINK' : 'Choose a shard from your library'}>
             {stampObject
-              ? <><span className="ws__slot-name">{stampObject.name}</span><span className="ws__slot-meta">{stampObject.shard.vertices.length} v · {stampObject.shard.faces.length} f · CHANGE</span></>
-              : <span className="ws__slot-meta">EMPTY · tap to choose</span>}
+              ? <><span className="ws__slot-name">{stampObject.name}</span><span className="ws__slot-meta">{stampForm === 'copy' ? 'COPY' : 'LINK'} · {stampObject.shard.vertices.length} v · {stampObject.shard.faces.length} f · CHANGE</span></>
+              : <span className="ws__slot-meta">{stampForm === 'copy' ? 'COPY' : 'LINK'} · tap to choose</span>}
           </button>
         )
         : (
@@ -78,8 +81,12 @@ function StampOptions({ onPickObject, tiles, setTiles }: { onPickObject: () => v
             <button className="ws__stripbtn ws__stripbtn--sq" {...bind(() => w().setStampSize(w().stampSize + 1))} disabled={stampSize >= MAX_SIZE} aria-label="Larger">+</button>
           </div>
         )}
+      {/* SNAP TO ITS SIZE: a 16-gibson piece steps by 16, so pieces of one size line up (owner, 2026-11-23). Greyed but in place for shapes. */}
+      <button className={`ws__stripbtn ws__stripbtn--tall${object && stampSnap ? ' is-on' : ''}`} disabled={!object} aria-pressed={object && stampSnap} onClick={() => w().setStampSnap(!stampSnap)} title={`Snap to its size (G): ${stampSnap ? 'on, taps step by the object\'s own size' : 'off, taps use the grid'}`} aria-label={`Snap to its size: ${stampSnap ? 'on' : 'off'}`}>
+        <Grid2x2Check size={16} strokeWidth={2.25} aria-hidden /><span>SNAP</span><kbd className="ws__key" aria-hidden>G</kbd>
+      </button>
       <button className="ws__stripbtn ws__stripbtn--tall" disabled={!object && !FACED[stampKind]} onClick={() => w().turnStamp()} title={`Turn a quarter (Q): facing ${FACING_LABEL[stampFacing]}`} aria-label={`Turn, facing ${FACING_LABEL[stampFacing]}`}>
-        <RotateCw size={16} strokeWidth={2.25} aria-hidden /><span>TURN</span>
+        <RotateCw size={16} strokeWidth={2.25} aria-hidden /><span>TURN</span><kbd className="ws__key" aria-hidden>Q</kbd>
       </button>
       {tiles && (
         <>
@@ -94,9 +101,9 @@ function StampOptions({ onPickObject, tiles, setTiles }: { onPickObject: () => v
                 </button>
               )
             })}
-            {/* A published object, placed by reference (DECK-0003 §1.10): it
-                stays that object and follows its author's edits. */}
-            <button role="menuitemradio" aria-checked={object} className={`ws__tile${object ? ' is-on' : ''}`} title="Stamp a published object, placed by reference" onClick={() => { w().setStampMode('object'); setTiles(false); if (!w().stampObject) onPickObject() }}>
+            {/* One of your shards (or a published object), copied in or
+                linked (workshop/StampLibrary.tsx; owner, 2026-11-23). */}
+            <button role="menuitemradio" aria-checked={object} className={`ws__tile${object ? ' is-on' : ''}`} title="Stamp one of your shards: COPY its points and faces in, or LINK it as one object" onClick={() => { w().setStampMode('object'); setTiles(false); if (!w().stampObject) onPickObject() }}>
               <Box size={22} strokeWidth={1.75} aria-hidden /><span>OBJECT</span>
             </button>
           </div>

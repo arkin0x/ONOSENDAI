@@ -19,14 +19,20 @@
  * runs on the bar from the entry; the exit zone stops it and shows the exit
  * card. Drag to look around.
  *
+ * The camera never loses you behind a wall (arkinox, 2026-11-23): a world
+ * shard between it and you is faded where it is in the way, and a camera that
+ * would dip under the floor is pulled in toward you, to just above it
+ * (game/occlusion.ts). Drawing only: the walls stop you as before.
+ *
  * Keys: W A S D or the arrows (held, a press every 110 ms, as WALK's hold),
  * Space to jump (or up), E or Enter for TAKE and OPEN, Shift, Q or C down.
  */
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { KeyRound } from 'lucide-react'
 import { BoxGeometry, EdgesGeometry, Vector3, type Group } from 'three'
+import { OcclusionFade } from './occlusion'
 import { holdsDoorKey, offerFor, useGame, type GameSession } from '../store/useGame'
 import { useInventory } from '../store/useInventory'
 import { ModelInMotion } from '../scene/ItemModel'
@@ -73,15 +79,23 @@ export function stepFor(yaw: number, press: 'forward' | 'back' | 'left' | 'right
   return { axis: 'z', dir: -rz > 0 ? 1 : -1 }
 }
 
-function Shards({ game, world }: { game: GameDef; world: WorldShard[] }): JSX.Element {
+/** One world shard, registered with the canvas's occlusion so it fades while it stands between the camera and you. */
+function FadingShard({ fade, id, centre, children }: { fade: OcclusionFade; id: string; centre: [number, number, number]; children: ReactNode }): JSX.Element {
+  const group = useRef<Group>(null)
+  // Before the first draw, so its materials compile once, already patched.
+  useLayoutEffect(() => (group.current ? fade.register(id, group.current) : undefined), [fade, id])
+  return <group ref={group} position={centre}>{children}</group>
+}
+
+function Shards({ game, world, fade }: { game: GameDef; world: WorldShard[]; fade: OcclusionFade }): JSX.Element {
   const placed = useMemo(() => world.map((w) => placeShard({ key: w.key, at: w.at, height: w.height, plane: game.region.plane, shard: w.shard }, game.region.base, 0, AXES)), [game, world])
   // Glow halos follow the Settings switch here, as in the world (scene/PointBillboards.tsx).
   return (
     <GlowFollowsSetting>
       {placed.map((p) => (
-        <group key={p.key} position={p.centre}>
+        <FadingShard key={p.key} fade={fade} id={p.key} centre={p.centre}>
           <ShardMesh shard={p.shard} scale={p.scale} clip={p.clip} pose={p.pose} lit />
-        </group>
+        </FadingShard>
       ))}
     </GlowFollowsSetting>
   )
@@ -128,24 +142,35 @@ function PadMark({ at, beacon }: { at: [number, number, number]; beacon?: number
   )
 }
 
-/** The camera, eased behind you at the look the drag set. */
-function Rig({ target, look }: { target: [number, number, number]; look: React.MutableRefObject<Look> }): null {
+/**
+ * The camera, eased behind you at the look the drag set, its arm shortened
+ * where it would end under the floor, and whatever stands between it and you
+ * faded (game/occlusion.ts).
+ */
+function Rig({ target, look, fade }: { target: [number, number, number]; look: React.MutableRefObject<Look>; fade: OcclusionFade }): null {
   const { camera } = useThree()
   const eye = useRef(new Vector3(...target))
   const want = useMemo(() => new Vector3(), [])
+  const placed = useMemo(() => new Vector3(), [])
+  const me = useMemo(() => new Vector3(), [])
   const focus = useRef(new Vector3(...target))
   useFrame((_, dt) => {
     const { yaw, pitch } = look.current
     const k = 1 - Math.exp(-dt * 10)
-    focus.current.lerp(new Vector3(...target), k)
+    me.set(target[0], target[1], target[2])
+    focus.current.lerp(me, k)
     want.set(
       focus.current.x + Math.sin(yaw) * Math.cos(pitch) * CAMERA_DISTANCE,
       focus.current.y + Math.sin(pitch) * CAMERA_DISTANCE,
       focus.current.z + Math.cos(yaw) * Math.cos(pitch) * CAMERA_DISTANCE,
     )
-    eye.current.lerp(want, k)
+    // The share of the arm clear of the floor, from the last cast: the camera eases there as it eases anywhere.
+    placed.copy(want).sub(focus.current).multiplyScalar(fade.arm).add(focus.current)
+    eye.current.lerp(placed, k)
     camera.position.copy(eye.current)
     camera.lookAt(focus.current)
+    // The fade follows the camera where this frame draws it.
+    fade.frame(eye.current, me, focus.current, want, performance.now(), dt * 1000)
   })
   return null
 }
@@ -217,6 +242,8 @@ function GameCanvas({ session, at, look, items }: { session: GameSession; at: Po
   const drawn = useMemo(() => (world ? sceneNow(game, { shards: world, door, room }, progress).drawn : null), [game, world, door, room, taken, progress.doorOpen])
   // A real key item, once its bag is open, until it is in ITEMS.
   const lying = useMemo(() => keys.filter((k) => !keyItemHeld(items, k)), [keys, items])
+  // The canvas's occlusion: which world shards fade, and how far the camera's arm reaches (game/occlusion.ts).
+  const fade = useMemo(() => new OcclusionFade(), [])
   // The ring marks where the key lies, seen from below, until it is held (or, LEGACY, taken): round the key item itself once its
   // bag is open, so it follows the item wherever the bag puts it, and before that where the game says the key lies (GameKeyBag).
   const ring = door ? (game.keyBag && !holdsDoorKey(session, items) && !progress.doorOpen ? { at: lying[0]?.at ?? game.keyBag.at, lift: 0 } : null) : game.key && !taken ? { at: game.key.at, lift: 1 } : null
@@ -226,8 +253,8 @@ function GameCanvas({ session, at, look, items }: { session: GameSession; at: Po
       <ambientLight intensity={0.9} />
       <directionalLight position={[10, 18, 6]} intensity={1.1} />
       <pointLight position={me} intensity={6} distance={12} decay={1.6} color="#ffe2f4" />
-      <Rig target={me} look={look} />
-      {drawn && <Shards game={game} world={drawn} />}
+      <Rig target={me} look={look} fade={fade} />
+      {drawn && <Shards game={game} world={drawn} fade={fade} />}
       {pads.map((p, i) => <PadMark key={i} at={p.at} beacon={p.beacon} />)}
       {ring && <KeyMark at={centreOf(game, ring.at)} lift={ring.lift} />}
       {lying.map((k) => <KeyItemMark key={k.eventId} game={game} item={k} />)}

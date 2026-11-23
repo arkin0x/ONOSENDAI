@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useState } from 'react'
+import { useRevealClass, watchNewcomer } from './newcomer/useNewcomer'
 import { BitReadout } from './hud/BitReadout'
 import { CrashNote } from './hud/CrashNote'
 import { ChainExplorer } from './hud/ChainExplorer'
@@ -32,6 +33,7 @@ import { watchArrivalMode } from './store/arrivalMode'
 import './tutorial/director'
 // The Earth route's waits: a stop picked, BOARD, RIDE.
 import './tutorial/earthRoute'
+import './tutorial/buildRoute'
 // The Straylight route's OPEN STRAYLIGHT CAFE: the invite in a new tab.
 import './tutorial/straylight'
 // The final card's DUNGEON, when games are on for this device.
@@ -167,6 +169,11 @@ export default function App(): JSX.Element {
   // switch on (tutorial/gate.ts, on by default since 2026-11-13), a
   // brand-new identity gets the tutorial and a player who left one
   // unfinished resumes it.
+  // The newcomer view (newcomer/useNewcomer.ts): a first arrival's run makes
+  // it a newcomer, each step it reaches brings in its part of the screen, and
+  // a finish or a skip ends it. Before the tutorial's watcher, so it hears the
+  // run start.
+  useEffect(() => watchNewcomer(), [])
   useEffect(() => watchFirstArrival(), [])
   // ?mode=view or ?mode=region on arrival: the mode wins over the first
   // arrival on that load, never over a run already going (store/arrivalMode.ts).
@@ -237,7 +244,11 @@ export default function App(): JSX.Element {
   // The HUD slides inside the menu's columns as it opens and closes on a
   // wide screen, but not as the page loads with it open (hooks/useMenuInset).
   useEffect(armMenuSlide, [])
-  const showPanels = panelsOpen && !spectating
+  // The newcomer view keeps the menu, and each part below, out of sight until
+  // the tour reaches it (newcomer/reveal.ts); outside it everything shows.
+  const veil = useRevealClass()
+  const shows = (id: Parameters<typeof veil>[0]): boolean => veil(id) !== ' nc-veiled'
+  const showPanels = panelsOpen && !spectating && shows('menu')
 
   // Reading a hidden thing owns the screen: the top-aligned modal sits where
   // the instrument stack lives, so the stack stands aside and the hamburger
@@ -443,11 +454,11 @@ export default function App(): JSX.Element {
       {showPanels && !offerUp && <CrashNote where="the menu"><Hud menuOpen={crowded} /></CrashNote>}
       <SpectateBar />
       {/* Hidden, never unmounted, while out of the way: each mount is a new WebGL context (scene/Compass3D). */}
-      <Compass3D hidden={crowded || offerUp || deploying} onTap={() => setViewMenuOpen((open) => !open)} />
+      <Compass3D hidden={crowded || offerUp || deploying || !shows('compass')} onTap={() => setViewMenuOpen((open) => !open)} />
       {/* Not while spectating: the spectate bar owns the bottom of the screen,
           and on a foldable's wide screen the folded CHAT chip sat on top of
           it. You cannot speak from someone else's head anyway. */}
-      {!crowded && !offerUp && !deploying && !secretOpen && !spectating && <ChatDock />}
+      {!crowded && !offerUp && !deploying && !secretOpen && !spectating && shows('chat') && <ChatDock />}
       {/* The nickname field for a place just starred, over the star (StarNickname.tsx). */}
       <StarNickname />
       {!crowded && !offerUp && !deploying && viewMenuOpen && <ViewMenu onClose={() => setViewMenuOpen(false)} />}
@@ -456,7 +467,7 @@ export default function App(): JSX.Element {
         {/* Not while placing: the deploy bar docks in this same corner
             (arkinox, 2026-10-12), and placing moves no avatar, so there is
             no route to show. */}
-        {showPad && !offerUp && !deploying && <RouteOverlay />}
+        {shows('route') && showPad && !offerUp && !deploying && <RouteOverlay />}
         {/* WALK's look ball, in the bottom right over JUMP and DOWN
             (WalkLookSphere.tsx). Not tied to the pad, which a tap on the scene
             folds; not while the menu covers the scene or while placing. */}
@@ -528,7 +539,7 @@ export default function App(): JSX.Element {
       {/* A brought key that needs its password, over everything: nothing signs until it is answered (hud/KeyLock.tsx). */}
       <KeyLockGate />
       <button
-        className="hamburger-menu"
+        className={`hamburger-menu${veil('menu')}`}
         onContextMenu={(e) => e.preventDefault()}
         onClick={() => setPanelsOpen((open) => !open)}
         disabled={spectating}

@@ -50,6 +50,8 @@ import { Explanation } from './Explanation'
 import { useChainUi } from '../store/useChainUi'
 import { setRideDestination } from '../store/destination'
 import { runTutorialEffect } from '../store/useTutorial'
+import { useNewcomerView } from '../newcomer/useNewcomer'
+import { say } from '../newcomer/names'
 
 /**
  * Where a stop sits, for the camera. The float64-approximate coordinate is
@@ -454,6 +456,8 @@ export function HyperspacePanel(): JSX.Element {
   const boarding = useRideRun((s) => s.boarding)
   // A tap on a stop in the scene picks the destination right now (the tour's pick and board steps).
   const tapPicks = useStopTapPicks((s) => s.on)
+  // The newcomer view (newcomer/names.ts): plain names, and a trip time in place of the work figures.
+  const plain = useNewcomerView()
   const cloud = useCyberspace((s) => s.cloud)
   const profile = useCyberspace((s) => s.cloudPrefs.profile)
   const ready = sync.status === 'ready'
@@ -557,7 +561,7 @@ export function HyperspacePanel(): JSX.Element {
       </header>
 
       <div className="hyper__group">
-        <span className="legend__label hyper__kicker hyper__kicker--nearest">Nearest station</span>
+        <span className="legend__label hyper__kicker hyper__kicker--nearest">{say('Nearest station', plain)}</span>
         {nearest ? (
           <>
             <dl className="stats">
@@ -569,10 +573,12 @@ export function HyperspacePanel(): JSX.Element {
                 <dt>Kind</dt>
                 <dd>{kindLabel(nearest.stop)}</dd>
               </div>
-              <div>
-                <dt>Distance</dt>
-                <dd>2^{nearest.distance}</dd>
-              </div>
+              {!plain && (
+                <div>
+                  <dt>Distance</dt>
+                  <dd>2^{nearest.distance}</dd>
+                </div>
+              )}
               {nearest.stop.kind === 'landfall' && (
                 <div>
                   <dt>Surface</dt>
@@ -610,16 +616,20 @@ export function HyperspacePanel(): JSX.Element {
                     <dt>{estimate.fromLabel}</dt>
                     <dd>{estimate.from}</dd>
                   </div>
+                  {!plain && (
+                    <>
+                      <div>
+                        <dt>Ride length</dt>
+                        <dd>{estimate.length} BLOCK{estimate.length === 1 ? '' : 'S'}</dd>
+                      </div>
+                      <div>
+                        <dt>Expected work</dt>
+                        <dd>{formatOps(expectedRidePairs(estimate.length) + expectedPricePairs(estimate.length))} PAIRS</dd>
+                      </div>
+                    </>
+                  )}
                   <div>
-                    <dt>Ride length</dt>
-                    <dd>{estimate.length} BLOCK{estimate.length === 1 ? '' : 'S'}</dd>
-                  </div>
-                  <div>
-                    <dt>Expected work</dt>
-                    <dd>{formatOps(expectedRidePairs(estimate.length) + expectedPricePairs(estimate.length))} PAIRS</dd>
-                  </div>
-                  <div>
-                    <dt>Est. time</dt>
+                    <dt>{say('Est. time', plain)}</dt>
                     {/* The pool's wall-clock per average block; the price is priced in blocks by its pairings. */}
                     <dd>{rideIssue !== null ? 'NOT IN THIS BROWSER' : localMs === null ? 'CALIBRATING' : formatDuration(localMs)}</dd>
                   </div>
@@ -707,7 +717,7 @@ export function HyperspacePanel(): JSX.Element {
               className="hyper__btn hyper__btn--board"
               disabled={inGame || !ownChain || !ready || destination === null || boarding}
               onClick={() => void boardFromAnywhere()}
-            >{boarding ? 'BOARDING' : 'BOARD'}</button>
+            >{say(boarding ? 'BOARDING' : 'BOARD', plain)}</button>
           )}
           {hosakaRiding ? (
             <>

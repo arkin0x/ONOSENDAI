@@ -36,7 +36,7 @@ vi.mock('../../hooks/useCover', () => ({ useCover: () => () => undefined }))
 vi.mock('../../hooks/useEscape', () => ({ useEscape: () => undefined }))
 
 import { mount, textOf, type Host, type Mounted } from '../../test/elementRoot'
-import { registerTutorialChoice, useTutorial } from '../../store/useTutorial'
+import { choiceOffered, registerTutorialChoice, useTutorial } from '../../store/useTutorial'
 import { CHOICE } from '../../tutorial/script'
 import { CHOICE_ICONS, TutorialCoach } from '../TutorialCoach'
 
@@ -75,8 +75,10 @@ describe('the Where next? card', () => {
   it('each route: its icon first, in the left column, hidden; then its words, unchanged', async () => {
     card = await mount(<TutorialCoach />)
     const buttons = routes(card)
-    expect(buttons.map((b) => textOf(b))).toEqual(CHOICE.choices!.map((c) => c.label + c.about))
-    CHOICE.choices!.forEach((c, i) => {
+    // The routes offered on this browser (SEE EARTH only where a ride cannot run).
+    const offered = CHOICE.choices!.filter(choiceOffered)
+    expect(buttons.map((b) => textOf(b))).toEqual(offered.map((c) => c.label + c.about))
+    offered.forEach((c, i) => {
       const [column, words] = kids(buttons[i])
       expect(column.props.className).toBe('tutorial-choice__icon')
       expect(column.props['aria-hidden']).toBe(true)

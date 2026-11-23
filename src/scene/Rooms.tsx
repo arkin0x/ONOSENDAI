@@ -48,6 +48,7 @@
  */
 
 import { useEffect, useLayoutEffect, useMemo, useRef } from 'react'
+import { useNewcomerView } from '../newcomer/useNewcomer'
 import { useFrame } from '@react-three/fiber'
 import { BoxGeometry, BufferGeometry, Color, DoubleSide, Float32BufferAttribute, type Mesh, ShaderMaterial, Vector3 } from 'three'
 import { formatOps, stepFor, type AxisDirection, type ViewAxes } from '../lib/space'
@@ -322,6 +323,8 @@ function gridGeometry(
 }
 
 export function Rooms({ axes }: Props): JSX.Element {
+  // The newcomer view hides movement proof terms (newcomer/reveal.ts 'proof-labels'): the boxes stay, their ops to leave labels go.
+  const plain = useNewcomerView()
   const position = useCyberspace((s) => s.anchor)
   const scaleExp = useCyberspace((s) => s.scaleExp)
   const walking = useCyberspace((s) => s.walking)
@@ -442,7 +445,7 @@ export function Rooms({ axes }: Props): JSX.Element {
             {/* Faded out right at the eye, as the world's lines are (scene/nearFade.ts). */}
             <lineBasicMaterial color={l.color} toneMapped={false} transparent opacity={l.opacity} {...NEAR_FADE_LINES} />
           </lineSegments>
-          {l.label !== null && (
+          {l.label !== null && !plain && (
             <WorldLabel
               text={l.label}
               color={l.color}

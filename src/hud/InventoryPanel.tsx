@@ -460,7 +460,7 @@ export function TakenRow({ item }: { item: HeldItem }): JSX.Element {
   }
   return (
     // Laid out as a key item row (HeldRowLine), the same picture size for every kind (owner, 2026-11-15).
-    <li className="secrets__row held__row held__row--loot" data-actions-row={item.id}>
+    <li className="secrets__row held__row held__row--loot" data-actions-row={item.id} data-kind={item.type}>
       <ItemThumb type={item.type} coin={coin} shard={item.type === 'shard' ? item.shard : undefined} />
       {item.type === 'chest' && item.chest
         ? <ChestBlock id={item.id} chest={item.chest} author={item.author} verified={item.verified} place={item.place} sealer={item.verified ? item.event.pubkey : undefined} contentsIn={contents} />
@@ -479,7 +479,7 @@ export function TakenRow({ item }: { item: HeldItem }): JSX.Element {
       <span className="held__acts">{actions.button}</span>
       {actions.group(
         <>
-          {item.type === 'shard' && <button className="chest__act" onClick={moveToWorkshop} title="Move this model into your workshop">MOVE TO WORKSHOP</button>}
+          {item.type === 'shard' && <button className="chest__act held__move" onClick={moveToWorkshop} title="Move this model into your workshop">MOVE TO WORKSHOP</button>}
           {item.type === 'message' && <button className={`chest__act ${open ? 'is-on' : ''}`} onClick={() => setOpen((o) => !o)} aria-expanded={open}>{coin || hasNftLink(item.text) ? 'CARD' : 'READ'}</button>}
           {item.type === 'audio' && item.audio && <button className={`chest__act ${open ? 'is-on' : ''}`} onClick={() => setOpen((o) => !o)} aria-expanded={open} title="Play it or save it">LISTEN</button>}
           {item.place && <button className={`chest__act ${details ? 'is-on' : ''}`} onClick={() => setDetails((d) => !d)} aria-expanded={details}>DETAILS</button>}
@@ -687,7 +687,7 @@ function ItemsModal({ kind }: { kind: ItemsKind }): JSX.Element {
 function KindButton({ kind, label }: { kind: ItemsKind; label: string }): JSX.Element {
   const Icon = KIND_ICON[kind]
   return (
-    <button className="avatars__go shards__compose-open items-kinds__go" onClick={() => useItemsModal.setState({ open: kind })} aria-haspopup="dialog">
+    <button className={`avatars__go shards__compose-open items-kinds__go items-kinds__go--${kind}`} onClick={() => useItemsModal.setState({ open: kind })} aria-haspopup="dialog">
       <Icon className="shards__build-icon" size={13} strokeWidth={2.5} aria-hidden /><span className="items-kinds__label">{label}</span>
     </button>
   )

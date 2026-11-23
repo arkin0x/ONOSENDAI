@@ -4157,7 +4157,7 @@ select.avatars__input option:checked {
   clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px);
 }
 .ws__tuttip-icon { color: var(--accent); vertical-align: -2px; margin-right: 6px; }
-.ws__tuttip-text { margin: 0; min-height: calc(2 * 1.45em); font-size: 12px; line-height: 1.45; color: #fff; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9); }
+.ws__tuttip-text { margin: 0; min-height: calc(4 * 1.45em); font-size: 12px; line-height: 1.45; color: #fff; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9); }
 .ws__tuttip-back {
   display: inline-flex;
   align-items: center;
@@ -12733,7 +12733,18 @@ html.tv-broadcast body { overflow: hidden; }
 .tutorial-card__foot { display: flex; gap: 6px; }
 .tutorial-card__foot .tutorial-card__go { flex: 1 1 0; align-self: auto; }
 .tutorial__back { flex: 0 0 auto; padding: 0 12px; background: transparent; }
+/* The terms line under the welcome's FIND IT: one short line, dim, never in the way. */
+.tutorial__terms { margin: 10px 0 0; text-align: center; font-size: 10px; letter-spacing: 0.08em; color: var(--dim); }
+.tutorial__terms a { color: var(--dim); text-decoration: underline; text-underline-offset: 2px; }
+.tutorial__terms a:hover { color: var(--fg); }
 .tutorial__next { flex: 1 1 0; }
+/* Every tour button row is one height, every button in it, in every state
+ * (owner, 2026-11-23: "back and done buttons should be the same height"):
+ * the caption panel's row at 32px, the centred card's at 40px. */
+.demo__foot { --tour-row-h: 32px; }
+.tutorial-card__foot { --tour-row-h: 40px; }
+.demo__foot > .demo__btn,
+.tutorial-card__foot > .demo__btn { height: var(--tour-row-h); min-height: var(--tour-row-h); align-self: stretch; }
 
 /* In-game mode (game/GameView.tsx, DECK-0002 §2.3): the game's world full
    screen over cyberspace, its bar on top, its pad at the bottom. Pink, the
@@ -13411,6 +13422,149 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
   filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.95));
 }
 .ws__topbtn--back { color: var(--accent); border-color: var(--accent); }
+
+/* ------------------------------------------------------------------
+ * The newcomer view (newcomer/useNewcomer.ts, newcomer/reveal.ts).
+ * A part the tour has not reached yet keeps its place and is simply not
+ * there to see or press (nc-veiled), so nothing moves when it arrives. When
+ * its step comes up it arrives once (nc-arrive): it rises a few pixels into
+ * place as it fades in, and a thin cyan ring flares and fades around it, the
+ * way a HUD element boots on (gskinner, "FUI FUN: Learning to Make HUDs";
+ * one thing at a time, in context). Calm: 1.4 s, no bounce, nothing loops.
+ * ------------------------------------------------------------------ */
+.nc-veiled {
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+.nc-arrive { animation: nc-arrive 1.4s cubic-bezier(0.2, 0.7, 0.2, 1) backwards; }
+@keyframes nc-arrive {
+  0% { opacity: 0; transform: translateY(6px); box-shadow: 0 0 0 0 rgba(0, 229, 255, 0); }
+  40% { opacity: 1; transform: none; box-shadow: 0 0 0 1px rgba(0, 229, 255, 0.7), 0 0 18px rgba(0, 229, 255, 0.35); }
+  100% { opacity: 1; transform: none; box-shadow: 0 0 0 0 rgba(0, 229, 255, 0); }
+}
+/* A control that arrives on the very step that points at it keeps the tour's
+ * pulse: both run, the pulse last so its ring is the one seen. */
+.nc-arrive.demo-pulse { animation: nc-arrive 1.4s cubic-bezier(0.2, 0.7, 0.2, 1) backwards, demo-pulse 1.4s ease-out infinite; }
+/* A menu panel only fades and rises: its frame is its own. */
+.slot.nc-arrive { animation-name: nc-arrive-panel; }
+@keyframes nc-arrive-panel {
+  0% { opacity: 0; transform: translateY(8px); }
+  100% { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .nc-arrive, .slot.nc-arrive { animation: nc-arrive-still 0.3s linear backwards; }
+  .nc-arrive.demo-pulse { animation: nc-arrive-still 0.3s linear backwards; box-shadow: 0 0 0 3px rgba(0, 229, 255, 0.85); }
+  @keyframes nc-arrive-still { from { opacity: 0; } to { opacity: 1; } }
+}
+
+/* The commit slot's key hints in the newcomer view: SPACE under GO, X under
+ * BACK TO ME, as the pad prints its keys (.touchpad__keyhint). */
+.touchops__cancel, .touchops__commit { position: relative; }
+.touchops__keyhint {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 3px;
+  text-align: center;
+  font-size: 6px;
+  line-height: 1;
+  letter-spacing: 0.06em;
+  font-weight: 400;
+  opacity: 0.6;
+  pointer-events: none;
+}
+/* Plain names are longer than COMMIT and HOP: two short lines inside the same
+ * 40 px button, above its key hint, never a wider button. */
+.touchops--plain .touchops__cancel,
+.touchops--plain .touchops__commit {
+  white-space: normal;
+  line-height: 1.15;
+  letter-spacing: 0.06em;
+  padding: 0 4px 7px;
+}
+.touchops--plain .touchops__sub { display: none; }
+/* ON THIS DEVICE / ONLINE in the switch's 26 px: two lines, the same height. */
+.touchmode--plain .touchmode__opt {
+  font-size: 7px;
+  letter-spacing: 0.05em;
+  line-height: 1.1;
+  white-space: normal;
+  padding: 0 4px;
+}
+
+/* A hand-cut chamfered button (top-left and bottom-right corners cut, the
+ * item-picture corners; owner, 2026-11-15): the button is the line's colour,
+ * clipped; its ::before is the fill, a line's width in, with its cut moved
+ * in by the line's width times (2 - sqrt 2) so the diagonal edges are as
+ * thick as the straight ones (as .chamfer__in). The content stands over the
+ * fill. Every edge keeps its outline, the two diagonals too, lit or not. */
+.cham-btn {
+  --cham-cut: 8px;
+  --cham-line-w: 1px;
+  --cham-line: rgba(0, 229, 255, 0.4);
+  --cham-fill: #04090f;
+  position: relative;
+  isolation: isolate;
+  border: 0;
+  background: var(--cham-line);
+  clip-path: polygon(var(--cham-cut) 0, 100% 0, 100% calc(100% - var(--cham-cut)), calc(100% - var(--cham-cut)) 100%, 0 100%, 0 var(--cham-cut));
+}
+.cham-btn::before {
+  --in-cut: calc(var(--cham-cut) - var(--cham-line-w) * 0.5858);
+  content: '';
+  position: absolute;
+  inset: var(--cham-line-w);
+  z-index: -1;
+  background: var(--cham-fill);
+  clip-path: polygon(var(--in-cut) 0, 100% 0, 100% calc(100% - var(--in-cut)), calc(100% - var(--in-cut)) 100%, 0 100%, 0 var(--in-cut));
+}
+
+/* The tour's short trips (hud/EarthTrips.tsx): one row per trip, a fixed
+ * height, in a chamfered frame cut by hand (top-left and bottom-right, the
+ * item-picture corners): the outer box is the line's color, the inner the
+ * fill, inset by a pixel with its cut moved in to match. */
+.earth-trips { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-top: 2px; }
+.earth-trips__row {
+  --cham-cut: 9px;
+  --cham-line: rgba(0, 229, 255, 0.35);
+  --cham-fill: rgba(6, 14, 22, 0.94);
+  display: block;
+  width: 100%;
+  min-height: 62px;
+  color: #fff;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.earth-trips__in { display: flex; align-items: flex-start; gap: 6px; height: 100%; min-height: 62px; padding: 7px 8px; }
+.earth-trips__row:hover, .earth-trips__row:focus-visible { --cham-fill: #0a1f29; }
+.earth-trips__row.is-on { --cham-line: var(--accent); --cham-fill: #0b2c36; }
+.earth-trips__icon { display: flex; color: var(--accent); flex: none; padding-top: 1px; }
+.earth-trips__text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.earth-trips__place { font-size: 11px; letter-spacing: 0.04em; color: #fff; white-space: nowrap; }
+.earth-trips__meta { font-size: 9px; color: var(--fg); opacity: 0.8; margin-top: 2px; }
+.earth-trips__wait { grid-column: 1 / -1; margin: 0; min-height: 62px; display: flex; align-items: center; font-size: 11px; color: var(--fg); }
+.earth-trips__hosaka { grid-column: 1 / -1; }
+/* Reserved even while empty, so HOSAKA's price arriving moves nothing. */
+.earth-trips__hosaka { margin: 0; min-height: 1.4em; font-size: 11px; color: var(--fg); }
+
+/* Settings > Interface: Screen, two half-width buttons (hud/NewcomerSetting.tsx). */
+.nc-setting { flex-direction: column; align-items: stretch; gap: 8px; }
+.nc-setting__pair { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.nc-setting__opt {
+  --cham-cut: 7px;
+  --cham-line: rgba(0, 229, 255, 0.4);
+  --cham-fill: rgba(6, 14, 22, 0.92);
+  font: inherit;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  min-height: 34px;
+  padding: 0 6px;
+  color: var(--fg);
+  cursor: pointer;
+}
+.nc-setting__opt.is-on { --cham-line: var(--accent); --cham-fill: var(--accent); color: #05070d; font-weight: 700; }
+
 
 /* BY SIZE (shell/MoveHandles.tsx; owner, 2026-11-23): the move handles' middle,
    a chip where the held middle's dot was. 84 by 44, so its corners (47px out)

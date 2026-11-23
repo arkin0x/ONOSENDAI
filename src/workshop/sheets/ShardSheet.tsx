@@ -20,6 +20,8 @@ import { usePublished } from '../../store/usePublished'
 import { useWorkshop } from '../../store/useWorkshop'
 import { BounceChip, BounceRow, OpacityRow } from '../shardRows'
 import { PointGlowRows } from '../glowRows'
+import { FullnessBar } from '../FullnessBar'
+import { placedApart } from '../../lib/shardFullness'
 
 export function ShardBody(): JSX.Element | null {
   const shard = useWorkshop((s) => s.current())
@@ -92,6 +94,8 @@ export function ShardBody(): JSX.Element | null {
           )}
         </div>
         <span className="workshop__work">{wireBytes.toLocaleString('en-US')} BYTES ON THE WIRE · {shard.vertices.length} VERTICES + {shard.faces.length} FACES{shard.parts?.length ? ` + ${shard.parts.length} PLACED` : ''}</span>
+        {/* How full it is against what one hide holds whole (lib/shardFullness.ts; owner, 2026-11-23). */}
+        <FullnessBar payload={wireBytes} apart={placedApart(shard)} />
       </div>
       {publishAsk === shard.id && (
         <ConfirmModal

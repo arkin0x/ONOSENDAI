@@ -401,7 +401,11 @@ describe('cost estimates', () => {
   }
 
   it('a pairing costs more the taller its tree, and exactly 1 averaged over a ride\'s mix', () => {
-    for (let h = K_LINE; h < K_LINE + 16; h++) expect(pairCost(h + 1)).toBeGreaterThan(pairCost(h))
+    // The trend, not every step: neighbouring light K differ by less than a re-measurement's noise.
+    expect(pairCost(16 + K_LINE)).toBeGreaterThan(2 * pairCost(8 + K_LINE))
+    expect(pairCost(8 + K_LINE)).toBeGreaterThan(2 * pairCost(0 + K_LINE))
+    expect(pairCost(16 + K_LINE)).toBeGreaterThan(1)
+    expect(pairCost(4 + K_LINE)).toBeLessThan(1)
     // Weighted by how often each K comes up (sixteen fair bits) and by its pairings.
     let work = 0
     let pairs = 0
@@ -422,8 +426,9 @@ describe('cost estimates', () => {
     expect(exactRideWork(heavy)).toBeCloseTo(2 ** (16 + K_LINE) * pairCost(16 + K_LINE))
   })
 
-  it('a re-roll attempt is one GRIND_HEIGHT tree at that height\'s cost', () => {
+  it('a re-roll attempt is one GRIND_HEIGHT tree at that height\'s cost, lighter than as many mean pairings', () => {
     expect(attemptWork()).toBeCloseTo(2 ** GRIND_HEIGHT * pairCost(GRIND_HEIGHT))
+    expect(attemptWork()).toBeLessThan(2 ** GRIND_HEIGHT)
   })
 
   it('exactRidePairs sums 2^(K + K_LINE)', () => {

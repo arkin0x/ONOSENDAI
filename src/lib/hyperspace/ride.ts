@@ -489,11 +489,14 @@ export function exactRidePairs(blockHashes: string[]): number {
  * doubles the size of its operands, so a taller tree's pairings work on
  * bigger numbers and each costs more: a K=16 block's pairing costs about
  * three times a K=8 block's. Only the shape matters here, never the device's
- * speed, which the calibration measures. Only V8 engines can ride at all
- * (Firefox and WebKit cap a BigInt at 2^20 bits, far below a ride leaf's
- * root), so V8's shape is the one that counts.
+ * speed, which the calibration measures. The shape comes mostly from V8's
+ * multiplication algorithms, so it should carry over to a phone's V8, though
+ * it was measured on a desktop; re-measure on an ARM phone if the estimate
+ * drifts there. V8 is the engine that matters: Firefox caps a BigInt at
+ * 2^20 bits (proofCapability.ts), below the root of a K=8 leaf, so most of a
+ * ride's leaves cannot be built there at all.
  */
-const PAIR_NS_BY_K = [
+export const PAIR_NS_BY_K: readonly number[] = [
   651.5, 651.9, 693.2, 805.1, 982.3, 1206.2, 1363.6, 1595.1, 1999.9,
   2374.1, 2896.1, 3402.8, 3879.3, 4276.8, 4790.5, 5403.4, 5948.3,
 ]

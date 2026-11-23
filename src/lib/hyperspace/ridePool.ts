@@ -885,6 +885,9 @@ export function calibrate(): Promise<RideBench> {
       const width = poolWidth()
       bench = { msPerBlock: poolMsPerBlock(await timeSamplesOnPool(width)), workers: width }
     }
+    // A worker from another build, or a clock gone wrong, must not leave
+    // NaN or Infinity as the session's number.
+    if (!Number.isFinite(bench.msPerBlock) || bench.msPerBlock <= 0) throw new Error('the ride calibration gave no usable number')
     benchmark = bench
     storeBenchmark(bench)
     return bench

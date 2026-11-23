@@ -15,7 +15,7 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { bytesToHex, sha256 } from 'cyberspace-core'
-import { K_LINE, attemptWork, attemptsRequired, be32, be64, buildRideProof, computeRideLeaf, expectedRidePairs, lineTerrainK, rideBlocks, verifyRideLevel1 } from '../ride'
+import { K_LINE, PAIR_NS_BY_K, attemptWork, attemptsRequired, calibrationHashes, exactRidePairs, exactRideWork, be32, be64, buildRideProof, computeRideLeaf, expectedRidePairs, lineTerrainK, rideBlocks, verifyRideLevel1 } from '../ride'
 import {
   RIDE_CHUNK_SIZE,
   assembleLeaves,
@@ -246,6 +246,33 @@ describe('the ride estimate uses the pool\'s measured throughput', () => {
     expect(poolMsPerBlock([{ elapsedMs: 100, work: 3_000 }, { elapsedMs: 100, work: 1_000 }])).toBeCloseTo(one / 4)
   })
 
+  it('a device that pairs at the table\'s speeds gets its true mean block, heavy blocks included', () => {
+    // A device exactly as fast as the table, times 3: each pairing at height
+    // K + K_LINE takes 3 * PAIR_NS_BY_K[K] ns. Time the sample on it.
+    const nsAt = (k: number) => 3 * PAIR_NS_BY_K[k]
+    const hashes = calibrationHashes()
+    let sampleNs = 0
+    for (const h of hashes) {
+      const k = lineTerrainK(h)
+      sampleNs += 2 ** (k + K_LINE) * nsAt(k)
+    }
+    const sample = { elapsedMs: sampleNs / 1e6, work: exactRideWork(hashes) }
+    // The truth, straight from the table: a mean block over sixteen fair bits.
+    let blockNs = 0
+    for (let k = 0; k <= 16; k++) {
+      let c = 1
+      for (let i = 0; i < k; i++) c = (c * (16 - i)) / (i + 1)
+      blockNs += (c / 2 ** 16) * 2 ** (k + K_LINE) * nsAt(k)
+    }
+    // To a few parts in a million: expectedRidePairs rounds the mean block's pairings.
+    expect(poolMsPerBlock([sample]) / (blockNs / 1e6)).toBeCloseTo(1, 4)
+    // Dividing by plain pairings, as before, priced every pairing like the
+    // sample's and came out about a tenth short.
+    const plain = poolMsPerBlock([{ elapsedMs: sample.elapsedMs, work: exactRidePairs(hashes) }])
+    expect(plain / (blockNs / 1e6)).toBeLessThan(0.93)
+    expect(plain / (blockNs / 1e6)).toBeGreaterThan(0.85)
+  })
+
   it('a long ride takes its blocks and its price at the pool\'s rate, not one worker\'s', () => {
     // The owner's ride: 363,870 blocks. Five workers, 52 ms a mean block for the pool (260 for one).
     const n = 363_870
@@ -334,7 +361,7 @@ describe('calibrate on the pool (fake workers)', () => {
         } else if (opts.fail) {
           this.reply({ type: 'error', id: msg.id, message: 'boom' }, 0)
         } else {
-          // Worker 0 is a big core, the rest little: 4,000 and 1,000 pairs in 100 ms.
+          // Worker 0 is a big core, the rest little: 4,000 and 1,000 mean pairings of work in 100 ms.
           this.reply({ type: 'calibrated', id: msg.id, elapsedMs: 100, work: this.index === 0 ? 4_000 : 1_000 }, 0)
         }
       }

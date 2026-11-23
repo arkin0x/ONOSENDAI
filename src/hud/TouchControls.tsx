@@ -210,9 +210,10 @@ export function padHold(b: PadKey): {
 
 export function TouchControls(): JSX.Element {
   // The pad and the block under it cover the scene from below: BUILD frames
-  // the cursor above them (hooks/useCover).
-  const padRef = useCover('bottom')
-  const opsRef = useCover('bottom')
+  // the cursor above them (hooks/useCover). The target markers do not dodge
+  // them: they fold with a tap on the scene, and the markers would jump.
+  const padRef = useCover('bottom', true, { markers: false })
+  const opsRef = useCover('bottom', true, { markers: false })
   const proof = useCyberspace((s) => s.proof)
   const position = useCyberspace((s) => s.position)
   const cursor = useCyberspace((s) => s.cursor)

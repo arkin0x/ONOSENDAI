@@ -6464,13 +6464,20 @@ select.avatars__input option:checked {
  *
  * One marker per target, positioned per frame by JS rather than by React. The
  * layer never takes pointer events: a landmark indicator must never sit between
- * the canvas and an orbit drag.
+ * the canvas and an orbit drag, and never takes a tap from a panel.
+ *
+ * Under the HUD (.hud is z-index 1): the menu's panels always draw over a
+ * marker, never the other way round (owner, 2026-11-23: "can we make these
+ * target markers not go over the menus?"). It was 2, the one layer drawn over
+ * the panels. Every other overlay with a z-index already stood above it, and
+ * those without one come later in the page, so they draw over it too. Targets.tsx also
+ * stops a chevron beside the panels, so it stays in sight.
  */
 .targets {
   position: absolute;
   inset: 0;
   pointer-events: none;
-  z-index: 2;
+  z-index: 0;
   overflow: hidden;
 }
 

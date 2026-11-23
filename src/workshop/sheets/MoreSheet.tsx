@@ -13,7 +13,7 @@
  */
 
 import { useEffect, useState } from 'react'
-import { ClipboardPaste, Copy, Eraser, FlipVertical2, Globe, Grid2x2Plus, Link, Merge, Pipette, Puzzle, Scissors, SquareDashedMousePointer, Triangle, WandSparkles, Waypoints } from 'lucide-react'
+import { ClipboardPaste, Copy, Eraser, FlipVertical2, Globe, Grid2x2Plus, Group, Link, Merge, Pipette, Puzzle, Scissors, SquareDashedMousePointer, Triangle, WandSparkles, Waypoints } from 'lucide-react'
 import { TICKS_PER_UNIT, ticksOf, unitsLabel, validPoint } from 'sno-core/shards'
 import { noCallout, useRepeatable } from '../../hooks/useRepeatable'
 import { dragHistory } from '../../lib/opacityStep'
@@ -134,7 +134,11 @@ function Key({ icon: Icon, label, title, onClick, disabled, aria, danger }: { ic
   )
 }
 
-export function MoreBody({ onClose }: { onClose?: () => void } = {}): JSX.Element | null {
+/**
+ * `onNewGroup`: NEW GROUP made a group (its id), or did not (null): the
+ * workshop swaps MORE for GROUPS with the new row on top (sheets/GroupsSheet).
+ */
+export function MoreBody({ onClose, onNewGroup }: { onClose?: () => void; onNewGroup?: (id: string | null) => void } = {}): JSX.Element | null {
   const shard = useWorkshop((s) => s.current())
   const tool = useWorkshop((s) => s.tool)
   const selection = useWorkshop((s) => s.selection)
@@ -162,6 +166,7 @@ export function MoreBody({ onClose }: { onClose?: () => void } = {}): JSX.Elemen
             <Key icon={Link} label="JOINED" title="Everything joined by faces to what you hold (C)" aria="Select connected" disabled={selection.length === 0} onClick={() => w().selectConnected()} />
             <Key icon={Scissors} label="CUT" title="Cut what you hold, and its faces, to the clipboard" aria="Cut the selection" disabled={selection.length === 0 && partSel.length === 0} onClick={() => w().cutSelection()} />
             <Key icon={Copy} label="DUPLICATE" title="A copy put down at once, held, ready to move" aria="Duplicate the selection" disabled={selection.length === 0 && partSel.length === 0} onClick={() => w().duplicateSelection()} />
+            <Key icon={Group} label="NEW GROUP" title="A new group from what you hold (Ctrl+G)" aria="Make a group from the selection" onClick={() => { const id = w().createGroup(); onNewGroup?.(id) }} />
             <Key icon={Triangle} label="FILL" title="Faces across these points: a flat set becomes one face, a solid set its hull (Enter)" aria="Fill the selection" disabled={points < 3} onClick={() => w().fillSelection()} />
             <Key icon={Grid2x2Plus} label="SUBDIVIDE" title="Cut each fully selected face into four, or a selected edge in two" aria="Subdivide the selection" disabled={points < 2} onClick={() => w().subdivideSelection()} />
             <Key icon={Puzzle} label="PIECE" title="The color in hand onto these points and everything joined to them by faces" aria="Color the connected piece" disabled={selection.length === 0} onClick={() => w().colorConnected(w().color)} />

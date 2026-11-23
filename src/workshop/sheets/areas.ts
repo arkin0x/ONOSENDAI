@@ -7,8 +7,12 @@
 /** A top-level area in the top bar. */
 export type Area = 'menu' | 'shard' | 'grid' | 'avatar' | 'motion'
 
-/** Everything that opens as a sheet over the dock: an area, MORE (phase 2), the palette, the object picker. */
-export type SheetKind = Area | 'more' | 'palette' | 'object'
+/**
+ * Everything that opens as a sheet over the dock: an area, MORE (phase 2),
+ * the palette, the object picker, and GROUPS (opened from the rail's key, or
+ * G; it stands on the strip, so what is held stays in sight under it).
+ */
+export type SheetKind = Area | 'more' | 'palette' | 'object' | 'groups'
 
 /** The words on each area's button and sheet header. */
 export const AREA_LABEL: Record<Area, string> = { menu: 'MENU', shard: 'SHARD', grid: 'GRID', avatar: 'AVATAR', motion: 'MOTION' }

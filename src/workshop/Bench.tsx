@@ -45,7 +45,8 @@ import type { ClockReading } from '../lib/worldClock'
 import { useAnimPreview } from '../store/animPreview'
 import { OVERLAY_ORDER } from '../scene/shardFaces'
 import { ShardLights } from '../scene/shardLight'
-import { nextSelection, ownAddress, useWorkshop, type Tool } from '../store/useWorkshop'
+import { hiddenIn, nextSelection, ownAddress, useWorkshop, type Tool } from '../store/useWorkshop'
+import { hiddenSets } from '../lib/shardGroups'
 import { partMatrix } from 'sno-core/parts'
 import { OwnPartsContext, fetchRef, useResolved } from '../lib/parts'
 import { PartBadges } from './PartBadges'
@@ -307,6 +308,9 @@ export function Handles(): JSX.Element | null {
   const moving = previewing
   const invalidate = useThree((s) => s.invalidate)
   const chosen = useMemo(() => new Set(selection), [selection])
+  // GROUPS' HIDE: a spot whose every vertex is hidden has no dot; a stack with one shown keeps its dot, and what is hidden of it is never taken (useWorkshop).
+  const hiddenKeys = useWorkshop((s) => s.hiddenGroups)
+  const hiddenVerts = useMemo(() => (shard ? hiddenSets(shard, hiddenIn(hiddenKeys, shard))?.vertices ?? null : null), [shard, hiddenKeys])
   const groups = useMemo(() => {
     const m = new Map<string, number[]>()
     shard?.vertices.forEach((v, i) => {
@@ -314,8 +318,9 @@ export function Handles(): JSX.Element | null {
       const g = m.get(k)
       if (g) g.push(i); else m.set(k, [i])
     })
-    return [...m.values()]
-  }, [shard?.vertices])
+    const all = [...m.values()]
+    return hiddenVerts ? all.filter((g) => g.some((i) => !hiddenVerts.has(i))).map((g) => { const shown = g.filter((i) => !hiddenVerts.has(i)); return [...shown, ...g.filter((i) => hiddenVerts.has(i))] }) : all
+  }, [shard?.vertices, hiddenVerts])
   // Made again only when the points outgrow them, so placing points one by one does not make one each time.
   const capacity = dotCapacity(groups.length)
   const dots = useMemo(() => new HandleDots(capacity), [capacity])
@@ -820,6 +825,8 @@ export function Keys(): null {
         // Text selected on the page (a shard's name in MENU) copies as text, as anywhere else.
         if (e.code === 'KeyC' && (w.selection.length || w.partSel.length) && !window.getSelection()?.toString()) { e.preventDefault(); w.copySelection() }
         if (e.code === 'KeyV' && w.clip) { e.preventDefault(); w.pasteClip('exact', ownAddress(useCyberspace.getState().identity.pubkey, w.currentId)) }
+        // GROUPS: a new group from what is held (sheets/GroupsSheet). LOOK only looks.
+        if (e.code === 'KeyG' && !isLook(w.tool) && (w.selection.length || w.partSel.length || w.selectedFaces.length)) { e.preventDefault(); w.createGroup() }
         return
       }
       if (e.altKey) return

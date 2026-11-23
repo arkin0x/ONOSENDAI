@@ -23,7 +23,7 @@ import { coordToLatLon } from '../lib/hyperspace/landfall'
 import { EARTH_SCALE_EXP } from '../lib/hyperspace/interest'
 import { formatLatLonDeg } from '../lib/earthSurface'
 import { expectedPricePairs, expectedRidePairs, lineStateOf, zeroLengthRideRefusal } from '../lib/hyperspace/ride'
-import { calibrate, computeRideProof, leafBenchmarkMs, rideFraction, type RideProgress } from '../lib/hyperspace/ridePool'
+import { calibrate, computeRideProof, rideBenchmark, rideEstimateMs, rideFraction, type RideBench, type RideProgress } from '../lib/hyperspace/ridePool'
 import { findStation } from '../lib/hyperspace/station'
 import { stopCoordExact, type Stop } from '../lib/hyperspace/stops'
 import { formatMs, formatOps, type Position } from '../lib/space'
@@ -457,13 +457,13 @@ export function HyperspacePanel(): JSX.Element {
   const hosakaRiding = hosakaPlanning || (hosakaJob !== null && cloudBusy)
   const now = useNow(hosakaRiding ? 1000 : 0)
 
-  // The per-leaf benchmark prices a ride in wall-clock time before you commit
-  // to it. Calibrated once; until the number exists the estimate says so
-  // rather than guessing.
-  const [benchMs, setBenchMs] = useState<number | null>(() => leafBenchmarkMs())
+  // The pool's measured throughput prices a ride in wall-clock time before
+  // you commit to it. Calibrated once, on every worker the ride uses; until
+  // the number exists the estimate says so rather than guessing.
+  const [bench, setBench] = useState<RideBench | null>(() => rideBenchmark())
   useEffect(() => {
     let alive = true
-    calibrate().then((ms) => { if (alive) setBenchMs(ms) }).catch(() => {})
+    calibrate().then((b) => { if (alive) setBench(b) }).catch(() => {})
     return () => { alive = false }
   }, [])
 
@@ -501,9 +501,7 @@ export function HyperspacePanel(): JSX.Element {
   const zeroRide = estimate && destination !== null ? zeroLengthRideRefusal(estimate.from, destination, atStop) : null
 
   // This device's own wait for the ride, as the Est. time row shows it.
-  const localMs = estimate && benchMs !== null
-    ? (estimate.length + expectedPricePairs(estimate.length) / expectedRidePairs(1)) * benchMs
-    : null
+  const localMs = estimate && bench !== null ? rideEstimateMs(estimate.length, bench) : null
   // HOSAKA's price beside it, when the provider sells rides and this one
   // fits (useRideQuote); hidden otherwise, and never for a zero-length ride.
   const quote = useRideQuote(estimate && !zeroRide ? estimate.from : null, estimate && !zeroRide ? destination : null)
@@ -606,7 +604,7 @@ export function HyperspacePanel(): JSX.Element {
                   </div>
                   <div>
                     <dt>Est. time</dt>
-                    {/* The benchmark is per average block; the price is priced in blocks by its pairings. */}
+                    {/* The pool's wall-clock per average block; the price is priced in blocks by its pairings. */}
                     <dd>{localMs === null ? 'CALIBRATING' : formatDuration(localMs)}</dd>
                   </div>
                   {quote.status !== 'hidden' && (
@@ -628,7 +626,10 @@ export function HyperspacePanel(): JSX.Element {
               it to the destination; all of the per-block work runs locally
               and resumes if interrupted. A re-roll price of about one
               thirty-second more follows the blocks, so a proof that skipped
-              some cannot cheaply retry its samples.
+              some cannot cheaply retry its samples. Est. time is measured on
+              this device with every worker the ride uses running at once. A
+              phone slows or pauses a tab that is hidden or behind another
+              app, so keep this tab open and in front while it rides.
               {quote.status !== 'hidden' && (
                 <>
                   {' '}RIDE VIA HOSAKA buys the same proof from HOSAKA, computed on

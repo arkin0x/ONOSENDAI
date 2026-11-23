@@ -10,6 +10,7 @@
  */
 
 import { CheckPaymentButton } from './InvoiceModal'
+import { PayTerms } from './ui/PayTerms'
 import { useEffect, useState } from 'react'
 import { balanceLabel, formatClock, satsLabel, satsOf, sinceLabel, type CloudMode } from '../lib/cloud'
 import { HOSAKA_DEFAULT_URL, cloudHopsSold } from '../lib/hosaka'
@@ -269,6 +270,7 @@ export function CloudPanel(): JSX.Element {
             />
             <button className="avatars__go" type="submit">GET INVOICE<GoArrow /></button>
           </div>
+          <PayTerms />
           <span className="cloud__profile-note">
             HOSAKA sends a lightning invoice. The balance updates the moment the node reports it paid, and nothing is spent until a move needs it.
           </span>

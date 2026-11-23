@@ -42,6 +42,7 @@
 
 import { useEffect, useState } from 'react'
 import { ChevronDown, ChevronUp } from 'lucide-react'
+import { PayTerms } from './ui/PayTerms'
 import { useCyberspace } from '../store/useCyberspace'
 import { useBuilder } from '../store/useBuilder'
 import { useSecrets } from '../store/useSecrets'
@@ -264,6 +265,11 @@ function ScanDock(): JSX.Element {
         {line && <span>{line}</span>}
         {line && percent !== null && <span className="scanorbs__bar" aria-hidden><span style={{ width: `${percent}%` }} /></span>}
       </div>
+      {/* The pay terms while the orb sells a HOSAKA scan. Its room is there
+          whenever HOSAKA scans at all, empty or not, as the line's is, so
+          stepping across the device max moves nothing; with HOSAKA off the
+          dock is as it was. */}
+      {range.cloud && <div className="scanorbs__terms">{cloud && <PayTerms scene />}</div>}
     </div>
   )
 }

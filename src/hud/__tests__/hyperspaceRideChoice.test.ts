@@ -93,6 +93,8 @@ describe('the HOSAKA choice in the Hyperspace panel', () => {
     const page = html()
     expect(page).not.toContain('RIDE VIA HOSAKA')
     expect(page).not.toContain('<dt>HOSAKA</dt>')
+    // Nothing to pay for, so no pay terms.
+    expect(page).not.toContain('Payments are final.')
     expect(button(page, '>RIDE<')).not.toContain('disabled')
   })
 
@@ -119,6 +121,15 @@ describe('the HOSAKA choice in the Hyperspace panel', () => {
     expect(page).toMatch(/RIDE VIA HOSAKA<\/span><span class="hyper__choicemeta">944 SATS(<!-- -->)? · 10 MIN/)
     expect(page).toMatch(/RIDE HERE<\/span><span class="hyper__choicemeta">FREE/)
     expect(button(page, 'RIDE VIA HOSAKA')).not.toContain('disabled')
+  })
+
+  it('priced: the pay terms sit under RIDE VIA HOSAKA, TERMS opening the Terms page in a new tab (owner, 2026-11-23)', () => {
+    quote.state = { status: 'ready', offer: OFFER }
+    const page = html()
+    const at = page.indexOf('class="payterms hyper__terms"')
+    expect(at).toBeGreaterThan(page.indexOf('RIDE VIA HOSAKA'))
+    expect(page.slice(at)).toMatch(/^class="payterms hyper__terms"[^>]*>Payments are final\.(<!-- -->)? (<!-- -->)?<a href="https:\/\/www\.onosendai\.tech\/terms" target="_blank" rel="noopener noreferrer">TERMS<\/a><\/p>/)
+    expect(page.split('Payments are final.').length - 1).toBe(1)
   })
 
   it('the highlight follows the profile: COST lights RIDE HERE; TIME lights the faster', () => {

@@ -19,6 +19,7 @@ import { useCyberspace } from '../store/useCyberspace'
 import { ConfirmModal } from './ConfirmModal'
 import { useEscape } from '../hooks/useEscape'
 import { ModalClose } from './ui/ModalClose'
+import { PayTerms } from './ui/PayTerms'
 
 /** The quote, waiting for a PAY. */
 export function CloudApproval(): JSX.Element | null {
@@ -75,6 +76,7 @@ export function CloudApproval(): JSX.Element | null {
       busy={funding}
       danger={false}
       cardClassName="cloud"
+      footer={<PayTerms />}
       onConfirm={() => useCyberspace.getState().approveCloud()}
       onCancel={() => useCyberspace.getState().declineCloud()}
     />
@@ -152,6 +154,7 @@ export function InvoiceModal(): JSX.Element | null {
           <a className="secret__act invoice__wallet" href={uri}>OPEN IN WALLET</a>
           <CheckPaymentButton />
         </div>
+        <PayTerms />
 
         <p className="legend__note">
           Watching for settlement{signerKind === 'local'

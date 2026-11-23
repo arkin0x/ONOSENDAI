@@ -17,6 +17,7 @@ import { type CloudMode } from '../lib/cloud'
 import { useCyberspace } from '../store/useCyberspace'
 import { useOffer, useOfferView } from '../store/useOffer'
 import { CheckPaymentButton } from './InvoiceModal'
+import { PayTerms } from './ui/PayTerms'
 import { useEscape } from '../hooks/useEscape'
 import { ModalClose } from './ui/ModalClose'
 
@@ -132,6 +133,8 @@ export function HosakaOffer({ hidden = false }: { hidden?: boolean }): JSX.Eleme
           </button>
         </div>
         )}
+        {/* Wherever this card can lead to paying HOSAKA: not for a move no one computes, nor with the cloud off. */}
+        {verdict.tier !== 'impossible' && prefs.mode !== 'off' && <PayTerms />}
         <p className="offer__note">HOSAKA necessarily learns the cantor roots of the moves it computes. Every result is verified locally before you sign it.</p>
       </div>
     </aside>

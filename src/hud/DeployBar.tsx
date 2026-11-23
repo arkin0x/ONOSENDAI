@@ -123,6 +123,7 @@ import { LookPicker } from './LookPicker'
 import { SHALLOW_WARN, autoHeightMax, shallowBag, shallowExplain } from '../lib/shallowBag'
 import { CONSTRAINS, CONSTRAIN_TIPS } from '../lib/walkConstrain'
 import { GoArrow } from './ui/GoArrow'
+import { PayTerms } from './ui/PayTerms'
 
 /**
  * The bar's classes. `pad` is whether the controls pad is on screen: with it,
@@ -616,6 +617,7 @@ function DeployBarOpen({ pad }: { pad: boolean }): JSX.Element | null {
             {ask.sats !== null ? `${ask.sats} SATS` : 'HIDE VIA HOSAKA'}{ask.seconds !== null ? ` · ${waitLabel(ask.seconds).toUpperCase()}` : ''}
           </button>
           <button className="deploybar__decline" onClick={() => useShards.getState().declineDeploy()} {...noCallout}>NOT NOW</button>
+          <PayTerms className="deploybar__terms" />
         </div>
       )}
 

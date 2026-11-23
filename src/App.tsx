@@ -283,7 +283,8 @@ export default function App(): JSX.Element {
   const tutorialActive = useTutorial((s) => s.active)
   const tutorialKeep = useTutorial((s) => (s.active ? (s.script.steps[s.index]?.keepChips ?? EMPTY_KEEP) : EMPTY_KEEP))
   const keepsChip = (name: 'found' | 'chain'): boolean => !tutorialActive || tutorialKeep.includes(name)
-  const versionBlocked = useVersionGate((s) => s.verdict === 'blocked')
+  // A newer deploy that refuses moves or saves (lib/versionGate.ts): its bar shows even in the tutorial.
+  const versionBlocked = useVersionGate((s) => s.verdict === 'blocked' || s.savesBlocked)
   // Region mode (store/useRegion.ts) clears the stack under its chip the same way.
   const regionOn = useRegion((s) => s.active)
   // The question bubble lives in the menu; on a phone the menu covers the
@@ -402,7 +403,7 @@ export default function App(): JSX.Element {
             </>,
             status: tutorialActive ? <>
               {/* During the tutorial only what is needed shows (feedback item
-                  3): RELOAD TO MOVE, a broken chain and a game you are in,
+                  3): RELOAD TO MOVE (or TO SAVE), a broken chain and a game you are in,
                   which each stop you; then the chips a step names, FOUND HERE
                   while opening a chest, the chain chip while spectating a friend. */}
               {versionBlocked && <VersionChip />}

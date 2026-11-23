@@ -38,10 +38,22 @@
  * Nothing is fetched until startVersionGate runs (App, at boot): until then
  * mayMove answers from the verdict alone, so no test that moves an avatar
  * reaches for a version file it did not ask for.
+ *
+ * SAVING SHARDS. The same file says `minWorkshopSchema`, the lowest
+ * workshop schema the deploy lets save (lib/workshopSchema.ts). A build below
+ * it is `savesBlocked`: the workshop saves nothing and holds its unsaved
+ * changes across the reload (store/workshopStorage.ts), no import starts
+ * (store/useShardImport.ts), and no event that carries a shard is signed
+ * (store signEvent). The chip asks for a RELOAD TO SAVE YOUR WORK. The same
+ * rules as the chain's: learned from this one look, never from an error, kept
+ * until a reload or a later answer with a lower number, and the look before
+ * a write reuses an answer up to PRE_MOVE_MAX_AGE_MS old (editing never
+ * waits; only the write does). Moving is untouched.
  */
 
 import { create } from 'zustand'
 import { CHAIN_RULES_EPOCH, VERSION_FILE, parseVersionFile, type DeployedVersion } from './chainRulesEpoch'
+import { WORKSHOP_SCHEMA } from './workshopSchema'
 import { reloadBroadcast } from './tv/broadcast'
 
 export type Verdict = 'ok' | 'hint' | 'blocked'
@@ -51,6 +63,9 @@ export const OWN_BUILD: string = typeof __ONOSENDAI_BUILD__ === 'string' ? __ONO
 
 /** What a refused move says, wherever a move's refusal is said. */
 export const VERSION_BLOCKED_MESSAGE = 'A new version of ONOSENDAI changed the chain rules. RELOAD to move again.'
+
+/** What a refused save, import or shard publish says, wherever it is said. */
+export const SAVE_BLOCKED_MESSAGE = 'A new version of ONOSENDAI changed how shards are saved. RELOAD to save your work. Your unsaved changes come back after the reload.'
 
 /** An answer this recent is used before a move without asking again. */
 export const PRE_MOVE_MAX_AGE_MS = 60_000
@@ -70,8 +85,15 @@ export function verdictOf(deployed: DeployedVersion | null, own: { build: string
   return deployed.build === own.build ? 'ok' : 'hint'
 }
 
+/** Whether the deploy's answer stops a tab whose workshop schema is `own` from saving shards. No answer, or no word on it, never does. */
+export function savesBlockedBy(deployed: DeployedVersion | null, own: number = WORKSHOP_SCHEMA): boolean {
+  return typeof deployed?.minWorkshopSchema === 'number' && deployed.minWorkshopSchema > own
+}
+
 interface VersionGateState {
   verdict: Verdict
+  /** The deploy requires a newer workshop schema than this build's: no shard is saved, imported or published until a reload. */
+  savesBlocked: boolean
   /** What the deploy last answered, or null before any answer. */
   deployed: DeployedVersion | null
   /** When the last look ended, answered or not (Date.now()); 0 before any. */
@@ -83,6 +105,7 @@ interface VersionGateState {
 
 export const useVersionGate = create<VersionGateState>((set, get) => ({
   verdict: 'ok',
+  savesBlocked: false,
   deployed: null,
   checkedAt: 0,
   hintDismissed: null,
@@ -92,6 +115,11 @@ export const useVersionGate = create<VersionGateState>((set, get) => ({
 /** Whether a move is refused now, from what is already known. Never waits. */
 export function movementBlocked(): boolean {
   return useVersionGate.getState().verdict === 'blocked'
+}
+
+/** Whether saving shards is refused now, from what is already known. Never waits. */
+export function savingBlocked(): boolean {
+  return useVersionGate.getState().savesBlocked
 }
 
 let inFlight: Promise<Verdict> | null = null
@@ -114,7 +142,7 @@ async function look(timeoutMs: number): Promise<Verdict> {
   } finally {
     clearTimeout(timer)
   }
-  if (deployed) useVersionGate.setState({ deployed, verdict: verdictOf(deployed), checkedAt: Date.now() })
+  if (deployed) useVersionGate.setState({ deployed, verdict: verdictOf(deployed), savesBlocked: savesBlockedBy(deployed), checkedAt: Date.now() })
   else useVersionGate.setState({ checkedAt: Date.now() })
   return useVersionGate.getState().verdict
 }
@@ -154,6 +182,24 @@ export function lookBeforeMove(): boolean | Promise<boolean> {
   return checkVersion({ maxAgeMs: PRE_MOVE_MAX_AGE_MS, timeoutMs: PRE_MOVE_TIMEOUT_MS }).then((v) => v !== 'blocked')
 }
 
+/**
+ * The look right before a shard is imported or an event carrying one is
+ * signed: true unless the deploy requires a newer workshop schema. Like
+ * lookBeforeMove: a recent answer is reused, no answer in time or an error
+ * lets it go, and no promise when the answer is in hand.
+ */
+export function lookBeforeSave(): boolean | Promise<boolean> {
+  if (!armed) return !savingBlocked()
+  const s = useVersionGate.getState()
+  if (s.checkedAt > 0 && Date.now() - s.checkedAt < PRE_MOVE_MAX_AGE_MS) return !s.savesBlocked
+  return checkVersion({ maxAgeMs: PRE_MOVE_MAX_AGE_MS, timeoutMs: PRE_MOVE_TIMEOUT_MS }).then(() => !savingBlocked())
+}
+
+/** lookBeforeSave, always as a promise. */
+export async function maySave(): Promise<boolean> {
+  return lookBeforeSave()
+}
+
 /** lookBeforeMove, always as a promise. */
 export async function mayMove(): Promise<boolean> {
   return lookBeforeMove()
@@ -184,5 +230,5 @@ export function reloadStreamOnBlock(now: { verdict: Verdict }, prev: { verdict: 
 export function resetVersionGateForTests(arm = false): void {
   armed = arm
   inFlight = null
-  useVersionGate.setState({ verdict: 'ok', deployed: null, checkedAt: 0, hintDismissed: null })
+  useVersionGate.setState({ verdict: 'ok', savesBlocked: false, deployed: null, checkedAt: 0, hintDismissed: null })
 }

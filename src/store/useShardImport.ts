@@ -56,6 +56,7 @@ import { isRateLimited } from '../lib/rateLimit'
 import { SNO_KIND } from 'sno-core/feed'
 import { shardFromText, useWorkshop } from './useWorkshop'
 import { bulkWrites, saveFailure, storageMode } from './workshopStorage'
+import { SAVE_BLOCKED_MESSAGE, maySave, savingBlocked } from '../lib/versionGate'
 import { refreshFeed, usePublished, type SendOutcome } from './usePublished'
 import { useCyberspace } from './useCyberspace'
 
@@ -185,6 +186,8 @@ const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout
  * would be saved. Matched against an empty list, every piece would look new.
  */
 export function notLoaded(): string | null {
+  // A newer deploy refuses this tab's saves (lib/versionGate.ts): nothing would be kept.
+  if (savingBlocked()) return SAVE_BLOCKED_MESSAGE
   const m = storageMode()
   return m === 'pending' || m === 'unavailable' ? 'Your shards have not loaded yet. Import works once they have.' : null
 }
@@ -717,6 +720,8 @@ export const useShardImport = create<ShardImportState>((set, get) => {
     start: async () => {
       const { phase } = get()
       if (phase !== 'review' && phase !== 'done') return
+      // The look a move takes, before the first shard is added: a deploy that refuses this tab's saves starts nothing.
+      if (!(await maySave())) { set({ error: SAVE_BLOCKED_MESSAGE }); return }
       await run()
     },
 
@@ -728,6 +733,7 @@ export const useShardImport = create<ShardImportState>((set, get) => {
 
     retry: async () => {
       if (get().phase !== 'done') return
+      if (!(await maySave())) { set({ error: SAVE_BLOCKED_MESSAGE }); return }
       // Only what failed, and anything the stop left untouched.
       set({ rows: get().rows.map((r) => (r.run === 'failed' ? { ...r, run: 'idle', failure: null } : r)) })
       await run()

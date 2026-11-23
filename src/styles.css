@@ -4468,6 +4468,24 @@ select.avatars__input option:checked {
   background: rgba(6, 14, 22, 0.92);
   border: 1px solid rgba(255, 176, 32, 0.45);
 }
+/* A newer deploy refuses saves (workshop/Notices.tsx SaveGateBar): the instrument
+   stack's red bar, over the bench, above the storage line. */
+.ws__savegate {
+  position: absolute;
+  top: calc(var(--ws-top-end) + 10px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 7;
+  width: max-content;
+  max-width: calc(100vw - 24px);
+}
+.ws__savegate .hyperbar { max-width: calc(100vw - 24px); }
+/* The toast and the storage line step down under it; with the tutorial's card, under that too. */
+.workshop:has(.ws__savegate) .ws__toast { top: calc(var(--ws-top-end) + 64px); }
+.workshop:has(.ws__savegate) .ws__storage { top: calc(var(--ws-top-end) + 118px); }
+.workshop:has(.ws__tuttip) .ws__savegate { top: calc(var(--ws-top-end) + 10px + 118px); }
+.workshop:has(.ws__tuttip):has(.ws__savegate) .ws__toast { top: calc(var(--ws-top-end) + 10px + 172px); }
+.workshop:has(.ws__tuttip):has(.ws__savegate) .ws__storage { top: calc(var(--ws-top-end) + 10px + 226px); }
 
 /* A wide screen: the bottom group floats at the bottom centre, 640px wide,
    and the top bar keeps to the top left instead of spanning the screen. */

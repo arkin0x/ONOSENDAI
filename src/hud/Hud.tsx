@@ -61,6 +61,8 @@ import { CopyValue } from './ui/CopyValue'
 import { copyText } from '../lib/copyText'
 import { randomCoordHex } from '../lib/randomCoord'
 import { Dices } from 'lucide-react'
+import { useNewcomerView, useRevealClass } from '../newcomer/useNewcomer'
+import { say } from '../newcomer/names'
 
 /** The menu footer's version: VERSION 2.1, or the build stamp for a build with no simple version. */
 const SHOWN_VERSION = ((v) => (v ? `VERSION ${v}` : __ONOSENDAI_VERSION__))(appVersion())
@@ -112,6 +114,7 @@ function IdentityPanel(): JSX.Element {
   const identity = useCyberspace((s) => s.identity)
   const signerKind = useCyberspace((s) => s.signerKind)
   const live = useCyberspace((s) => s.live)
+  const plain = useNewcomerView()
   const profile = useProfile(identity.pubkey)
   const [loginOpen, setLoginOpen] = useState(false)
   const [mutesOpen, setMutesOpen] = useState(false)
@@ -123,7 +126,7 @@ function IdentityPanel(): JSX.Element {
     <section className="panel">
       <header className="panel__head">
         <h2>Identity</h2>
-        <span className={`tag ${live ? 'tag--live' : 'tag--local'}`}>{live ? 'LIVE' : 'LOCAL'}</span>
+        <span className={`tag ${live ? 'tag--live' : 'tag--local'}`}>{say(live ? 'LIVE' : 'LOCAL', plain)}</span>
       </header>
 
       <div className="identity__who">
@@ -739,9 +742,15 @@ export function Hud({ menuOpen = false }: { menuOpen?: boolean }): JSX.Element {
   // place, which the hidden days kept.
   // The TUTORIAL panel (feedback item 17) is drawn for everyone, switched off
   // too: its switch lives in it (owner, 2026-11-13), so it can be turned back on.
-  const hidden = (id: PanelId): boolean => leads.includes(id)
-  const left = [...leads, ...order.left.filter((id) => !hidden(id))]
-  const right = order.right.filter((id) => !hidden(id))
+  // The newcomer view draws only the panels the tour has reached
+  // (newcomer/reveal.ts), leading ones too; a panel arriving fades in.
+  const veil = useRevealClass()
+  const shown = (id: PanelId): boolean => veil(`panel.${id}`) !== ' nc-veiled'
+  const hidden = (id: PanelId): boolean => leads.includes(id) || !shown(id)
+  // The tour's build steps show ITEMS alone (usePanelLayout frontOnly).
+  const frontOnly = usePanelLayout((s) => s.frontOnly && s.front !== null)
+  const left = frontOnly && front ? [front] : [...leads.filter(shown), ...order.left.filter((id) => !hidden(id))]
+  const right = frontOnly ? [] : order.right.filter((id) => !hidden(id))
 
   // The drag. The pointer is captured by the drag surface (the .hud__grab
   // div), not by the grip it started on: a lifted panel moves in the DOM as
@@ -773,7 +782,7 @@ export function Hud({ menuOpen = false }: { menuOpen?: boolean }): JSX.Element {
   const slot = (id: PanelId): JSX.Element => {
     const Panel = PANELS[id]
     return (
-      <PanelSlot key={id} id={id} lead={leads.includes(id)} lifting={lifting === id} onGrab={grab}>
+      <PanelSlot key={id} id={id} lead={leads.includes(id)} lifting={lifting === id} onGrab={grab} arriving={veil(`panel.${id}`) === ' nc-arrive'}>
         <Panel />
       </PanelSlot>
     )

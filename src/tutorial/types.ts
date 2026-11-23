@@ -30,7 +30,7 @@ export type TutorialWait = Exclude<DemoAction, 'spawn'> | TutorialAction
  * hop target over the course's start reached, gravity on in WALK, the finish chest found and
  * something in it taken; the workshop opened and closed again.
  */
-export type TutorialAction = 'see-chest' | 'open-chest' | 'take' | 'at-target' | 'gravity' | 'see-finish' | 'take-finish' | 'workshop' | 'at-plot' | 'plant' | EarthRouteAction
+export type TutorialAction = 'see-chest' | 'open-chest' | 'take' | 'at-target' | 'gravity' | 'see-finish' | 'take-finish' | 'workshop' | 'at-plot' | 'plant' | 'agent-copy' | 'placed' | EarthRouteAction
 
 /**
  * The Earth route's waits (tutorial/earthRoute.ts): a stop picked as the
@@ -83,6 +83,12 @@ export interface TutorialStep {
    * when it arrives at the stop or stops short, never over the ride itself.
    */
   advanceOn?: TutorialWait
+  /**
+   * Done, but never on by itself: the step stays with its ✓ and FINISH (or
+   * NEXT) until the player taps it. The AI step (owner, 2026-11-23: "give
+   * you the Finish button once you've pressed the copy button").
+   */
+  stay?: boolean
   /** The one-line instruction shown while waiting. */
   hint?: string
   /** NEXT stays off until the `wait` has happened; otherwise NEXT reads SKIP while waiting. */
@@ -109,9 +115,10 @@ export interface TutorialStep {
    * A panel of its own under the caption, by name, for a step whose words
    * depend on the player (hud/TutorialCoach.tsx draws it): the Straylight
    * route's identity step says what to do for the signer the player is on
-   * (hud/StraylightIdentity.tsx).
+   * (hud/StraylightIdentity.tsx); the Earth route's pick and BOARD steps
+   * list the short trips from where the player stands (hud/EarthTrips.tsx).
    */
-  panel?: 'straylight-identity'
+  panel?: 'straylight-identity' | 'earth-trips'
   /** A button in the coach that runs a registered effect when tapped (OPEN WORKSHOP); nothing runs untapped. */
   action?: { label: string; effect: string }
   /**
@@ -146,6 +153,8 @@ export interface TutorialChoice {
   step?: string
   /** Shown only when a choice by this name is registered. */
   when?: string
+  /** Shown only while no choice by this name is registered (the ride on a browser that can ride: tutorial/earthRoute.ts). */
+  unless?: string
 }
 
 export interface TutorialScript {

@@ -23,7 +23,24 @@ import { useTutorialStage } from '../tutorial/director'
 import { placeCoach, type Box, type CoachSide } from '../tutorial/coachPlace'
 import { ProfilePic } from './ProfileBadge'
 import { StraylightIdentity } from './StraylightIdentity'
+import { EarthTrips } from './EarthTrips'
+import { useNewcomerView } from '../newcomer/useNewcomer'
+import { NEWCOMER_CAPTIONS, plainText } from '../newcomer/names'
 import { ModalClose } from './ui/ModalClose'
+
+/**
+ * The step's pulse on exactly the elements that match now (`next`): taken
+ * off those that no longer match, put on any that lack it, and nothing
+ * touched that already has it, so marking again after a class change settles
+ * at once instead of feeding the observer that called it. Returns what is
+ * marked.
+ */
+export function markPulse(was: readonly Element[], next: readonly Element[]): Element[] {
+  const now = new Set(next)
+  for (const el of was) if (!now.has(el)) el.classList.remove('demo-pulse')
+  for (const el of next) if (!el.classList.contains('demo-pulse')) el.classList.add('demo-pulse')
+  return [...next]
+}
 
 /** How far along a step is, 0 to 1, along the steps that are not branches; a branch is the end. */
 export function progressOf(steps: ReadonlyArray<{ branch?: boolean }>, index: number): number {
@@ -44,6 +61,7 @@ export function progressOf(steps: ReadonlyArray<{ branch?: boolean }>, index: nu
 export const CHOICE_ICONS: Readonly<Record<string, LucideIcon>> = {
   straylight: Coffee,
   hyperspace: Earth,
+  'earth-look': Earth,
   dungeon: Gamepad2,
   agents: Bot,
   friend: Target,
@@ -139,6 +157,8 @@ export function TutorialCoach(): JSX.Element | null {
   const choiceNote = useTutorial((s) => s.choiceNote)
   // The routes already done this run, checked off on the choices card (item 10).
   const doneChoices = useTutorial((s) => s.doneChoices)
+  // The newcomer view's plain button names in what the coach says (newcomer/names.ts).
+  const plain = useNewcomerView()
   useEffect(() => { if (shown && modal) (firstChoice.current ?? go.current)?.focus() }, [shown, modal, index])
 
   // The control a step points at wears the /demo tour's pulsing ring
@@ -148,11 +168,7 @@ export function TutorialCoach(): JSX.Element | null {
   useEffect(() => {
     if (!highlight) { setSpot(AT_TOP); return }
     let marked: Element[] = []
-    const mark = (): void => {
-      for (const el of marked) el.classList.remove('demo-pulse')
-      marked = Array.from(document.querySelectorAll(highlight))
-      for (const el of marked) el.classList.add('demo-pulse')
-    }
+    const mark = (): void => { marked = markPulse(marked, Array.from(document.querySelectorAll(highlight))) }
     // Keeping clear of a menu panel the step points at (owner, 2026-11-15:
     // the "Your items" box covered ITEMS). Only what sits in a menu panel
     // counts: the pad, the chips and the hamburger have their own places,
@@ -163,7 +179,9 @@ export function TutorialCoach(): JSX.Element | null {
     const place = (): void => {
       const coach = ref.current
       const inPanel = marked.filter((el) => el.closest('[data-panel-id]'))
-      const target = around(inPanel.map((el) => el.getBoundingClientRect()).filter((r) => r.width > 0 && r.height > 0))
+      // The control and its panel's title, so the card never hides which panel it is in (the AI step's COPY under AGENTS).
+      const heads = inPanel.map((el) => el.closest('[data-panel-id]')?.querySelector('.panel__head')).filter((h): h is Element => !!h)
+      const target = around([...inPanel, ...heads].map((el) => el.getBoundingClientRect()).filter((r) => r.width > 0 && r.height > 0))
       if (!coach || !target) { setSpot((s) => s.side === 'top' ? s : AT_TOP); return }
       for (const el of inPanel) ro?.observe(el)
       const c = coach.getBoundingClientRect()
@@ -200,7 +218,10 @@ export function TutorialCoach(): JSX.Element | null {
     mark()
     place()
     const mo = new MutationObserver(update)
-    mo.observe(document.body, { childList: true, subtree: true })
+    // Class changes too: React writes a control's whole class when its state
+    // changes (a newcomer control arriving, COMMIT arming), which drops the
+    // pulse; marking again puts it back, and finds nothing to change after.
+    mo.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] })
     // A turn of the phone changes the safe area: read again (outside place, whose probe the observer would see).
     const resized = (): void => { safe = safeArea(); update() }
     window.addEventListener('resize', resized)
@@ -224,7 +245,11 @@ export function TutorialCoach(): JSX.Element | null {
   const waiting = !!step.wait && !done
   // A gate never holds when staging failed: NEXT is the way on (the box step has no SKIP otherwise).
   const held = step.gate === true && waiting && !stageError
-  const caption = done && step.captionDone ? step.captionDone : step.caption
+  const own = plain ? NEWCOMER_CAPTIONS[step.id] : undefined
+  const caption = plainText(done && step.captionDone ? step.captionDone : own?.caption ?? step.caption, plain)
+  const title = plain ? own?.title ?? step.title : step.title
+  const hint = plainText(own?.hint ?? step.hint, plain)
+  const note = plainText(stepNote ?? undefined, plain)
   // BACK shows once there is a step behind this one (not on the welcome). It
   // is the way back out of a branch too (feedback item 8).
   const canBack = index > 0
@@ -238,7 +263,7 @@ export function TutorialCoach(): JSX.Element | null {
             <span className="demo__chapter" />
             <ModalClose onClose={() => t.end('skipped')} label="Close the tutorial" />
           </div>
-          <h2 className="modal__title">{step.title}</h2>
+          <h2 className="modal__title">{title}</h2>
           <p className="demo__caption"><CaptionText caption={caption} /></p>
           {step.choices?.filter(choiceOffered).map((c, i) => {
             const choiceDone = doneChoices.includes(c.id)
@@ -274,7 +299,7 @@ export function TutorialCoach(): JSX.Element | null {
       <div className={`demo demo--min tutorial${spotClass}`} style={spotStyle} ref={ref} role="region" aria-label="Tutorial">
         <button className="demo__bar" onClick={() => t.setMinimized(false)} title="Show the caption">
           <span className="demo__tag">TUTORIAL</span>
-          <span className="demo__bartitle">{step.title}</span>
+          <span className="demo__bartitle">{title}</span>
           <ChevronDown size={14} aria-hidden />
         </button>
         <button className="demo__icon" onClick={t.next} disabled={held} aria-label={(last || (step.branch && !step.then)) ? 'Finish' : waiting ? 'Skip this step' : 'Next'}><ChevronRight size={14} /></button>
@@ -294,7 +319,7 @@ export function TutorialCoach(): JSX.Element | null {
       <div className="demo__bar-track" aria-hidden><div className="demo__bar-fill" style={{ width: `${progressOf(script.steps, index) * 100}%` }} /></div>
       <div className="demo__body" key={index}>
         <div className="demo__titlerow">
-          <h2 className="demo__title">{step.title}</h2>
+          <h2 className="demo__title">{title}</h2>
         </div>
         {step.speaker
           ? (
@@ -305,16 +330,17 @@ export function TutorialCoach(): JSX.Element | null {
           )
           : <p className="demo__caption"><CaptionText caption={caption} /></p>}
         {step.panel === 'straylight-identity' && <StraylightIdentity />}
+        {step.panel === 'earth-trips' && <EarthTrips />}
         {step.image && <img className="tutorial__image" src={step.image.src} alt={step.image.alt} width={160} height={160} onError={(e) => { e.currentTarget.style.display = 'none' }} />}
-        {step.explain && explaining && <p className="demo__caption tutorial__explain">{step.explain}</p>}
+        {step.explain && explaining && <p className="demo__caption tutorial__explain">{plainText(step.explain, plain)}</p>}
       </div>
       {step.wait ? (
         <div className={`demo__wait ${done ? 'is-done' : ''}`} aria-live="polite">
-          <span>{done ? '✓ Done' : stageError ?? stepNote ?? step.hint ?? 'Your turn.'}</span>
+          <span>{done ? '✓ Done' : stageError ?? note ?? hint ?? 'Your turn.'}</span>
         </div>
-      ) : step.hint && (
+      ) : hint && (
         // A step that waits on nothing still says where to go next (the menu, for a ride or an agent).
-        <div className="demo__wait"><span>{step.hint}</span></div>
+        <div className="demo__wait"><span>{hint}</span></div>
       )}
       <div className="demo__foot">
         {step.action && (
@@ -325,7 +351,7 @@ export function TutorialCoach(): JSX.Element | null {
         )}
         {/* BACK is sized to its text and outlined; NEXT fills the rest and is the filled action (feedback item 8). */}
         {canBack && <button className="demo__btn tutorial__back" onClick={t.back} aria-label="Back"><ChevronLeft size={14} aria-hidden /> BACK</button>}
-        <button className={`demo__btn demo__btn--next tutorial__next ${waiting && !held ? 'is-skip' : ''}`} onClick={t.next} disabled={held} title={held ? step.hint : undefined}>
+        <button className={`demo__btn demo__btn--next tutorial__next ${waiting && !held ? 'is-skip' : ''}`} onClick={t.next} disabled={held} title={held ? hint : undefined}>
           {(last || (step.branch && !step.then)) && !waiting ? 'FINISH' : waiting && !held ? 'SKIP' : 'NEXT'} <ChevronRight size={14} aria-hidden />
         </button>
       </div>

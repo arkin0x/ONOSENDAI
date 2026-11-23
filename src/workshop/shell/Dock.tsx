@@ -12,6 +12,8 @@ import { Eye, MousePointer2, Paintbrush, Plus, Stamp, Triangle, type LucideIcon 
 import { shownTools, useBeginner, useDockTools } from '../beginner'
 import { rgbToHex } from 'sno-core/shards'
 import { useWorkshop, type Tool } from '../../store/useWorkshop'
+import { useTutorial } from '../../store/useTutorial'
+import { WORKSHOP_STEP_ID } from './TutorialTip'
 
 /** A tool's slot: what it is called on the dock and the key that picks it. */
 export interface ToolSlot { tool: Tool; label: string; icon: LucideIcon; key: string }
@@ -30,6 +32,18 @@ export const DOCK: ToolSlot[] = [
   { tool: 'face', label: 'FACE', icon: Triangle, key: '6' },
 ]
 
+/**
+ * Whether the dock shows a beginner's four (phase 4, decision 4): only for a
+ * beginner, unless the tool in hand is one of the other two, and never on the
+ * tour's workshop step, whose tip names ADD (owner, 2026-11-23: "Tap STAMP to
+ * add pre-made shapes, or ADD to hand-craft your object's points"). The tour
+ * shows all six there without keeping the choice: after the step a beginner
+ * has the four and MORE TOOLS again.
+ */
+export function dockShowsFour(tools: 'four' | 'all' | null, tool: Tool, tourStep: boolean): boolean {
+  return tools === 'four' && tool !== 'add' && tool !== 'face' && !tourStep
+}
+
 /** A tool's slot by its id. */
 export const slotOf = (tool: Tool): ToolSlot => DOCK.find((d) => d.tool === tool) ?? DOCK[0]
 
@@ -39,8 +53,8 @@ export function Dock({ onColor, colorOpen }: { onColor: () => void; colorOpen: b
   const tools = useDockTools()
   const glow = useBeginner((b) => b.glow)
   const w = useWorkshop.getState
-  // A beginner's four (phase 4, decision 4), unless the tool in hand is one of the other two.
-  const four = tools === 'four' && tool !== 'add' && tool !== 'face'
+  const tourStep = useTutorial((s) => s.active && s.script.steps[s.index]?.id === WORKSHOP_STEP_ID)
+  const four = dockShowsFour(tools, tool, tourStep)
   const shown = shownTools(four ? 'four' : 'all')
   return (
     <nav className="ws__dock" aria-label="Tools">

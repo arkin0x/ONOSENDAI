@@ -75,6 +75,46 @@ export function liftSide(away: Vector3): Vector3 {
   return d.normalize().addScaledVector(UP, SHOULDER_LIFT).normalize()
 }
 
+/** How far to the right of the chest's front the chest shot stands, as a share of the front (about 37 degrees round). */
+const SHOT_RIGHT = 0.75
+/** How far below level it looks from, as a share (looking slightly up, so the loot shows over the lid). */
+const SHOT_LOW = 0.3
+/** The share of what the HUD leaves uncovered the framed things may fill. */
+const SHOT_FILL = 0.8
+
+/**
+ * The chest shot's side (owner, 2026-11-23, his screenshot: the camera low
+ * and to the right of the chest, looking slightly up at it): from the chest
+ * out toward its front (`front`, render, toward the avatar), level, turned
+ * toward the camera's right and lowered a little; unit. Seen from there the
+ * avatar standing in front of the chest is to its left, clear of it, and the
+ * loot hovering over the lid is in the open sky above it.
+ */
+export function chestShotDir(front: Vector3): Vector3 {
+  const f = front.clone()
+  f.y = 0
+  if (f.lengthSq() < 1e-12) f.set(0, 0, 1)
+  f.normalize()
+  // Screen right as seen from the front looking at the chest: up x front.
+  const right = new Vector3().crossVectors(UP, f)
+  return f.addScaledVector(right, SHOT_RIGHT).addScaledVector(UP, -SHOT_LOW).normalize()
+}
+
+/**
+ * How far back to stand so a sphere of `radius` (render cells) fits the part
+ * of a `width` by `height` screen the HUD leaves uncovered (`band`, from
+ * lib/coverBand.ts uncoveredBand), under a vertical field of view of
+ * `fovDeg`, filling SHOT_FILL of the band's tighter side.
+ */
+export function fitInBand(radius: number, fovDeg: number, width: number, height: number, band: { left: number; top: number; right: number; bottom: number }): number {
+  const tan = Math.tan((fovDeg * Math.PI) / 360)
+  const hFrac = Math.max(0.1, (band.bottom - band.top) / Math.max(1, height))
+  const wFrac = Math.max(0.1, (band.right - band.left) / Math.max(1, width))
+  const aspect = width / Math.max(1, height)
+  const half = tan * Math.min(hFrac, aspect * wFrac)
+  return Math.min(FRAME_MAX_DISTANCE, Math.max(FRAME_MIN_DISTANCE / 2, radius / (half * SHOT_FILL)))
+}
+
 const q = new Quaternion()
 const part = new Quaternion()
 

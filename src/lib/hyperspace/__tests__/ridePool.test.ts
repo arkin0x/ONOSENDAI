@@ -13,9 +13,9 @@
  * Block heights: a ride from 6 to 12 passes heights 7..12 whose fakeHash
  * terrain K is at most 9 (verified offline), so no test rolls a 2^22 block.
  */
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { bytesToHex, sha256 } from 'cyberspace-core'
-import { K_LINE, be32, be64, buildRideProof, computeRideLeaf, lineTerrainK, rideBlocks, verifyRideLevel1 } from '../ride'
+import { K_LINE, PAIR_NS_BY_K, attemptWork, attemptsRequired, calibrationHashes, exactRidePairs, exactRideWork, be32, be64, buildRideProof, computeRideLeaf, expectedRidePairs, lineTerrainK, rideBlocks, verifyRideLevel1 } from '../ride'
 import {
   RIDE_CHUNK_SIZE,
   assembleLeaves,
@@ -23,10 +23,12 @@ import {
   computeRideProof,
   grindCheckpoint,
   grindKey,
-  leafBenchmarkMs,
   leafKey,
   pendingBlocks,
   planChunks,
+  poolMsPerBlock,
+  rideBenchmark,
+  rideEstimateMs,
   rideFraction,
 } from '../ridePool'
 import type { RideJob, RideProgress } from '../ridePool'
@@ -226,9 +228,183 @@ describe('calibrate (no workers under node)', () => {
   it('measures once, shares the measurement, and publishes it', async () => {
     const first = calibrate()
     expect(calibrate()).toBe(first)
-    const ms = await first
-    expect(Number.isFinite(ms) && ms > 0).toBe(true)
-    expect(leafBenchmarkMs()).toBe(ms)
-    expect(await calibrate()).toBe(ms)
+    const bench = await first
+    expect(Number.isFinite(bench.msPerBlock) && bench.msPerBlock > 0).toBe(true)
+    // No workers: the main thread is a pool of one.
+    expect(bench.workers).toBe(1)
+    expect(rideBenchmark()).toBe(bench)
+    expect(await calibrate()).toBe(bench)
+  })
+})
+
+describe('the ride estimate uses the pool\'s measured throughput', () => {
+  it('worker rates add up: two workers timed together are twice as fast as one', () => {
+    const one = poolMsPerBlock([{ elapsedMs: 100, work: 1_000 }])
+    expect(one).toBeCloseTo((100 / 1_000) * expectedRidePairs(1))
+    expect(poolMsPerBlock([{ elapsedMs: 100, work: 1_000 }, { elapsedMs: 100, work: 1_000 }])).toBeCloseTo(one / 2)
+    // A big core and a little one: the big one counts for what it does.
+    expect(poolMsPerBlock([{ elapsedMs: 100, work: 3_000 }, { elapsedMs: 100, work: 1_000 }])).toBeCloseTo(one / 4)
+  })
+
+  it('a device that pairs at the table\'s speeds gets its true mean block, heavy blocks included', () => {
+    // A device exactly as fast as the table, times 3: each pairing at height
+    // K + K_LINE takes 3 * PAIR_NS_BY_K[K] ns. Time the sample on it.
+    const nsAt = (k: number) => 3 * PAIR_NS_BY_K[k]
+    const hashes = calibrationHashes()
+    let sampleNs = 0
+    for (const h of hashes) {
+      const k = lineTerrainK(h)
+      sampleNs += 2 ** (k + K_LINE) * nsAt(k)
+    }
+    const sample = { elapsedMs: sampleNs / 1e6, work: exactRideWork(hashes) }
+    // The truth, straight from the table: a mean block over sixteen fair bits.
+    let blockNs = 0
+    for (let k = 0; k <= 16; k++) {
+      let c = 1
+      for (let i = 0; i < k; i++) c = (c * (16 - i)) / (i + 1)
+      blockNs += (c / 2 ** 16) * 2 ** (k + K_LINE) * nsAt(k)
+    }
+    // To a few parts in a million: expectedRidePairs rounds the mean block's pairings.
+    expect(poolMsPerBlock([sample]) / (blockNs / 1e6)).toBeCloseTo(1, 4)
+    // Dividing by plain pairings, as before, priced every pairing like the
+    // sample's and came out about a tenth short.
+    const plain = poolMsPerBlock([{ elapsedMs: sample.elapsedMs, work: exactRidePairs(hashes) }])
+    expect(plain / (blockNs / 1e6)).toBeLessThan(0.93)
+    expect(plain / (blockNs / 1e6)).toBeGreaterThan(0.85)
+  })
+
+  it('a long ride takes its blocks and its price at the pool\'s rate, not one worker\'s', () => {
+    // The owner's ride: 363,870 blocks. Five workers, 52 ms a mean block for the pool (260 for one).
+    const n = 363_870
+    const blocks = n + (attemptsRequired(n) * attemptWork()) / expectedRidePairs(1)
+    const pool = rideEstimateMs(n, { msPerBlock: 52, workers: 5 })
+    expect(pool).toBeCloseTo(blocks * 52)
+    // The one-worker reading of the same device, which the panel used to show.
+    expect(rideEstimateMs(n, { msPerBlock: 260, workers: 1 }) / pool).toBeCloseTo(5)
+  })
+
+  it('a ride too short to fill the pool runs on as many workers as it has chunks', () => {
+    // 100 blocks are two chunks (64 and 36): two workers of eight, each at
+    // the pool's mean rate (80 ms a block), done when the 64-block chunk is.
+    // The price is four attempts, on four workers.
+    const bench = { msPerBlock: 10, workers: 8 }
+    expect(rideEstimateMs(100, bench)).toBeCloseTo(80 * (64 + (4 * attemptWork()) / expectedRidePairs(1) / 4))
+    // 1,000 blocks are 16 chunks: all eight workers.
+    expect(rideEstimateMs(1_000, bench)).toBeCloseTo(80 * (1_000 / 8 + (32 * attemptWork()) / expectedRidePairs(1) / 8))
+    expect(rideEstimateMs(0, bench)).toBe(0)
+  })
+})
+
+/** A localStorage stand-in holding `entries`. */
+function storage(entries: Record<string, string>) {
+  const mem = new Map(Object.entries(entries))
+  return { getItem: (k: string) => mem.get(k) ?? null, setItem: (k: string, v: string) => { mem.set(k, String(v)) }, removeItem: (k: string) => { mem.delete(k) } }
+}
+
+describe('the stored calibration', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.resetModules()
+  })
+
+  it('older numbers (one worker, then plain pairings) are ignored, never shown, and dropped', async () => {
+    // Both were stored by earlier clients: the one-worker number, and a pool
+    // number that priced every pairing like the sample's, a tenth short.
+    const ls = storage({
+      'onosendai:ride-bench-ms': '260',
+      'onosendai:ride-pool-bench': JSON.stringify({ msPerBlock: 52, workers: 5 }),
+    })
+    vi.stubGlobal('navigator', { hardwareConcurrency: 6 })
+    vi.stubGlobal('localStorage', ls)
+    vi.resetModules()
+    const fresh = await import('../ridePool')
+    expect(fresh.rideBenchmark()).toBeNull()
+    expect(ls.getItem('onosendai:ride-bench-ms')).toBeNull()
+    expect(ls.getItem('onosendai:ride-pool-bench')).toBeNull()
+  })
+
+  it('a pool measurement on this pool\'s width is read back; one from another width is not', async () => {
+    vi.stubGlobal('navigator', { hardwareConcurrency: 6 })
+    vi.stubGlobal('localStorage', storage({ 'onosendai:ride-pool-bench-2': JSON.stringify({ msPerBlock: 52, workers: 5 }) }))
+    vi.resetModules()
+    expect((await import('../ridePool')).rideBenchmark()).toEqual({ msPerBlock: 52, workers: 5 })
+    vi.stubGlobal('navigator', { hardwareConcurrency: 8 })
+    vi.resetModules()
+    expect((await import('../ridePool')).rideBenchmark()).toBeNull()
+  })
+})
+
+describe('calibrate on the pool (fake workers)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.resetModules()
+  })
+
+  /** Fake ride workers: `readyDelay(i)` ms before worker i says it loaded; `fail` makes the sample error. */
+  function fakeWorkers(opts: { readyDelay: (i: number) => number; fail?: boolean }) {
+    const log: string[] = []
+    let made = 0
+    let terminated = 0
+    class FakeWorker {
+      private listeners: Array<(e: { data: unknown }) => void> = []
+      private readonly index = made++
+      addEventListener(type: string, fn: (e: { data: unknown }) => void) { if (type === 'message') this.listeners.push(fn) }
+      terminate() { terminated++ }
+      private reply(data: unknown, ms: number) { setTimeout(() => { for (const fn of this.listeners) fn({ data }) }, ms) }
+      postMessage(msg: { type: string; id: number }) {
+        log.push(`${this.index}:${msg.type}`)
+        if (msg.type === 'ready') {
+          setTimeout(() => {
+            log.push(`${this.index}:loaded`)
+            for (const fn of this.listeners) fn({ data: { type: 'ready', id: msg.id } })
+          }, opts.readyDelay(this.index))
+        } else if (opts.fail) {
+          this.reply({ type: 'error', id: msg.id, message: 'boom' }, 0)
+        } else {
+          // Worker 0 is a big core, the rest little: 4,000 and 1,000 mean pairings of work in 100 ms.
+          this.reply({ type: 'calibrated', id: msg.id, elapsedMs: 100, work: this.index === 0 ? 4_000 : 1_000 }, 0)
+        }
+      }
+    }
+    return { FakeWorker, log, made: () => made, terminated: () => terminated }
+  }
+
+  it('starts no worker until all have loaded, sums their rates, and ends every worker', async () => {
+    // Worker 1 loads last, well after the others.
+    const fake = fakeWorkers({ readyDelay: (i) => (i === 1 ? 30 : 0) })
+    vi.stubGlobal('navigator', { hardwareConcurrency: 4 })
+    vi.stubGlobal('Worker', fake.FakeWorker)
+    vi.stubGlobal('localStorage', storage({}))
+    vi.resetModules()
+    const fresh = await import('../ridePool')
+    const bench = await fresh.calibrate()
+    // Three workers (four cores, one left for the page).
+    expect(fake.made()).toBe(3)
+    const lastLoaded = fake.log.indexOf('1:loaded')
+    const firstStart = fake.log.findIndex((l) => l.endsWith(':calibrate'))
+    expect(lastLoaded).toBeGreaterThan(-1)
+    expect(firstStart).toBeGreaterThan(lastLoaded)
+    expect(fake.log.filter((l) => l.endsWith(':calibrate')).sort()).toEqual(['0:calibrate', '1:calibrate', '2:calibrate'])
+    expect(bench.workers).toBe(3)
+    expect(bench.msPerBlock).toBeCloseTo(expectedRidePairs(1) / (40 + 10 + 10))
+    expect(fresh.rideBenchmark()).toEqual(bench)
+    expect(fake.terminated()).toBe(3)
+  })
+
+  it('a failing pool stores nothing, never falls back to one worker, and the next call measures again', async () => {
+    const failing = fakeWorkers({ readyDelay: () => 0, fail: true })
+    vi.stubGlobal('navigator', { hardwareConcurrency: 4 })
+    vi.stubGlobal('Worker', failing.FakeWorker)
+    const ls = storage({})
+    vi.stubGlobal('localStorage', ls)
+    vi.resetModules()
+    const fresh = await import('../ridePool')
+    await expect(fresh.calibrate()).rejects.toThrow('boom')
+    expect(fresh.rideBenchmark()).toBeNull()
+    expect(ls.getItem('onosendai:ride-pool-bench-2')).toBeNull()
+    expect(failing.terminated()).toBe(3)
+    const working = fakeWorkers({ readyDelay: () => 0 })
+    vi.stubGlobal('Worker', working.FakeWorker)
+    expect((await fresh.calibrate()).workers).toBe(3)
   })
 })

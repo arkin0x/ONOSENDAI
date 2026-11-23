@@ -2,7 +2,7 @@ import { signerWaiting } from '../lib/authOpen'
 import { hopLanding, yieldTask } from '../lib/hopStage'
 import { flyLanding } from '../lib/viewFly'
 import { chainHolders } from '../lib/chainHolders'
-import { bigintBitLimit, movementCapabilityIssue } from '../lib/proofCapability'
+import { bigintBitLimit, movementCapabilityIssue, rideCapabilityIssue } from '../lib/proofCapability'
 /**
  * useCyberspace.ts - the single source of truth for who you are, where you
  * are, where your uncommitted cursor is, and what the movement chain has cost.
@@ -220,10 +220,21 @@ let actionsFor: { events: NostrEvent[]; actions: ActionEvent[]; named: Set<strin
 function parsedChain(events: NostrEvent[]): ActionEvent[] {
   if (!actionsFor || actionsFor.events !== events) {
     const grown = appendedTo(actionsFor, events)
-    actionsFor = grown ?? { events, actions: buildChain(events), named: null }
+    actionsFor = grown ?? { events, actions: builtAlready.get(events) ?? buildChain(events), named: null }
   }
   return actionsFor.actions
 }
+
+/**
+ * Chains authenticStretch has just built, by the very array it hands on: a
+ * load reads a chain from storage, keeps it whole, and the store then parses
+ * that same array (derive, parsedChain). On a long chain the second build was
+ * as long as the first, all before the first draw (arkinox, 2026-11-22). Only
+ * an array kept whole, all of one author, is noted: its chain is exactly what
+ * parsedChain would build. A chain is never changed in place (extendChain
+ * concatenates), so the same array always has the same chain.
+ */
+const builtAlready = new WeakMap<NostrEvent[], ActionEvent[]>()
 
 /**
  * The chain of `events` from the one memoized, when `events` are its events
@@ -1706,6 +1717,8 @@ function authenticStretch(pubkey: string, events: NostrEvent[], isAuthentic: (e:
   const forked = resolved[0]?.fork !== undefined
   const out = forked || kept.length === events.length ? kept : kept.filter((e) => onChain.has(e.id))
   if (resolved.length === 0 || (!forked && resolved.length !== out.length) || resolved[0].pubkey !== pubkey) return null
+  // Built from `out` itself, every event of `pubkey`: what parsedChain would build for it (builtAlready).
+  if (out === kept) builtAlready.set(out, resolved)
   return out
 }
 
@@ -6215,7 +6228,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       // renders and the save) go in a task of their own, not inside it
       // (owner, 2026-11-21: "smooth until I'm getting movements back from
       // the signer"). A local key signs at once, and has no such message.
-      if (currentSigner.kind !== 'local') await yieldTask()
+      if (currentSigner.kind !== 'local') await yieldTask('land')
       if (!live()) return
       // The steps after it were proved from this very id.
       if (event.id !== lane.id) { failLanes(WALK_SIGNED_OTHER_MESSAGE); return }
@@ -8019,6 +8032,10 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       if (!row?.ncryptsec?.startsWith('ncryptsec1') && !generatedKeyOf(row)) return LOGOUT_UNKEPT
     }
     const session = get().signerSession
+    // Locked as 'gone', the identity is a local stand-in, yet its row may still hold
+    // a bunker session, which the login list offers (identitiesDb heldWay): LOG OUT
+    // takes it too, so an identity logged out of is not offered back.
+    const wasGone = keyLocked?.mode === 'gone'
     // Read before the switch overwrites the one pref slot: the relays its sockets are to.
     const saved = loadSignerPref()
     const bunkerUri = outgoing.bunkerUri ?? (saved?.pubkey === leaving ? saved.bunkerUri : undefined)
@@ -8039,7 +8056,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       void forgetHeldSession(leaving)
       dropSignerSockets(bunkerRelaysOf({ kind: 'nip46', bunkerUri }))
       forgetActivity(session)
-    }
+    } else if (wasGone) void forgetHeldSession(leaving)
     try { await outgoing.close?.() } catch { /* closed already */ }
     return null
   },
@@ -8345,6 +8362,9 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       return false
     }
     if (cloudPrefs.mode === 'off') return refuse('Cloud compute is off in the Cloud compute panel.')
+    // Before anything is paid for: a proof this browser cannot check is never signed.
+    const rideIssue = rideCapabilityIssue()
+    if (rideIssue) return refuse(rideIssue)
     // One cloud flow and one computing move at a time: the invoice modal and
     // the persisted job are single, and the head is held by one move.
     if (plan !== null || proof.status === 'computing' || (cloud.status !== 'idle' && cloud.status !== 'error')) {
@@ -8598,6 +8618,13 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       settle(null, 'A pending cloud job was dropped: its invoice expired.')
       return
     }
+    // A ride kept from before this browser's check existed: following it would
+    // pay an open invoice or start the job from the balance for a proof that
+    // can never be checked here. Kept, never dropped: it is paid work.
+    if (record.action === 'ride' && rideCapabilityIssue() !== null) {
+      settle(record, `A HOSAKA ride is kept but cannot be finished here. ${rideCapabilityIssue()}`)
+      return
+    }
     const id = ++requestId
     if (record.action === 'ride') {
       // A ride bought before a reload: the head is held again at once, and
@@ -8682,6 +8709,8 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   setPublishStatus: (id, status, reason) => {
     const { published, events, chain } = get()
     if (!(id in published)) return
+    // Never back from 'ok', as setPublishStatuses: a relay's echo or another send may have marked it first, and the backlog (lib/unsent.ts) counts on an 'ok' staying so.
+    if (published[id] === 'ok' && status !== 'ok') return
     const next = { ...published, [id]: status }
     set({ published: next, publishError: status === 'failed' ? reason ?? 'relay refused' : null })
     if (status === 'ok') saveChain(events, next, chain)

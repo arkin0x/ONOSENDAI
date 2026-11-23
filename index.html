@@ -64,7 +64,23 @@
     </script>
   </head>
   <body>
-    <div id="root"></div>
+    <!--
+      The first paint: the wordmark on black, drawn by the browser from this
+      page alone, before any script runs or any database answers. It sits in
+      #root, so the app's first render takes its place (src/boot.tsx). Inline
+      and tiny on purpose: nothing here waits on the network but the logo,
+      which is preloaded above, and the page is black without it.
+    -->
+    <style>
+      html { background: #000; }
+      .boot-shell { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 22px; background: #000; }
+      .boot-shell img { width: min(56vw, 300px); height: auto; aspect-ratio: 1969 / 354; opacity: 0.92; }
+      .boot-shell i { position: relative; display: block; width: 132px; height: 2px; overflow: hidden; background: rgba(255, 255, 255, 0.14); clip-path: polygon(2px 0, 100% 0, calc(100% - 2px) 100%, 0 100%); }
+      .boot-shell i::after { content: ''; position: absolute; inset: 0; width: 40%; background: #fff; animation: boot-shell-run 1.4s ease-in-out infinite; }
+      @keyframes boot-shell-run { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
+      @media (prefers-reduced-motion: reduce) { .boot-shell i::after { animation: none; width: 100%; opacity: 0.4; } }
+    </style>
+    <div id="root"><div class="boot-shell" aria-label="ONOSENDAI is loading"><img src="/logo.png" alt="ONOSENDAI" width="1969" height="354" decoding="async"><i></i></div></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

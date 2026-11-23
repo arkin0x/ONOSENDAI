@@ -58,7 +58,7 @@ import { hasNftLink } from '../lib/nftLink'
 import { useCyberspace } from '../store/useCyberspace'
 import { useInventory } from '../store/useInventory'
 import { sealableKeys } from '../lib/inventory'
-import { chestCopiesOf, chestKeyTemplate, lookModelOf, placedDoorHeight, positionOf, useShards, type ChestContent, type ChestDraft, type ChestLock } from '../store/useShards'
+import { chestCopiesOf, chestKeyTemplate, chestModelOf, lookModelOf, placedDoorHeight, positionOf, useShards, type ChestContent, type ChestDraft, type ChestLock } from '../store/useShards'
 import { creditOf, useWorkshop } from '../store/useWorkshop'
 import { composeVerdict, SETTLE_MS, useCashu } from './useCashu'
 import { useSettled } from './useSettled'
@@ -379,8 +379,10 @@ export function ChestCompose({ onDone, target = { mode: 'place' } }: { onDone: (
       if (c.kind === 'key') return [attributed(chestKeyTemplate(c, at, 0, SAMPLE_CREATED_AT))]
       if (c.kind === 'audio') return [attributed(audioInnerTemplate(c.audio, at, 0, SAMPLE_CREATED_AT))]
       if (c.aimed) { const { kind, created_at, tags, content } = c.aimed.signed; return [{ kind, created_at, tags, content }] }
-      const model = models.find((s) => s.id === c.shardId)
-      return [attributed(model ? shardInnerTemplate(model, at, 0, SAMPLE_CREATED_AT, creditOf(model)) : messageInnerTemplate('', at, 0, SAMPLE_CREATED_AT))]
+      // As the chest will carry it: a split build's pieces inside it (useShards chestModelOf).
+      const found = models.find((s) => s.id === c.shardId)
+      const model = found ? chestModelOf(found, me) : undefined
+      return [attributed(model && found ? shardInnerTemplate(model, at, 0, SAMPLE_CREATED_AT, creditOf(found)) : messageInnerTemplate('', at, 0, SAMPLE_CREATED_AT))]
     })
     const fresh = templateBytes(templates, me || '0'.repeat(64))
     // Two JSON lists joined: the kept entries' bytes, less their brackets, and a comma between.
@@ -531,7 +533,7 @@ export function ChestCompose({ onDone, target = { mode: 'place' } }: { onDone: (
           </div>
         </>
       ) : adding === 'shard' ? (
-        <ShardChoice byRecent={byRecent} onPick={(shardId) => add({ kind: 'shard', shardId })} onCancel={() => setAdding(null)} />
+        <ShardChoice byRecent={byRecent} onPick={(shardId) => { useWorkshop.getState().keepCopy(shardId); add({ kind: 'shard', shardId }) }} onCancel={() => setAdding(null)} />
       ) : adding === 'item' ? (
         <div className="compose__row">
           <button className="chest__act" onClick={() => setAdding('mine')} title="The same item, every setting kept: only items you made">FROM MY ITEMS</button>

@@ -7,10 +7,13 @@
  * message box to be 1 gibson cubed, always, while it is normally visible";
  * NOTE_BOX_GIBSONS). Its words are labels, sized on screen like every other
  * world label so they stay readable, and fade out far off, the credit line
- * first (fadeShare). The other marks (a coin, a key's stand-in cube) are
- * still sized on screen, and past the headlamp's reach recede with depth to
- * a floor (lib/markerSize.ts recedeShare), so a chest at the far end of a
- * hall in WALK is smaller than one at your feet (arkinox, 2026-10-25).
+ * first (fadeShare). A key that wears no model of its own is the same
+ * one-gibson cube, its name over it (owner, 2026-11-22; keyBoxSide). The
+ * other marks (a coin, a key's cube while its model loads, Cyberspace
+ * TV's finds) are still sized on screen, and past the headlamp's reach
+ * recede with depth to a floor (lib/markerSize.ts recedeShare), so a chest
+ * at the far end of a hall in WALK is smaller than one at your feet
+ * (arkinox, 2026-10-25).
  * Culled past the same reach as everything else.
  *
  * Placed with markerCentre, not cellCentre, and the difference is the whole of
@@ -312,7 +315,8 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
     // CoinItem asks for, and a spent coin drops out there.
     const notesShown = markShown('note', scaleExp)
     // A key is drawn as a note is: a cube and a short label with the item's
-    // name, so VIEW and GO TO IT have something to arrive at. What it is and
+    // name, so VIEW and GO TO IT have something to arrive at; with no model,
+    // the same one-gibson cube (keyBoxSide). What it is and
     // what it opens is in the lists (ItemRows), one tap away. A chest or a
     // door is drawn as the look it wears (ChestLooks), at the same zooms.
     return useShards.getState().drawnItems()
@@ -345,30 +349,55 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
     <>
       {placed.map((w) => {
         const open = (): void => useShards.getState().selectSecret(w.key)
-        // Being moved, a message keeps its one-gibson box, faint; anything else its PlacedBox.
-        if (w.key === moving) return w.type === 'message' && !w.coin
+        // A key: drawn whole, or at half while it is held (lib/worldMarks itemDrawAs).
+        const draw = w.type === 'key' ? itemDrawAs(holdsItem(held, w.key, w.lineage, w.itemAuthor, heldLin, w.keypair), itemsRead, madeBy(w.itemAuthor, me)) : 'item'
+        // Being moved, a message, or a key with no model that is not held,
+        // keeps its one-gibson box, faint; anything else (a held key's half
+        // box among them) its PlacedBox.
+        if (w.key === moving) return worldCube(w) && draw === 'item'
           ? <WorldMark key={w.key} kind="note" at={w.centre} side={noteBoxSide(scaleExp)} opacity={MOVING_OPACITY} />
           : <PlacedBox key={w.key} at={w.centre} opacity={MOVING_OPACITY} />
         if (w.coin) return <CoinItem key={w.key} text={w.text} at={w.centre} scaleExp={scaleExp} onTap={open} />
         if (w.type === 'message') return <NoteItem key={w.key} w={w} birth={births[w.key]} onTap={open} />
         if (w.type === 'audio') return <AudioMark key={w.key} title={w.text} at={w.centre} onTap={open} />
         // A key: the cube and its short name, or at half while it is held.
+        // With no model of its own, the cube is one gibson, as a message's
+        // box is (owner, 2026-11-22; keyBoxSide); with one, as before.
         const play = vanishing[openedKey(me, w.key)]
-        const draw = itemDrawAs(holdsItem(held, w.key, w.lineage, w.itemAuthor, heldLin, w.keypair), itemsRead, madeBy(w.itemAuthor, me))
+        const side = keyBoxSide(w.wears, scaleExp)
         return (
           <group key={w.key}>
             {draw === 'item'
-              ? <ItemMark id={w.key} text={w.text} sub={author(w)} at={w.centre} wears={w.wears} region={w.region} axes={axes} onTap={open} />
+              ? <ItemMark id={w.key} text={w.text} sub={author(w)} at={w.centre} wears={w.wears} region={w.region} axes={axes} side={side} onTap={open} />
               : <HeldItemMark id={w.key} own={draw === 'own'} at={w.centre} wears={w.wears} region={w.region} axes={axes} appear={play} />}
-            {draw !== 'item' && play && <ItemVanish id={w.key} label={{ text: w.text, color: NOTE, sub: author(w), subColor: ACCENT }} at={w.centre} wears={w.wears} region={w.region} axes={axes} minPx={NOTE_EDGE_PX} play={play} clear={{ trueSide: placedBoxSide(scaleExp), minPx: 0 }} />}
-            {/* The mark is a fixed size on screen at any zoom, so its target is
-                too: a fingertip over the mark (TapTarget). */}
-            <TapTarget px={TAP_PX} at={w.centre} onTap={open} />
+            {/* TAKE on a key with no model: its one-gibson cube fades out (MARK_FADE_MS), and its name, over where the cube stood, with the rest. */}
+            {draw !== 'item' && play && side !== undefined && <WorldMark kind="note" at={w.centre} side={side} fadeOut={play.at} />}
+            {draw !== 'item' && play && <ItemVanish id={w.key} label={{ text: w.text, color: NOTE, sub: author(w), subColor: ACCENT }} at={w.centre} wears={w.wears} region={w.region} axes={axes} minPx={NOTE_EDGE_PX} play={play} clear={side === undefined ? { trueSide: placedBoxSide(scaleExp), minPx: 0 } : { trueSide: side, minPx: 0, nearFace: true }} />}
+            {/* A fingertip over the mark at any distance, and over a one-gibson
+                cube the whole cube once it is larger (TapTarget `side`). A
+                held key keeps its fingertip: its box is the half one. */}
+            <TapTarget px={TAP_PX} side={draw === 'item' ? side : undefined} at={w.centre} onTap={open} />
           </group>
         )
       })}
     </>
   )
+}
+
+/**
+ * A key's cube's edge in scene units when it is one gibson, as a message's
+ * box is (noteBoxSide): a key that wears no model of its own (owner,
+ * 2026-11-22: a model-less key draws in the world as a real 1-gibson cube,
+ * exactly like message boxes). Undefined for a key that wears one: its model,
+ * and the screen-sized cube while that loads or if it never does, as before.
+ */
+export function keyBoxSide(wears: ItemWears | undefined, scaleExp: number): number | undefined {
+  return wears ? undefined : noteBoxSide(scaleExp)
+}
+
+/** Whether a placed thing's box is one gibson in the world: a message's (not a coin's), or a key's with no model (keyBoxSide). */
+function worldCube(w: { type: string; coin: boolean; wears?: ItemWears }): boolean {
+  return (w.type === 'message' && !w.coin) || (w.type === 'key' && keyBoxSide(w.wears, 0) !== undefined)
 }
 
 /** What a key or a chest is called in the world: its glyph and its name. */
@@ -396,8 +425,13 @@ const NO_MOTION: readonly ItemAnimation[] = []
  * who left it. Cyberspace TV's fade (TvFinds). A key that wears a SNO is
  * drawn as that model in its blue box instead of the cube (ItemModel), once
  * the model is in hand; while it loads, and if it never does, the cube.
+ *
+ * Given a `side` (a key with no model in the scene: keyBoxSide), the cube is
+ * that size in the world, one gibson, as a message's box is, and its name
+ * stands just above it rather than through it. Without one (Cyberspace TV's
+ * finds, a key whose model has not come) the cube is sized on screen.
  */
-export function ItemMark({ id, text, sub, at, opacity = 1, wears, region = null, axes, onTap }: {
+export function ItemMark({ id, text, sub, at, opacity = 1, wears, region = null, axes, side, onTap }: {
   id?: string
   text: string
   sub: string
@@ -407,20 +441,22 @@ export function ItemMark({ id, text, sub, at, opacity = 1, wears, region = null,
   /** The region's cut about the item, half a gibson outside its walls, gibsons, render frame (regionBox at unit 0). */
   region?: Box | null
   axes?: ViewAxes
+  /** The cube's edge in scene units, a size in the world (keyBoxSide); absent, a size on screen. */
+  side?: number
   onTap?: () => void
 }): JSX.Element {
   const model = useItemModel(wears?.model)
   // A model's faces would hide a label at its middle, so its label stands
-  // just above its box instead (ItemModelMark `label`); the cube's is
-  // drawn through, as before.
+  // just above its box instead (ItemModelMark `label`). The cube's is
+  // drawn through, as before, or stands just above a one-gibson cube (`side`).
   const label = { text, color: NOTE, sub, subColor: ACCENT }
   if (model && axes && itemMarkShape(model, axes) === 'model') {
     return <ItemModelMark id={id ?? text} model={model} animation={wears?.animation ?? NO_MOTION} at={at} region={region} axes={axes} minPx={NOTE_EDGE_PX} opacity={opacity} onTap={onTap} label={FLOATING_NAME.item ? label : undefined} />
   }
   return (
     <>
-      <WorldMark kind="note" at={at} opacity={opacity} />
-      {FLOATING_NAME.item && <WorldLabel text={label.text} color={label.color} at={at} align="center" px={13} sub={label.sub} subColor={label.subColor} opacity={opacity} recede="name" />}
+      <WorldMark kind="note" at={at} opacity={opacity} side={side} />
+      {FLOATING_NAME.item && <WorldLabel text={label.text} color={label.color} at={at} align="center" px={13} sub={label.sub} subColor={label.subColor} opacity={opacity} clear={side === undefined ? undefined : { trueSide: side, minPx: 0, nearFace: true }} recede="name" />}
     </>
   )
 }
@@ -462,7 +498,7 @@ export function HeldItemMark({ id, own, at, wears, region = null, axes, appear }
 const FLOURISH_HOLD_MS = 2600
 
 /**
- * A message in the world: the cube and the hider's name under it, and nothing
+ * A message in the world: the cube and the hider's name over it, and nothing
  * else; the words are one tap away in the item modal (arkinox, 2026-10-10,
  * decision B: the full-text billboards piled up on each other and over
  * everything near them, and were unreadable at distance anyway). A message
@@ -470,9 +506,11 @@ const FLOURISH_HOLD_MS = 2600
  * (DecodingLabel), hold for a moment, then give way to the cube and the name.
  * The name is the profile's where one is known, "you" for your own.
  *
- * The box is one gibson (NOTE_BOX_GIBSONS), so the name sits just under it,
- * clear of its reach on screen at any distance (WorldLabel `clear`, below),
- * and the tap target covers the box once it is larger than a fingertip.
+ * The box is one gibson (NOTE_BOX_GIBSONS), so the name stands just above
+ * it, clear of its reach on screen at any distance (WorldLabel `clear`,
+ * `nearFace`): above and not under, so the ground a box rests on never hides
+ * it (follow-up to #887), and the tap target covers the box once it is
+ * larger than a fingertip.
  */
 export function NoteItem({ w, birth, onTap }: { w: { key: string; text: string; mine: boolean; author: string; centre: [number, number, number] }; birth: number | undefined; onTap: () => void }): JSX.Element {
   const profile = useProfile(w.author || null)
@@ -490,7 +528,7 @@ export function NoteItem({ w, birth, onTap }: { w: { key: string; text: string; 
       <WorldMark kind="note" at={w.centre} side={side} />
       {flourish && birth !== undefined
         ? <DecodingLabel text={messageBillboard(w.text)} seed={seedOf(w.key)} birth={birth} at={w.centre} />
-        : <WorldLabel text={name} color={ACCENT} at={w.centre} align="center" px={10} clear={{ trueSide: side, minPx: 0, below: true }} recede="credit" />}
+        : <WorldLabel text={name} color={ACCENT} at={w.centre} align="center" px={10} clear={{ trueSide: side, minPx: 0, nearFace: true }} recede="credit" />}
       {/* A fingertip over the box at any distance, and the whole box once it is larger (TapTarget `side`). */}
       <TapTarget px={TAP_PX} side={side} at={w.centre} onTap={onTap} />
     </group>
@@ -741,6 +779,18 @@ export function PlacedBox({ at, opacity = 1, appear, size }: { at: [number, numb
   )
 }
 
+/**
+ * How long a model-less key's one-gibson cube takes to fade out under TAKE,
+ * ms: quick, so the half box it leaves fades in where it stood (PlacedBox
+ * `appear`) rather than the whole gibson vanishing in one frame.
+ */
+export const MARK_FADE_MS = 200
+
+/** What is left of a mark `elapsed` ms into its fade: 1 down to 0 over MARK_FADE_MS. */
+export function markFadeLeft(elapsed: number): number {
+  return Math.min(1, Math.max(0, 1 - elapsed / MARK_FADE_MS))
+}
+
 /** The line color and opacity of each mark. A spent coin is steel and faint. */
 const MARK_LOOK: Record<MarkKind, { color: string; opacity: number }> = {
   coin: { color: BITCOIN, opacity: 0.9 },
@@ -756,10 +806,18 @@ const MARK_LOOK: Record<MarkKind, { color: string; opacity: number }> = {
  * eye anywhere within the headlamp's reach, smaller past it: markRecede),
  * unless given a `side`: then the cube is that size in the world, in scene
  * units, at any distance, and its edges are pulled a hair toward the camera
- * (NOTE_EDGE_DEPTH). A message's box is (noteBoxSide).
+ * (NOTE_EDGE_DEPTH). A message's box is (noteBoxSide), and a model-less key's (keyBoxSide).
  */
-function WorldMark({ kind, at, opacity = 1, side }: { kind: MarkKind; at: [number, number, number]; opacity?: number; side?: number }): JSX.Element {
+function WorldMark({ kind, at, opacity = 1, side, fadeOut }: {
+  kind: MarkKind
+  at: [number, number, number]
+  opacity?: number
+  side?: number
+  /** From this moment (performance.now()), fading out over MARK_FADE_MS and then gone: a model-less key's cube under TAKE. */
+  fadeOut?: number
+}): JSX.Element {
   const group = useRef<Group>(null)
+  const edges = useRef<LineSegments>(null)
   const geometry = useMemo(
     () => new EdgesGeometry(kind === 'note' ? new BoxGeometry(NOTE_GEOMETRY_EDGE, NOTE_GEOMETRY_EDGE, NOTE_GEOMETRY_EDGE) : new OctahedronGeometry(0.5)),
     [kind],
@@ -768,8 +826,14 @@ function WorldMark({ kind, at, opacity = 1, side }: { kind: MarkKind; at: [numbe
   // A cube of `side` in the world: its geometry's edge scaled up to it. Only the note's cube is sized so.
   const world = side !== undefined && kind === 'note' ? side / NOTE_GEOMETRY_EDGE : undefined
 
+  const look = MARK_LOOK[kind]
   useFrame((state) => {
     const g = group.current
+    if (fadeOut !== undefined && edges.current) {
+      const left = markFadeLeft(performance.now() - fadeOut)
+      ;(edges.current.material as Material).opacity = look.opacity * opacity * left
+      edges.current.visible = left > 0
+    }
     // A size in the world is set once, below, not read from the camera.
     if (!g || world !== undefined) return
     const cam = state.camera as PerspectiveCamera
@@ -788,11 +852,12 @@ function WorldMark({ kind, at, opacity = 1, side }: { kind: MarkKind; at: [numbe
     }
   }, LABEL_PRIORITY)
 
-  const look = MARK_LOOK[kind]
+  // Fading, its first frame is drawn as far into the fade as it already is.
+  const start = fadeOut === undefined ? 1 : markFadeLeft(performance.now() - fadeOut)
   return (
     <group key={kind} ref={group} position={at} scale={world}>
-      <lineSegments geometry={geometry} frustumCulled={false}>
-        <lineBasicMaterial color={look.color} toneMapped={false} transparent opacity={look.opacity * opacity} depthWrite={false} {...(world !== undefined ? NOTE_EDGE_DEPTH : {})} />
+      <lineSegments ref={edges} geometry={geometry} frustumCulled={false} visible={start > 0}>
+        <lineBasicMaterial color={look.color} toneMapped={false} transparent opacity={look.opacity * opacity * start} depthWrite={false} {...(world !== undefined ? NOTE_EDGE_DEPTH : {})} />
       </lineSegments>
     </group>
   )

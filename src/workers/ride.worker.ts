@@ -44,16 +44,30 @@ export interface RideGrindRequest {
   count: number
 }
 
-export type RideWorkerRequest = RideChunkRequest | CalibrateRequest | RideGrindRequest
+/** Answered as soon as the worker has loaded: the pool calibration waits
+ * for every worker to say so, then starts them together. */
+export interface RideReadyRequest {
+  type: 'ready'
+  id: number
+}
+
+export type RideWorkerRequest = RideChunkRequest | CalibrateRequest | RideGrindRequest | RideReadyRequest
 
 export type RideChunkResponse =
   | { type: 'leaf'; id: number; height: number; leafHex: string }
-  | { type: 'calibrated'; id: number; elapsedMs: number; pairs: number }
+  /** work: the sample's work in mean pairings (exactRideWork). */
+  | { type: 'calibrated'; id: number; elapsedMs: number; work: number }
+  | { type: 'ready'; id: number }
   /** One attempt; gHex is G when this nonce meets the price, else null. */
   | { type: 'attempt'; id: number; nonce: number; gHex: string | null }
   | { type: 'error'; id: number; message: string }
 
 self.onmessage = (event: MessageEvent<RideWorkerRequest>) => {
+  if (event.data.type === 'ready') {
+    const response: RideChunkResponse = { type: 'ready', id: event.data.id }
+    self.postMessage(response)
+    return
+  }
   if (event.data.type === 'grind') {
     const { id, previousEventIdHex, rootHex, attempts, start, count } = event.data
     try {
@@ -74,8 +88,8 @@ self.onmessage = (event: MessageEvent<RideWorkerRequest>) => {
   if (event.data.type === 'calibrate') {
     const { id } = event.data
     try {
-      const { elapsedMs, pairs } = timeCalibrationSample()
-      const response: RideChunkResponse = { type: 'calibrated', id, elapsedMs, pairs }
+      const { elapsedMs, work } = timeCalibrationSample()
+      const response: RideChunkResponse = { type: 'calibrated', id, elapsedMs, work }
       self.postMessage(response)
     } catch (err) {
       const response: RideChunkResponse = { type: 'error', id, message: err instanceof Error ? err.message : String(err) }

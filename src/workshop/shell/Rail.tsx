@@ -1,15 +1,23 @@
 /**
  * Rail.tsx - the left rail, one of the workshop's five fixed places
  * (workshop redesign, phase 1): UNDO and REDO, then the grid floor's LEVEL up,
- * its value, and down. The same corner they had, so old habits still work,
- * and never hidden: no sheet, panel or tool takes them away (they used to go
- * whenever a panel opened).
+ * its value, and down, then GROUPS (2026-11-23). The same corner they had, so
+ * old habits still work, and never hidden: no sheet, panel or tool takes them
+ * away (they used to go whenever a panel opened).
+ *
+ * GROUPS sits here because the rail is the one place in sight in every state
+ * the groups need: nothing held (the strip has SELECT's options, with no room
+ * left at 375px), holding (the strip is the held bar's eight fixed slots),
+ * and with the GROUPS sheet open, which never covers the rail. So the key
+ * that opened the sheet stays lit and closes it again, as the top bar's do.
+ * Greyed in LOOK, which holds nothing; G does the same in every other tool.
  */
 
-import { ChevronDown, ChevronUp, Redo2, Undo2 } from 'lucide-react'
+import { ChevronDown, ChevronUp, Group, Redo2, Undo2 } from 'lucide-react'
 import { TICKS_PER_UNIT, unitsLabel } from 'sno-core/shards'
 import { useRepeatable } from '../../hooks/useRepeatable'
-import { useWorkshop } from '../../store/useWorkshop'
+import { hiddenIn, useWorkshop } from '../../store/useWorkshop'
+import { isLook } from '../lookTool'
 
 /** The plane's name under the level: the floor is the floor, a wall is named by its axis. */
 const PLANE_LABEL = ['LEVEL X', 'FLOOR', 'LEVEL Z'] as const
@@ -42,7 +50,41 @@ function LevelStack(): JSX.Element {
   )
 }
 
-export function Rail(): JSX.Element {
+/**
+ * Whether G opens GROUPS now. In STAMP's OBJECT, G is SNAP TO ITS SIZE
+ * (Bench Keys, its key printed on the strip), so there it is SNAP's alone and
+ * this key prints no G: one key, one meaning, one printed hint. The rail key
+ * still opens and closes the sheet there.
+ */
+export function gOpensGroups(s: { tool: string; stampMode: string }): boolean {
+  return !(s.tool === 'stamp' && s.stampMode === 'object')
+}
+
+/**
+ * GROUPS: opens and closes the GROUPS sheet (G), lit while it is open. A
+ * badge counts the groups hidden on the bench, so they are not forgotten
+ * with the sheet shut. The word under it stands over the scene: white.
+ */
+
+function GroupsKey({ open, onToggle }: { open: boolean; onToggle: () => void }): JSX.Element {
+  const look = useWorkshop((s) => isLook(s.tool))
+  const hidden = useWorkshop((s) => hiddenIn(s.hiddenGroups, s.current()).length)
+  const keyed = useWorkshop(gOpensGroups)
+  const named = keyed ? 'Groups (G)' : 'Groups'
+  const title = look ? 'GROUPS: pick a tool other than LOOK' : hidden > 0 ? `${named}: ${hidden} hidden on the bench` : named
+  return (
+    <div className="ws__railkey">
+      <button className={`ws__railbtn ws__railbtn--groups${open ? ' is-on' : ''}`} disabled={look} aria-pressed={open} onClick={onToggle} title={title} aria-label="Groups">
+        <Group size={18} strokeWidth={2.25} aria-hidden />
+        <span className="ws__railbtn-word">GROUPS</span>
+        {hidden > 0 && !look && <i className="ws__badge ws__badge--hidden" aria-hidden>{hidden}</i>}
+      </button>
+      <span className="ws__rail-label" aria-hidden>GROUPS{keyed && <kbd className="ws__key ws__rail-kbd">G</kbd>}</span>
+    </div>
+  )
+}
+
+export function Rail({ groupsOpen = false, onGroups }: { groupsOpen?: boolean; onGroups?: () => void } = {}): JSX.Element {
   const canUndo = useWorkshop((s) => s.past.length > 0)
   const canRedo = useWorkshop((s) => s.future.length > 0)
   const w = useWorkshop.getState
@@ -51,6 +93,7 @@ export function Rail(): JSX.Element {
       <button className="ws__railbtn" disabled={!canUndo} onClick={() => w().undo()} title="Undo (Ctrl+Z)" aria-label="Undo"><Undo2 size={18} strokeWidth={2.25} aria-hidden /></button>
       <button className="ws__railbtn" disabled={!canRedo} onClick={() => w().redo()} title="Redo (Ctrl+Shift+Z)" aria-label="Redo"><Redo2 size={18} strokeWidth={2.25} aria-hidden /></button>
       <LevelStack />
+      {onGroups && <GroupsKey open={groupsOpen} onToggle={onGroups} />}
     </nav>
   )
 }

@@ -30,7 +30,7 @@ import type { ChainCommit, ChainRead, ChainRecord, ChainSource, MigrationResult 
 import type { Nip01Flag } from './eventDb/schema'
 import { CHAIN_ROWS_ON_WEBKIT, CHAIN_STORE_VERSION } from './chainStoreVersion'
 import { checkSignatures, sigCheckDeadlineMs } from './sigCheck'
-import type { NostrEvent } from './events'
+import { rulesHeld, type NostrEvent } from './events'
 
 /** The patience of a read: the same 3 s the old store's reads have (lib/chainDb.ts). */
 let readPatienceMs = 3_000
@@ -208,6 +208,7 @@ export type RowsRead = ChainRead | null | 'unreadable' | 'timeout'
 export function readRows(pubkey: string, onLate?: (late: ChainRead | null | 'unreadable') => void): Promise<RowsRead> {
   const read: Promise<ChainRead | null | 'unreadable'> = rowsSettled(pubkey)
     .then(() => callEventDb('readChain', [pubkey], 30_000))
+    .then((r) => { if (r) heldByVerdict(r); return r })
     .catch(() => 'unreadable' as const)
   return new Promise<RowsRead>((resolve) => {
     let timedOut = false
@@ -218,6 +219,13 @@ export function readRows(pubkey: string, onLate?: (late: ChainRead | null | 'unr
       resolve(r)
     })
   })
+}
+
+/** The rows read back whose verdict is valid under today's rules: their form is not parsed again (lib/events.ts rulesHeld). */
+function heldByVerdict(read: ChainRead): void {
+  if (!read.ruled?.length) return
+  const ruled = new Set(read.ruled)
+  rulesHeld(read.events.filter((e) => ruled.has(e.id)))
 }
 
 /**

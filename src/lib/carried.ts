@@ -114,6 +114,9 @@ export function rekeyCarried(model: ShardModel, me: string | null): ShardModel {
     return { ...x, refs: x.refs.map((r: unknown) => (Array.isArray(r) && r[0] === 'a' && typeof r[1] === 'string' && renamed.has(r[1]) ? ['a', renamed.get(r[1]), ...r.slice(2)] : r)) }
   }
   // The keys go back in code point order (DECK-0003 §1.2): plain string comparison.
+  // Only the renamed ones: a key under anyone but the event's author counted for
+  // nobody where it was read, and one under your name in someone else's event is
+  // a forgery that would count once the copy is yours (review of the edit view).
   const rewritten: Array<[string, unknown]> = []
   for (const [key, payload] of Object.entries(model.objects)) {
     const next = renamed.get(key)
@@ -161,3 +164,17 @@ export function withoutCarried(model: ShardModel): ShardModel {
   void _parts
   return { ...rest, ...(kept.length ? { refs: kept.map(([r]) => r) } : {}), ...(parts.length ? { parts } : {}) }
 }
+
+/** A shard that came to you sealed in a bag or a chest (TAKE): local only, never on the wire, like `author`. */
+type CameSealed = ShardModel & { cameSealed?: true }
+
+/** The shard marked as come sealed: PUBLISH asks before it goes out in the clear (owner's rule: kit pieces are never published in the clear). */
+export function markCameSealed(model: ShardModel): ShardModel {
+  return { ...model, cameSealed: true } as CameSealed
+}
+
+/** Whether a shard came to you sealed (markCameSealed). */
+export function cameSealed(model: ShardModel): boolean {
+  return !!(model as CameSealed).cameSealed
+}
+

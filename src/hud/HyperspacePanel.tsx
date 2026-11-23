@@ -23,11 +23,12 @@ import { coordToLatLon } from '../lib/hyperspace/landfall'
 import { EARTH_SCALE_EXP } from '../lib/hyperspace/interest'
 import { formatLatLonDeg } from '../lib/earthSurface'
 import { expectedPricePairs, expectedRidePairs, lineStateOf, zeroLengthRideRefusal } from '../lib/hyperspace/ride'
-import { calibrate, computeRideProof, leafBenchmarkMs, rideFraction, type RideProgress } from '../lib/hyperspace/ridePool'
+import { calibrate, computeRideProof, rideBenchmark, rideEstimateMs, rideFraction, type RideBench, type RideProgress } from '../lib/hyperspace/ridePool'
 import { findStation } from '../lib/hyperspace/station'
 import { stopCoordExact, type Stop } from '../lib/hyperspace/stops'
 import { formatMs, formatOps, type Position } from '../lib/space'
 import { rideChoice, type RideOffer } from '../lib/cloudRide'
+import { rideCapabilityIssue } from '../lib/proofCapability'
 import { PAYMENT_SECONDS } from '../lib/crossover'
 import { satsLabel } from '../lib/cloud'
 import { useNow } from '../hooks/useNow'
@@ -294,6 +295,13 @@ export async function boardFromAnywhere(): Promise<void> {
  */
 export async function startRide(): Promise<void> {
   if (riding || useRideRun.getState().hosaka) return
+  // A browser whose numbers cannot hold a ride's would fail partway, after
+  // minutes of work: refused before any of it.
+  const rideIssue = rideCapabilityIssue()
+  if (rideIssue) {
+    useRideRun.setState({ error: rideIssue })
+    return
+  }
   const planned = await planRide()
   if (planned === null) return
   const { previousId, fromHeight, asOf, destination, destStop } = planned
@@ -457,13 +465,15 @@ export function HyperspacePanel(): JSX.Element {
   const hosakaRiding = hosakaPlanning || (hosakaJob !== null && cloudBusy)
   const now = useNow(hosakaRiding ? 1000 : 0)
 
-  // The per-leaf benchmark prices a ride in wall-clock time before you commit
-  // to it. Calibrated once; until the number exists the estimate says so
-  // rather than guessing.
-  const [benchMs, setBenchMs] = useState<number | null>(() => leafBenchmarkMs())
+  // The pool's measured throughput prices a ride in wall-clock time before
+  // you commit to it. Calibrated once, on every worker the ride uses; until
+  // the number exists the estimate says so rather than guessing.
+  const [bench, setBench] = useState<RideBench | null>(() => rideBenchmark())
   useEffect(() => {
+    // Nothing to measure where a ride cannot run (its sample would only throw).
+    if (rideCapabilityIssue() !== null) return
     let alive = true
-    calibrate().then((ms) => { if (alive) setBenchMs(ms) }).catch(() => {})
+    calibrate().then((b) => { if (alive) setBench(b) }).catch(() => {})
     return () => { alive = false }
   }, [])
 
@@ -500,17 +510,21 @@ export function HyperspacePanel(): JSX.Element {
   // is pressed, with the way to get there (ride elsewhere and back).
   const zeroRide = estimate && destination !== null ? zeroLengthRideRefusal(estimate.from, destination, atStop) : null
 
+  // Whether this browser can ride at all (proofCapability): no estimate,
+  // no RIDE HERE and no HOSAKA ride where it cannot, since a bought proof is
+  // checked here with the same numbers before it is signed.
+  const rideIssue = rideCapabilityIssue()
   // This device's own wait for the ride, as the Est. time row shows it.
-  const localMs = estimate && benchMs !== null
-    ? (estimate.length + expectedPricePairs(estimate.length) / expectedRidePairs(1)) * benchMs
-    : null
+  const localMs = estimate && bench !== null && rideIssue === null ? rideEstimateMs(estimate.length, bench) : null
   // HOSAKA's price beside it, when the provider sells rides and this one
   // fits (useRideQuote); hidden otherwise, and never for a zero-length ride.
-  const quote = useRideQuote(estimate && !zeroRide ? estimate.from : null, estimate && !zeroRide ? destination : null)
+  // Not asked at all where this browser could not check what it sells.
+  const quotable = estimate !== null && !zeroRide && rideIssue === null
+  const quote = useRideQuote(quotable ? estimate.from : null, quotable ? destination : null)
   const offer = quote.status === 'ready' ? quote.offer : null
   // The highlighted choice follows the cloud profile; it is only a highlight.
-  const best = rideChoice(profile, localMs === null ? null : localMs / 1000, offer, PAYMENT_SECONDS)
-  const rideDisabled = inGame || !onLine || destination === null || zeroRide !== null || !ready || !ownChain
+  const best = rideChoice(profile, localMs === null ? null : localMs / 1000, offer, PAYMENT_SECONDS, rideIssue === null)
+  const rideDisabled = inGame || !onLine || destination === null || zeroRide !== null || !ready || !ownChain || rideIssue !== null
   // Why RIDE VIA HOSAKA is dark although the price is shown.
   const hosakaHeld = cloudBusy || cloud.job !== null
     ? 'Another HOSAKA job is in progress or kept in the Cloud compute panel'
@@ -606,8 +620,8 @@ export function HyperspacePanel(): JSX.Element {
                   </div>
                   <div>
                     <dt>Est. time</dt>
-                    {/* The benchmark is per average block; the price is priced in blocks by its pairings. */}
-                    <dd>{localMs === null ? 'CALIBRATING' : formatDuration(localMs)}</dd>
+                    {/* The pool's wall-clock per average block; the price is priced in blocks by its pairings. */}
+                    <dd>{rideIssue !== null ? 'NOT IN THIS BROWSER' : localMs === null ? 'CALIBRATING' : formatDuration(localMs)}</dd>
                   </div>
                   {quote.status !== 'hidden' && (
                     <div title="What HOSAKA charges to compute this ride's proof, and how long it expects to take">
@@ -628,7 +642,10 @@ export function HyperspacePanel(): JSX.Element {
               it to the destination; all of the per-block work runs locally
               and resumes if interrupted. A re-roll price of about one
               thirty-second more follows the blocks, so a proof that skipped
-              some cannot cheaply retry its samples.
+              some cannot cheaply retry its samples. Est. time is measured on
+              this device, working the same way the ride does. A phone slows
+              or pauses a tab that is hidden or behind another app, so keep
+              this tab open and in front until the ride is done.
               {quote.status !== 'hidden' && (
                 <>
                   {' '}RIDE VIA HOSAKA buys the same proof from HOSAKA, computed on
@@ -721,7 +738,7 @@ export function HyperspacePanel(): JSX.Element {
         <div className="hyper__choice">
           <button
             className={`hyper__btn hyper__choicebtn hyper__choicebtn--here ${best === 'local' ? 'hyper__btn--ride' : ''}`}
-            title="Compute the ride's proof on this device. Free; it resumes if interrupted"
+            title={rideIssue ?? "Compute the ride's proof on this device. Free; it resumes if interrupted"}
             disabled={rideDisabled}
             onClick={() => void startRide()}
           >
@@ -731,7 +748,7 @@ export function HyperspacePanel(): JSX.Element {
           </button>
           <button
             className={`hyper__btn hyper__choicebtn ${best === 'hosaka' ? 'hyper__btn--ride' : ''}`}
-            title={hosakaHeld ?? 'HOSAKA computes the proof; this device checks it before signing. You pay the price shown, by invoice or from your HOSAKA balance'}
+            title={rideIssue ?? hosakaHeld ?? 'HOSAKA computes the proof; this device checks it before signing. You pay the price shown, by invoice or from your HOSAKA balance'}
             disabled={rideDisabled || hosakaHeld !== null}
             onClick={() => void startHosakaRide(offer)}
           >
@@ -758,6 +775,7 @@ export function HyperspacePanel(): JSX.Element {
             <button className="tag tag--tap hyper__whybtn" onClick={() => useChainUi.getState().setBrokenView('notice')}>WHY</button>
           </p>
         ))}
+      {!inGame && rideIssue && progress === null && <p className="notice" role="status">{rideIssue}</p>}
       {!inGame && zeroRide && progress === null && <p className="notice">{zeroRide}</p>}
       {/* Every gate that holds BOARD dark says so (new-user feedback, 2026-11-21:
           "The board button was never available, so I couldn't ride"). A

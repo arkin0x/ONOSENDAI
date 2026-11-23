@@ -32,6 +32,7 @@ import { getEventHash } from 'nostr-tools/pure'
 import { CYBERSPACE_RELAY, askRelay, countRelay, publish, publishOnceTo } from './relay'
 import { TOO_BIG } from './rateLimit'
 import { AUTH_STALLED } from './relayOutcome'
+import { unsentOf } from './unsent'
 import { confirmChainEvents } from './chains'
 import { noteChainHolders } from './chainHolders'
 import { chainLanded, onReleased } from './chainStore'
@@ -119,7 +120,10 @@ if (typeof document !== 'undefined') {
 const acked = (id: string): boolean => marks.get(id) === 'ok'
 
 /** Not on a relay yet, as far as the drain goes: acks waiting to be marked count as on one. */
-const notSent = (s: { published: Record<string, string> }, id: string): boolean => s.published[id] !== 'ok' && !acked(id)
+/** The chain's actions not yet sent, in chain order: its unsent ones (lib/unsent.ts), less those a relay took within the marks window. */
+function waiting(s: { events: readonly NostrEvent[]; published: Record<string, string> }): NostrEvent[] {
+  return unsentOf(s.events, s.published).filter((e) => !acked(e.id))
+}
 
 /**
  * Look at the relays once before sending a backlog: more than one event
@@ -169,9 +173,11 @@ async function pump(): Promise<void> {
   if (movementBlocked()) return
   let s = useCyberspace.getState()
   if (!maySend(s, released)) return
-  if (!s.events.some((e) => notSent(s, e.id))) { backlogChecked = null; return }
-
-  const unsent = s.events.filter((e) => notSent(s, e.id))
+  // The backlog, kept as the chain grows (lib/unsent.ts), not read off the
+  // whole chain: this runs at every change to the chain, a landing of a walk
+  // among them (owner's phone diag, 2026-11-22).
+  const unsent = waiting(s)
+  if (unsent.length === 0) { backlogChecked = null; return }
   // One waiting move is sent without a look only when this page signed it,
   // right after its own head check. One that came from storage (a reload, an
   // identity switched back to) was signed before anything here asked the
@@ -189,7 +195,7 @@ async function pump(): Promise<void> {
     backlogChecked = who
     lookOwed = false
   }
-  const next = s.events.find((e) => notSent(s, e.id))
+  const next = unsentOf(s.events, s.published).find((e) => !acked(e.id))
   if (!next) { backlogChecked = null; return }
   // Never a hop in the old proof format (hop proof version 2): the store
   // cuts it away as it lands, and this is the last place it could slip out.
@@ -239,7 +245,7 @@ async function pump(): Promise<void> {
     lastFailed = false
     // Marked published within the window (flushMarks); the next one is sent in a task of its own, not inside this OK.
     mark(next.id, 'ok')
-    void yieldTask().then(() => { if (maySend(useCyberspace.getState(), released)) void pump() })
+    void yieldTask('publish').then(() => { if (maySend(useCyberspace.getState(), released)) void pump() })
     return
   }
 

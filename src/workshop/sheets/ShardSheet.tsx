@@ -9,8 +9,10 @@ import { useEffect, useMemo, useState } from 'react'
 import { MODES, toPayload, type ShardMode } from 'sno-core/shards'
 import { formatCellSize } from 'sno-core/scale'
 import { ConfirmModal } from '../../hud/ConfirmModal'
-import { carriesSealedParts } from '../../lib/carried'
+import { cameSealed, carriesSealedParts } from '../../lib/carried'
 import { STATE_HELP, STATE_LABEL, STATE_TAG, publishState, shardFingerprint } from '../../lib/published'
+import { shardForm } from '../../lib/partForm'
+import { PartFormBadge } from '../PartFormBadge'
 import { bounceChip } from '../../lib/walkBounce'
 import { CONSTRAINS, CONSTRAIN_TIPS, authoredConstrainOf, withAuthoredConstrain } from '../../lib/walkConstrain'
 import { useCyberspace } from '../../store/useCyberspace'
@@ -18,6 +20,8 @@ import { usePublished } from '../../store/usePublished'
 import { useWorkshop } from '../../store/useWorkshop'
 import { BounceChip, BounceRow, OpacityRow } from '../shardRows'
 import { PointGlowRows } from '../glowRows'
+import { FullnessBar } from '../FullnessBar'
+import { placedApart } from '../../lib/shardFullness'
 
 export function ShardBody(): JSX.Element | null {
   const shard = useWorkshop((s) => s.current())
@@ -47,6 +51,8 @@ export function ShardBody(): JSX.Element | null {
   const wireBytes = useMemo(() => (shard ? new TextEncoder().encode(JSON.stringify(toPayload(withAuthoredConstrain(shard)))).length : 0), [shard])
   // Something to publish: its own vertices, or objects it places (DECK-0003 §1.9 rule 13).
   const hasContent = shard !== null && (shard.vertices.length > 0 || (shard.parts?.length ?? 0) > 0)
+  // A shard that came to you sealed (TAKE, a split build's piece among them) goes public only if you say so.
+  const [sealedAsk, setSealedAsk] = useState<string | null>(null)
   const w = useWorkshop.getState
   if (!shard) return null
   return (
@@ -63,13 +69,15 @@ export function ShardBody(): JSX.Element | null {
         <div className="workshop__row">
           <span className="workshop__label">SHARD FEED</span>
           <span className={`tag ${STATE_TAG[pubState]}`} title={STATE_HELP[pubState]}>{STATE_LABEL[pubState]}</span>
+          {/* What it is when another shard places it: the bench's corner mark, the same component (lib/partForm.ts). */}
+          <PartFormBadge form={shardForm(shard, ledger, me)} size="inline" />
           <span className="workshop__gap" />
         </div>
         <div className="workshop__list-row">
           <button
             className="workshop__btn workshop__btn--warn"
             disabled={!hasContent || publishing || retracting || !me}
-            onClick={() => { if (carriesSealedParts(shard)) setPublishAsk(shard.id); else void usePublished.getState().publish(shard) }}
+            onClick={() => { if (carriesSealedParts(shard)) setPublishAsk(shard.id); else if (cameSealed(shard)) setSealedAsk(shard.id); else void usePublished.getState().publish(shard) }}
             title={!hasContent
               ? 'Nothing to publish yet: add points, or place objects'
               : pubState === 'other-key'
@@ -86,6 +94,8 @@ export function ShardBody(): JSX.Element | null {
           )}
         </div>
         <span className="workshop__work">{wireBytes.toLocaleString('en-US')} BYTES ON THE WIRE · {shard.vertices.length} VERTICES + {shard.faces.length} FACES{shard.parts?.length ? ` + ${shard.parts.length} PLACED` : ''}</span>
+        {/* How full it is against what one hide holds whole (lib/shardFullness.ts; owner, 2026-11-23). */}
+        <FullnessBar payload={wireBytes} apart={placedApart(shard)} />
       </div>
       {publishAsk === shard.id && (
         <ConfirmModal
@@ -97,6 +107,18 @@ export function ShardBody(): JSX.Element | null {
           onBackdrop={() => setPublishAsk(null)}
           onConfirm={() => { setPublishAsk(null); void usePublished.getState().publish(shard, true) }}
           onCancel={() => { setPublishAsk(null); void usePublished.getState().publish(shard) }}
+        />
+      )}
+      {sealedAsk === shard.id && (
+        <ConfirmModal
+          title={`Publish "${shard.name}"?`}
+          body={<>It came to you sealed in a bag or a chest. Published, anyone can read it.</>}
+          confirmLabel="PUBLISH IT"
+          cancelLabel="KEEP IT PRIVATE"
+          danger={false}
+          onBackdrop={() => setSealedAsk(null)}
+          onConfirm={() => { setSealedAsk(null); void usePublished.getState().publish(shard) }}
+          onCancel={() => setSealedAsk(null)}
         />
       )}
       {retractAsk === shard.id && (

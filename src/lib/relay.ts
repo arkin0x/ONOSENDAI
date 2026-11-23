@@ -19,7 +19,7 @@ import { answerChecks } from './sigCheck'
 import type { Filter } from 'nostr-tools/filter'
 import type { EventTemplate, VerifiedEvent } from 'nostr-tools/core'
 import type { NostrEvent } from './events'
-import { currentRelays, DEFAULT_RELAY, PINNED_RELAYS, isRetiredRelay } from '../store/useRelays'
+import { currentRelays, DEFAULT_RELAY, PINNED_RELAYS, READ_FALLBACK_RELAY, isReadFallbackRelay, isRetiredRelay, readRelays } from '../store/useRelays'
 import { LiveRegistry, type Transport } from './liveSub'
 import { signerHeld } from './authOpen'
 import { AUTH_STALLED, classifyClose, mergeAnswers, type RelayAnswer } from './relayOutcome'
@@ -129,10 +129,27 @@ function countPings(relay: AbstractRelay): void {
     openSubs: Map<string, unknown>
     scheduleIdleClose: () => void
     clearIdleTimeout: () => void
+    idleSince?: number
+    idleTimeout: number
+    idleTimeoutHandle?: ReturnType<typeof setTimeout>
+    close: () => void
+    publish: AbstractRelay['publish']
+    countWithHLL: (...args: unknown[]) => Promise<unknown>
+    readonly connected: boolean
   }
+  /**
+   * When the socket went idle before the ping in flight now, if it had: the
+   * ping's close times the idle close from then, not from itself. Restarted
+   * by every ping, a socket kept open past the pings' 29 s (SIGNED_IN_IDLE_MS)
+   * was never closed as idle at all (review of the AUTH churn fix).
+   */
+  let idleBeforePing: number | undefined
+  let pingClosing = false
   const subscribe = r.subscribe.bind(relay)
   r.subscribe = (filters, params) => {
-    if (params.label !== '<forced-ping>') return subscribe(filters, params)
+    // Real work while a ping is out: the idle time starts again once it is done.
+    if (params.label !== '<forced-ping>') { idleBeforePing = undefined; return subscribe(filters, params) }
+    idleBeforePing = r.ongoingOperations === 0 ? r.idleSince : undefined
     r.ongoingOperations++
     const sub = subscribe(filters, {
       ...params,
@@ -141,7 +158,21 @@ function countPings(relay: AbstractRelay): void {
         params.onclose?.(reason)
       },
     })
+    const close = sub.close.bind(sub)
+    sub.close = (reason?: string) => {
+      pingClosing = true
+      try { close(reason) } finally { pingClosing = false }
+    }
     return sub
+  }
+  // A publish or a count while a ping is out is real work too: the idle time
+  // starts again once it is done, never from before the ping (a socket closed
+  // under a publish's OK; second review of the AUTH churn fix).
+  const publish = r.publish.bind(relay)
+  r.publish = (event) => { idleBeforePing = undefined; return publish(event) }
+  if (typeof r.countWithHLL === 'function') {
+    const countWithHLL = r.countWithHLL.bind(relay)
+    r.countWithHLL = (...args) => { idleBeforePing = undefined; return countWithHLL(...args) }
   }
   let ops = Math.max(0, r.ongoingOperations)
   Object.defineProperty(relay, 'ongoingOperations', { configurable: true, enumerable: true, get: () => ops, set: (v: number) => { ops = Math.max(0, v) } })
@@ -149,7 +180,19 @@ function countPings(relay: AbstractRelay): void {
   r.scheduleIdleClose = () => {
     // Each subscription's close, and each hold's release, schedules it again.
     if (r.openSubs.size > 0 || (holds.get(relay) ?? 0) > 0) { r.clearIdleTimeout(); return }
-    scheduleIdleClose()
+    // Never on a socket already closed: its subscriptions, closed with it,
+    // each schedule one, and its close when it fired took the newer socket to
+    // the same relay out of the pool by URL, so the next read dialled a third
+    // (and signed in again where the relay gates).
+    if (r.connected === false) { r.clearIdleTimeout(); return }
+    const since = pingClosing ? idleBeforePing : undefined
+    if (since === undefined || r.idleTimeout <= 0) { scheduleIdleClose(); return }
+    // A ping ending: the socket has been idle since before it.
+    r.idleSince = since
+    r.clearIdleTimeout()
+    r.idleTimeoutHandle = setTimeout(() => {
+      if (r.ongoingOperations === 0 && r.idleSince) r.close()
+    }, Math.max(0, since + r.idleTimeout - Date.now()))
   }
 }
 
@@ -188,6 +231,25 @@ function guardSend(relay: AbstractRelay): void {
   }
 }
 
+const forgetGuarded = new WeakSet<object>()
+
+/**
+ * nostr-tools forgets a relay in the pool by its URL when it closes
+ * (relay.onclose), whichever socket is filed there by then. A socket that
+ * closed late, after a newer one to the same relay had taken its place (an
+ * idle close timer left on it, a close after dropRelays), took the newer one
+ * out of the pool: its live subscriptions were orphaned, and the next read
+ * dialled another socket, one more AUTH where the relay gates (second review
+ * of the AUTH churn fix). Each socket forgets only itself.
+ */
+function guardForget(relays: Map<string, AbstractRelay> | undefined, url: string, relay: AbstractRelay): void {
+  if (!relays || forgetGuarded.has(relay)) return
+  forgetGuarded.add(relay)
+  const r = relay as unknown as { onclose: (() => void) | null }
+  const forget = r.onclose
+  r.onclose = () => { if (relays.get(url) === relay) forget?.() }
+}
+
 /** AUTHs holding each socket open (holdOpen), apart from nostr-tools' own count. */
 const holds = new WeakMap<object, number>()
 
@@ -208,7 +270,7 @@ class Pool extends AbstractSimplePool {
     const pending = super.ensureRelay(url, { ...params, connectionTimeout: params?.connectionTimeout ?? (norm === normalizeURL(CYBERSPACE_RELAY) ? MAX_WAIT_MS : CONNECT_MS) })
     // Registered before the connect's first await, and gone from the pool by the time it fails.
     const relay = this.relays?.get(norm)
-    if (relay) { countPings(relay); guardAuth(relay); guardSend(relay) }
+    if (relay) { countPings(relay); guardAuth(relay); guardSend(relay); guardForget(this.relays, norm, relay); if (this.tracksHung) hearAuthDemands(norm, relay) }
     try {
       const ready = await pending
       // The app's own pool only: the signer's pool (getSignerPool) has sockets
@@ -369,6 +431,99 @@ const authedAs = new Map<string, string>()
 /** Which key signed the AUTH sent on each WebSocket. */
 const signedBy = new WeakMap<object, string>()
 
+/**
+ * Relays that have told this visit "auth-required:" (a CLOSED or an OK
+ * false), by normalized URL: they gate something this client does there.
+ *
+ * Every relay ONOSENDAI talks to sends a NIP-42 challenge the moment a
+ * socket opens, and this client used to sign each one as it came. Most do
+ * not need it: the canonical relay serves reads to anyone and asks for AUTH
+ * only for a NIP-70 event or a gift wrap, and so do most relays in a player's
+ * relay list. The notifications poll, once a minute, opened a fresh socket to
+ * each of the player's read relays (the last one had closed as idle 20 s
+ * after the poll before it), each challenged, and each challenge was one
+ * more request to a remote signer: the owner's Amber was asked for a
+ * "client authentication" about once a minute (the owner, 2026-11-22). A
+ * challenge is now signed only at a relay that gates (relayGates), or for a
+ * write that needs it (a protected event); anywhere else, only when the
+ * relay answers "auth-required:", which every read and write here handles by
+ * signing in and asking once more.
+ */
+const gatesSeen = new Set<string>()
+
+/** A speakeasy: the canonical relay's host with a path (lib/speakeasy.ts), which serves nobody it has not placed. */
+function isSpeakeasyPath(url: string): boolean {
+  try {
+    const u = new URL(url)
+    return u.host === new URL(CYBERSPACE_RELAY).host && u.pathname.replace(/\/+$/, '') !== ''
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Whether this relay is known to need this page signed in for what it does
+ * there: the old relay (it gates every read), a speakeasy, or a relay that
+ * said "auth-required:" this visit. Only these have their challenge signed
+ * up front, without waiting to be refused.
+ */
+function relayGates(url: string): boolean {
+  let key: string
+  try { key = normalizeURL(url) } catch { return false }
+  return gatesSeen.has(key) || isReadFallbackRelay(key) || isSpeakeasyPath(key)
+}
+
+/**
+ * Count this relay as gating (relayGates) without waiting for it to say so:
+ * for a relay that answers a reader it does not know with an empty EOSE
+ * rather than "auth-required:" (the tests' fake relays model one), which no
+ * read here could tell from a relay with nothing.
+ */
+export function noteRelayGates(url: string): void {
+  gatesSeen.add(normalizeURL(url))
+}
+
+/** Forget every relay that said "auth-required:" this visit (tests, between cases). */
+export function forgetRelayGates(): void {
+  gatesSeen.clear()
+}
+
+/** A relay frame refusing for want of AUTH: ["CLOSED", id, "auth-required: ..."] or ["OK", id, false, "auth-required: ..."]. */
+const AUTH_REQUIRED_FRAME = /^\["(?:CLOSED|OK)",\s*"[^"]*",\s*(?:false,\s*)?"auth-required:/
+
+const demandsHeard = new WeakSet<object>()
+
+/**
+ * Note every "auth-required:" this relay's socket sends, before nostr-tools
+ * handles it, so the relay counts as gating (relayGates) from then on: its
+ * next socket signs its challenge as it comes, and saves the refusal.
+ */
+function hearAuthDemands(url: string, relay: AbstractRelay): void {
+  const ws = (relay as unknown as { ws?: { onmessage: ((ev: MessageEvent) => void) | null } }).ws
+  if (!ws || typeof ws !== 'object' || demandsHeard.has(ws)) return
+  demandsHeard.add(ws)
+  const handle = ws.onmessage
+  if (typeof handle !== 'function') return
+  ws.onmessage = (ev: MessageEvent) => {
+    if (typeof ev?.data === 'string' && AUTH_REQUIRED_FRAME.test(ev.data)) gatesSeen.add(url)
+    handle.call(ws, ev)
+  }
+}
+
+/**
+ * How long a socket this page signed in on may sit idle before the pool
+ * closes it: longer than the pool's 20 s, so a read that comes back every
+ * minute or so (the notifications poll, at a relay that gates reads) finds it
+ * still signed in, rather than a new socket and a new AUTH each time.
+ */
+export const SIGNED_IN_IDLE_MS = 5 * 60_000
+
+/** Give this socket the signed-in idle time (nostr-tools reads its own idleTimeout each time it schedules the idle close). */
+function keepSignedIn(socket: unknown): void {
+  const r = socket as { idleTimeout?: number } | undefined
+  if (r && typeof r.idleTimeout === 'number' && r.idleTimeout < SIGNED_IN_IDLE_MS) r.idleTimeout = SIGNED_IN_IDLE_MS
+}
+
 /** The identity on screen, or null where the store is not there (tests of this file alone). */
 function identityNow(): string | null {
   try { return useCyberspace.getState().identity?.pubkey ?? null } catch { return null }
@@ -459,6 +614,8 @@ function authSign(template: EventTemplate): Promise<VerifiedEvent> {
       const me = identityNow()
       if (me && ev.pubkey !== me) { reject(new StaleIdentity()); return }
       if (ws && typeof ws === 'object') signedBy.set(ws, ev.pubkey)
+      // Signed in on: kept open through a short idle spell, so its sign-in is not thrown away (SIGNED_IN_IDLE_MS).
+      keepSignedIn(socket)
       resolve(ev as unknown as VerifiedEvent)
     }
     if (key) inflight.set(k, take)
@@ -539,13 +696,18 @@ export function onAuthChange(fn: (url: string, ok: boolean) => void): () => void
 }
 
 /**
- * Whether this visit's sign-in to a relay failed and stands: the signer
- * refused or ran out of time, or the relay turned the AUTH down. RETRY
- * (retryFailedAuth) clears it on success. For the pinned backup relay's line
- * (hud/RelayTrouble BackupTrouble), whose reads need the sign-in.
+ * Whether this visit's sign-in to a relay failed and stands, at a relay that
+ * gates (relayGates), so its reads wait on the sign-in: the signer refused
+ * or ran out of time, or the relay turned the AUTH down. RETRY
+ * (retryFailedAuth) clears it on success. For the old relay's line
+ * (hud/RelayTrouble BackupTrouble) and the own-chain watch's backoff
+ * (ownWatch.ts). A relay that serves reads to anyone is not held back by a
+ * failed sign-in for a protected event.
  */
 export function signInFailed(url: string): boolean {
-  return authFailed.has(normalizeURL(url))
+  let key: string
+  try { key = normalizeURL(url) } catch { return false }
+  return authFailed.has(key) && relayGates(key)
 }
 
 function noteAuth(url: string, ok: boolean, err?: unknown, bySigner: 'timeout' | 'refused' | null = null): void {
@@ -641,8 +803,9 @@ function untilSettled(relay: AuthRelay, lib: Promise<unknown>): Promise<unknown>
 
 /**
  * The signer nostr-tools answers a challenge with on its own, the moment one
- * comes. A function of its own, so guardAuth knows that call: nobody awaits
- * it, and nostr-tools rethrows its failure, unhandled.
+ * comes, at a relay that gates (relayGates, getPool). A function of its own,
+ * so guardAuth knows that call: nobody awaits it, and nostr-tools rethrows
+ * its failure, unhandled.
  */
 const autoAuthSign = (template: EventTemplate): Promise<VerifiedEvent> => authSign(template)
 
@@ -709,7 +872,7 @@ async function signInLate(url: string, ws: unknown, ev: NostrEvent): Promise<voi
  * socket has gone is dialled again, and its new challenge answered.
  */
 export function retryFailedAuth(only?: string, when: 'back' | 'signer' | 'answered' = 'back'): void {
-  const inUse = new Set(relaySet().map((r) => normalizeURL(r)))
+  const inUse = new Set(readRelaySet().map((r) => normalizeURL(r)))
   let asked = false
   for (const [url, why] of [...authFailed]) {
     const wanted = only
@@ -750,8 +913,8 @@ function reauthAs(pubkey: string): void {
   const stale = new Set([...authedAs].filter(([, as]) => as !== pubkey).map(([url]) => url))
   // And every socket whose AUTH another key signed, whether or not this
   // file's own sign-in settled on it. authedAs is written only there
-  // (settleAuth); nostr-tools answers a challenge by itself the moment it
-  // comes (automaticallyAuth), and a publish or a feed told auth-required
+  // (settleAuth); nostr-tools answers a gating relay's challenge by itself
+  // the moment it comes (automaticallyAuth), and a publish or a feed told auth-required
   // signs in by itself too (onauth). A socket signed in only so, opened by a
   // read that does not sign in first (a count, a feed read, a light publish),
   // stayed signed in as the old key through a switch, and the new identity's
@@ -813,9 +976,11 @@ export function getPool(): AbstractSimplePool {
       // relay auth-gates reads. The registry authenticates first, then asks.
       enableReconnect: false,
     })
-    // Not in SimplePool's constructor options, but the abstract pool honours it:
-    // when a relay proactively sends an AUTH challenge, authenticate with it.
-    ;(pool as unknown as { automaticallyAuth?: () => typeof authSign }).automaticallyAuth = () => autoAuthSign
+    // Not in SimplePool's constructor options, but the abstract pool honours it,
+    // asking on every ensureRelay: a relay's challenge is signed the moment it
+    // comes only where the relay gates what this client does (relayGates).
+    // Anywhere else it waits for an "auth-required:" (gatesSeen).
+    ;(pool as unknown as { automaticallyAuth?: (url: string) => typeof authSign | undefined }).automaticallyAuth = (url) => (relayGates(url) ? autoAuthSign : undefined)
   }
   if (!watchingSigner) watchSigner()
   return pool
@@ -868,16 +1033,23 @@ async function challengeOf(relay: AuthRelay, ms: number): Promise<string | undef
 }
 
 /**
- * Make sure the connection is authenticated before a read or write.
+ * Make sure the connection is authenticated before a read or write, where
+ * that is needed: at a relay that gates what this client does (relayGates),
+ * on a deliberate ask (`retry`), or for a write that needs it (`needed`, a
+ * protected event). Anywhere else nothing is signed up front: a relay that
+ * challenges every socket and serves reads anyway (the canonical relay since
+ * 2026-11-05) costs no request to the signer.
  *
- * The relay now requires NIP-42 auth for everything, and answers an unauthed
- * REQ by closing it — the pool's read path does not retry that, so a query on
- * an unauthed socket comes back empty. So we open the relay, wait for its
- * challenge, and answer it up front. relay.auth caches its own promise per
- * challenge, so calling this before every operation costs nothing once done,
- * and re-auths on its own when a reconnect brings a fresh challenge.
+ * A relay that gates answers an unauthed REQ by closing it, so there we open
+ * the relay, wait for its challenge, and answer it up front. relay.auth caches
+ * its own promise per challenge, so calling this before every operation costs
+ * nothing once done, and re-auths on its own when a reconnect brings a fresh
+ * challenge.
  */
-async function authRelay(url: string, retry = false): Promise<void> {
+async function authRelay(url: string, retry = false, needed = false): Promise<void> {
+  // Not signed in up front where nothing asks for it: the read or write that
+  // follows signs in if the relay answers "auth-required:" (gatesSeen).
+  const signs = retry || needed || relayGates(url)
   const started = Date.now()
   // A relay that never challenged is not dialled for its AUTH alone: the read
   // or write that follows connects. One open with a challenge since is answered.
@@ -887,6 +1059,11 @@ async function authRelay(url: string, retry = false): Promise<void> {
   }
   try {
     const relay = (await getPool().ensureRelay(url)) as unknown as AuthRelay
+    // Still connected first where nothing is signed: on the relay's own
+    // connect time (the canonical relay's MAX_WAIT_MS), which a read's
+    // shorter question then shares, and a connect that hangs is counted as
+    // it always was (noteTimeout).
+    if (!signs) return
     // A relay that never challenged before is not waited for, but one whose
     // challenge came late (a phone's busy first seconds) is still answered:
     // remembered as never challenging, it was never signed in to again, and
@@ -905,8 +1082,9 @@ async function authRelay(url: string, retry = false): Promise<void> {
   }
 }
 
-async function authAll(relays: string[]): Promise<void> {
-  await Promise.allSettled(relays.map((url) => authRelay(url)))
+/** authRelay at each; `needed`: sign in wherever the relay challenges, gating or not (a protected event's publish). */
+async function authAll(relays: string[], needed = false): Promise<void> {
+  await Promise.allSettled(relays.map((url) => authRelay(url, false, needed)))
 }
 
 /** Whether this relay's socket in hand was signed in to by this page. */
@@ -914,9 +1092,27 @@ export function signedIn(url: string): boolean {
   return authedFor.has(normalizeURL(url))
 }
 
-/** The relays every cyberspace read and write fans out across, right now. */
+/**
+ * Whether reads of this relay may still change once this page signs in: the
+ * relay gates (relayGates) and this page has not signed in to it. A relay
+ * that serves reads to anyone owes no sign-in, whatever its challenge says.
+ */
+export function signInOwed(url: string): boolean {
+  return relayGates(url) && !signedIn(url)
+}
+
+/** The relays every cyberspace write fans out across, right now: the canonical relay and the player's own. */
 export function relaySet(): string[] {
   return currentRelays()
+}
+
+/**
+ * The relays a cyberspace read fans out across: relaySet, then the former
+ * canonical relay, read only while it is retired (useRelays
+ * READ_FALLBACK_RELAY). Never a place to publish to.
+ */
+export function readRelaySet(): string[] {
+  return readRelays()
 }
 
 /**
@@ -1028,8 +1224,10 @@ async function publishOnce(listed: string[], event: NostrEvent, onAccept?: (url:
   if (relays.length === 0) return { ok: false, reason: HUNG_REASON }
   // Protected events (the `-` tag) are only accepted from an authenticated
   // author, and the relay does not challenge on the EVENT itself, so we must
-  // already be authed before publishing.
-  await authAll(relays)
+  // already be authed before publishing. Anything else signs in up front only
+  // where the relay gates (relayGates), and elsewhere if it answers
+  // "auth-required:" (nostr-tools signs in and sends it again, onauth below).
+  await authAll(relays, (event.tags ?? []).some((t) => t[0] === '-'))
   await paceSends(relays, event.kind)
   const sends = getPool().publish(relays, event, { maxWait: MAX_WAIT_MS, onauth: authSign })
   // Each relay's acceptance told as it comes (publishFirst), not only once every relay has answered.
@@ -1169,12 +1367,35 @@ export async function publishLight(event: NostrEvent): Promise<boolean> {
   return result?.status === 'fulfilled' && !String(result.value).startsWith(CONNECTION_FAILURE)
 }
 
+/** A movement chain event (events.ts ACTION_KIND), named here so this module keeps importing only types from events. */
+const MOVEMENT_KIND = 3333
+
+/**
+ * A movement chain event (kind 3333) is also copied to the read-only old
+ * relay (useRelays READ_FALLBACK_RELAY), until stage 2: a device of the same
+ * identity still on a build of before stage 1 pins that relay and lets it
+ * pass a move alone, and were it not sent your moves it could sign on a head
+ * this one already moved past, and fork the chain. A copy on the side, best
+ * effort: its answer is never part of the publish's (never "published", never
+ * a holder, never the canonical retry's business), so a move only the old
+ * relay took is a failed publish, as it is with the old relay out of the
+ * picture (review of stage 1). Nothing reads a head from it. Not when the
+ * player lists the old relay themselves: then the publish itself goes there.
+ */
+export function mirrorToOldRelay(event: NostrEvent): void {
+  if (event.kind !== MOVEMENT_KIND || relaySet().some(isReadFallbackRelay)) return
+  void publishMany([READ_FALLBACK_RELAY], event).catch(() => { /* best effort */ })
+}
+
 /**
  * Send one event to every configured relay. With `first`, answered as soon as
  * one relay took it, with every relay's answer to come in `all` (publishFirst).
+ * A move is also copied to the old relay on the side (mirrorToOldRelay).
  */
 export function publish(event: NostrEvent, opts?: { first?: boolean }): Promise<PublishResult & { all?: Promise<PublishResult> }> {
-  return opts?.first ? publishFirst(event) : publishMany(relaySet(), event)
+  if (opts?.first) return publishFirst(event)
+  mirrorToOldRelay(event)
+  return publishMany(relaySet(), event)
 }
 
 /** publishFirst's answer: published once a relay took it, and `all`, every relay's answer, when they are in. */
@@ -1194,6 +1415,7 @@ export function publishFirst(event: NostrEvent): Promise<FirstResult> {
     let answered = false
     // Never rejects: a throw is a failure every relay shares, said as one.
     let all: Promise<PublishResult> = Promise.resolve({ ok: false, reason: 'not sent' })
+    mirrorToOldRelay(event)
     all = publishMany(relaySet(), event, (url) => {
       if (answered) return
       answered = true
@@ -1220,6 +1442,17 @@ interface OpenSub {
 
 /** How askOne times a question; without any, the answer is due by its deadline. */
 interface AskOptions {
+  /**
+   * A read whose empty answer decides something (a chain's holders, "no
+   * chain", the newest version of something of yours): an empty EOSE from a
+   * relay that challenged and is not signed in is not believed, gating or
+   * not, but signed in to and asked again, as every read was before the AUTH
+   * churn fix. A relay that gates without saying "auth-required:" answers a
+   * reader it does not know with nothing, and taken at its word that signs a
+   * spawn or a fork (review of the AUTH churn fix). Not the canonical relay,
+   * whose reads are open to anyone (useRelays DEFAULT_RELAY).
+   */
+  decides?: boolean
   /** The answer is due this long after the REQ is written, not by the deadline (verification of #236, finding 6). */
   answerMs?: number
   /** Called once the REQ is written. */
@@ -1233,6 +1466,17 @@ interface AskOptions {
   /** While events keep coming, wait at least this long after each, up to `capAt` (ReadOptions.stream). */
   quietMs?: number
   capAt?: number
+  /**
+   * Events another relay of the same question already sent, checked, by id
+   * (queryRelays). One this relay sends again is taken from here, neither
+   * parsed nor checked again: the same bags came from all 8 of the owner's
+   * relays on every region scan, each parsed and checked (phone diag of
+   * 2026-11-22). Same id, same content; the copy kept is one that passed.
+   * A relay then counts as sending an event once it names its id, not once
+   * its own copy passed: so not for a read that decides which relays hold
+   * what (ReadOptions `perRelay`, `written`).
+   */
+  shared?: Map<string, NostrEvent>
 }
 
 /**
@@ -1259,11 +1503,26 @@ const NO_ANSWER = 'no answer in time'
  * the rest have this long more, not the whole deadline (TV's tape). A relay
  * a viewer added answering first starts nothing: it may hold none of it.
  */
-export interface ReadOptions { evenHung?: boolean; offThread?: boolean; stream?: { quietMs: number; capMs: number }; graceMs?: number }
+/**
+ * `written`: ask only the relays this client publishes to (relaySet), not
+ * the read-only former canonical relay (useRelays READ_FALLBACK_RELAY), unless
+ * the player listed it themselves. For
+ * a decision about the newest version of something of yours (a bag, an
+ * object): the moves and edits of this version never reach that relay, so
+ * its answer alone could pass for the relays' word on a version it never got.
+ */
+/**
+ * `perRelay`: each relay's answer is only what that relay sent whole and
+ * passed, never a copy another relay of the question sent (AskOptions
+ * `shared`): for a read that decides which relays hold something (the chain's
+ * self-check, its holders, the canonical relay's copy). Also so for
+ * `written` reads and where the checks are deferred.
+ */
+export interface ReadOptions { evenHung?: boolean; offThread?: boolean; stream?: { quietMs: number; capMs: number }; graceMs?: number; written?: boolean; perRelay?: boolean }
 
 /** `filter` may be several: one REQ, one EOSE, the union of their matches (NIP-01). */
 async function askOne(url: string, filter: Filter | Filter[], deadline: number, opts: AskOptions = {}): Promise<RelayAnswer> {
-  const { answerMs, onSent, stop, onEvent, deferChecks, quietMs, capAt } = opts
+  const { answerMs, onSent, stop, onEvent, deferChecks, quietMs, capAt, shared, decides } = opts
   const remaining = (): number => Math.max(0, deadline - Date.now())
   const late = (events: NostrEvent[] = []): RelayAnswer => ({ url, outcome: 'unreachable', reason: NO_ANSWER, events })
   if (stop?.aborted) return late()
@@ -1328,13 +1587,23 @@ async function askOne(url: string, filter: Filter | Filter[], deadline: number, 
       // False once this subscription is closed to sign in and ask again: its close is not the answer.
       let current = true
       try {
+        // One event, kept for this relay's answer: it landed here, or another relay of the question had it checked already.
+        const take = (e: NostrEvent): void => {
+          if (settled || events.has(e.id)) return
+          events.set(e.id, e)
+          stretch()
+          onEvent?.(e)
+        }
         sub = relay.subscribe(Array.isArray(filter) ? filter : [filter], {
+          // nostr-tools reads the id before parsing: one another relay of
+          // this question sent and that passed is taken from `shared` here
+          // (receivedEvent) and not parsed or checked again.
           ...(deferChecks ? { alreadyHaveEvent: deferCheck } : {}),
+          ...(shared && !deferChecks ? { alreadyHaveEvent: (id: string) => shared.has(id), receivedEvent: (_r: unknown, id: string) => { const had = shared.get(id); if (had) take(had) } } : {}),
           onevent: (e) => {
-            if (settled || events.has(e.id)) return
-            events.set(e.id, e as NostrEvent)
-            stretch()
-            onEvent?.(e as NostrEvent)
+            // Checked as it landed (the pool's verifyEvent): the others may take it.
+            shared?.set(e.id, e as NostrEvent)
+            take(e as NostrEvent)
           },
           oneose: () => {
             // A challenge this read was not signed in with, and nothing sent:
@@ -1345,7 +1614,9 @@ async function askOne(url: string, filter: Filter | Filter[], deadline: number, 
             // signer the cause it is refused as AUTH_STALLED. A relay that
             // turned the AUTH down itself answers as on v2 (review of #570).
             const challenge = (relay as unknown as AuthRelay).challenge
-            if (events.size === 0 && challenge && authedFor.get(url) !== challenge && !authTried && !relayTurnedDown(relay as unknown as AuthRelay, url)) {
+            // Only at a relay known to gate (relayGates), or for a read whose empty answer decides something
+            // (`decides`): every relay challenges, and most serve reads to anyone.
+            if (events.size === 0 && challenge && (relayGates(url) || (decides && url !== normalizeURL(CYBERSPACE_RELAY))) && authedFor.get(url) !== challenge && !authTried && !relayTurnedDown(relay as unknown as AuthRelay, url)) {
               authTried = true
               signingIn = true
               current = false
@@ -1415,8 +1686,12 @@ async function queryRelays(relays: string[], filter: Filter, maxWait = MAX_WAIT_
   // more, then end as no answer in time with what they sent. Ended early, none hung.
   const early = new AbortController()
   const pinned = PINNED_RELAYS.map((r) => normalizeURL(r))
+  // What one relay sent and passed, for the others to take without parsing it
+  // again. Not where the asker checks the signatures afterwards (deferChecks):
+  // nothing has passed yet when it lands.
+  const shared = new Map<string, NostrEvent>()
   const answers = await Promise.all(urls.map((url): Promise<RelayAnswer> => asked.includes(url)
-    ? askOne(url, filter, deadline, { deferChecks: opts.deferChecks, stop: early.signal, ...(opts.stream ? { quietMs: opts.stream.quietMs, capAt: Date.now() + opts.stream.capMs } : {}) }).then((a) => {
+    ? askOne(url, filter, deadline, { decides: !!(opts.perRelay || opts.written), deferChecks: opts.deferChecks, shared: opts.deferChecks || opts.written || opts.perRelay ? undefined : shared, stop: early.signal, ...(opts.stream ? { quietMs: opts.stream.quietMs, capAt: Date.now() + opts.stream.capMs } : {}) }).then((a) => {
       if (opts.graceMs !== undefined && a.outcome === 'answered' && pinned.includes(url)) setTimeout(() => early.abort(), opts.graceMs)
       opts.onAnswer?.(a)
       return a
@@ -1446,10 +1721,10 @@ async function collect(relays: string[], filter: Filter, maxWait = MAX_WAIT_MS, 
  * `evenHung` asks a hung relay too, either way.
  */
 export async function query(filter: Filter, opts: ReadOptions = {}): Promise<NostrEvent[]> {
-  if (!opts.offThread) return collect(relaySet(), filter, MAX_WAIT_MS, opts)
+  if (!opts.offThread) return collect(readRelaySet(), filter, MAX_WAIT_MS, opts)
   // Each relay's answer is checked the moment it is in, not after the slowest one.
   const checks = answerChecks<RelayAnswer>()
-  return mergeAnswers(await checks.kept(await queryRelays(relaySet(), filter, MAX_WAIT_MS, { evenHung: opts.evenHung, deferChecks: true, onAnswer: checks.onAnswer })))
+  return mergeAnswers(await checks.kept(await queryRelays(readRelaySet(), filter, MAX_WAIT_MS, { evenHung: opts.evenHung, perRelay: opts.perRelay, written: opts.written, deferChecks: true, onAnswer: checks.onAnswer })))
 }
 
 /**
@@ -1458,7 +1733,7 @@ export async function query(filter: Filter, opts: ReadOptions = {}): Promise<Nos
  * answer" lead to different actions.
  */
 export function queryEach(filter: Filter, maxWait = MAX_WAIT_MS, opts: ReadOptions = {}): Promise<RelayAnswer[]> {
-  return queryRelays(relaySet(), filter, maxWait, opts)
+  return queryRelays(opts.written ? relaySet() : readRelaySet(), filter, maxWait, opts)
 }
 
 /**
@@ -1466,8 +1741,8 @@ export function queryEach(filter: Filter, maxWait = MAX_WAIT_MS, opts: ReadOptio
  * own. For a read that must hear from one particular relay, such as the
  * canonical relay confirming a chain's head before a move is signed.
  */
-export function queryEachAt(relays: string[], filter: Filter, maxWait = MAX_WAIT_MS): Promise<RelayAnswer[]> {
-  return queryRelays(relays, filter, maxWait)
+export function queryEachAt(relays: string[], filter: Filter, maxWait = MAX_WAIT_MS, opts: ReadOptions = {}): Promise<RelayAnswer[]> {
+  return queryRelays(relays, filter, maxWait, opts)
 }
 
 /**
@@ -1657,7 +1932,7 @@ export function queryEachSettled(
     const enough = (): boolean => answers.size === urls.length || (primaryAnswered && [...held].every((url) => answers.has(url)))
     for (const url of urls) {
       const left = (): number => Math.max(0, deadline - Date.now())
-      const ask: AskOptions = held.has(url) ? { answerMs: maxWait, onSent, stop: done.signal } : { answerMs: maxWait, onSent }
+      const ask: AskOptions = held.has(url) ? { answerMs: maxWait, onSent, stop: done.signal, decides: true } : { answerMs: maxWait, onSent, decides: true }
       // Each relay authenticates inside its own time, so one that is slow to
       // connect or whose signer is slow to answer holds nobody else.
       void Promise.race([authRelay(url), new Promise<void>((r) => setTimeout(r, left()))])
@@ -1753,9 +2028,11 @@ export async function queryAny(relays: string[], filter: Filter, maxWait?: numbe
  */
 const liveTransport: Transport = {
   open: async (filter, handlers, onClose) => {
-    const relays = relaySet()
-    // Authenticate first; a live subscription opened on an unauthed socket is
-    // closed by the relay before it delivers anything.
+    const relays = readRelaySet()
+    // Authenticate first where the relay gates; a live subscription opened on
+    // an unauthed socket there is closed by the relay before it delivers
+    // anything. Anywhere else it is signed in only when it says
+    // "auth-required:" (onauth below).
     await authAll(skipHung(relays))
     const sub = getPool().subscribe(relays, filter, {
       onevent: handlers.onEvent,
@@ -1771,7 +2048,7 @@ const liveTransport: Transport = {
 
 // While the canonical relay's sign-in has failed, a feed it closed waits for
 // the sign-in (onCanonicalSignIn, below) rather than asking again every 30 s.
-const live = new LiveRegistry(liveTransport, () => authFailed.has(normalizeURL(CYBERSPACE_RELAY)))
+const live = new LiveRegistry(liveTransport, () => signInFailed(CYBERSPACE_RELAY))
 
 // A feed the canonical relay closed for want of AUTH waits out a backoff of up
 // to 30 s. Signed in late, the socket then sat empty, the pool closed it as
@@ -1798,7 +2075,7 @@ export function subscribe(
  * an alt-tab on a desktop is not an absence, so the caller says how long.
  */
 export function resumeLive(): void {
-  live.resumeAll(() => dropRelays(relaySet()))
+  live.resumeAll(() => dropRelays(readRelaySet()))
   notifyResume()
 }
 
@@ -1863,7 +2140,7 @@ export async function probeLiveness(): Promise<'alive' | 'dead' | 'skipped'> {
   // An AUTH the relay itself failed (a slow OK) does not stop the probe: a
   // half-open socket would then go unnoticed for the visit (review of #600).
   const canon = normalizeURL(CYBERSPACE_RELAY)
-  if (authPending(canon) || authFailed.get(canon)?.bySigner) return 'skipped'
+  if (authPending(canon) || (authFailed.get(canon)?.bySigner && relayGates(canon))) return 'skipped'
   return probeNow(PROBE_TIMEOUT_MS)
 }
 
@@ -1899,17 +2176,19 @@ export const RETURN_PROBE_MS = 3_000
  * Back from a real absence: the sockets in hand may be half-open, or fine.
  * Replaced unasked, every return of 15 s or more was a new canonical socket,
  * so a new AUTH and one more prompt on a bunker, with nothing wrong (the
- * real-bunker run, 2026-11-04). A canonical socket signed in now is asked
- * for nothing first and kept if it answers within RETURN_PROBE_MS; one that
- * does not is replaced as before, a few seconds later. One not signed in
- * (its AUTH failed or is waiting) is replaced at once, as before, so the
- * return can sign in afresh.
+ * real-bunker run, 2026-11-04). A canonical socket signed in now, or one the
+ * canonical relay does not need signed in (relayGates), is asked for nothing
+ * first and kept if it answers within RETURN_PROBE_MS; one that does not is
+ * replaced as before, a few seconds later. One that needs a sign-in it does
+ * not have (its AUTH failed or is waiting) is replaced at once, as before, so
+ * the return can sign in afresh.
  */
 export function resumeIfDead(): void {
   if (probing) return
   const canon = normalizeURL(CYBERSPACE_RELAY)
   const socket = socketOf(canon)
-  const signedInNow = !!socket?.connected && !!socket.challenge && authedFor.get(canon) === socket.challenge
+  // Signed in as far as it needs to be: signed in, or the canonical relay does not gate (relayGates).
+  const signedInNow = !!socket?.connected && (!relayGates(canon) || (!!socket.challenge && authedFor.get(canon) === socket.challenge))
   if (!signedInNow || !connected() || authPending(canon) || authFailed.has(canon)) { resumeLive(); return }
   // Kept: the catch-up reads an absence calls for still run, over it.
   void probeNow(RETURN_PROBE_MS).then((r) => { if (r === 'alive') notifyResume() })

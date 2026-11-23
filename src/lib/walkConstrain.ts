@@ -693,12 +693,25 @@ export function segmentHit(tris: Float64Array, o: readonly [number, number, numb
   return best
 }
 
+/** triangleDistance's nearest point, which it does not keep. */
+const closestScratch = [0, 0, 0]
+
 /** How far `p` is from triangle `n` of `tris` (Ericson, Real-Time Collision Detection 5.1.5). */
 export function triangleDistance(tris: Float64Array, n: number, p: readonly number[]): number {
+  return triangleClosest(tris, n, p, closestScratch)
+}
+
+/**
+ * The point of triangle `n` of `tris` nearest `p`, into `out`, and how far
+ * `p` is from it (Ericson, Real-Time Collision Detection 5.1.5): which way
+ * is away from the face, for the WALK eye kept off it (store/walkWalls.ts
+ * eyePlace).
+ */
+export function triangleClosest(tris: Float64Array, n: number, p: readonly number[], out: number[]): number {
   const ax = tris[n], ay = tris[n + 1], az = tris[n + 2]
   const abx = tris[n + 3] - ax, aby = tris[n + 4] - ay, abz = tris[n + 5] - az
   const acx = tris[n + 6] - ax, acy = tris[n + 7] - ay, acz = tris[n + 8] - az
-  const at = (x: number, y: number, z: number): number => Math.hypot(p[0] - x, p[1] - y, p[2] - z)
+  const at = (x: number, y: number, z: number): number => { out[0] = x; out[1] = y; out[2] = z; return Math.hypot(p[0] - x, p[1] - y, p[2] - z) }
   const apx = p[0] - ax, apy = p[1] - ay, apz = p[2] - az
   const d1 = abx * apx + aby * apy + abz * apz, d2 = acx * apx + acy * apy + acz * apz
   if (d1 <= 0 && d2 <= 0) return at(ax, ay, az)

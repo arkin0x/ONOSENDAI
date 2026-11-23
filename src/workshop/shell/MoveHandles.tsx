@@ -13,17 +13,26 @@
  * every frame it draws (benchAxes reportHandles); they are moved here without
  * React, as the compass labels are.
  *
+ * Their middle is BY SIZE (owner, 2026-11-23: "move the selection by units
+ * of the selection itself"): a chip on the held middle, where the dot was,
+ * that switches every move (drag, tap, the keys; X) between the grid step and
+ * the held size on each axis, which its second line prints ("16 × 16 × 16",
+ * in grid units, the step a move takes either way). On the middle it turns
+ * and travels with the handles and never meets a knob: a knob's edge stays
+ * 50px out, and the chip is 84 by 44 (its corner reaches 47px).
+ *
  * In SET EYE (AVATAR's FIRST-PERSON EYE; shell/EyeBar) the same handles move
  * the eye: the middle is an eye marker, a cyan ring with an eye, and a dashed
  * line runs from it to the model's 0, 0, 0, labelled TODAY'S EYE, the eye
  * every avatar had before it could choose one.
  */
 
-import { useEffect, useRef } from 'react'
-import { Eye } from 'lucide-react'
-import { TICKS_PER_UNIT } from 'sno-core/shards'
+import { useEffect, useMemo, useRef } from 'react'
+import { Eye, Ruler } from 'lucide-react'
+import { TICKS_PER_UNIT, unitsLabel } from 'sno-core/shards'
 import { dragHistory } from '../../lib/opacityStep'
 import { useWorkshop } from '../../store/useWorkshop'
+import { useBenchResolved } from '../../store/heldSize'
 import { handleSteps, setHandleSink, type HandleFrame } from '../benchAxes'
 import { slopFor } from '../deadZone'
 
@@ -48,11 +57,59 @@ export function handleAt(frame: HandleFrame, axis: 0 | 1 | 2, reach = HANDLE_REA
   return [frame.center[0] + (dx / len) * reach, frame.center[1] + (dy / len) * reach]
 }
 
+/** One step's length on `axis`, in ticks: the snap's for the eye; for the selection, its own size there with BY SIZE on (useWorkshop moveStep). */
+function stepOf(axis: 0 | 1 | 2): number {
+  const w = useWorkshop.getState()
+  return w.eyeEdit ? w.step() : w.moveStep(axis)
+}
+
 /** One move of what the handles hold: the eye in SET EYE, else the selection. */
 function moveHeld(axis: 0 | 1 | 2, delta: number): void {
   const w = useWorkshop.getState()
   if (w.eyeEdit) w.moveEye(axis, delta)
   else w.moveSelected(axis, delta)
+}
+
+/** BY SIZE's second line: the step a move takes on X, Y and Z, in grid units ("16 × 16 × 16", "1/2 × 1/2 × 1/2"). Pure on the store's moveStep. */
+export function stepLine(moveStep: (axis: 0 | 1 | 2) => number): string {
+  return ([0, 1, 2] as const).map((a) => unitsLabel(moveStep(a))).join(' × ')
+}
+
+/**
+ * BY SIZE, the handles' middle: tap (or X) to step by what is held's own
+ * size. Lit, it says so in the accent fill every lit chip has; its size and
+ * its two lines never change, only what they say.
+ */
+function BySize({ hub }: { hub: React.Ref<HTMLButtonElement> }): JSX.Element {
+  const on = useWorkshop((s) => s.stepBySize)
+  // Measured again only when what it measures changes (a big held piece is many points), and only while something is held.
+  const shard = useWorkshop((s) => s.current())
+  const selection = useWorkshop((s) => s.selection)
+  const partSel = useWorkshop((s) => s.partSel)
+  const division = useWorkshop((s) => s.division)
+  const resolved = useBenchResolved((s) => s.resolved)
+  const steps = useMemo(() => (selection.length || partSel.length ? stepLine(useWorkshop.getState().moveStep) : ''), [shard, selection, partSel, division, on, resolved])
+  return (
+    <button
+      ref={hub}
+      className={`ws__handle-hub ws__bysize${on ? ' is-on' : ''}`}
+      aria-pressed={on}
+      aria-label={`By size. A move steps ${steps}.`}
+      title={on ? `BY SIZE (X): a move steps by the size of what you hold: ${steps}` : `BY SIZE (X): a move steps by the grid: ${steps}. On: by the size of what you hold`}
+      onPointerDown={(e) => e.stopPropagation()}
+      onClick={() => { const w = useWorkshop.getState(); w.setStepBySize(!w.stepBySize) }}
+      // Enter and Space here are this switch's, not the bench's (Enter there is FILL).
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') e.nativeEvent.stopPropagation() }}
+      onContextMenu={(e) => e.preventDefault()}
+    >
+      <span className="ws__bysize-top">
+        <Ruler size={12} strokeWidth={2.25} aria-hidden />
+        <b>BY SIZE</b>
+        <kbd className="ws__key ws__bysize-key" aria-hidden>X</kbd>
+      </span>
+      <span className="ws__bysize-step">{steps}</span>
+    </button>
+  )
 }
 
 export function MoveHandles(): JSX.Element {
@@ -62,10 +119,11 @@ export function MoveHandles(): JSX.Element {
   const origin = useRef<HTMLSpanElement>(null)
   const lines = useRef<Array<SVGLineElement | null>>([])
   const knobs = useRef<Array<HTMLButtonElement | null>>([])
-  const hub = useRef<HTMLSpanElement>(null)
+  const hub = useRef<HTMLElement | null>(null)
+  const hubRef = (el: HTMLElement | null): void => { hub.current = el }
   const frame = useRef<HandleFrame | null>(null)
   // The drag in flight: which axis, where it began, the steps it has made, and the history to fold it into.
-  const drag = useRef<{ axis: 0 | 1 | 2; id: number; x: number; y: number; perUnit: [number, number]; steps: number; travel: number; past: ReturnType<typeof useWorkshop.getState>['past']; before: ReturnType<ReturnType<typeof useWorkshop.getState>['current']>; shardId: string | null; slop: number } | null>(null)
+  const drag = useRef<{ axis: 0 | 1 | 2; id: number; x: number; y: number; perUnit: [number, number]; steps: number; travel: number; past: ReturnType<typeof useWorkshop.getState>['past']; before: ReturnType<ReturnType<typeof useWorkshop.getState>['current']>; shardId: string | null; slop: number; step: number } | null>(null)
 
   useEffect(() => {
     const draw = (f: HandleFrame | null): void => {
@@ -110,7 +168,7 @@ export function MoveHandles(): JSX.Element {
     e.stopPropagation()
     try { e.currentTarget.setPointerCapture(e.pointerId) } catch { /* followed by the element anyway */ }
     const st = useWorkshop.getState()
-    drag.current = { axis, id: e.pointerId, x: e.clientX, y: e.clientY, perUnit: f.perUnit[axis], steps: 0, travel: 0, past: st.past, before: st.current(), shardId: st.currentId, slop: slopFor(e.pointerType) }
+    drag.current = { axis, id: e.pointerId, x: e.clientX, y: e.clientY, perUnit: f.perUnit[axis], steps: 0, travel: 0, past: st.past, before: st.current(), shardId: st.currentId, slop: slopFor(e.pointerType), step: stepOf(axis) }
   }
   const move = (e: React.PointerEvent<HTMLButtonElement>): void => {
     const d = drag.current
@@ -119,8 +177,8 @@ export function MoveHandles(): JSX.Element {
     const dy = e.clientY - d.y
     d.travel = Math.max(d.travel, Math.hypot(dx, dy))
     if (d.travel < d.slop) return
-    const w = useWorkshop.getState()
-    const step = w.step()
+    // Measured once as the drag began: the count of steps stays in one length, and a big piece is not measured again every move.
+    const step = d.step
     const steps = handleSteps(dx, dy, d.perUnit, TICKS_PER_UNIT, step)
     if (steps !== d.steps) {
       moveHeld(d.axis, (steps - d.steps) * step)
@@ -131,9 +189,8 @@ export function MoveHandles(): JSX.Element {
     const d = drag.current
     if (!d || d.id !== e.pointerId) return
     drag.current = null
-    const w = useWorkshop.getState()
     // A tap: one step the handle's way.
-    if (d.travel < d.slop && e.type === 'pointerup') { moveHeld(d.axis, w.step()); return }
+    if (d.travel < d.slop && e.type === 'pointerup') { moveHeld(d.axis, stepOf(d.axis)); return }
     // A drag: every step it made, one UNDO, as an OPACITY drag is (shardRows),
     // a full history too: the history keeps its cap, so its length tells nothing.
     const now = useWorkshop.getState()
@@ -154,8 +211,8 @@ export function MoveHandles(): JSX.Element {
         </span>
       )}
       {eyeEdit
-        ? <span className="ws__handle-hub ws__handle-hub--eye" ref={hub} aria-hidden><Eye size={16} strokeWidth={2.25} /><b>EYE</b></span>
-        : <span className="ws__handle-hub" ref={hub} aria-hidden />}
+        ? <span className="ws__handle-hub ws__handle-hub--eye" ref={hubRef} aria-hidden><Eye size={16} strokeWidth={2.25} /><b>EYE</b></span>
+        : <BySize hub={hubRef} />}
       {AXES.map(({ axis, label, cls }) => (
         <button
           key={cls}
@@ -169,7 +226,7 @@ export function MoveHandles(): JSX.Element {
           onPointerCancel={up}
           onContextMenu={(e) => e.preventDefault()}
           // From the keyboard: one step, as a tap.
-          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); moveHeld(axis, useWorkshop.getState().step()) } }}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.nativeEvent.stopPropagation(); moveHeld(axis, stepOf(axis)) } }}
         >
           <span>{label}</span>
         </button>

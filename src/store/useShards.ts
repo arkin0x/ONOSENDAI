@@ -107,7 +107,8 @@ import { dnaResolver } from '../lib/seeds/seedSources'
 import { seedSnapOffered } from '../lib/seeds/orientation'
 import { seedItemOf } from '../lib/seeds/seedItem'
 import { SEALED_KIND, freshSealedD, isSealedRef, refOf, rememberSealed, utf8Bytes, retractSealed, sealedChanges, sealedEventOf, sealedItemOf, sealedRefParts, sealedTemplate, sendBagWithSealed, type OutgoingSealed } from '../lib/sealed'
-import { loadLedger, publishState, retractionTemplate, shardFingerprint, type Ledger } from '../lib/published'
+import { loadLedger, retractionTemplate, type Ledger } from '../lib/published'
+import { sealedAsPiece } from '../lib/partForm'
 import { audioInnerTemplate, fadeAt, type AudioItem } from '../lib/audioItem'
 import { resealCopy } from '../lib/audioFile'
 import { movableIntoRoom, openWithSecret, openWithSigner, openerFor, placeOf as eventPlace, plaintextWithSecret, readContents, resealWithout, revealedIn, sealEntries, sealedInside, sealerOf, sealsLooksFor, type ChestEntry, type OpeningKey } from '../lib/chests'
@@ -119,15 +120,15 @@ import { useInventory } from './useInventory'
 import { useShardFolders } from './useShardFolders'
 import { creditOf, useWorkshop } from './useWorkshop'
 import { deletionFilters, isDeleted, type Credit, type FeedObject } from 'sno-core/feed'
-import { bagSizeRefusal, signedBytes } from '../lib/bagSize'
+import { BAG_SAFE_BYTES, bagSizeRefusal, signedBytes } from '../lib/bagSize'
 import { addsEntries, bagBytes, heldBy, planUnderCap, referenceFor, sealFor, withReferences, type FitCandidate } from '../lib/bagFit'
 import { ROOM_BAG_SETTINGS, inRoom, innermostRoomAt, newDoorSecret, roomDoorAt, roomEntries, roomKey, roomLookupId, roomOf, type OwnDoor } from '../lib/doors'
 import { commitDoorSecret, doorSecret, keepDoorSecret } from './doorSecrets'
-import { entriesIn, isListed, noteStored, onHiddenChange, reloadLocalView, saveRows, UNCLAIMED } from './hiddenStorage'
+import { entriesIn, isListed, noteStored, onHiddenChange, reloadLocalView, saveRows, saveRowsResult, UNCLAIMED, type SaveResult, type SaveTrouble } from './hiddenStorage'
 import { builtInLook, builtInLookTags, doorHeightOf, isDoor, keptInChest, lookOf, lookTags, lookTagsOf, posedLook, posedWrapper, setSealedLookFetch, wireLook, wireOpenLook, type LookName, type LookPose } from '../lib/looks'
 import { openSealedLookPayload, sealLookTags, sealedLookAddresses, sealedLookLimit } from '../lib/sealedLooks'
-import { dropPiece, forgetPieceKeys, notePieceKey, primePiece, notePieceKeys, pieceAddresses, pieceWasOpened, setLocalPieces } from '../lib/pieceKeys'
-import { openOnePiece, pieceRefusal, planPieces, planPiecesNow, sealedPiecesOf, type PlannedPiece } from '../lib/pieces'
+import { dropPiece, forgetPieceKeys, notePieceKey, primePiece, notePieceKeys, pieceAddresses, setLocalPieces } from '../lib/pieceKeys'
+import { carryPiecesInline, openOnePiece, pieceRefusal, planPieces, planPiecesNow, sealedPiecesOf, type PlannedPiece } from '../lib/pieces'
 import { useCeremony } from './useCeremony'
 import { useToast } from './useToast'
 import type { ShardModel } from 'sno-core/shards'
@@ -141,6 +142,7 @@ import { hidesThing, type Muted } from '../lib/muteList'
 import { useMutes } from './useMutes'
 import { asShown, hintPrefsOf, loadHintPrefs, saveHintPrefs, withHintPrefs } from './deployHintPrefs'
 import { CONSTRAIN_DEFAULT, authoredConstrain, authoredConstrainOf, withAuthoredConstrain, withConstrain, type Constrain } from '../lib/walkConstrain'
+import { hideWholeRefusal } from '../lib/shardFullness'
 import { kvGet, kvSet } from '../lib/kvStore'
 
 /** A workshop model's WALK setting as it publishes, by id; the default for one that never chose or is not there (DECK-0003 §1.12). */
@@ -383,14 +385,35 @@ function workshopPiece(address: string, me: string, ledger: Ledger): Record<stri
   const a = parseAddress(address)
   if (!a || a.kind !== OBJECT_KIND || a.pubkey !== me) return undefined
   const s = useWorkshop.getState().shards.find((x) => x.id === a.d)
-  if (!s || (s.vertices.length === 0 && (s.parts?.length ?? 0) === 0)) return undefined
-  const rec = ledger[s.id]
-  if (rec && rec.pubkey !== me) return undefined
-  // Published under your key and unedited since: it stays a plain link to the
-  // public object, which every finder fetches (owner, 2026-11-22). Edited
-  // since, the public one is stale: the hide seals the workshop's.
-  if (rec && publishState(rec, shardFingerprint(s), me) === 'published') return undefined
+  // Published under your key and unedited since, it stays a plain link to the
+  // public object, which every finder fetches (owner, 2026-11-22); edited since,
+  // the public one is stale and the hide seals the workshop's. The rule the
+  // workshop's LINK and SEALED marks show (lib/partForm.ts sealedAsPiece).
+  if (!s || !sealedAsPiece(s, ledger, me)) return undefined
   return toPayload(withAuthoredConstrain(s)) as unknown as Record<string, unknown>
+}
+
+/**
+ * A shard as a chest carries it: the pieces it places from your workshop inside
+ * it, in its objects table (lib/pieces.ts carriedInline), sealed with the chest.
+ * What the composer measures and what PUT IN CHEST and SEAL write.
+ */
+export function chestModelOf(model: ShardModel, me: string | null | undefined): ShardModel {
+  if (!me) return model
+  const ledger = loadLedger()
+  return carryPiecesInline(model, me, (address) => workshopPiece(address, me, ledger))
+}
+
+/**
+ * Why a shard cannot go in a chest as it carries its pieces, or null: the
+ * format refuses it, or, carried inline, it is too large for one event (a
+ * split build exists because its whole was too big for one).
+ */
+export function chestShardRefusal(carried: ShardModel, template: EventTemplate): string | null {
+  const refusal = shardRefusal(carried)
+  if (refusal) return refusal
+  const bytes = signedBytes(template)
+  return bytes > BAG_SAFE_BYTES ? `${carried.name} is too big to carry inside a chest with its parts (${bytes.toLocaleString('en-US')} of ${BAG_SAFE_BYTES.toLocaleString('en-US')} bytes). Hide it on its own instead.` : null
 }
 
 /** A piece of a split build signed here and not sent yet (a row's pieceObjects), by its address. */
@@ -1077,7 +1100,7 @@ function keptLineage(d: Pick<MyDeployment, 'inner' | 'ref' | 'lineage'>): { line
 /** Why an EDIT stopped: the shard it moves is no longer among your deployments here. */
 export const EDIT_GONE = 'That shard is no longer among what this device hid, so there is nothing to move.'
 /** A move of a split build whose piece no relay answered for: it stays where it is (lib/pieces.ts). */
-export const PIECE_NOT_FETCHED = "A piece of this shard could not be fetched from your relays, so it was not moved. Try again when a relay answers."
+export const PIECE_NOT_FETCHED = "Part of this shard could not be found on your relays, so it was not moved. Try again when a relay answers. If you deleted something it places, place it again first."
 /**
  * Your rows after a scan claimed `claimed` among them: of an item carried
  * inline that a scan read in more than one version (its hider moved it,
@@ -1473,6 +1496,13 @@ export interface BagMeter {
   fitted: boolean
   /** The refusal the deploy would give, or null when it fits. */
   refusal: string | null
+  /**
+   * Why the shard itself cannot be hidden whole, or null: going by reference it
+   * is one sealed object, and that object would pass what one may be
+   * (lib/shardFullness.ts hideWholeRefusal). The deploy refuses it before
+   * anything is signed; the bar says so first.
+   */
+  objectRefusal: string | null
 }
 
 /**
@@ -1527,14 +1557,17 @@ export function deployBagMeter(rows: readonly MyDeployment[], planned: NostrEven
   if (large) {
     const es = mergeEntries(before, [['a', `${OBJECT_KIND}:${o.owner}:${'0'.repeat(32)}`, hint, at]])
     const fit = planUnderCap(es, seals, measured, replaced, adds)
-    return { bytes: measureHeld(withReferences(es, fit.convert)), byReference: true, fitted: false, refusal: fit.refusal }
+    // A MOVE of an object already hidden is not held to it, as the deploy does not hold it.
+    const objectRefusal = o.edit ? null : hideWholeRefusal(new TextEncoder().encode(planned.content).length)
+    return { bytes: measureHeld(withReferences(es, fit.convert)), byReference: true, fitted: false, refusal: fit.refusal, objectRefusal }
   }
   const es = mergeEntries(before, [planned])
   const candidate = referenceFor(planned, o.owner, '0'.repeat(32), hint)
   const plan = planUnderCap(es, [...(candidate ? [candidate] : []), ...seals], measured, replaced, adds)
   const written = withReferences(es, plan.convert)
   const byReference = !!candidate && plan.convert.has(candidate.key)
-  return { bytes: measureHeld(written), byReference, fitted: byReference, refusal: plan.refusal }
+  // Inline, or by reference only because the bag is full: under the reference threshold, so far under one object's limit.
+  return { bytes: measureHeld(written), byReference, fitted: byReference, refusal: plan.refusal, objectRefusal: null }
 }
 
 /** The realistic ceiling for interactive scanning (spec §7.3 says 0..16). */
@@ -2054,13 +2087,43 @@ let deployWaiting: DeployPending | null = null
 /** What this list leaves out but must stay stored: rows no list shows. */
 const notShown = (d: MyDeployment | null): boolean => !isListed(d) || unreadable(d)
 
-/** Whether the list reached disk. Only what changed is written. When it did not, a toast says so: it shows whatever is open. */
+/** What a scan brings back, said after every reason a record was not kept. */
+const SCAN_BRINGS_IT_BACK = 'If it went LIVE, a scan where you hid it brings it back.'
+/**
+ * Why the record of what you hid was not kept, in plain words (hiddenStorage
+ * SaveTrouble). "No room" only when the browser said so: the owner was told his
+ * phone had no room while it used 327 MB of 2 GB (2026-11-22).
+ */
+export const NOT_SAVED_WHY: Record<SaveTrouble, string> = {
+  full: `This device has no room left for the record of what you hid. ${SCAN_BRINGS_IT_BACK}`,
+  fallback: `Storage did not open when this page loaded, and the small backup used instead is full. Reload the page to try storage again. ${SCAN_BRINGS_IT_BACK}`,
+  slow: `This device's storage did not answer in time, so the record of what you hid is not kept yet. This page tries again with your next change. ${SCAN_BRINGS_IT_BACK}`,
+  refused: `The browser would not keep the record of what you hid. This page tries again with your next change. ${SCAN_BRINGS_IT_BACK}`,
+}
+
+/**
+ * A save that did not land, told once it is known not to: a write that was only
+ * slow and then landed says nothing. What you hid is on the relays if it went
+ * LIVE, but this device forgets it on a reload: say so, rather than lose your
+ * own record in silence. It shows whatever is open.
+ */
+async function sayNotSaved(r: SaveResult, owner: string): Promise<void> {
+  let trouble = r.trouble ?? 'refused'
+  if (r.late) {
+    const late = await r.late
+    if (late === null) return
+    // Up to a minute later: not over another identity's screen.
+    if (useCyberspace.getState().identity.pubkey !== owner) return
+    trouble = late
+  }
+  useToast.getState().show({ label: 'NOT SAVED ON THIS DEVICE', meta: NOT_SAVED_WHY[trouble], mark: 'build' })
+}
+
+/** Whether the list reached disk. Only what changed is written. When it did not, a toast says why (sayNotSaved). */
 function saveMine(mine: MyDeployment[], owner = useCyberspace.getState().identity.pubkey): Promise<boolean> {
-  return saveRows(owner, sealedStateOf(mine), storedRow, notShown).then((ok) => {
-    // What you hid is on the relays if it went LIVE, but this device forgets it
-    // on a reload: say so, rather than lose your own record in silence.
-    if (!ok) useToast.getState().show({ label: 'NOT SAVED ON THIS DEVICE', meta: 'This device has no room left for the record of what you hid. If it went LIVE, a scan where you hid it brings it back.', mark: 'build' })
-    return ok
+  return saveRowsResult(owner, sealedStateOf(mine), storedRow, notShown).then((r) => {
+    if (!r.ok) void sayNotSaved(r, owner)
+    return r.ok
   })
 }
 
@@ -2519,7 +2582,7 @@ export const useShards = create<ShardsState>((set, get) => {
    */
   async function addressStillThis(object: NostrEvent): Promise<'this' | 'newer' | 'silent'> {
     try {
-      const answers = (await queryEach({ kinds: [object.kind], authors: [object.pubkey], '#d': [dOf(object)] })).filter((a) => a.outcome === 'answered')
+      const answers = (await queryEach({ kinds: [object.kind], authors: [object.pubkey], '#d': [dOf(object)] }, undefined, { written: true })).filter((a) => a.outcome === 'answered')
       if (answers.length === 0) return 'silent'
       return answers.some((a) => a.events.some((e) => e.id !== object.id && e.created_at >= object.created_at)) ? 'newer' : 'this'
     } catch {
@@ -2887,7 +2950,7 @@ export const useShards = create<ShardsState>((set, get) => {
     let settingsFrom: NostrEvent | null = null
     let heard = false
     try {
-      const answers = await queryEach({ kinds: [HIDDEN_KIND], authors: [owner], '#d': [lookupId] })
+      const answers = await queryEach({ kinds: [HIDDEN_KIND], authors: [owner], '#d': [lookupId] }, undefined, { written: true })
       still()
       const events = answers.flatMap((a) => a.events)
       heard = answers.some((a) => a.outcome === 'answered')
@@ -3152,7 +3215,7 @@ export const useShards = create<ShardsState>((set, get) => {
   async function stillInItsBag(d: MyDeployment): Promise<'this' | 'gone' | 'silent'> {
     const me = cyber().identity.pubkey
     let answers: Awaited<ReturnType<typeof queryEach>>
-    try { answers = await queryEach({ kinds: [HIDDEN_KIND], authors: [me], '#d': [d.lookupId] }) } catch { return 'silent' }
+    try { answers = await queryEach({ kinds: [HIDDEN_KIND], authors: [me], '#d': [d.lookupId] }, undefined, { written: true }) } catch { return 'silent' }
     if (!answers.some((a) => a.outcome === 'answered')) return 'silent'
     const newest = answers.flatMap((a) => a.events).filter((e) => e.pubkey === me).sort((a, b) => b.created_at - a.created_at)[0]
     if (!newest) return 'gone'
@@ -3280,9 +3343,12 @@ export const useShards = create<ShardsState>((set, get) => {
         }
         const model = useWorkshop.getState().shards.find((s) => s.id === c.shardId)
         if (!model) throw new Error('A model in this chest is no longer in your workshop.')
-        const refusal = shardRefusal(model)
+        // A split build's pieces from your workshop go inside it, in its table: the chest seals them with it (lib/pieces.ts carriedInline).
+        const carried = chestModelOf(model, owner)
+        const template = shardInnerTemplate(carried, at, plane, createdAt, creditOf(model))
+        const refusal = chestShardRefusal(carried, template)
         if (refusal) throw new Error(refusal)
-        signed.push(await signAsOwner(shardInnerTemplate(model, at, plane, createdAt, creditOf(model))))
+        signed.push(await signAsOwner(template))
       } else if (c.kind === 'audio') {
         // A rumor, as in a bag (DECK-0007 §3): the chest's signature vouches for it.
         signed.push(rumorOf(audioInnerTemplate(c.audio, at, plane, createdAt), cs.identity.pubkey))
@@ -3442,7 +3508,7 @@ export const useShards = create<ShardsState>((set, get) => {
       return held.filter(inItsBag)
     }
     if (!live) return rows()
-    const asked = await queryEach({ kinds: [HIDDEN_KIND], authors: [d.inner.pubkey], '#d': [lookupId] })
+    const asked = await queryEach({ kinds: [HIDDEN_KIND], authors: [d.inner.pubkey], '#d': [lookupId] }, undefined, { written: true })
     if (cyber().identity.pubkey !== owner) return SWITCHED
     const answers = asked.filter((a) => a.outcome === 'answered')
     if (answers.length === 0) return 'No relay answered, so this cannot tell what is behind the door. Nothing has changed. Try again when one is reachable.'
@@ -3640,7 +3706,7 @@ export const useShards = create<ShardsState>((set, get) => {
       const guarded = (t: EventTemplate): Promise<NostrEvent> => { if (cyber().identity.pubkey !== owner) throw new Error(SWITCHED); return cs.signEvent(t) }
       const plan = await planPieces(r.shard, me, async (address) => {
         const got = await openOnePiece(address, src.keyHex, fetchHiddenObject)
-        if (got === 'missing' && (r.pieces ? r.pieces.includes(address) : pieceWasOpened(address))) throw new Error(PIECE_NOT_FETCHED)
+        if (got === 'missing' && (!r.pieces || r.pieces.includes(address))) throw new Error(PIECE_NOT_FETCHED)
         return typeof got === 'string' ? undefined : got.payload
       }, placementId, false)
       if (plan.pieces.length === 0) return r
@@ -4171,7 +4237,8 @@ export const useShards = create<ShardsState>((set, get) => {
     // A new deploy starts at the shard's own size, so the last deploy's choice
     // never carries silently into this one. Placing the same thing again is
     // `placedLast`'s, which carries everything on purpose.
-    startDeployShard: (shardId, from) => set({
+    // A look copy (useWorkshop untouchedLookCopy) put to use here is stored now: the deploy reads it back by id.
+    startDeployShard: (shardId, from) => { useWorkshop.getState().keepCopy(shardId); set({
       pending: { type: 'shard', shardId, ...(from ? { from } : {}) },
       deployLink: false,
       deployHeightAuto: true,
@@ -4190,7 +4257,7 @@ export const useShards = create<ShardsState>((set, get) => {
       deployBagFrom: null,
       deployStatus: 'idle',
       deployError: null,
-    }),
+    }) },
     // A move starts exactly as the shard stands: its height (held, not
     // fitted, so the shard stays in its bag and keeps its comments unless
     // you change it), its size, its pose and its bag's riddle, with the hint
@@ -5072,8 +5139,29 @@ export const useShards = create<ShardsState>((set, get) => {
             pieceAddrs = plan.pieces.map((p) => p.address)
           }
         }
+        // PUT IN CHEST: its pieces go inside it, in its table, sealed with the chest (lib/pieces.ts carriedInline).
+        if (intoChest && !was && !object && cs.identity.pubkey) {
+          const carried = chestModelOf(shard, cs.identity.pubkey)
+          if (carried !== shard) {
+            shard = carried
+            innerTemplate = shardInnerTemplate(shard, at, plane, createdAt, credit)
+            const tooBig = chestShardRefusal(shard, innerTemplate)
+            if (tooBig) { set({ deployStatus: 'error', deployError: tooBig }); return }
+          }
+        }
         // Moved, it names the pieces it named (sealed again below when the key changes).
         if (was?.pieces) pieceAddrs = [...was.pieces]
+        // Hidden by reference, the shard is one sealed object of its own, held to
+        // one event of BAG_SAFE_BYTES as signed, as every hidden object is: one
+        // past it is refused here, in words, before any key is worked out or
+        // anything signed (lib/shardFullness.ts, the SHARD sheet's bar measures
+        // the same). A split build's parent is measured as it goes out; its
+        // pieces were measured above. A MOVE of an object already hidden is left
+        // as it was: its size is not new, and splitting is not what a move does.
+        if (!link && !intoChest && !was && wantsReference(shard)) {
+          const tooBig = hideWholeRefusal(new TextEncoder().encode(JSON.stringify(toPayload(withAuthoredConstrain(shard)))).length)
+          if (tooBig) { set({ deployStatus: 'error', deployError: tooBig }); return }
+        }
       } else if (pending.type === 'key') {
         if (!pending.key.name.trim()) return
         // Moved, it is the very item it was: its keypair, name and every tag.
@@ -5283,7 +5371,10 @@ export const useShards = create<ShardsState>((set, get) => {
           set({ deployNote: 'Opening its pieces' })
           const plan = await planPieces(shard, owner, async (address) => {
             const got = await openOnePiece(address, from.keyHex, fetchHiddenObject)
-            if (got === 'missing' && (from.pieces ? from.pieces.includes(address) : pieceWasOpened(address))) throw new Error(PIECE_NOT_FETCHED)
+            // A piece no relay answers for stops the move, whatever the row knows: carried
+            // as it is, it would never open under the new key (owner, 2026-11-22).
+            // An address the row knows is no piece (a live link) never stops it; a row learned from the relays knows none.
+            if (got === 'missing' && (!from.pieces || from.pieces.includes(address))) throw new Error(PIECE_NOT_FETCHED)
             return typeof got === 'string' ? undefined : got.payload
           }, placementId, false)
           if (plan.pieces.length > 0) {

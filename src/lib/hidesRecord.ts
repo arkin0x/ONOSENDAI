@@ -46,7 +46,8 @@ export const MAX_SHARDS = 16
 export const HIDES_D_TAGS: readonly string[] = Array.from({ length: MAX_SHARDS }, (_, i) => `${HIDES_D_PREFIX}${i}`)
 /**
  * The longest a shard's sealed text may be before it is split further, in
- * characters of base64. NIP-44 v2 refuses a plaintext over 65,535 bytes, and
+ * characters of base64. Older NIP-44 v2 libraries refuse a plaintext over
+ * 65,535 bytes (newer ones carry more with the extended length prefix), and
  * strfry's default and many relays cap an event near 64 KB: 40,000 characters
  * pad to 40,960 and seal to some 54,700, so a whole event stays under 56 KB.
  */

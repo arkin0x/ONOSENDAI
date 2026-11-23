@@ -19,9 +19,9 @@
  * A chest is sealed to an item in your ITEMS, to a listed item from the
  * ITEM FEED (arkinox, 2026-10-13), or to a pasted item public key or npub,
  * which seals it to a person. The select is text only: an <option> cannot
- * hold an item's picture. The meter shows the sealed size against NIP-44's
- * 65,535 bytes, and sealing is refused past it, in the same words the seal
- * would use.
+ * hold an item's picture. The meter shows the sealed size against a chest's
+ * cap, 131,072 bytes (lib/chests.ts CHEST_MAX_PLAINTEXT, DECK-0004 §3.2), and
+ * sealing is refused past it, in the same words the seal would use.
  *
  * What is inside is taken, not placed (DECK-0004 §3.4, spec #82): nothing in
  * a chest is aimed at a point of its own any more. A door is for that.
@@ -50,7 +50,7 @@ import { ShardThumb } from './ShardThumb'
 import { SearchField } from './ui/SearchField'
 import type { ShardModel } from 'sno-core/shards'
 import { nip19 } from 'nostr-tools'
-import { forgeKey, isLockPubkey, NIP44_MAX_PLAINTEXT, sizeRefusal, templateBytes } from '../lib/chests'
+import { CHEST_MAX_PLAINTEXT, forgeKey, isLockPubkey, sizeRefusal, templateBytes } from '../lib/chests'
 import { attributed } from '../lib/client'
 import { MAX_ITEM_NAME, MAX_MESSAGE_LENGTH, messageInnerTemplate, shardInnerTemplate } from '../lib/hidden'
 import { findCashuToken } from '../lib/cashu'
@@ -581,9 +581,9 @@ export function ChestCompose({ onDone, target = { mode: 'place' } }: { onDone: (
       ) : null}
 
       {/* The one hard limit, as a meter. */}
-      <div className={`compose__meter ${refusal ? 'is-over' : ''}`} title="NIP-44 seals at most 65,535 bytes">
+      <div className={`compose__meter ${refusal ? 'is-over' : ''}`} title={`A chest holds at most ${CHEST_MAX_PLAINTEXT.toLocaleString('en-US')} bytes`}>
         <span>{refusal ?? (contents.length === 0 ? 'Nothing inside yet.' : `sealed to ${lock ? lock.label : 'nothing yet'}`)}</span>
-        <span>{bytes.toLocaleString('en-US')}/{NIP44_MAX_PLAINTEXT.toLocaleString('en-US')} B</span>
+        <span>{bytes.toLocaleString('en-US')}/{CHEST_MAX_PLAINTEXT.toLocaleString('en-US')} B</span>
       </div>
       </>}
 

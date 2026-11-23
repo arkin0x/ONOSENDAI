@@ -111,7 +111,7 @@ import { loadLedger, retractionTemplate, type Ledger } from '../lib/published'
 import { sealedAsPiece } from '../lib/partForm'
 import { audioInnerTemplate, fadeAt, type AudioItem } from '../lib/audioItem'
 import { resealCopy } from '../lib/audioFile'
-import { movableIntoRoom, openWithSecret, openWithSigner, openerFor, placeOf as eventPlace, plaintextWithSecret, readContents, resealWithout, revealedIn, sealEntries, sealedInside, sealerOf, type ChestEntry, type OpeningKey } from '../lib/chests'
+import { movableIntoRoom, openWithSecret, openWithSigner, openerFor, placeOf as eventPlace, plaintextWithSecret, readContents, resealWithout, revealedIn, sealEntries, sealedInside, sealerOf, sealsLooksFor, type ChestEntry, type OpeningKey } from '../lib/chests'
 import { openedByHand, restoreOpened } from './useOpenedChests'
 import { closeArriving, closedByMe, closedDoorIds, closedSignature } from './closedDoors'
 import { hiderKeys, madeKeys, openingKeys, placeOf, type HeldItem, type HeldPlace, type InChest } from '../lib/inventory'
@@ -5332,6 +5332,8 @@ export const useShards = create<ShardsState>((set, get) => {
             key: rk.key, owner, createdAt, newD: placementId, sign: (t) => signAsOwner(t),
             // A look this client will not read goes exactly as it is.
             sealLarge: pending.look?.from !== 'kept',
+            // A chest past 65,535 bytes seals every look it draws itself, so the chest fits its event (DECK-0004 §3.2, Size).
+            sealAll: sealsLooksFor(chest.payload),
             send: async (object) => {
               if (!live) return ''
               still()

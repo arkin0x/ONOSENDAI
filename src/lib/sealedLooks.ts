@@ -92,6 +92,14 @@ export function sealedLookAddresses(tags: readonly unknown[] | undefined, author
   return out
 }
 
+/** A look that names nothing (no `refs`): its own geometry, which sealAll seals. A wrapper, or a look that places live objects, stays as it is. */
+function ownGeometry(payload: string): boolean {
+  try {
+    const p = JSON.parse(payload) as { refs?: unknown }
+    return !Array.isArray(p.refs) || p.refs.length === 0
+  } catch { return false }
+}
+
 function wrapperAddress(payload: string, author: string): string | null {
   // A wrapper is small; anything larger is a look in its own right.
   if (bytesOf(payload) > MAX_LOOK_BYTES) return null
@@ -144,6 +152,13 @@ export interface SealLooksIo {
    * whatever its size, and only a sealed look is sealed again for a new bag.
    */
   sealLarge?: boolean
+  /**
+   * True for a chest near its cap (lib/chests.ts sealsLooksFor): every look
+   * goes sealed, whatever its size, because a chest of 131,072 bytes leaves
+   * about 3,900 bytes of its event for tags (DECK-0004 §3.2, Size) and the tag
+   * that names a sealed look is under 300.
+   */
+  sealAll?: boolean
   /** Opens a sealed look under its old key (openSealedLookPayload by default). */
   open?: (address: string, keyHex: string) => Promise<{ payload: string; public?: false } | { public: true } | null>
 }
@@ -188,7 +203,7 @@ export async function sealLookTags(tags: readonly string[][], io: SealLooksIo): 
       dropped.push(moved)
     }
     const bytes = bytesOf(payload)
-    if (!sealsLook(bytes) || (io.sealLarge === false && !moved)) { out.push([LOOK_TAG, payload, ...t.slice(2)]); continue }
+    if (!(sealsLook(bytes) || (io.sealAll && ownGeometry(payload))) || (io.sealLarge === false && !moved)) { out.push([LOOK_TAG, payload, ...t.slice(2)]); continue }
     const refusal = lookRefusal(bytes, limit)
     if (refusal) throw new Error(refusal)
     const d = io.newD()

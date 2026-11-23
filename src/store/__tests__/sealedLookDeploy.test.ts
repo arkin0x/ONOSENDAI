@@ -145,6 +145,34 @@ describe('a sealed look through MOVE, BROADCAST and DELETE', () => {
   })
 })
 
+describe('a chest near its cap seals its look whatever its size (DECK-0004 §3.2, Size)', () => {
+  it('a look small enough for its tag rides inline on a small chest, and goes sealed on a chest past 65,535 bytes, which then fits its bag', async () => {
+    const look = model('Crate', 400)
+    useWorkshop.setState({ shards: [look] })
+    expect(new TextEncoder().encode(JSON.stringify(toPayload(look))).length).toBeGreaterThan(3_900)
+    start()
+    S().setDeployLook({ from: 'mine', shardId: look.id })
+    await hide()
+    expect(S().deployError).toBeNull()
+    expect(chestRow().lookObjects ?? []).toHaveLength(0)
+    expect(sealedLookAddresses(chestRow().chest?.look, C().identity.pubkey)).toEqual([])
+
+    useShards.setState({ mine: [], pending: null, deployStatus: 'idle', deployError: null })
+    relay.length = 0
+    const lock = forgeKey('Hoard Key')
+    const texts = Array.from({ length: 12 }, (_, i) => 'abcdefghijkl'[i].repeat(10_000))
+    S().startDeployChest({ name: 'Hoard', lock: { pubkey: lock.itemPubkey, label: 'Hoard Key' }, requires: 'Hoard Key', contents: texts.map((text) => ({ kind: 'message' as const, text })) })
+    S().setDeployLook({ from: 'mine', shardId: look.id })
+    await hide()
+    expect(S().deployError).toBeNull()
+    expect(S().deployStatus).toBe('done')
+    const row = chestRow()
+    expect(row.chest!.payload.length).toBeGreaterThan(87_472)
+    expect(sealedLookAddresses(row.chest?.look, C().identity.pubkey)).toHaveLength(1)
+    expect(row.lookObjects).toHaveLength(1)
+  })
+})
+
 describe('sealedLookPayload', () => {
   it('a wrapper keeps the sealed payload’s name, unit and stance, and nothing else', () => {
     const w = JSON.parse(sealedLookPayload(JSON.stringify(toPayload({ ...model('Hoard', 3), unit: 2 })), `33331:${'a'.repeat(64)}:x`))

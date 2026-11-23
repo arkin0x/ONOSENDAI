@@ -9,6 +9,8 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { TICKS_PER_UNIT as T, fromPayload, pointKey, ticksOf, toPayload, type ShardModel } from 'sno-core/shards'
 import { groupKey, useWorkshop } from '../useWorkshop'
 import { normalizeOne } from '../workshopStorage'
+import { useCyberspace } from '../useCyberspace'
+import { setLocalAuthor } from '../../lib/carried'
 import { midpoint } from '../../lib/subdivide'
 import { groupCounts, groupsOf, heldState, hiddenSets, hiddenView, saneGroups, withAppendedGroup, type ShardGroup } from '../../lib/shardGroups'
 
@@ -218,6 +220,52 @@ describe('groups stay right through edits', () => {
     expect(named('Top').faces).toEqual([0])
   })
 
+  it('a pasted piece SUBDIVIDEd keeps its new midpoints: held again, all of it moves together', () => {
+    w().create('s')
+    w().placeStamp([0, 0, 0])
+    w().setSelection(cur().vertices.map((_, i) => i))
+    w().copySelection()
+    w().create('level')
+    w().pasteClip('exact')
+    const g0 = named('Paste 1')
+    // Cut one face of the paste, and the neighbours around it split to match.
+    w().selectVertex(null)
+    w().selectFace(g0.faces[0])
+    const facesBefore = cur().faces.length
+    w().subdivideSelection()
+    expect(cur().faces.length).toBeGreaterThan(facesBefore)
+    const g = named('Paste 1')
+    // Every vertex and every face of the shard is the paste's: the midpoints and the children joined it.
+    expect(g.vertices).toEqual(cur().vertices.map((_, i) => i))
+    expect(g.faces).toEqual(cur().faces.map((_, k) => k))
+    // Held again and moved: nothing is left behind.
+    w().selectVertex(null); w().selectFace(null)
+    w().toggleGroupSelection(g.id)
+    const before = cur().vertices.map((v) => ticksOf(v)[1])
+    w().moveSelected(1, T)
+    expect(cur().vertices.map((v) => ticksOf(v)[1])).toEqual(before.map((y) => y + T))
+  })
+
+  it('WELD of only some stacks folds each paste into the vertex WELD kept, never into another stack', () => {
+    w().create('s')
+    w().placeStamp([0, 0, 0])
+    const n = cur().vertices.length
+    w().setSelection(cur().vertices.map((_, i) => i))
+    w().copySelection()
+    w().pasteClip('exact')
+    w().selectVertex(null)
+    w().setSelection(cur().vertices.map((_, i) => i).slice(0, n))
+    w().copySelection()
+    w().pasteClip('exact')
+    // Three blocks on the same spots: the original (0..7), Paste 1 (8..15), Paste 2 (16..23). Weld the two pastes only.
+    useWorkshop.setState({ selection: cur().vertices.map((_, i) => i).filter((i) => i >= n) })
+    w().weld()
+    expect(cur().vertices.length).toBe(2 * n)
+    // Paste 2 folded into Paste 1's vertices, not the original's.
+    expect(named('Paste 1').vertices).toEqual(Array.from({ length: n }, (_, k) => n + k))
+    expect(named('Paste 2').vertices).toEqual(Array.from({ length: n }, (_, k) => n + k))
+  })
+
   it('placed objects: a delete of one renumbers the rest, and a move or a turn keeps them', () => {
     w().create('s')
     place('column', [0, 0, 0])
@@ -399,7 +447,51 @@ describe('the panel\'s functions', () => {
     expect(hiddenView(s, null)).toBeNull()
   })
 
-  it('Ctrl+G is a new group, and every group change is one UNDO', () => {
+  it('a face added to a group of points is held with it, corners and all', () => {
+    twoBlocks()
+    const a = named('A')
+    const bFace = cur().faces.findIndex((f) => f.every((i) => !a.vertices.includes(i)))
+    w().selectFace(bFace)
+    w().addSelectionToGroup(a.id)
+    expect(named('A').faces).toEqual([bFace])
+    w().selectFace(null); w().selectVertex(null)
+    w().toggleGroupSelection(a.id)
+    for (const i of cur().faces[bFace]) expect(w().selection).toContain(i)
+    expect(heldState(cur(), named('A'), w())).toBe('all')
+  })
+
+  it('a hidden group of faces hides the corners only its faces stand on, so nothing in sight can bend them', () => {
+    w().create('s')
+    w().placeStamp([0, 0, 0])
+    w().selectFace(null)
+    for (let k = 0; k < cur().faces.length; k++) w().selectFace(k)
+    w().createGroup('Skin')
+    w().selectFace(null); w().selectVertex(null)
+    w().setGroupHidden(named('Skin').id, true)
+    w().selectAll()
+    expect(w().selection).toEqual([])
+    const h = hiddenSets(cur(), [named('Skin')])!
+    expect(h.vertices.size).toBe(cur().vertices.length)
+  })
+
+  it('a group made inside an opened LINK leaves its parent pointed at the link: only a real edit makes the copy the parent\'s', async () => {
+    setLocalAuthor(() => useCyberspace.getState().identity.pubkey)
+    const PK2 = 'b'.repeat(64)
+    const statue = fromPayload({ v: 2, name: 'Statue', unit: 0, mode: 'solid', vertices: [[0, 0, 0], [1, 0, 0], [0, 0, 1]], colors: [5, 5, 5], faces: [[0, 1, 2]] }, 'statue')!
+    const link = ['a', `33331:${PK2}:statue`] as ['a', string]
+    useWorkshop.setState({ shards: [{ ...fromPayload({ v: 2, name: 'Plaza', unit: 0, mode: 'solid', vertices: [], colors: [], faces: [] }, 'plaza')!, refs: [link], parts: [{ ref: 0, at: [0, 0, 0], turn: [0, 0, 0], step: 0 }] }], currentId: 'plaza', backStack: [] })
+    await w().enterPart(0, async () => toPayload(statue))
+    expect(w().currentId).not.toBe('plaza')
+    w().setSelection([0, 1, 2])
+    w().createGroup('Head')
+    w().renameGroup(named('Head').id, 'Face')
+    expect(w().shards.find((x) => x.id === 'plaza')!.refs).toEqual([link])
+    // A real edit does point it at the copy.
+    w().addVertex([5, 5, 5])
+    expect(w().shards.find((x) => x.id === 'plaza')!.refs).toEqual([['a', `33331:${useCyberspace.getState().identity.pubkey}:${w().currentId}`]])
+  })
+
+  it('every group change is one UNDO', () => {
     twoBlocks()
     const steps = w().past.length
     w().renameGroup(named('A').id, 'Rock')

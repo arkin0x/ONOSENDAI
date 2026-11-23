@@ -25,7 +25,6 @@
  */
 
 import { pointKey, ticksOf, uuid, type Part, type ShardModel } from 'sno-core/shards'
-import { midpoint } from './subdivide'
 
 /** A named group of a shard's points, faces and placed objects, by index. */
 export interface ShardGroup {
@@ -198,14 +197,15 @@ export function missing(g: Members, m: Members): number {
  * objects as they are, never widened to a stack: a paste lands on its
  * original, and a group of the paste must take the copy alone. A group of
  * faces alone (made in SELECT FACES) is held as faces, with their corners,
- * as a tapped face is; a group with points holds its faces through them.
+ * as a tapped face is; a group with points is held as points, its own and
+ * the corners of any face it holds, so its faces move with it.
  */
 export function heldBy(s: ShardModel, g: ShardGroup): { selection: number[]; partSel: number[]; selectedFaces: number[] } {
   const faces = g.faces.filter((i) => s.faces[i])
-  if (g.vertices.length === 0 && faces.length > 0) {
-    return { selection: cleanIndices(faces.flatMap((i) => s.faces[i]), s.vertices.length), partSel: cleanIndices(g.parts, s.parts?.length ?? 0), selectedFaces: faces }
-  }
-  return { selection: cleanIndices(g.vertices, s.vertices.length), partSel: cleanIndices(g.parts, s.parts?.length ?? 0), selectedFaces: [] }
+  const corners = faces.flatMap((i) => s.faces[i])
+  const partSel = cleanIndices(g.parts, s.parts?.length ?? 0)
+  if (g.vertices.length === 0 && faces.length > 0) return { selection: cleanIndices(corners, s.vertices.length), partSel, selectedFaces: faces }
+  return { selection: cleanIndices([...g.vertices, ...corners], s.vertices.length), partSel, selectedFaces: [] }
 }
 
 /** How much of a group is in hand: all of it, some, or none. */
@@ -235,10 +235,14 @@ export function groupCounts(s: ShardModel, g: ShardGroup): { points: number; fac
   return { points: spots.size, faces: g.faces.filter((i) => s.faces[i]).length, objects: g.parts.filter((i) => s.parts?.[i]).length }
 }
 
-/** Hints an edit gives the remap where the shard before and after cannot say. */
+/** Hints an edit gives the remap where the shard before and after cannot say it exactly. */
 export interface RemapHint {
-  /** WELD: a vertex that went was folded into the one left on its spot, and its groups follow it there. */
-  merged?: boolean
+  /** Where each vertex went, by its index before (WELD: a folded one goes where it was folded); -1 or absent for gone. */
+  vertexTo?: readonly number[]
+  /** Which face before each face after was (a child of SUBDIVIDE, its parent), or -1 for a face the edit made. */
+  faceFrom?: readonly number[]
+  /** SUBDIVIDE's midpoints, each with the ends (indices before) of the edge it halves: a group holding both ends holds it. */
+  midpoints?: ReadonlyArray<{ at: number; ends: readonly [number, number] }>
   /** The placed objects an edit removed, by their index before it (DELETE, CUT). */
   partsGone?: ReadonlySet<number>
 }
@@ -251,27 +255,19 @@ const same = (i: number): number[] => [i]
 /**
  * Where each vertex of `before` is in `after`.
  *
- * Every edit that keeps the count keeps the order (a move, a turn, a color),
- * and every edit that adds appends (PASTE, a stamp, SUBDIVIDE's midpoints),
- * so those keep every index. An edit that removes (DELETE, CUT, WELD) keeps
- * the vertices it leaves as the same objects, in order, so they are found by
- * identity. With `merged` (WELD), one that went follows the vertex left on
- * its spot.
+ * Told by the edit (WELD), that. Otherwise: every edit that keeps the count
+ * keeps the order (a move, a turn, a color), and every edit that adds
+ * appends (PASTE, a stamp, SUBDIVIDE's midpoints), so those keep every index.
+ * An edit that removes (DELETE, CUT) keeps the vertices it leaves as the same
+ * objects, in order, so they are found by identity.
  */
 function vertexMap(before: ShardModel, after: ShardModel, hint: RemapHint): IndexMap {
+  const told = hint.vertexTo
+  if (told) return (i) => { const j = told[i]; return j === undefined || j < 0 ? [] : [j] }
   if (after.vertices === before.vertices || after.vertices.length >= before.vertices.length) return same
   const at = new Map<unknown, number>()
   after.vertices.forEach((v, i) => { if (!at.has(v)) at.set(v, i) })
-  let spot: Map<string, number> | null = null
-  return (i) => {
-    const v = before.vertices[i]
-    const j = at.get(v)
-    if (j !== undefined) return [j]
-    if (!hint.merged || !v) return []
-    if (!spot) { spot = new Map(); after.vertices.forEach((w, k) => { const key = pointKey(ticksOf(w)); if (!spot!.has(key)) spot!.set(key, k) }) }
-    const k = spot.get(pointKey(ticksOf(v)))
-    return k === undefined ? [] : [k]
-  }
+  return (i) => { const j = at.get(before.vertices[i]); return j === undefined ? [] : [j] }
 }
 
 /** A part's place and look, without its ref index (which a removal renumbers), for matching one across an edit. */
@@ -317,72 +313,47 @@ function partMap(before: ShardModel, after: ShardModel, hint: RemapHint): IndexM
 /**
  * Where each face of `before` is in `after`, once the vertices are known.
  *
- * A face kept as the same array at the same index is itself (every edit that
- * only appends faces). Otherwise it is found by its three corners, renumbered
- * and order-free (a delete renumbers corners, a flip turns them round, a weld
- * moves a corner onto its twin). A face whose corner went is gone. A face not
- * found whose corners all stayed was cut (SUBDIVIDE): it becomes every new
- * face that stands only on its corners and the middles of its edges.
+ * Told by the edit (which old face each new one was: a delete, a stamp that
+ * buries faces, SUBDIVIDE's children, WELD), that. Otherwise a face kept as
+ * the same array is itself (a filter, an append), and the rest are found by
+ * their three corners, renumbered and order-free (a flip turns them round). A
+ * face whose corner went, or that is found nowhere, is gone.
  */
-function faceMap(before: ShardModel, after: ShardModel, vmap: IndexMap): IndexMap {
+function faceMap(before: ShardModel, after: ShardModel, vmap: IndexMap, hint: RemapHint): IndexMap {
+  const told = hint.faceFrom
+  if (told) {
+    const to = new Map<number, number[]>()
+    told.forEach((i, j) => { if (i >= 0) { const l = to.get(i); if (l) l.push(j); else to.set(i, [j]) } })
+    return (i) => to.get(i) ?? []
+  }
   if (after.faces === before.faces) return same
-  const fresh = (): Map<string, number[]> => {
-    const m = new Map<string, number[]>()
-    after.faces.forEach((f, j) => { const k = triKey(f); const l = m.get(k); if (l) l.push(j); else m.set(k, [j]) })
-    return m
-  }
-  let byKey: Map<string, number[]> | null = null
-  let matched: Set<number> | null = null
-  const result = new Map<number, number[]>()
-  const mapped = (f: readonly number[]): number[] | null => {
-    const out: number[] = []
-    for (const v of f) { const to = vmap(v); if (to.length === 0) return null; out.push(to[0]) }
-    return out
-  }
-  // One pass over every face, so a face matched once is not matched again by another.
-  const ensure = (): void => {
-    if (byKey) return
-    byKey = fresh()
-    matched = new Set()
-    const cut: number[] = []
-    // A face left as the same array (a filter, an append) is itself, found first, so a twin on the same corners never takes its place.
-    const byObject = new Map<unknown, number>()
-    after.faces.forEach((f, j) => { if (!byObject.has(f)) byObject.set(f, j) })
-    const rest: number[] = []
-    before.faces.forEach((f, i) => {
-      const j = byObject.get(f)
-      if (j !== undefined && !matched!.has(j)) { result.set(i, [j]); matched!.add(j) } else rest.push(i)
-    })
-    rest.forEach((i) => {
-      const f = before.faces[i]
-      const m = mapped(f)
-      if (!m) { result.set(i, []); return }
-      const list = byKey!.get(triKey(m))
-      if (!list?.length) { cut.push(i); return }
-      const j = list.find((x) => !matched!.has(x)) ?? list[0]
-      matched!.add(j)
-      result.set(i, [j])
-    })
-    if (cut.length === 0) return
-    // The faces nobody kept, and the vertices nobody had before: a cut's children and its midpoints.
-    const loose = after.faces.map((_, j) => j).filter((j) => !matched!.has(j))
-    for (const i of cut) {
-      const corners = mapped(before.faces[i])!
-      const own = new Set(corners)
-      const pts = corners.map((v) => pointKey(ticksOf(after.vertices[v])))
-      const mids = new Set<string>()
-      for (let a = 0; a < 3; a++) mids.add(pointKey(midpoint(ticksOf(after.vertices[corners[a]]), ticksOf(after.vertices[corners[(a + 1) % 3]]))))
-      const kids = loose.filter((j) => after.faces[j].every((v) => own.has(v) || (v >= before.vertices.length && after.vertices[v] && mids.has(pointKey(ticksOf(after.vertices[v]))) && !pts.includes(pointKey(ticksOf(after.vertices[v]))))))
-      result.set(i, kids)
+  // Every old face still where it was (only appends since): no pass needed.
+  if (after.faces.length >= before.faces.length && before.faces.every((f, i) => after.faces[i] === f)) return same
+  const result = new Array<number>(before.faces.length).fill(-1)
+  const matched = new Set<number>()
+  // A face left as the same array is itself, found first, so a twin on the same corners never takes its place.
+  const byObject = new Map<unknown, number>()
+  after.faces.forEach((f, j) => { if (!byObject.has(f)) byObject.set(f, j) })
+  const rest: number[] = []
+  before.faces.forEach((f, i) => {
+    const j = byObject.get(f)
+    if (j !== undefined && !matched.has(j)) { result[i] = j; matched.add(j) } else rest.push(i)
+  })
+  if (rest.length) {
+    const byKey = new Map<string, number[]>()
+    after.faces.forEach((f, j) => { if (matched.has(j)) return; const k = triKey(f); const l = byKey.get(k); if (l) l.push(j); else byKey.set(k, [j]) })
+    for (const i of rest) {
+      const m: number[] = []
+      for (const v of before.faces[i]) { const t = vmap(v); if (t.length === 0) break; m.push(t[0]) }
+      if (m.length < 3) continue
+      const list = byKey.get(triKey(m))
+      const j = list?.find((x) => !matched.has(x))
+      if (j === undefined) continue
+      matched.add(j)
+      result[i] = j
     }
   }
-  // Every old face still where it was (only appends since): no pass needed.
-  const appendOnly = after.faces.length >= before.faces.length && before.faces.every((f, i) => after.faces[i] === f)
-  if (appendOnly) return same
-  return (i) => {
-    ensure()
-    return result.get(i) ?? []
-  }
+  return (i) => (result[i] >= 0 ? [result[i]] : [])
 }
 
 const triKey = (f: readonly number[]): string => [...f].sort((a, b) => a - b).join(',')
@@ -396,7 +367,7 @@ export function remapGroups(before: ShardModel, after: ShardModel, groups: reado
   if (groups.length === 0) return []
   const vmap = vertexMap(before, after, hint)
   const pmap = partMap(before, after, hint)
-  const fmap = faceMap(before, after, vmap)
+  const fmap = faceMap(before, after, vmap, hint)
   const nv = after.vertices.length, nf = after.faces.length, np = after.parts?.length ?? 0
   const out: ShardGroup[] = []
   for (const g of groups) {
@@ -411,7 +382,13 @@ export function remapGroups(before: ShardModel, after: ShardModel, groups: reado
       if (!changed && next.length === list.length) return list
       return [...new Set(next)].sort((a, b) => a - b)
     }
-    const vertices = move(g.vertices, vmap, nv)
+    let vertices = move(g.vertices, vmap, nv)
+    // A midpoint on an edge whose two ends the group held is the group's too.
+    if (hint.midpoints?.length && g.vertices.length) {
+      const had = new Set(g.vertices)
+      const extra = hint.midpoints.filter((m) => had.has(m.ends[0]) && had.has(m.ends[1]) && m.at < nv).map((m) => m.at)
+      if (extra.length) vertices = [...new Set([...vertices, ...extra])].sort((x, y) => x - y)
+    }
     const faces = move(g.faces, fmap, nf)
     const parts = move(g.parts, pmap, np)
     if (vertices === g.vertices && faces === g.faces && parts === g.parts) { out.push(g); continue }
@@ -450,6 +427,12 @@ export function hiddenSets(s: ShardModel, hidden: readonly ShardGroup[]): Hidden
   const vertices = new Set<number>(), faces = new Set<number>(), parts = new Set<number>()
   for (const g of hidden) { for (const i of g.vertices) vertices.add(i); for (const k of g.faces) faces.add(k); for (const p of g.parts) parts.add(p) }
   if (vertices.size) s.faces.forEach((f, k) => { if (f.some((i) => vertices.has(i))) faces.add(k) })
+  // A corner only hidden faces stand on goes too, so nothing left in sight can bend a hidden face.
+  if (faces.size) {
+    const shown = new Set<number>()
+    s.faces.forEach((f, k) => { if (!faces.has(k)) for (const i of f) shown.add(i) })
+    for (const k of faces) for (const i of s.faces[k] ?? []) if (!shown.has(i)) vertices.add(i)
+  }
   return vertices.size || faces.size || parts.size ? { vertices, faces, parts } : null
 }
 
@@ -506,4 +489,56 @@ export function groupLoss(s: ShardModel, g: ShardGroup): { points: number; faces
   const spots = new Set([...verts].map((i) => pointKey(ticksOf(s.vertices[i]))))
   const others = groupsOf(s).filter((x) => x.id !== g.id && (x.vertices.some((i) => verts.has(i)) || x.faces.some((k) => faces.has(k)) || x.parts.some((i) => parts.has(i)))).map((x) => x.name)
   return { points: spots.size, faces: faces.size, objects: parts.size, facesBesides: faces.size - own.size, others }
+}
+
+/** What is in hand as sets, made once per draw of the GROUPS list rather than once per row. */
+export interface HeldSets {
+  selection: ReadonlySet<number>
+  partSel: ReadonlySet<number>
+  selectedFaces: ReadonlySet<number>
+  /** Whether faces are held (SELECT FACES): what ADD puts in a group is then the faces. */
+  faceMode: boolean
+}
+
+export function heldSets(h: Held): HeldSets {
+  return { selection: new Set(h.selection), partSel: new Set(h.partSel), selectedFaces: new Set(h.selectedFaces), faceMode: h.selectedFaces.length > 0 }
+}
+
+/**
+ * One row's state, against sets made once: how much of the group is held,
+ * whether ADD would add anything, whether REMOVE would take anything out.
+ * The same answers as heldState, canAdd and canRemove, at the group's size
+ * rather than the selection's.
+ */
+export function rowState(s: ShardModel, g: ShardGroup, h: HeldSets): { held: 'all' | 'some' | 'none'; addable: boolean; removable: boolean } {
+  const want = heldBy(s, g)
+  let n = 0
+  for (const i of want.selection) if (h.selection.has(i)) n++
+  for (const i of want.partSel) if (h.partSel.has(i)) n++
+  for (const k of want.selectedFaces) if (h.selectedFaces.has(k)) n++
+  const total = want.selection.length + want.partSel.length + want.selectedFaces.length
+  const state = total === 0 || n === 0 ? 'none' : n === total ? 'all' : 'some'
+  // REMOVE: anything held that the group holds.
+  let removable = false
+  for (const i of g.vertices) if (h.selection.has(i)) { removable = true; break }
+  if (!removable) for (const k of g.faces) if (h.selectedFaces.has(k)) { removable = true; break }
+  if (!removable) for (const i of g.parts) if (h.partSel.has(i)) { removable = true; break }
+  // ADD: anything held, as a group would hold it, that the group lacks: fewer of
+  // the group's members in hand than there are things in hand. Walks the group, not the selection.
+  let inHand = 0
+  if (h.faceMode) { for (const k of g.faces) if (h.selectedFaces.has(k)) inHand++ } else for (const i of g.vertices) if (h.selection.has(i)) inHand++
+  for (const i of g.parts) if (h.partSel.has(i)) inHand++
+  const addable = inHand < (h.faceMode ? h.selectedFaces.size : h.selection.size) + h.partSel.size
+  return { held: state, addable, removable }
+}
+
+const countsCache = new WeakMap<ShardGroup, { v: unknown; f: unknown; p: unknown; counts: ReturnType<typeof groupCounts> }>()
+
+/** groupCounts, kept per group until the group or the shard's lists change: a nudge recounts nothing. */
+export function groupCountsCached(s: ShardModel, g: ShardGroup): { points: number; faces: number; objects: number } {
+  const hit = countsCache.get(g)
+  if (hit && hit.v === s.vertices && hit.f === s.faces && hit.p === s.parts) return hit.counts
+  const counts = groupCounts(s, g)
+  countsCache.set(g, { v: s.vertices, f: s.faces, p: s.parts, counts })
+  return counts
 }

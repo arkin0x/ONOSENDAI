@@ -197,16 +197,16 @@ export function Workshop(): JSX.Element | null {
       if (e.code !== 'KeyG' || e.altKey || e.shiftKey || e.repeat) return
       const tag = (e.target as HTMLElement | null)?.tagName
       if (tag === 'INPUT' || tag === 'TEXTAREA') return
+      // Ctrl+G is find-next in Chrome and Firefox: never that here, whatever else happens.
+      if (e.ctrlKey || e.metaKey) e.preventDefault()
       if (useFacingPreview.getState().on) return
+      // A question on screen (DELETE CONTENTS, any confirmation) keeps the keys.
+      if (document.querySelector('[aria-modal="true"]')) return
       const ws = useWorkshop.getState()
       if (isLook(ws.tool)) return
-      if (e.ctrlKey || e.metaKey) {
-        // Find-next in Chrome and Firefox.
-        e.preventDefault()
-        groupMade(ws.createGroup())
-        return
-      }
-      setSheet((cur) => (cur === 'groups' ? null : 'groups'))
+      if (e.ctrlKey || e.metaKey) { groupMade(ws.createGroup()); return }
+      // Not over the palette or the object picker: G never throws away a choice half made.
+      setSheet((cur) => (cur === 'palette' || cur === 'object' ? cur : cur === 'groups' ? null : 'groups'))
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)

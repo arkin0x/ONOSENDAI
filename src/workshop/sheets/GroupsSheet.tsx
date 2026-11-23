@@ -21,7 +21,7 @@
  * siblings; lib/shardGroups.ts), so UNDO takes back every change to a group.
  */
 
-import { memo, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Check, ChevronDown, CopyPlus, Eye, EyeOff, PencilLine, Plus, SquareMinus, SquarePlus, Trash2, Ungroup } from 'lucide-react'
 import type { ShardModel } from 'sno-core/shards'
 import { ConfirmModal } from '../../hud/ConfirmModal'
@@ -29,7 +29,7 @@ import { SearchField } from '../../hud/ui/SearchField'
 import { useEscape } from '../../hooks/useEscape'
 import { noCallout } from '../../hooks/useRepeatable'
 import { matches, searchKey } from '../../lib/shardSearch'
-import { GROUP_NAME_MAX, canAdd, canRemove, groupCounts, groupLoss, groupsOf, heldState, type ShardGroup } from '../../lib/shardGroups'
+import { GROUP_NAME_MAX, groupCountsCached, groupLoss, groupsOf, heldSets, rowState, type ShardGroup } from '../../lib/shardGroups'
 import { groupKey, hiddenIn, useWorkshop } from '../../store/useWorkshop'
 
 /** From how many groups the search shows, as MENU shows its own over a long list. */
@@ -221,6 +221,8 @@ export function GroupsBody({ made = null, onMadeSeen }: BodyProps = {}): JSX.Ele
   const [query, setQuery] = useState('')
   // The group DELETE CONTENTS asked about, with the shard it is in: never a bare yes (as ShardSheet's RETRACT).
   const [deleteAsk, setDeleteAsk] = useState<{ shard: string; id: string } | null>(null)
+  // Stable, so the memoized rows are drawn again only when their own group or state changes.
+  const askDelete = useCallback((id: string): void => { const at = useWorkshop.getState().currentId; if (at) setDeleteAsk({ shard: at, id }) }, [])
   // Rows that arrived while the sheet was open (a paste, an import, NEW GROUP, DUPLICATE) glow for a moment.
   const seen = useRef<Set<string> | null>(null)
   const [fresh, setFresh] = useState<string[]>([])
@@ -257,13 +259,13 @@ export function GroupsBody({ made = null, onMadeSeen }: BodyProps = {}): JSX.Ele
   const rows = useMemo(() => {
     if (!shard) return []
     const hidden = new Set(hiddenKeys)
+    // What is in hand as sets, once for every row (a level has dozens of groups, a held kit piece thousands of points).
+    const sets = heldSets(held)
     return groups.map((g) => ({
       group: g,
-      counts: countsLine(groupCounts(shard, g)),
-      held: heldState(shard, g, held),
+      counts: countsLine(groupCountsCached(shard, g)),
       hidden: hidden.has(groupKey(shard.id, g.id)),
-      addable: canAdd(g, held),
-      removable: canRemove(g, held),
+      ...rowState(shard, g, sets),
     })).reverse()
   }, [shard, groups, held, hiddenKeys])
   if (!shard) return null
@@ -306,7 +308,7 @@ export function GroupsBody({ made = null, onMadeSeen }: BodyProps = {}): JSX.Ele
                 removable={r.removable}
                 onOpen={setOpen}
                 onRename={setRenaming}
-                onDelete={(id) => setDeleteAsk({ shard: shard.id, id })}
+                onDelete={askDelete}
               />
             ))}
             {listed.length === 0 && <li className="ws__groups-empty" role="status">No matches</li>}

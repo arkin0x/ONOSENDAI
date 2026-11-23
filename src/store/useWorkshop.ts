@@ -1150,7 +1150,9 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     // its parent at it, one edit of the parent that the parent's UNDO takes back.
     const stack = get().backStack
     const top = stack[stack.length - 1]
-    const pointed = top?.pending && !top.pending.done && top.pending.copyId === shards[i].id ? pointParent(list, top) : null
+    // A change to groups alone changes nothing a parent draws: it stays pointed where it was.
+    const groupsOnly = opts.ownGroups && made.vertices === shards[i].vertices && made.faces === shards[i].faces && made.parts === shards[i].parts && made.refs === shards[i].refs
+    const pointed = !groupsOnly && top?.pending && !top.pending.done && top.pending.copyId === shards[i].id ? pointParent(list, top) : null
     const backStack = pointed ? [...stack.slice(0, -1), pointed] : null
     set({ shards: list, past: [...past.slice(-(HISTORY - 1)), shards[i]], future: [], notice, turnPivot: null, partSel, ...(backStack ? { backStack } : {}) })
     save(list)
@@ -1646,7 +1648,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
         // Not found is not expected, but it costs that face its seam, never the stamp.
         return k < s.faces.length ? k++ : -1
       })
-      edit(() => ({ ...seamsFollow(s, res.shard, from), mode }), notice)
+      edit(() => ({ ...seamsFollow(s, res.shard, from), mode }), notice, { hint: { faceFrom: from } })
       set({ selection: [], partSel: [], selectedFaces: [], facePick: [] })
     },
 
@@ -1750,11 +1752,13 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       const { selectedFaces } = get()
       if (selectedFaces.length === 0) return
       const gone = new Set(selectedFaces)
+      const hint: RemapHint = {}
       edit((s) => {
         const kept = s.faces.map((_, i) => i).filter((i) => !gone.has(i))
         if (kept.length === s.faces.length) return null
+        hint.faceFrom = kept
         return seamsFollow(s, { ...s, faces: kept.map((i) => s.faces[i]) }, kept)
-      })
+      }, null, { hint })
       set({ selectedFaces: [] })
     },
 
@@ -2083,6 +2087,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     deleteSelected: () => {
       const { selection, partSel } = get()
       if (selection.length === 0 && partSel.length === 0) return
+      const hint: RemapHint = { partsGone: new Set(partSel) }
       edit((before) => {
         // Selected placed objects go first; references nothing places any more go with them.
         const s = partSel.length ? removeParts(before, partSel) : before
@@ -2093,8 +2098,9 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
         s.vertices.forEach((_, i) => { if (!gone.has(i)) remap.set(i, remap.size) })
         const kept = s.faces.map((_, i) => i).filter((i) => !s.faces[i].some((v) => gone.has(v)))
         const faces = kept.map((i) => s.faces[i].map((v) => remap.get(v) as number) as [number, number, number])
+        hint.faceFrom = kept
         return seamsFollow(s, { ...s, vertices: s.vertices.filter((_, i) => !gone.has(i)), faces }, kept)
-      }, null, { hint: { partsGone: new Set(partSel) } })
+      }, null, { hint })
       set({ selection: [], partSel: [], selectedFaces: [], facePick: [] })
     },
 
@@ -2105,7 +2111,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       const res = weld(s, selection.length >= 2 ? new Set(selection) : undefined)
       if (!res) { set({ notice: 'Nothing to weld: no two points stand on the same spot.' }); return }
       const n = res.shard.vertices.length
-      edit(() => res.shard, `${res.merged} point${res.merged === 1 ? '' : 's'} welded${res.colored ? ', and the faces keep their own colors now' : ''}. ${n} vert${n === 1 ? 'ex' : 'ices'}.`, { hint: { merged: true } })
+      edit(() => res.shard, `${res.merged} point${res.merged === 1 ? '' : 's'} welded${res.colored ? ', and the faces keep their own colors now' : ''}. ${n} vert${n === 1 ? 'ex' : 'ices'}.`, { hint: { vertexTo: res.vertexTo, faceFrom: res.faceFrom } })
       set({ selection: [], partSel: [], selectedFaces: [], facePick: [] })
     },
 
@@ -2229,7 +2235,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       if (!s || selection.length === 0) return
       const res = subdivide(s, selection)
       if ('refused' in res) { set({ notice: res.refused }); return }
-      edit(() => res.shard, subdivideNotice(res))
+      edit(() => res.shard, subdivideNotice(res), { hint: { faceFrom: res.faceFrom, midpoints: res.midpoints } })
       // Whole points, as every selection is, so a midpoint that landed on an
       // occupied spot is in hand with what stands there.
       get().setSelection([...res.corners, ...res.added])
@@ -2354,7 +2360,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
         const kept = p.faces.map((_, i) => i).filter((i) => !own.has(i) && !p.faces[i].some((v) => gone.has(v)))
         const faces = kept.map((i) => p.faces[i].map((v) => remap.get(v) as number) as [number, number, number])
         const after = seamsFollow(p, { ...p, vertices: gone.size ? p.vertices.filter((_, i) => !gone.has(i)) : p.vertices, faces }, kept)
-        return withGroups(after, remapGroups(before, after, groupsOf(before).filter((x) => x.id !== id), hint))
+        return withGroups(after, remapGroups(before, after, groupsOf(before).filter((x) => x.id !== id), { ...hint, faceFrom: kept }))
       }, `${g.name} deleted, with everything it held. UNDO brings it back.`, { ownGroups: true })
       if (done) set({ selection: [], partSel: [], selectedFaces: [], facePick: [], hiddenGroups: get().hiddenGroups.filter((k) => k !== groupKey(s.id, id)) })
     },

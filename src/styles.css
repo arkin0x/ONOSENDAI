@@ -13326,7 +13326,8 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
   height: 34px;
   padding: 0 8px;
   font-family: inherit;
-  font-size: 12px;
+  /* 16px on a phone: iOS Safari zooms the page into any smaller field it focuses. */
+  font-size: 16px;
   color: #fff;
   background: none;
   border: 0;
@@ -13336,4 +13337,7 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
 @media (prefers-reduced-motion: reduce) {
   .ws__groups-row.is-new { animation: none; }
   .ws__groups-chev > svg { transition: none; }
+}
+@media (hover: hover) and (pointer: fine) {
+  .ws__groups-rename-input { font-size: 12px; }
 }

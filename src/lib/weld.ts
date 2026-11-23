@@ -30,6 +30,10 @@ export interface Welded {
   merged: number
   /** Whether faces were given their own colours to keep their look. */
   colored: boolean
+  /** Where each vertex went, by its index before: a folded one to the vertex it was folded into (workshop groups follow it). */
+  vertexTo: number[]
+  /** Which face of the shard before each face after was. */
+  faceFrom: number[]
 }
 
 const sameColor = (a: ShardVertex, b: ShardVertex): boolean => a.c[0] === b.c[0] && a.c[1] === b.c[1] && a.c[2] === b.c[2]
@@ -82,6 +86,7 @@ export function weld(s: ShardModel, only?: ReadonlySet<number>): Welded | null {
 
   const faces: Tri[] = []
   const facecolors: Rgb[] = []
+  const faceFrom: number[] = []
   const seen = new Set<string>()
   s.faces.forEach((f, i) => {
     const g = f.map((j) => index.get(to[j]) as number) as Tri
@@ -92,6 +97,7 @@ export function weld(s: ShardModel, only?: ReadonlySet<number>): Welded | null {
     if (seen.has(key)) return
     seen.add(key)
     faces.push(g)
+    faceFrom.push(i)
     if (before) facecolors.push(before[i])
   })
 
@@ -100,6 +106,8 @@ export function weld(s: ShardModel, only?: ReadonlySet<number>): Welded | null {
     shard: { ...s, vertices: keep.map((i) => s.vertices[i]), faces, facecolors: before && faces.length ? facecolors : undefined },
     merged,
     colored: conflict && !own && faces.length > 0,
+    vertexTo: s.vertices.map((_, i) => index.get(to[i]) as number),
+    faceFrom,
   }
 }
 

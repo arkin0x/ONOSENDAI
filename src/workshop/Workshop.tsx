@@ -53,7 +53,7 @@ import { ZipImport } from './ZipImport'
 import { Dock } from './shell/Dock'
 import { MoveHandles } from './shell/MoveHandles'
 import { isLook } from './lookTool'
-import { Rail } from './shell/Rail'
+import { Rail, gOpensGroups } from './shell/Rail'
 import { Sheet } from './shell/Sheet'
 import { Strip } from './shell/Strip'
 import { TopBar, backToName } from './shell/TopBar'
@@ -205,6 +205,8 @@ export function Workshop(): JSX.Element | null {
       const ws = useWorkshop.getState()
       if (isLook(ws.tool)) return
       if (e.ctrlKey || e.metaKey) { groupMade(ws.createGroup()); return }
+      // In STAMP's OBJECT plain G is SNAP TO ITS SIZE (Bench Keys).
+      if (!gOpensGroups(ws)) return
       // Not over the palette or the object picker: G never throws away a choice half made.
       setSheet((cur) => (cur === 'palette' || cur === 'object' ? cur : cur === 'groups' ? null : 'groups'))
     }

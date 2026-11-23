@@ -66,7 +66,7 @@ describe('COPY', () => {
     expect(range).toEqual({ shardId: s.id, vertices: [0, 4], faces: [0, 2] })
     expect(w().lastCopy).toEqual(range)
     expect(stampedIndices(w().lastCopy!)).toEqual({ vertices: [0, 1, 2, 3], faces: [0, 1] })
-    expect(w().notice).toMatch(/copied in: 4 points and 2 faces, yours to edit\. Switched to SOLID so the faces show\.$/)
+    expect(w().notice).toMatch(/copied in: 4 points and 2 faces, yours to edit\. Switched to SOLID so the faces show\. New group: Tile 16\.$/)
     w().undo()
     expect(w().current()!.vertices).toHaveLength(0)
   })

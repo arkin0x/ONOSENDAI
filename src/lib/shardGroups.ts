@@ -124,18 +124,26 @@ export function nextName(groups: readonly ShardGroup[], base = 'Group', from = 1
 }
 
 /**
- * A name for a group that copies `name`: "Rock" makes "Rock 2", "Rock 2"
- * makes "Rock 3", always the first number no group has.
+ * A name for a group that copies `name`: "Rock" makes "Rock 2", and "Rock 2"
+ * makes "Rock 3" while a "Rock" is there to count from, always the first
+ * number no group has. A name that only ends in a number is a name: a copy
+ * of "Tile 16" is "Tile 16 2", never "Tile 17", which names another piece.
  */
 export function copyName(groups: readonly ShardGroup[], name: string): string {
-  const m = /^(.*?) (\d+)$/.exec(name)
-  return m ? nextName(groups, m[1], Number(m[2]) + 1) : nextName(groups, name, 2)
+  const m = /^(.*?) ([1-9]\d*)$/.exec(name)
+  const counted = m && groups.some((g) => g.name.toLowerCase() === m[1].toLowerCase())
+  return m && counted ? nextName(groups, m[1], Number(m[2]) + 1) : nextName(groups, name, 2)
 }
 
-/** A name nobody has used yet in this shard: `name` itself when it is free, else the next numbered one. */
+/**
+ * A name nobody has used yet in this shard: `name` itself when it is free,
+ * else `name` with the first free number after it. The whole name is kept,
+ * so a second "gibson-mountain-03" is "gibson-mountain-03 2", never
+ * "gibson-mountain-04", which names another piece.
+ */
 export function freeName(groups: readonly ShardGroup[], name: string): string {
   const n = cleanName(name) || 'Group'
-  return groups.some((g) => g.name.toLowerCase() === n.toLowerCase()) ? copyName(groups, n) : n
+  return groups.some((g) => g.name.toLowerCase() === n.toLowerCase()) ? nextName(groups, n, 2) : n
 }
 
 /** A new group of these members (cleaned against `s`), under `name`. Null when it would hold nothing. */

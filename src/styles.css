@@ -12726,6 +12726,10 @@ html.tv-broadcast body { overflow: hidden; }
 .tutorial-card__foot { display: flex; gap: 6px; }
 .tutorial-card__foot .tutorial-card__go { flex: 1 1 0; align-self: auto; }
 .tutorial__back { flex: 0 0 auto; padding: 0 12px; background: transparent; }
+/* The terms line under the welcome's FIND IT: one short line, dim, never in the way. */
+.tutorial__terms { margin: 10px 0 0; text-align: center; font-size: 10px; letter-spacing: 0.08em; color: var(--dim); }
+.tutorial__terms a { color: var(--dim); text-decoration: underline; text-underline-offset: 2px; }
+.tutorial__terms a:hover { color: var(--fg); }
 .tutorial__next { flex: 1 1 0; }
 
 /* In-game mode (game/GameView.tsx, DECK-0002 §2.3): the game's world full

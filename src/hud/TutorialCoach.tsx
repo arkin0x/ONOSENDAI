@@ -259,6 +259,10 @@ export function TutorialCoach(): JSX.Element | null {
             {canBack && <button className="demo__btn tutorial__back" onClick={t.back} aria-label="Back"><ChevronLeft size={14} aria-hidden /> BACK</button>}
             <button ref={go} className={`demo__btn tutorial-card__go ${step.choices ? 'tutorial-card__go--done' : 'demo__btn--next'}`} onClick={t.next}>{step.go ?? (last ? 'FINISH' : 'NEXT')}</button>
           </div>
+          {/* The terms, once, on the first thing a new arrival sees (public/terms.html; also in the menu footer). */}
+          {step.id === 'welcome' && (
+            <p className="tutorial__terms">By playing you agree to the <a href="/terms" target="_blank" rel="noopener">TERMS</a>.</p>
+          )}
         </div>
       </div>,
       document.body,

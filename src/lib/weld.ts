@@ -32,8 +32,8 @@ export interface Welded {
   colored: boolean
   /** Where each vertex went, by its index before: a folded one to the vertex it was folded into (workshop groups follow it). */
   vertexTo: number[]
-  /** Which face of the shard before each face after was. */
-  faceFrom: number[]
+  /** Where each face went, by its index before: a face that became another's twin goes where that one went, a face that folded to a line goes nowhere (-1). */
+  faceTo: number[]
 }
 
 const sameColor = (a: ShardVertex, b: ShardVertex): boolean => a.c[0] === b.c[0] && a.c[1] === b.c[1] && a.c[2] === b.c[2]
@@ -86,18 +86,19 @@ export function weld(s: ShardModel, only?: ReadonlySet<number>): Welded | null {
 
   const faces: Tri[] = []
   const facecolors: Rgb[] = []
-  const faceFrom: number[] = []
-  const seen = new Set<string>()
+  const faceTo: number[] = new Array<number>(s.faces.length).fill(-1)
+  const seen = new Map<string, number>()
   s.faces.forEach((f, i) => {
     const g = f.map((j) => index.get(to[j]) as number) as Tri
     // A face whose corners fell together is a line or a point now, and a
     // face that became another face's twin says nothing the first did not.
     if (g[0] === g[1] || g[1] === g[2] || g[0] === g[2]) return
     const key = [...g].sort((a, b) => a - b).join(',')
-    if (seen.has(key)) return
-    seen.add(key)
+    const twin = seen.get(key)
+    if (twin !== undefined) { faceTo[i] = twin; return }
+    seen.set(key, faces.length)
+    faceTo[i] = faces.length
     faces.push(g)
-    faceFrom.push(i)
     if (before) facecolors.push(before[i])
   })
 
@@ -107,7 +108,7 @@ export function weld(s: ShardModel, only?: ReadonlySet<number>): Welded | null {
     merged,
     colored: conflict && !own && faces.length > 0,
     vertexTo: s.vertices.map((_, i) => index.get(to[i]) as number),
-    faceFrom,
+    faceTo,
   }
 }
 

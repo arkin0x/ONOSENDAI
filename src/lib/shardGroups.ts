@@ -241,6 +241,8 @@ export interface RemapHint {
   vertexTo?: readonly number[]
   /** Which face before each face after was (a child of SUBDIVIDE, its parent), or -1 for a face the edit made. */
   faceFrom?: readonly number[]
+  /** Where each face went, by its index before (WELD: two faces made twins go to the one kept); -1 for gone. */
+  faceTo?: readonly number[]
   /** SUBDIVIDE's midpoints, each with the ends (indices before) of the edge it halves: a group holding both ends holds it. */
   midpoints?: ReadonlyArray<{ at: number; ends: readonly [number, number] }>
   /** The placed objects an edit removed, by their index before it (DELETE, CUT). */
@@ -320,6 +322,8 @@ function partMap(before: ShardModel, after: ShardModel, hint: RemapHint): IndexM
  * face whose corner went, or that is found nowhere, is gone.
  */
 function faceMap(before: ShardModel, after: ShardModel, vmap: IndexMap, hint: RemapHint): IndexMap {
+  const sent = hint.faceTo
+  if (sent) return (i) => { const j = sent[i]; return j === undefined || j < 0 ? [] : [j] }
   const told = hint.faceFrom
   if (told) {
     const to = new Map<number, number[]>()
@@ -534,7 +538,7 @@ export function rowState(s: ShardModel, g: ShardGroup, h: HeldSets): { held: 'al
 
 const countsCache = new WeakMap<ShardGroup, { v: unknown; f: unknown; p: unknown; counts: ReturnType<typeof groupCounts> }>()
 
-/** groupCounts, kept per group until the group or the shard's lists change: a nudge recounts nothing. */
+/** groupCounts, kept per group until the group or the shard's lists change: a change of what is held recounts nothing (a move does, its vertices are a new list). */
 export function groupCountsCached(s: ShardModel, g: ShardGroup): { points: number; faces: number; objects: number } {
   const hit = countsCache.get(g)
   if (hit && hit.v === s.vertices && hit.f === s.faces && hit.p === s.parts) return hit.counts

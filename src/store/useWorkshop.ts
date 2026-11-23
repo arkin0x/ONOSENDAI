@@ -2111,7 +2111,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       const res = weld(s, selection.length >= 2 ? new Set(selection) : undefined)
       if (!res) { set({ notice: 'Nothing to weld: no two points stand on the same spot.' }); return }
       const n = res.shard.vertices.length
-      edit(() => res.shard, `${res.merged} point${res.merged === 1 ? '' : 's'} welded${res.colored ? ', and the faces keep their own colors now' : ''}. ${n} vert${n === 1 ? 'ex' : 'ices'}.`, { hint: { vertexTo: res.vertexTo, faceFrom: res.faceFrom } })
+      edit(() => res.shard, `${res.merged} point${res.merged === 1 ? '' : 's'} welded${res.colored ? ', and the faces keep their own colors now' : ''}. ${n} vert${n === 1 ? 'ex' : 'ices'}.`, { hint: { vertexTo: res.vertexTo, faceTo: res.faceTo } })
       set({ selection: [], partSel: [], selectedFaces: [], facePick: [] })
     },
 

@@ -447,6 +447,25 @@ describe('the panel\'s functions', () => {
     expect(hiddenView(s, null)).toBeNull()
   })
 
+  it('WELD that makes a pasted face the twin of its original keeps a group of those faces, on the face kept', () => {
+    w().create('s')
+    w().placeStamp([0, 0, 0])
+    const n = cur().vertices.length
+    const f = cur().faces.length
+    w().setSelection(cur().vertices.map((_, i) => i))
+    w().copySelection()
+    w().pasteClip('exact')
+    w().selectVertex(null)
+    // A group of the copy's faces alone, then everything welded: the copy's faces fold onto the originals.
+    for (let k = f; k < 2 * f; k++) w().selectFace(k)
+    w().createGroup('Copy faces')
+    w().selectFace(null); w().selectVertex(null)
+    w().weld()
+    expect(cur().vertices.length).toBe(n)
+    expect(cur().faces.length).toBe(f)
+    expect(named('Copy faces').faces).toEqual(cur().faces.map((_, k) => k))
+  })
+
   it('a face added to a group of points is held with it, corners and all', () => {
     twoBlocks()
     const a = named('A')

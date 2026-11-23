@@ -59,7 +59,7 @@ import { HOP_FRAME_MS, setTutorialFrame, setTutorialShot, setTutorialSpin, setTu
 import { afterHop, holdGlide } from '../lib/hopStage'
 import { setMenuOpen } from '../hooks/useMenuOpen'
 import { usePanelLayout } from '../store/usePanelLayout'
-import { useAgentInviteCopies } from '../hud/AgentsPanel'
+import { useAgentInviteCopies } from '../store/agentInvite'
 import { assignToFolder, createFolderPath } from '../store/useShardFolders'
 import type { ShardModel } from 'sno-core/shards'
 

@@ -56,11 +56,9 @@ import { DmInboxSetup, useMyDmInbox } from './DmInboxSetup'
 import { Explanation } from './Explanation'
 import { ProfileBadge } from './ProfileBadge'
 import { copyText } from '../lib/copyText'
-import { create } from 'zustand'
+import { useAgentInviteCopies } from '../store/agentInvite'
 import { CopyValue } from './ui/CopyValue'
 
-/** How many times COPY under Invite an agent was pressed on this page: the tour's AI step waits for one (tutorial/director.ts). */
-export const useAgentInviteCopies = create<{ presses: number }>(() => ({ presses: 0 }))
 
 /** How long a tapped button says COPIED before its label returns. */
 const COPIED_MS = 1200

@@ -105,7 +105,7 @@ export function boxMark(layout: TutorialLayout | null, anchor: Position, anchorP
  * What of the course target shows, by where the tutorial is: nothing before
  * the course step; the cube, its ring, the beam and the ping while the course
  * step waits ('guiding'); once the player has landed in it, and for the rest
- * of the run, the cube and its ring, still ('after').
+ * of the run, the cube's outline alone ('after').
  */
 export type TargetPhase = 'off' | 'guiding' | 'after'
 

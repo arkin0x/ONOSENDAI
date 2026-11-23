@@ -179,7 +179,9 @@ export function TutorialCoach(): JSX.Element | null {
     const place = (): void => {
       const coach = ref.current
       const inPanel = marked.filter((el) => el.closest('[data-panel-id]'))
-      const target = around(inPanel.map((el) => el.getBoundingClientRect()).filter((r) => r.width > 0 && r.height > 0))
+      // The control and its panel's title, so the card never hides which panel it is in (the AI step's COPY under AGENTS).
+      const heads = inPanel.map((el) => el.closest('[data-panel-id]')?.querySelector('.panel__head')).filter((h): h is Element => !!h)
+      const target = around([...inPanel, ...heads].map((el) => el.getBoundingClientRect()).filter((r) => r.width > 0 && r.height > 0))
       if (!coach || !target) { setSpot((s) => s.side === 'top' ? s : AT_TOP); return }
       for (const el of inPanel) ro?.observe(el)
       const c = coach.getBoundingClientRect()

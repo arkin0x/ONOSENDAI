@@ -21,7 +21,7 @@
  *      build     the mode button, round to BUILD (or B);
  *   5. object    OBJECT on the BUILD bar; then
  *      pick      a shard in the picker;
- *   6. place     PLACE (the commit slot), aimed with the arrows.
+ *   6. place     HIDE on the placing bar, aimed with the arrows.
  *
  * The step waits for 'placed' (something placed since it came up) and stays
  * on its ✓ with FINISH (TutorialStep stay); BACK and SKIP stay as on every
@@ -38,7 +38,7 @@ import { usePanelLayout } from '../store/usePanelLayout'
 import { useMenuIsOpen } from '../hooks/useMenuOpen'
 import { useItemsModal, useOpenActions } from '../hud/InventoryPanel'
 import { useStash } from '../hud/stash'
-import { COMMIT, MENU_SHUT } from './script'
+import { MENU_SHUT } from './script'
 
 /** Where the player is in placing something. */
 export type BuildStage = 'menu' | 'loot' | 'actions' | 'move' | 'close' | 'build' | 'object' | 'pick' | 'place'
@@ -83,7 +83,8 @@ export const BUILD_STAGES: Readonly<Record<BuildStage, { note: string; glow: str
   build: { note: 'Tap the mode button until it says BUILD (or press B).', glow: '.touchops__commit.is-hop, .touchops__commit.is-view, .touchops__commit.is-scan' },
   object: { note: 'Tap OBJECT.', glow: '.buildbar__act[aria-label="Place object"]' },
   pick: { note: 'Tap the shard you moved.', glow: '.objpick__row:not(:disabled)' },
-  place: { note: 'Aim with the arrows, then tap PLACE.', glow: COMMIT },
+  // The placing bar's own button (hud/DeployBar.tsx): HIDE (LOCAL), or HIDE & PUBLISH while ONLINE.
+  place: { note: 'Aim with the arrows, then tap HIDE to place it.', glow: '.deploybar__deploy' },
 }
 
 /** Workshop shards that are the player's own (not the tour's copies, tutorial-...). */

@@ -7,11 +7,12 @@
  * be the same green as the ring/beam. Put the ring and beam around the first
  * green box from step 1, and around this target's green box").
  *
- *   - a green outline cube: the region that counts;
- *   - a level green ring round it at half its height, clear of its corners;
- *   - while the step that sends the player there waits ('guiding'), a beam of
- *     the same green from the cube's top straight up, and a ring that pings
- *     outward.
+ *   - a green outline cube: the region that counts, always;
+ *   - while the step that sends the player there waits ('guiding'): a level
+ *     green ring round it at half its height, clear of its corners, a beam
+ *     of the same green from the cube's top straight up, and a ring that
+ *     pings outward. Once the step is done only the outline stays, so a ring
+ *     never sweeps across the camera on the later steps.
  * Nothing solid: the outline is lines, and nothing here writes depth, so the
  * cursor and the avatar inside the cube always show through (the white
  * diamond that used to stand on the course target hid the cursor). The beam
@@ -70,7 +71,7 @@ export function GreenTargetBox({ centre, scale, turn, side, guiding, name }: Gre
   }, [side])
   const ring = ringRadius(side)
   const beam = beamOf(side)
-  const tube = Math.max(0.06, side * 0.012)
+  const tube = Math.max(0.05, side * 0.008)
   const pings = useRef<Array<Mesh | null>>([])
   const group = useRef<Group>(null)
   useFrame(({ clock }) => {
@@ -88,12 +89,12 @@ export function GreenTargetBox({ centre, scale, turn, side, guiding, name }: Gre
       <lineSegments geometry={edges} raycast={noRaycast} renderOrder={-1}>
         <lineBasicMaterial color={TARGET_GREEN} toneMapped={false} transparent opacity={0.95} depthWrite={false} />
       </lineSegments>
-      <mesh rotation={[Math.PI / 2, 0, 0]} raycast={noRaycast}>
-        <torusGeometry args={[ring, tube * 1.5, 8, 64]} />
-        <meshBasicMaterial color={TARGET_GREEN} toneMapped={false} transparent opacity={0.9} depthWrite={false} />
-      </mesh>
       {guiding && (
         <>
+          <mesh rotation={[Math.PI / 2, 0, 0]} raycast={noRaycast}>
+            <torusGeometry args={[ring, tube * 1.5, 8, 64]} />
+            <meshBasicMaterial color={TARGET_GREEN} toneMapped={false} transparent opacity={0.9} depthWrite={false} />
+          </mesh>
           {/* The beam and the ping, translucent, each twice split by the stencil (ClipWalls OFF_FACES / OVER_FACES):
               over a shard face the face keeps its alpha tag, so the bloom never blows the course's platforms out behind them. */}
           {[{ ...OFF_FACES, blending: AdditiveBlending }, OVER_FACES].map((split, i) => (

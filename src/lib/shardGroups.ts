@@ -124,13 +124,15 @@ export function nextName(groups: readonly ShardGroup[], base = 'Group', from = 1
 }
 
 /**
- * A name for a group that copies `name`: "Rock" makes "Rock 2", "Rock 2"
- * makes "Rock 3", always the first number no group has.
+ * A name for a group that copies `name`: "Rock" makes "Rock 2", and "Rock 2"
+ * makes "Rock 3" while a "Rock" is there to count from, always the first
+ * number no group has. A name that only ends in a number is a name: a copy
+ * of "Tile 16" is "Tile 16 2", never "Tile 17", which names another piece.
  */
 export function copyName(groups: readonly ShardGroup[], name: string): string {
-  // A count is a plain number after a space: "Rock 2". "Mountain 03" is a name, so its copy is "Mountain 03 2".
   const m = /^(.*?) ([1-9]\d*)$/.exec(name)
-  return m ? nextName(groups, m[1], Number(m[2]) + 1) : nextName(groups, name, 2)
+  const counted = m && groups.some((g) => g.name.toLowerCase() === m[1].toLowerCase())
+  return m && counted ? nextName(groups, m[1], Number(m[2]) + 1) : nextName(groups, name, 2)
 }
 
 /**

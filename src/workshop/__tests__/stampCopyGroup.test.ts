@@ -105,6 +105,28 @@ describe('names', () => {
   })
 })
 
+describe('names, more', () => {
+  it('a DUPLICATE of a stamped "Tile 16" is "Tile 16 2": a number that is part of the name is never counted up', () => {
+    w().setStampObject(chosen(tile('Tile 16')))
+    stampTap([0, 0, 0])
+    w().duplicateGroup(groups()[0].id)
+    expect(groups().map((g) => g.name)).toEqual(['Tile 16', 'Tile 16 2'])
+    // Its copy counts on from the name it copies.
+    w().duplicateGroup(groups()[1].id)
+    expect(groups().map((g) => g.name)).toEqual(['Tile 16', 'Tile 16 2', 'Tile 16 3'])
+  })
+
+  it('a shard with no name still makes a group, and a name ending in a period reads once', () => {
+    w().setStampObject(chosen(tile('')))
+    stampTap([0, 0, 0])
+    expect(groups()).toHaveLength(1)
+    expect(groups()[0].name).toBe('Group')
+    w().setStampObject(chosen(tile('Rock.')))
+    stampTap([16 * T, 0, 0])
+    expect(w().notice).toMatch(/New group: Rock\.$/)
+  })
+})
+
 describe('G', () => {
   it('is SNAP in STAMP\'s OBJECT and GROUPS everywhere else', () => {
     expect(gOpensGroups({ tool: 'stamp', stampMode: 'object' })).toBe(false)

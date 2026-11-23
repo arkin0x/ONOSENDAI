@@ -1690,13 +1690,14 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       const id = get().currentId
       if (!id || !get().current()) return null
       // A COPY is a group of what it put in, named after the shard stamped (made free: "Rock 2"), in this same edit.
-      const groupName = added && name ? freeName(groupsOf(get().current()), name) : null
+      // Every COPY makes one, even of a shard whose name was cleared (freeName says "Group" then).
+      const groupName = added && name !== undefined ? freeName(groupsOf(get().current()), name) : null
       const done = groupName && added
         ? edit((before) => {
           const g = makeGroup(shard, groupName, { ...stampedIndices(added), parts: [] })
           const kept = remapGroups(before, shard, groupsOf(before))
           return withGroups(shard, g ? [...kept, g] : kept)
-        }, `${notice} New group: ${groupName}.`, { ownGroups: true })
+        }, `${notice} New group: ${groupName.replace(/\.+$/, '')}.`, { ownGroups: true })
         : edit(() => shard, notice)
       if (!done) return null
       const range: StampedRange | null = added ? { shardId: id, vertices: [...added.vertices] as [number, number], faces: [...added.faces] as [number, number] } : null

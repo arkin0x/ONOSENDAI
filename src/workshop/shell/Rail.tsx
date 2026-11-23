@@ -51,18 +51,20 @@ function LevelStack(): JSX.Element {
 }
 
 /**
- * GROUPS: opens and closes the GROUPS sheet (G), lit while it is open. A
- * badge counts the groups hidden on the bench, so they are not forgotten
- * with the sheet shut. The word under it stands over the scene: white.
- */
-/**
  * Whether G opens GROUPS now. In STAMP's OBJECT, G is SNAP TO ITS SIZE
  * (Bench Keys, its key printed on the strip), so there it is SNAP's alone and
- * this key prints no G: one key, one meaning, one printed hint.
+ * this key prints no G: one key, one meaning, one printed hint. The rail key
+ * still opens and closes the sheet there.
  */
 export function gOpensGroups(s: { tool: string; stampMode: string }): boolean {
   return !(s.tool === 'stamp' && s.stampMode === 'object')
 }
+
+/**
+ * GROUPS: opens and closes the GROUPS sheet (G), lit while it is open. A
+ * badge counts the groups hidden on the bench, so they are not forgotten
+ * with the sheet shut. The word under it stands over the scene: white.
+ */
 
 function GroupsKey({ open, onToggle }: { open: boolean; onToggle: () => void }): JSX.Element {
   const look = useWorkshop((s) => isLook(s.tool))

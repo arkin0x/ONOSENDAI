@@ -290,6 +290,8 @@ export function TouchControls(): JSX.Element {
   // hidden in its place until the tour reaches it, then arriving calmly.
   const plain = useNewcomerView()
   const veil = useRevealClass()
+  // A slot's word, with its key printed under it in the newcomer view; outside it the word alone, as it always was.
+  const withKey = (word: string, key: string): ReactNode => (plain ? <>{word}<span className="touchops__keyhint" aria-hidden>{key}</span></> : word)
   const opsUp = home || viewing || (building && !spectating)
 
   const computing = proof.status === 'computing'
@@ -409,7 +411,7 @@ export function TouchControls(): JSX.Element {
   const ringShown = veil('pad.modes') !== ' nc-veiled'
   const ring = (m: WalkFrom): JSX.Element => ringShown ? modeButton(m, true) : (
     <button key="commit" className={`touchops__commit${veil('pad.go')}`} disabled title="Move the cursor somewhere first">
-      {say('COMMIT', plain)}{plain && <span className="touchops__keyhint" aria-hidden>SPACE</span>}
+      {withKey(say('COMMIT', plain), 'SPACE')}
     </button>
   )
 
@@ -469,7 +471,7 @@ export function TouchControls(): JSX.Element {
             aria-label="Gravity"
             {...noCallout}
             onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); useWalk.getState().setGravity(!gravity) }}
-          >GRAVITY{plain && <span className="touchpad__keyhint" aria-hidden>Z</span>}</button>
+          >{plain ? <>GRAVITY<span className="touchpad__keyhint" aria-hidden>Z</span></> : 'GRAVITY'}</button>
         )}
         {pad.filter((b) => !b.side).map(padKey)}
         {/* The hub doubles as the scale readout and its reset: a tap returns
@@ -539,8 +541,7 @@ export function TouchControls(): JSX.Element {
             recall()
           }}
         >
-          {computing || stopping ? 'STOP' : regionActive && regionGrown ? 'RESET' : say('RECALL', plain)}
-          {plain && <span className="touchops__keyhint" aria-hidden>X</span>}
+          {withKey(computing || stopping ? 'STOP' : regionActive && regionGrown ? 'RESET' : say('RECALL', plain), 'X')}
         </button>}
         {/* The mode switch, in the commit slot while there is nothing to
             commit: HOP to VIEW to BUILD to SCAN and back to HOP
@@ -569,8 +570,7 @@ export function TouchControls(): JSX.Element {
             else useCyberspace.getState().commit()
           }}
         >
-          {deploying ? (placedHere ? 'PLACED' : 'PLACE') : computing ? busyLabel(proof) : say(action ? ACTION_LABEL[action] : 'COMMIT', plain)}
-          {plain && !computing && !deploying && <span className="touchops__keyhint" aria-hidden>SPACE</span>}
+          {deploying ? (placedHere ? 'PLACED' : 'PLACE') : computing ? busyLabel(proof) : withKey(say(action ? ACTION_LABEL[action] : 'COMMIT', plain), 'SPACE')}
         </button>
         )}
         {/* Whether a commit leaves the device. Under COMMIT because that is the

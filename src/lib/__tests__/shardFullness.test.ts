@@ -90,21 +90,21 @@ describe('fullnessOf', () => {
     expect(words).toMatch(/^\d+% of one hidden object: /)
     expect(f.percent).toBe(Math.round((41_816 / wholePayloadLimit()) * 100))
     expect(words).not.toMatch(/—|–/)
-    expect(fullnessWords(fullnessOf(wholePayloadLimit() + 1))).toMatch(/^Too big for one hidden object: /)
+    expect(fullnessWords(fullnessOf(wholePayloadLimit() + 1))).toMatch(/^Too big to hide whole: /)
   })
 
-  it('keeps each line to one line at a phone width (58 characters of 10px monospace)', () => {
+  it('keeps each line to one line at a phone width (54 characters of 10px monospace: a 360px phone holds about 56)', () => {
     const big = wholePayloadLimit() + 99_999
     for (const f of [fullnessOf(1), fullnessOf(wholePayloadLimit()), fullnessOf(big)]) {
-      expect(fullnessWords(f).length).toBeLessThanOrEqual(58)
-      for (const apart of [0, 1, 1234]) expect(fullnessNote(f, apart).length).toBeLessThanOrEqual(58)
+      expect(fullnessWords(f).length).toBeLessThanOrEqual(54)
+      for (const apart of [0, 1, 1234]) expect(fullnessNote(f, apart).length).toBeLessThanOrEqual(54)
     }
   })
 
   it('notes what to do when too big, else that it counts this shard alone when it places objects', () => {
     expect(fullnessNote(fullnessOf(1000), 0)).toBe('')
-    expect(fullnessNote(fullnessOf(1000), 1)).toBe('Only this shard: 1 placed object goes out on its own.')
-    expect(fullnessNote(fullnessOf(1000), 3)).toBe('Only this shard: 3 placed objects go out on their own.')
+    expect(fullnessNote(fullnessOf(1000), 1)).toBe('This shard only: 1 placed object is not in it.')
+    expect(fullnessNote(fullnessOf(1000), 3)).toBe('This shard only: 3 placed objects are not in it.')
     expect(fullnessNote(fullnessOf(wholePayloadLimit() + 1), 3)).toMatch(/^Split it: /)
   })
 })

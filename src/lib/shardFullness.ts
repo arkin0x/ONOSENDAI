@@ -116,20 +116,20 @@ export function placedApart(shard: { refs?: unknown[]; parts?: Array<{ ref: numb
   return apart.size
 }
 
-/** The first line under the bar: how full, in the bytes BYTES ON THE WIRE counts. One line at a phone's width. */
+/** The first line under the bar: how full, in the bytes BYTES ON THE WIRE counts. One line at a phone's width (54 characters; a 360px phone holds about 56). */
 export function fullnessWords(f: Fullness): string {
   const of = `${f.payload.toLocaleString('en-US')} of ${f.limit.toLocaleString('en-US')} bytes`
-  if (f.level === 'over') return `Too big for one hidden object: ${of}`
+  if (f.level === 'over') return `Too big to hide whole: ${of}`
   return `${f.percent}% of one hidden object: ${of}`
 }
 
 /**
  * The second line: what to do when it is too big, else, when it places
  * objects that go out on their own, that the bar counts this shard alone.
- * Empty otherwise; the line is kept either way. One line at a phone's width.
+ * Empty otherwise; the line is kept either way. One line at a phone's width (54 characters; a 360px phone holds about 56).
  */
 export function fullnessNote(f: Fullness, apart: number): string {
-  if (f.level === 'over') return 'Split it: move part into its own shard and place that.'
+  if (f.level === 'over') return 'Split it: move part into a shard and place it.'
   if (apart <= 0) return ''
-  return apart === 1 ? 'Only this shard: 1 placed object goes out on its own.' : `Only this shard: ${apart} placed objects go out on their own.`
+  return apart === 1 ? 'This shard only: 1 placed object is not in it.' : `This shard only: ${apart} placed objects are not in it.`
 }

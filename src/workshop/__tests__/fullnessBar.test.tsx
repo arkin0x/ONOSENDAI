@@ -25,7 +25,7 @@ describe('FullnessBar', () => {
     expect(renderToStaticMarkup(<FullnessBar payload={Math.ceil(wholePayloadLimit() * 0.95)} />)).toContain('fullbar--near')
     const over = renderToStaticMarkup(<FullnessBar payload={wholePayloadLimit() + 10} />)
     expect(over).toContain('fullbar--over')
-    expect(over).toContain('Too big for one hidden object')
+    expect(over).toContain('Too big to hide whole')
     expect(over).toContain('Split it: ')
   })
 
@@ -36,7 +36,7 @@ describe('FullnessBar', () => {
   })
 
   it('says it counts the shard itself when it places objects that go out on their own, in a line always kept', () => {
-    expect(renderToStaticMarkup(<FullnessBar payload={1000} apart={3} />)).toContain('Only this shard: 3 placed objects go out on their own.')
+    expect(renderToStaticMarkup(<FullnessBar payload={1000} apart={3} />)).toContain('This shard only: 3 placed objects are not in it.')
     // The line is there, empty, without placed objects: nothing moves when the first one is placed.
     expect(renderToStaticMarkup(<FullnessBar payload={1000} />)).toContain('<span class="fullbar__line fullbar__note"></span>')
   })

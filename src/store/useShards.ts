@@ -35,6 +35,7 @@
 import { findCashuToken } from '../lib/cashu'
 import { hasNftLink } from '../lib/nftLink'
 import { clampUnit, normalizeStored, toPayload } from 'sno-core/shards'
+import { forOlderReaders } from './olderReaders'
 import { parseAddress } from 'sno-core/parts'
 import { snapOffered, wrapSpin } from '../lib/pose'
 import { create } from 'zustand'
@@ -2064,7 +2065,9 @@ function loadMine(owner: string): MyDeployment[] {
  * is some 20 KB a side: kept twice it was 39,800 bytes a row. It comes back from
  * the inner event on load (normalizedRow).
  */
-function storedRow(d: MyDeployment): string {
+function storedRow(row: MyDeployment): string {
+  // A shard past 64 units is stored so an older tab reads it the same (olderReaders.ts).
+  const d = row.shard ? { ...row, shard: forOlderReaders(row.shard) } : row
   if (!d.chest?.look) return JSON.stringify(d)
   const { look: _inInner, ...chest } = d.chest
   void _inInner

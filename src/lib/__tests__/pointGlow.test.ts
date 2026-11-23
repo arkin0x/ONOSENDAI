@@ -36,6 +36,11 @@ describe('POINT SIZE rail', () => {
     expect(stepPointSize(36, 1)).toBe(48)
     expect(stepPointSize(40, -1)).toBe(36)
     expect(stepPointSize(GLOW_REACH, 1)).toBe(GLOW_REACH)
+    // Past 64 units the steps double to the cap of 4,096 (DECK-0003 §1.8).
+    expect(stepPointSize(6000, 1)).toBe(7680)
+    expect(stepPointSize(7680, 1)).toBe(15360)
+    expect(stepPointSize(245760, 1)).toBe(GLOW_REACH)
+    expect(stepPointSize(GLOW_REACH, -1)).toBe(245760)
   })
 })
 
@@ -49,6 +54,8 @@ describe('RADIUS and GLOW STRENGTH rails', () => {
     expect(stepRadius(1, -1)).toBe(1)
     expect(stepRadius(120, 1)).toBe(180)
     expect(stepRadius(GLOW_REACH, 1)).toBe(GLOW_REACH)
+    expect(stepRadius(6000, 1)).toBe(7680)
+    expect(stepRadius(GLOW_REACH, -1)).toBe(245760)
   })
 
   it('GLOW STRENGTH runs 1 to 100, steps 1 then fives', () => {
@@ -79,7 +86,7 @@ describe('gibsons at the object\'s scale', () => {
     expect(gibsonsText(36, 0)).toEqual({ figure: '0.3', word: 'GIBSONS' })
     expect(gibsonsText(120, 0)).toEqual({ figure: '1', word: 'GIBSON' })
     expect(gibsonsText(0, 0)).toEqual({ figure: '0', word: 'GIBSONS' })
-    expect(gibsonsText(GLOW_REACH, 0).figure).toBe('64')
+    expect(gibsonsText(GLOW_REACH, 0).figure).toBe('4096')
   })
 
   it('at a larger unit the same ticks are more gibsons, a power of two past a million', () => {
@@ -96,7 +103,8 @@ describe('gibsons at the object\'s scale', () => {
     expect(typedTicks('.5', 0, 0)).toBe(60)
     expect(typedTicks('1024', 10, 0)).toBe(120)
     expect(typedTicks('0', 0, 1)).toBe(1)
-    expect(typedTicks('9999', 0, 0)).toBe(GLOW_REACH)
+    expect(typedTicks('99999', 0, 0)).toBe(GLOW_REACH)
+    expect(typedTicks('100', 0, 0)).toBe(12000)
     expect(typedTicks('0.001', 0, 0)).toBe(1)
     expect(typedTicks('3', 20, 0)).toBe(1)
     expect(typedTicks('0', 20, 0)).toBe(0)
@@ -106,9 +114,9 @@ describe('gibsons at the object\'s scale', () => {
 })
 
 describe('the most # takes', () => {
-  it('is 64 units as plain digits the field can hold, and typing it back gives the cap', () => {
-    expect(maxGibsonsTyped(0)).toBe('64')
-    expect(maxGibsonsTyped(20)).toBe('67108864')
+  it('is 4,096 units as plain digits the field can hold, and typing it back gives the cap', () => {
+    expect(maxGibsonsTyped(0)).toBe('4096')
+    expect(maxGibsonsTyped(20)).toBe('4294967296')
     expect(maxGibsonsTyped(80)).toMatch(/^\d+$/)
     for (const u of [0, 10, 20, 40, 80]) expect(typedTicks(maxGibsonsTyped(u), u, 0)).toBe(GLOW_REACH)
   })

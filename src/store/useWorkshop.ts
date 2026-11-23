@@ -1177,10 +1177,21 @@ function facesFor(pts: P3[]): Tris | null {
   return out
 }
 
+/** A GRID SIZE step this soon after the last one joins its undo step: a held key repeats every 110 ms (useRepeatable). */
+const EXTENT_RUN_GAP_MS = 1000
+
 /** The shard object the last COPY stamp left on the bench (useWorkshop lastCopy): once the bench holds anything else, lastCopy names nothing. */
 let copiedInto: ShardModel | null = null
 
 export const useWorkshop = create<WorkshopState>((set, get) => {
+  /**
+   * The last change of GRID SIZE (setExtent): the shard as it left it, how
+   * long the undo history was then, and when. A step joins it only while all
+   * three still hold, so a reopened workshop, another shard, an undo or a
+   * press after a pause starts a step of its own (review of #555).
+   */
+  let extentRun: { shard: ShardModel; past: number; at: number } | null = null
+
   /**
    * Apply an edit to the current shard, remember what it was, stamp it, persist.
    *
@@ -1652,7 +1663,19 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       if (!s) return
       const e = Math.max(Math.max(MIN_EXTENT, neededExtent(s)), Math.min(MAX_EXTENT, Math.round(extent)))
       if (e === s.extent) return
-      edit((cur) => ({ ...cur, extent: e }))
+      // One held key is one undo step: from 64 to the top is about a hundred
+      // calls, which would push everything before it out of the undo history.
+      // Whatever edit comes next leaves the shard a different object, and starts a new step.
+      const now = Date.now()
+      const run = extentRun
+      if (run && run.shard === s && run.past === get().past.length && run.past > 0 && now - run.at < EXTENT_RUN_GAP_MS) {
+        const { shards } = get()
+        const list = shards.map((x) => (x === s ? { ...x, extent: e, updatedAt: Date.now() } : x))
+        set({ shards: list, future: [] })
+        save(list)
+      } else edit((cur) => ({ ...cur, extent: e }))
+      const after = get().current()
+      extentRun = after ? { shard: after, past: get().past.length, at: now } : null
       set({ level: Math.max(-e * TICKS_PER_UNIT, Math.min(e * TICKS_PER_UNIT, get().level)) })
     },
     setPlane: (plane) => set({ plane, aim: null }),

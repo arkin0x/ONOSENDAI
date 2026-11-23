@@ -42,7 +42,7 @@ const glowNow = (): Glow | undefined => readGlow(useWorkshop.getState().current(
 /**
  * POINT SIZE: AUTO at the rail's left end (no `pointsize`: each app draws
  * its own size, which is how points drew before), then 0 (no dots) to 2
- * units across the rail. − and + go on past the rail to the 64-unit cap, and
+ * units across the rail. − and + go on past the rail to the 4,096-unit cap, and
  * # types gibsons up to it.
  */
 export function PointSizeRow({ disabled }: { disabled: boolean }): JSX.Element {

@@ -25,19 +25,19 @@
  */
 
 import { Quaternion, Vector3 } from 'three'
-import { TICKS_PER_UNIT, ticksOf, type ShardModel } from 'sno-core/shards'
+import { TICK_REACH, TICKS_PER_UNIT, ticksOf, type ShardModel } from 'sno-core/shards'
 import { AVATAR_MARKER_HALF, MAX_AVATAR_RADIUS, avatarDraw, avatarScale } from './avatar'
 
 /** The payload field. */
 export const EYE_FIELD = 'eye'
 
-/** The farthest an eye coordinate may be, in ticks: the 64-unit position bound (DECK-0003 §1.8). */
-export const EYE_REACH = 64 * TICKS_PER_UNIT
+/** The farthest an eye coordinate may be, in ticks: the position bound (DECK-0003 §1.8), 4,096 units since 2026-11-23. */
+export const EYE_REACH = TICK_REACH
 
 export type Eye = [number, number, number]
 
 /**
- * An `eye` value as read: exactly three JSON integers, each -7680..7680, in
+ * An `eye` value as read: exactly three JSON integers, each within ±EYE_REACH, in
  * ticks of the object's lattice; anything else (null, a fraction, two or four
  * elements, a string, out of range) is undefined, which means the automatic
  * eye. `-0` is the integer 0.
@@ -129,7 +129,7 @@ export function centerEye(shard: Pick<ShardModel, 'vertices'>): Eye {
  * How far from the origin an eye may be on each axis, in ticks of the shard's
  * grid: the avatar size limit, MAX_AVATAR_RADIUS gibsons, at the avatar's true
  * scale (avatarScale), which is as far as WALK carries it (walkEyeLocal brings
- * anything farther in), and never past the 64-unit position bound.
+ * anything farther in), and never past the position bound (EYE_REACH).
  */
 export function eyeReachTicks(shard: ShardModel): number {
   return Math.min(EYE_REACH, Math.floor((MAX_AVATAR_RADIUS * TICKS_PER_UNIT) / avatarScale(shard)))

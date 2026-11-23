@@ -3,6 +3,8 @@
  * redesign, phase 1): the deploy scale multiplier, the snap (DIVISION) and
  * the grid's own size. Moved from the old panel unchanged, but for its copy
  * of the LEVEL stack: the rail's one never hides now, so one is enough.
+ * GRID SIZE runs to 4,096 (DECK-0003 §1.8, 2026-11-23): ones up to 64, then
+ * sixteenths of each doubling (gridSize.ts), and a held key is one undo step.
  */
 
 import { DIVISIONS, MAX_EXTENT, MAX_UNIT, MIN_EXTENT, neededExtent } from 'sno-core/shards'
@@ -10,6 +12,7 @@ import { formatCellSize } from 'sno-core/scale'
 import { useRepeatable } from '../../hooks/useRepeatable'
 import { useWorkshop } from '../../store/useWorkshop'
 import { stepDivision } from '../divisions'
+import { stepExtent } from '../gridSize'
 
 export function GridBody(): JSX.Element | null {
   const shard = useWorkshop((s) => s.current())
@@ -40,9 +43,9 @@ export function GridBody(): JSX.Element | null {
       </div>
       <div className="workshop__row">
         <span className="workshop__label">GRID SIZE</span>
-        <button className="workshop__btn" {...bind(() => w().setExtent((w().current()?.extent ?? MIN_EXTENT) - 1))} disabled={extent <= minExtent} aria-label="Smaller grid">−</button>
+        <button className="workshop__btn" {...bind(() => w().setExtent(stepExtent(w().current()?.extent ?? MIN_EXTENT, -1)))} disabled={extent <= minExtent} aria-label="Smaller grid">−</button>
         <span className="workshop__value">{extent}</span>
-        <button className="workshop__btn" {...bind(() => w().setExtent((w().current()?.extent ?? MIN_EXTENT) + 1))} disabled={extent >= MAX_EXTENT} aria-label="Larger grid">+</button>
+        <button className="workshop__btn" {...bind(() => w().setExtent(stepExtent(w().current()?.extent ?? MIN_EXTENT, 1)))} disabled={extent >= MAX_EXTENT} aria-label="Larger grid">+</button>
         <span className="workshop__unit-size" title="Saved with the shard. Never below what its points need.">gibsons each side of each axis</span>
       </div>
     </>

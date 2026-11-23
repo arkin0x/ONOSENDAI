@@ -25,8 +25,17 @@
  * faint tint, and zooming in brings them out. The unit grid stays on top
  * throughout, so the tint never reads as a coarser snap, which is exactly
  * what the old divisor lines did.
+ *
+ * Adaptive past the unit (GRID SIZE runs to 4,096 since 2026-11-23, DECK-0003
+ * §1.8): a grid 8,192 units across, seen whole, has several units to a pixel,
+ * and the unit lines alone would leave one even tint with nothing to read a
+ * place by. So as the unit lines fade, lines every 8 units come in, in the
+ * unit lines' colour; as those fade, every 64; then 512 and 4,096. Each comes
+ * in only where the one finer has gone, so close in, and on any grid seen at
+ * the distances it always was, nothing changes. Still one quad: the lines
+ * are arithmetic, never geometry, whatever the size.
  */
-import { BufferGeometry, Color, DoubleSide, Float32BufferAttribute, Mesh, ShaderMaterial } from 'three'
+import { BufferGeometry, Color, DoubleSide, Float32BufferAttribute, Mesh, ShaderMaterial, Vector2, Vector3 } from 'three'
 import { ACCENT } from '../lib/palette'
 
 /** The unit grid's line colour when a unit is not divided. */
@@ -57,9 +66,13 @@ const QUAD_PAD = 1
 const GRID_ORDER = 0.5
 
 const VERTEX = /* glsl */ `
+uniform vec2 uOrigin;
 varying vec2 vGrid;
+varying vec2 vLocal;
 void main() {
   vGrid = position.xz;
+  // From a whole unit near the camera: small numbers, so the fine lines keep their precision on a 4,096 grid.
+  vLocal = position.xz - uOrigin;
   gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
 }
 `
@@ -71,6 +84,7 @@ uniform vec3 uDivisionColor;
 uniform vec3 uUnitColor;
 uniform vec3 uCentreColor;
 varying vec2 vGrid;
+varying vec2 vLocal;
 
 // Half a line's width plus half a pixel: a one pixel line, box filtered.
 const float REACH = 1.0;
@@ -86,6 +100,12 @@ vec2 cellsPerPixel(vec2 c) {
   // Never quite zero: far from the origin and close in, two neighbouring pixels
   // can hold the same float, and a rate of 0 divides into infinity or NaN.
   return max(vec2(length(vec2(dx.x, dy.x)), length(vec2(dx.y, dy.y))), vec2(1e-6));
+}
+
+// How well one family of lines resolves here: 1 where they are FADE_HIGH pixels apart or more, 0 under FADE_LOW.
+float resolves(vec2 g, float cells) {
+  vec2 rate = cellsPerPixel(g * cells);
+  return smoothstep(FADE_LOW, FADE_HIGH, 1.0 / max(rate.x, rate.y));
 }
 
 // One family of lines, a whole number of 1/cells from the origin: how much of this pixel they cover.
@@ -106,9 +126,18 @@ void main() {
   float inside = min(clamp(REACH - past.x, 0.0, 1.0), clamp(REACH - past.y, 0.0, 1.0));
 
   vec3 color = uDivisionColor;
-  float alpha = lines(vGrid, uDivision);
+  // The division and the unit from vLocal: uOrigin is a whole unit, so their lines fall where vGrid's would.
+  float alpha = lines(vLocal, uDivision);
 
-  float a = lines(vGrid, 1.0);
+  float a = lines(vLocal, 1.0);
+  // Coarser lines, every 8, 64, 512 and 4,096 units, each only where the one finer no longer resolves.
+  float finer = resolves(vLocal, 1.0);
+  float cells = 1.0;
+  for (int k = 0; k < 4; k++) {
+    cells /= 8.0;
+    a = max(a, lines(vGrid, cells) * (1.0 - finer));
+    finer = resolves(vGrid, cells);
+  }
   float over = a + alpha * (1.0 - a);
   color = over > 0.0 ? (uUnitColor * a + color * alpha * (1.0 - a)) / over : color;
   alpha = over;
@@ -127,6 +156,7 @@ void main() {
 export class BenchGrid {
   readonly mesh: Mesh<BufferGeometry, ShaderMaterial>
   private extent = 0
+  private readonly at = new Vector3()
 
   constructor() {
     const geometry = new BufferGeometry()
@@ -138,6 +168,7 @@ export class BenchGrid {
       uniforms: {
         uDivision: { value: 1 },
         uExtent: { value: 0 },
+        uOrigin: { value: new Vector2() },
         uDivisionColor: { value: new Color(UNIT_LINE) },
         uUnitColor: { value: new Color(UNIT_LINE) },
         uCentreColor: { value: new Color(ACCENT) },
@@ -158,6 +189,8 @@ export class BenchGrid {
     this.mesh.renderOrder = GRID_ORDER
     // Nothing to tap here: the bench's tap plane is its own mesh (Bench.tsx Grid).
     this.mesh.raycast = () => {}
+    // Only when the bench draws a frame (frameloop "demand"), and only arithmetic: no allocation.
+    this.mesh.onBeforeRender = (_r, _s, camera) => this.follow(camera.position)
   }
 
   /**
@@ -177,6 +210,22 @@ export class BenchGrid {
     p.setXYZ(0, -r, 0, -r); p.setXYZ(1, r, 0, -r); p.setXYZ(2, -r, 0, r); p.setXYZ(3, r, 0, r)
     p.needsUpdate = true
     g.computeBoundingSphere()
+  }
+
+  /**
+   * Keep uOrigin on the whole unit nearest the camera, in the grid's own frame.
+   * Far out on a 4,096 grid a 32-bit float holds a 1/120 line to 1/32 of its
+   * spacing, and its screen rate steps in blocks, so the finest lines broke
+   * into dashes near the far corner (review of #555). Measured from here they
+   * are small numbers again. A whole unit keeps every unit and division line
+   * where it was, since uOrigin times any division is a whole number.
+   */
+  follow(cameraWorld: Vector3): void {
+    this.at.copy(cameraWorld)
+    this.mesh.worldToLocal(this.at)
+    const o = this.mesh.material.uniforms.uOrigin.value as Vector2
+    const x = Math.round(this.at.x), z = Math.round(this.at.z)
+    if (o.x !== x || o.y !== z) o.set(x, z)
   }
 
   dispose(): void {

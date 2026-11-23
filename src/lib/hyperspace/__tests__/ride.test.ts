@@ -7,7 +7,7 @@
 import { describe, expect, it } from 'vitest'
 import type { ActionEvent } from '../../events'
 import { bytesToHex, hexToBytes, sha256 } from 'cyberspace-core'
-import { CALIBRATION_KS, K_LINE, SAMPLES, attemptsRequired, be32, be64, buildRideProof, calibrationHashes, computeRideLeaf, decodeNonce, decodeOpenings, encodeNonce, encodeOpenings, exactRidePairs, expectedPricePairs, grindAttempt, inclusionPath, isGrandfatheredV1Hyperjump, lineTerrainK, meetsPrice, merkleDepth, merkleLayers, rideBlocks, rideSeed, sampleIndices, timeCalibrationSample, verifyInclusion, verifyRideLevel1, lineStateOf, rideStatsOf, zeroLengthRideRefusal } from '../ride'
+import { CALIBRATION_KS, GRIND_HEIGHT, K_LINE, SAMPLES, attemptWork, exactRideWork, pairCost, attemptsRequired, be32, be64, buildRideProof, calibrationHashes, computeRideLeaf, decodeNonce, decodeOpenings, encodeNonce, encodeOpenings, exactRidePairs, expectedPricePairs, grindAttempt, inclusionPath, isGrandfatheredV1Hyperjump, lineTerrainK, meetsPrice, merkleDepth, merkleLayers, rideBlocks, rideSeed, sampleIndices, timeCalibrationSample, verifyInclusion, verifyRideLevel1, lineStateOf, rideStatsOf, zeroLengthRideRefusal } from '../ride'
 import { GRANDFATHERED_V1_HYPERJUMPS, GRANDFATHERED_V1_HYPERJUMPS_SOURCE } from '../grandfathered'
 
 const PREV = 'ab'.repeat(32)
@@ -395,6 +395,42 @@ describe('published rides recompute exactly from display-order block hashes', ()
 })
 
 describe('cost estimates', () => {
+  /** A deterministic block hash with line terrain K = k. */
+  function hashOfK(k: number): string {
+    for (let i = 0; ; i++) if (lineTerrainK(fakeHash(10_000 + i)) === k) return fakeHash(10_000 + i)
+  }
+
+  it('a pairing costs more the taller its tree, and exactly 1 averaged over a ride\'s mix', () => {
+    // The trend, not every step: neighbouring light K differ by less than a re-measurement's noise.
+    expect(pairCost(16 + K_LINE)).toBeGreaterThan(2 * pairCost(8 + K_LINE))
+    expect(pairCost(8 + K_LINE)).toBeGreaterThan(2 * pairCost(0 + K_LINE))
+    expect(pairCost(16 + K_LINE)).toBeGreaterThan(1)
+    expect(pairCost(4 + K_LINE)).toBeLessThan(1)
+    // Weighted by how often each K comes up (sixteen fair bits) and by its pairings.
+    let work = 0
+    let pairs = 0
+    for (let k = 0; k <= 16; k++) {
+      let c = 1
+      for (let i = 0; i < k; i++) c = (c * (16 - i)) / (i + 1)
+      work += c * 2 ** k * pairCost(k + K_LINE)
+      pairs += c * 2 ** k
+    }
+    expect(work / pairs).toBeCloseTo(1, 12)
+  })
+
+  it('exactRideWork weighs a heavy block above its pairings and a light one below', () => {
+    const heavy = [hashOfK(16)]
+    const light = [hashOfK(4)]
+    expect(exactRideWork(heavy)).toBeGreaterThan(exactRidePairs(heavy))
+    expect(exactRideWork(light)).toBeLessThan(exactRidePairs(light))
+    expect(exactRideWork(heavy)).toBeCloseTo(2 ** (16 + K_LINE) * pairCost(16 + K_LINE))
+  })
+
+  it('a re-roll attempt is one GRIND_HEIGHT tree at that height\'s cost, lighter than as many mean pairings', () => {
+    expect(attemptWork()).toBeCloseTo(2 ** GRIND_HEIGHT * pairCost(GRIND_HEIGHT))
+    expect(attemptWork()).toBeLessThan(2 ** GRIND_HEIGHT)
+  })
+
   it('exactRidePairs sums 2^(K + K_LINE)', () => {
     const hashes = [fakeHash(1), fakeHash(2)]
     const expected = hashes.reduce((acc, h) => acc + 2 ** (lineTerrainK(h) + K_LINE), 0)
@@ -437,10 +473,14 @@ describe('calibration sample', () => {
     expect(hashes.map(lineTerrainK)).toEqual(CALIBRATION_KS)
     expect(calibrationHashes()).toEqual(hashes)
   })
-  it('times the sample and reports its exact pairings', () => {
-    const { elapsedMs, pairs } = timeCalibrationSample()
+  it('times the sample and reports its work weighted by height, not its plain pairings', () => {
+    const { elapsedMs, work } = timeCalibrationSample()
     expect(elapsedMs).toBeGreaterThan(0)
-    expect(pairs).toBe(exactRidePairs(calibrationHashes()))
+    expect(work).toBe(exactRideWork(calibrationHashes()))
+    // The sample stops at K=11, lighter per pairing than a ride's mix, so
+    // its work is less than its pairings: the same time gives a slower,
+    // truer ms per mean block than dividing by pairings did.
+    expect(work).toBeLessThan(exactRidePairs(calibrationHashes()))
   })
 })
 

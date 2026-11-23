@@ -34,7 +34,7 @@
 
 import { bytesToHex, hexToBytes } from 'cyberspace-core'
 import {
-  GRIND_HEIGHT,
+  attemptWork,
   attemptsRequired,
   computeRideLeaf,
   expectedRidePairs,
@@ -729,13 +729,15 @@ export interface RideBench {
  * Where the last measurement is kept between sessions. A phone's number is
  * as good next week as today, and reading it back means the estimate shows a
  * figure the moment the panel opens rather than CALIBRATING; the fresh
- * measurement then replaces it. A new key, so a number stored by the old
- * one-worker calibration ('onosendai:ride-bench-ms') is never read again.
- * It also keeps the pool width: a number measured on another width is not
- * this pool's.
+ * measurement then replaces it. A new key whenever the measurement changes
+ * meaning, so an older number is never read again: the one-worker
+ * calibration's ('onosendai:ride-bench-ms') and the pool calibration's that
+ * priced every pairing like the sample's ('onosendai:ride-pool-bench'), a
+ * tenth short. It also keeps the pool width: a number measured on another
+ * width is not this pool's.
  */
-const BENCH_KEY = 'onosendai:ride-pool-bench'
-const OLD_BENCH_KEY = 'onosendai:ride-bench-ms'
+const BENCH_KEY = 'onosendai:ride-pool-bench-2'
+const OLD_BENCH_KEYS = ['onosendai:ride-bench-ms', 'onosendai:ride-pool-bench']
 
 /** Long enough for a slow phone to load its workers and run the sample under full load. */
 const CALIBRATE_TIMEOUT_MS = 20_000
@@ -743,8 +745,8 @@ const CALIBRATE_TIMEOUT_MS = 20_000
 function loadBenchmark(): RideBench | null {
   try {
     if (typeof localStorage === 'undefined') return null
-    // The one-worker number is never read again; drop it so it does not sit in storage.
-    localStorage.removeItem(OLD_BENCH_KEY)
+    // Older numbers are never read again; drop them so they do not sit in storage.
+    for (const key of OLD_BENCH_KEYS) localStorage.removeItem(key)
     const raw = localStorage.getItem(BENCH_KEY)
     if (raw === null) return null
     const b = JSON.parse(raw) as Partial<RideBench> | null
@@ -767,7 +769,8 @@ function storeBenchmark(bench: RideBench): void {
 let benchmark: RideBench | null = loadBenchmark()
 let calibrating: Promise<RideBench> | null = null
 
-type Sample = { elapsedMs: number; pairs: number }
+/** One worker's timed sample: its work in mean pairings (exactRideWork). */
+type Sample = { elapsedMs: number; work: number }
 
 /**
  * Wall-clock ms per mean block from samples timed together, one per worker.
@@ -776,9 +779,9 @@ type Sample = { elapsedMs: number; pairs: number }
  * faster worker more chunks.
  */
 export function poolMsPerBlock(samples: Sample[]): number {
-  let pairsPerMs = 0
-  for (const s of samples) pairsPerMs += s.pairs / s.elapsedMs
-  return expectedRidePairs(1) / pairsPerMs
+  let workPerMs = 0
+  for (const s of samples) workPerMs += s.work / s.elapsedMs
+  return expectedRidePairs(1) / workPerMs
 }
 
 /**
@@ -792,7 +795,7 @@ export function rideEstimateMs(length: number, bench: RideBench): number {
   if (length <= 0) return 0
   const oneWorkerMs = bench.msPerBlock * bench.workers
   const attempts = attemptsRequired(length)
-  const attemptBlocks = 2 ** GRIND_HEIGHT / expectedRidePairs(1)
+  const attemptBlocks = attemptWork() / expectedRidePairs(1)
   const leafWorkers = Math.min(bench.workers, Math.ceil(length / RIDE_CHUNK_SIZE))
   const grindWorkers = Math.min(bench.workers, attempts)
   // A worker runs a whole chunk, so no ride's leaves finish before one full chunk does.
@@ -839,7 +842,7 @@ function timeSamplesOnPool(width: number): Promise<Sample[]> {
           const request: CalibrateRequest = { type: 'calibrate', id: 1 }
           for (const w of workers) w.postMessage(request)
         } else if (msg.type === 'calibrated') {
-          samples.push({ elapsedMs: msg.elapsedMs, pairs: msg.pairs })
+          samples.push({ elapsedMs: msg.elapsedMs, work: msg.work })
           if (samples.length === width) done(() => resolve(samples))
         } else if (msg.type === 'error') {
           done(() => reject(new Error(msg.message)))
@@ -856,8 +859,10 @@ function timeSamplesOnPool(width: number): Promise<Sample[]> {
  * Measure this device's ride throughput, once per session: the 8 synthetic
  * leaves of the calibration sample on every worker of the pool at once (on
  * the main thread, as a pool of one, only where workers do not exist, as a
- * ride then runs too), ms per Cantor pairing summed over the workers, scaled
- * to the §5.7 expected pairings of the mean block. Idempotent; concurrent
+ * ride then runs too), rates in mean pairings (exactRideWork: each pairing
+ * weighed by its tree's height, so the heavy blocks the sample leaves out
+ * still count) summed over the workers, scaled to the §5.7 expected
+ * pairings of the mean block. Idempotent; concurrent
  * and later calls share the first measurement. Until it resolves,
  * rideBenchmark() is the previous session's number, if there was one.
  *
@@ -880,6 +885,9 @@ export function calibrate(): Promise<RideBench> {
       const width = poolWidth()
       bench = { msPerBlock: poolMsPerBlock(await timeSamplesOnPool(width)), workers: width }
     }
+    // A worker from another build, or a clock gone wrong, must not leave
+    // NaN or Infinity as the session's number.
+    if (!Number.isFinite(bench.msPerBlock) || bench.msPerBlock <= 0) throw new Error('the ride calibration gave no usable number')
     benchmark = bench
     storeBenchmark(bench)
     return bench

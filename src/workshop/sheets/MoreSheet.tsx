@@ -52,12 +52,12 @@ const NUDGES: Array<{ cell: string; glyph: string; name: NudgeName; key: string 
   { cell: 'right', glyph: '▶', name: 'right', key: 'D' },
 ]
 
-/** The move pad: what is held, a grid step at a time in screen directions (held to repeat). */
+/** The move pad: what is held, a step at a time in screen directions (held to repeat): the grid's step, or with BY SIZE its own size, as the keys move it. */
 function MovePad(): JSX.Element {
   const axes = useBenchView((s) => s.axes)
   const bind = useRepeatable()
   const w = useWorkshop.getState
-  const move = (name: NudgeName) => () => { const n = nudgeFor(useBenchView.getState().axes, name); w().moveSelected(n.axis, n.delta * w().step()) }
+  const move = (name: NudgeName) => () => { const n = nudgeFor(useBenchView.getState().axes, name); w().moveSelected(n.axis, n.delta * w().moveStep(n.axis)) }
   return (
     <div className="ws__morepad" role="group" aria-label="Move the selected points">
       {NUDGES.map((a) => {

@@ -45,6 +45,8 @@ import {
   type ShardModel,
   type ShardVertex, type Part, type Ref, addressesIn, cloneVertex, hexToRgb, rgbToHex } from 'sno-core/shards'
 import { withOpacity } from '../lib/opacityStep'
+import { heldBox, heldSize, sizeStep } from '../lib/heldSize'
+import { useBenchResolved } from './heldSize'
 import { readGlow, withGlow, withPointSize, type Glow } from 'sno-core/glow'
 import { drawnFace, withFace, type FaceMode } from 'sno-core/face'
 import { GLOW_START, suggestedGlowStyle } from '../lib/pointGlow'
@@ -142,6 +144,8 @@ function savePalettes(list: NamedPalette[]): void {
   try { localStorage.setItem(PALETTES_STORAGE, JSON.stringify(list)) } catch { /* quota or private mode */ }
 }
 const AVATAR_KEY = 'onosendai:workshop-avatar'
+/** BY SIZE, kept between visits like the avatar switch. */
+const BY_SIZE_KEY = 'onosendai:workshop-by-size'
 /** Undo depth per shard. */
 const HISTORY = 64
 /**
@@ -553,6 +557,17 @@ export interface WorkshopState {
   setPlane: (plane: WorkPlane) => void
   setDivision: (division: Division) => void
   setShowAvatar: (on: boolean) => void
+  /**
+   * BY SIZE (owner, 2026-11-23, item 8): while on, a move steps what is held
+   * by its own size on that axis (lib/heldSize.ts), so a 16x16x16 block moves
+   * 16 gibsons a step, and a quarter turn pivots on the middle of what is
+   * held. Off: the snap's step and the turn pivot as before. A tool setting,
+   * kept between visits.
+   */
+  stepBySize: boolean
+  setStepBySize: (on: boolean) => void
+  /** One move's step on `axis`, in ticks: the held size there with BY SIZE on (the snap where it is flat), else the snap's step. */
+  moveStep: (axis: 0 | 1 | 2) => number
   /** One snap step, in ticks. */
   step: () => number
   setColor: (c: [number, number, number]) => void
@@ -968,6 +983,10 @@ function loadPalette(): string[] {
   } catch { return [] }
 }
 
+function loadBySize(): boolean {
+  try { return localStorage.getItem(BY_SIZE_KEY) === '1' } catch { return false }
+}
+
 function loadShowAvatar(): boolean {
   try { return localStorage.getItem(AVATAR_KEY) !== '0' } catch { return true }
 }
@@ -1380,6 +1399,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     stampMode: 'shape',
     stampObject: null,
     showAvatar: loadShowAvatar(),
+    stepBySize: loadBySize(),
     color: [0, 0.9, 1],
     glowLast: { ...GLOW_START },
     stampKind: 'block',
@@ -1598,6 +1618,14 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     },
     setDivision: (division) => { if (DIVISIONS.includes(division)) set({ division }) },
     setShowAvatar: (on) => { set({ showAvatar: on }); try { localStorage.setItem(AVATAR_KEY, on ? '1' : '0') } catch { /* private mode */ } },
+    setStepBySize: (on) => { set({ stepBySize: on, turnPivot: null }); try { localStorage.setItem(BY_SIZE_KEY, on ? '1' : '0') } catch { /* private mode */ } },
+    moveStep: (axis) => {
+      const { stepBySize, selection, partSel } = get()
+      const snap = get().step()
+      const s = get().current()
+      if (!stepBySize || !s) return snap
+      return sizeStep(heldSize(s, selection, partSel, useBenchResolved.getState().resolved), axis, snap, true)
+    },
     step: () => TICKS_PER_UNIT / get().division,
     setColor: (c) => set({ color: clampColor(c) }),
     setStampKind: (stampKind) => set({ stampKind, stampMode: 'shape' }),
@@ -1966,6 +1994,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     moveSelected: (axis, delta) => {
       const { selection, partSel } = get()
       if (selection.length === 0 && partSel.length === 0) return
+      let refused = false
       edit((s) => {
         // Every selected point and placed object moves the same unit; if any
         // would leave the grid the whole move is refused, so a shape never tears.
@@ -1976,18 +2005,20 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
         for (const i of chosen) {
           const p = ticksOf(vertices[i])
           p[axis] += delta
-          if (!validPoint(p, s.extent)) return null
+          if (!validPoint(p, s.extent)) { refused = true; return null }
           vertices[i] = vertexAt(p, vertices[i].c)
         }
         const parts = (s.parts ?? []).slice()
         for (const i of placed) {
           const at = [...parts[i].at] as P3
           at[axis] += delta
-          if (!validPoint(at, s.extent)) return null
+          if (!validPoint(at, s.extent)) { refused = true; return null }
           parts[i] = { ...parts[i], at }
         }
         return placed.size ? { ...s, vertices, parts } : { ...s, vertices }
       })
+      // Said, so a big BY SIZE step at the edge is not a key that does nothing.
+      if (refused) set({ notice: 'That move would carry a point or an object off the grid. GRID SIZE makes it bigger.' })
     },
 
     rotateSelected: (turns) => {
@@ -2006,8 +2037,10 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       // The plane is part of the key: turning, tipping the grid on its side and
       // turning again are two different turns about two different axes.
       const axes = turnAxes(plane)
-      const key = `${step}:${plane}:${[...chosen].sort((a, b) => a - b).join(',')}:${placed.join(',')}`
-      const at = turnPivot?.key === key ? turnPivot.at : turnPivotFor(pts, step, axes)
+      const key = `${get().stepBySize ? 'size:' : ''}${step}:${plane}:${[...chosen].sort((a, b) => a - b).join(',')}:${placed.join(',')}`
+      // BY SIZE: about the middle of what is held as drawn, placed objects' own size included, so a kit piece turns in place.
+      const box = get().stepBySize ? heldBox(s, chosen, placed, useBenchResolved.getState().resolved) : null
+      const at = turnPivot?.key === key ? turnPivot.at : turnPivotFor(box ? [box.min, box.max] : pts, step, axes)
       const [ca, cb] = at
       const [ax, bx] = axes
       let refused = false

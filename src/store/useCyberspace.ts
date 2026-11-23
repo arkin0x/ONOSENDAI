@@ -2,7 +2,7 @@ import { signerWaiting } from '../lib/authOpen'
 import { hopLanding, yieldTask } from '../lib/hopStage'
 import { flyLanding } from '../lib/viewFly'
 import { chainHolders } from '../lib/chainHolders'
-import { bigintBitLimit, movementCapabilityIssue } from '../lib/proofCapability'
+import { bigintBitLimit, movementCapabilityIssue, rideCapabilityIssue } from '../lib/proofCapability'
 /**
  * useCyberspace.ts - the single source of truth for who you are, where you
  * are, where your uncommitted cursor is, and what the movement chain has cost.
@@ -8362,6 +8362,9 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       return false
     }
     if (cloudPrefs.mode === 'off') return refuse('Cloud compute is off in the Cloud compute panel.')
+    // Before anything is paid for: a proof this browser cannot check is never signed.
+    const rideIssue = rideCapabilityIssue()
+    if (rideIssue) return refuse(rideIssue)
     // One cloud flow and one computing move at a time: the invoice modal and
     // the persisted job are single, and the head is held by one move.
     if (plan !== null || proof.status === 'computing' || (cloud.status !== 'idle' && cloud.status !== 'error')) {
@@ -8613,6 +8616,13 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     if (record.stage === 'awaiting_payment' && record.deposit && record.deposit.expiresAt * 1000 < Date.now()) {
       clearCloudJob(record.pubkey, record.jobId)
       settle(null, 'A pending cloud job was dropped: its invoice expired.')
+      return
+    }
+    // A ride kept from before this browser's check existed: following it would
+    // pay an open invoice or start the job from the balance for a proof that
+    // can never be checked here. Kept, never dropped: it is paid work.
+    if (record.action === 'ride' && rideCapabilityIssue() !== null) {
+      settle(record, `A HOSAKA ride is kept but cannot be finished here. ${rideCapabilityIssue()}`)
       return
     }
     const id = ++requestId

@@ -3490,8 +3490,9 @@ select.avatars__input option:checked {
   --ws-bottom: calc(var(--ws-strip) + var(--ws-dock));
   /* Where the bottom group stands off the screen's edge: flush on a phone. */
   --ws-bottom-gap: 0px;
-  /* The rail's height: two 44px keys, a gap, the level's two keys and its value. */
-  --ws-rail-h: 236px;
+  /* The rail's height: two 44px keys, a gap, the level's two keys and its
+     value, then GROUPS (a gap, its 44px key and the word under it). */
+  --ws-rail-h: 300px;
   --ws-rail-end: calc(var(--ws-top-end) + 10px + var(--ws-rail-h));
   --ws-ink: #05070d;
   --ws-surface: rgba(6, 14, 22, 0.86);
@@ -4321,6 +4322,14 @@ select.avatars__input option:checked {
   max-height: max(160px, calc(100vh - var(--ws-dock) - var(--ws-rail-end) - 8px));
   max-height: max(160px, calc(100dvh - var(--ws-dock) - var(--ws-rail-end) - 8px));
 }
+.ws__sheet.ws__sheet--onstrip {
+  bottom: 100%;
+  /* As tall from the bottom as every other sheet: the strip's height comes off it. */
+  max-height: max(160px, min(calc(42vh - var(--ws-strip)), calc(100vh - var(--ws-bottom) - var(--ws-rail-end) - 8px)));
+  max-height: max(160px, min(calc(42dvh - var(--ws-strip)), calc(100dvh - var(--ws-bottom) - var(--ws-rail-end) - 8px)));
+}
+/* Its strip paints over it, so the strip's own questions (the tiles, PASTE where, COLOR how, the ?) are never under the sheet. */
+.ws__bottom:has(.ws__sheet--onstrip) .ws__strip { z-index: 3; }
 .ws__sheet.ws__sheet--tall {
   bottom: 100%;
   height: max(200px, calc(100vh - var(--ws-bottom) - var(--ws-rail-end) - 8px));
@@ -4331,10 +4340,15 @@ select.avatars__input option:checked {
    columns, UNDO beside REDO and the level's keys beside each other, so the
    sheets keep their room. */
 @media (max-height: 700px) {
-  .workshop { --ws-rail-h: 124px; }
+  .workshop { --ws-rail-h: 174px; }
   .ws__rail { display: grid; grid-template-columns: 44px 44px; gap: 6px; }
   .ws__level { grid-column: 1 / -1; display: grid; grid-template-columns: 44px 44px; gap: 6px; margin-top: 0; }
   .ws__level-value { grid-column: 1 / -1; grid-row: 2; min-height: 24px; flex-direction: row; gap: 5px; }
+  /* GROUPS across both columns, a pill with its word inside. */
+  .ws__railkey { grid-column: 1 / -1; }
+  .ws__railbtn.ws__railbtn--groups { width: 94px; border-radius: 22px; gap: 6px; }
+  .ws__railbtn--groups .ws__railbtn-word { display: inline; }
+  .ws__railkey .ws__rail-label { display: none; }
 }
 .ws__sheet-head {
   flex: none;
@@ -4459,7 +4473,7 @@ select.avatars__input option:checked {
    and the top bar keeps to the top left instead of spanning the screen. */
 /* Keys printed on their buttons where there is a keyboard and room (phase 5). */
 .ws__key { display: none; }
-.ws__dockbtn, .ws__heldbtn { position: relative; }
+.ws__dockbtn, .ws__heldbtn, .ws__stripbtn { position: relative; }
 
 /* A desktop (phase 5): the phone's places, spread out. The dock and the strip
    float at the bottom centre of the canvas; the open area (a sheet on the
@@ -4487,6 +4501,7 @@ select.avatars__input option:checked {
   .ws__dock { border: 1px solid var(--border); border-top: 0; border-radius: 0 0 12px 12px; }
   .ws__sheet,
   .ws__sheet.ws__sheet--tall,
+  .ws__sheet.ws__sheet--onstrip,
   .ws__sheet[aria-label='Menu'] {
     position: fixed;
     left: auto;
@@ -4552,6 +4567,7 @@ select.avatars__input option:checked {
   .ws__guide { left: calc(max(var(--ws-gutter), var(--ws-safe-l)) + 104px); }
   .ws__sheet,
   .ws__sheet.ws__sheet--tall,
+  .ws__sheet.ws__sheet--onstrip,
   .ws__sheet[aria-label='Menu'] {
     position: fixed;
     left: auto;
@@ -8215,6 +8231,104 @@ select.avatars__input option:checked {
   line-height: 1.2;
 }
 
+/* How full the shard is against one hidden object (workshop/FullnessBar.tsx,
+   lib/shardFullness.ts; owner, 2026-11-23). A segmented HUD meter in the house
+   chamfer (top-left and bottom-right cut), calm cyan until close to full, amber
+   near it, red past it. The two lines of words are always there, one line each,
+   so nothing under them moves. */
+.fullbar {
+  --fb: var(--accent);
+  --fb-dim: rgba(0, 229, 255, 0.16);
+  --fb-cut: 6px;
+  --fb-in: 2px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.fullbar--near { --fb: var(--warn); --fb-dim: rgba(255, 176, 32, 0.16); }
+.fullbar--over { --fb: var(--danger); --fb-dim: rgba(255, 59, 107, 0.18); }
+.fullbar__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: var(--ws-label, 10px);
+  letter-spacing: 0.12em;
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+}
+.fullbar__pct {
+  font-variant-numeric: tabular-nums;
+  color: var(--fb);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+.fullbar__track {
+  position: relative;
+  height: 12px;
+  /* The frame's line: the inner box below covers all but a hairline, cut corners included (as ui/Chamfer.tsx). */
+  background: color-mix(in srgb, var(--fb) 55%, transparent);
+  clip-path: polygon(var(--fb-cut) 0, 100% 0, 100% calc(100% - var(--fb-cut)), calc(100% - var(--fb-cut)) 100%, 0 100%, 0 var(--fb-cut));
+  overflow: hidden;
+}
+.fullbar__track::before {
+  --in-cut: calc(var(--fb-cut) - 0.5858px);
+  content: "";
+  position: absolute;
+  inset: 1px;
+  background: linear-gradient(var(--fb-dim), var(--fb-dim)), #04090f;
+  clip-path: polygon(var(--in-cut) 0, 100% 0, 100% calc(100% - var(--in-cut)), calc(100% - var(--in-cut)) 100%, 0 100%, 0 var(--in-cut));
+  pointer-events: none;
+}
+/* The fill runs inside the frame: its share of the inner width, so full is full. */
+.fullbar__fill {
+  position: absolute;
+  top: var(--fb-in);
+  bottom: var(--fb-in);
+  left: var(--fb-in);
+  width: calc((100% - 2 * var(--fb-in)) * var(--fb-share, 0));
+  background: linear-gradient(90deg, color-mix(in srgb, var(--fb) 55%, transparent), var(--fb));
+  box-shadow: 0 0 8px color-mix(in srgb, var(--fb) 60%, transparent);
+  transition: width 0.25s ease;
+}
+/* What one stamp would add (STAMP's library): hatched, after the fill, in the colour the result would be. */
+.fullbar__next {
+  position: absolute;
+  top: var(--fb-in);
+  bottom: var(--fb-in);
+  left: calc(var(--fb-in) + (100% - 2 * var(--fb-in)) * var(--fb-share, 0));
+  width: calc((100% - 2 * var(--fb-in)) * var(--fb-next, 0));
+  background: repeating-linear-gradient(135deg, var(--fb) 0 2px, transparent 2px 5px);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fb) 70%, transparent);
+  transition: width 0.25s ease, left 0.25s ease;
+}
+.fullbar__to { color: #fff; font-weight: 400; letter-spacing: 0.12em; }
+/* A gap every tenth: the meter's segments, inside the frame so its line stays whole. */
+.fullbar__ticks {
+  position: absolute;
+  inset: var(--fb-in);
+  background: repeating-linear-gradient(90deg, transparent 0 calc(10% - 2px), rgba(4, 9, 15, 0.9) calc(10% - 2px) 10%);
+  pointer-events: none;
+}
+.fullbar__words {
+  display: flex;
+  flex-direction: column;
+  font-size: 10px;
+  line-height: 1.25;
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+  font-variant-numeric: tabular-nums;
+}
+.fullbar__line {
+  display: block;
+  min-height: 1.25em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fullbar__note { opacity: 0.85; }
+
 
 /* Something deployed while LOCAL, and the button that sends it. */
 .shards__note {
@@ -9703,12 +9817,178 @@ select.avatars__input option:checked {
 .ws__slot.is-full { border-style: solid; }
 .ws__slot-name { font-size: 11px; }
 .ws__slot-meta { font-size: 10px; line-height: 1.1; letter-spacing: 0; color: var(--dim); }
+/* In the strip the slot gives way first, its words cut short, so SNAP and TURN keep their places on a phone. */
+.ws__strip-opts .ws__slot { flex: 1 1 0; min-width: 0; width: auto; height: 44px; justify-content: center; overflow: hidden; }
+.ws__strip-opts .ws__slot-name, .ws__strip-opts .ws__slot-meta { max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* ---------- Stash modals (Models, Bags, Bag contents) ---------- */
 .modal__card.stash-modal { border-color: rgba(0, 229, 255, 0.5); max-width: 460px; max-height: calc(100dvh - 32px); overflow-y: auto; }
 .stash-modal .avatars__list { max-height: 55vh; overflow-y: auto; }
 .shards__type--bag { display: inline-flex; align-items: center; gap: 3px; vertical-align: -2px; }
 .objpick__row:disabled { opacity: 0.45; cursor: default; }
+
+/* ---------- STAMP's library (workshop/StampLibrary.tsx; owner, 2026-11-23) ----------
+ * COPY or LINK as a pair of chamfered tiles (half width each, as the CREATE
+ * panel's buttons), the library as the Shard Feed's rows (an 80px chamfered
+ * picture beside two lines), and a foot pinned to the bottom of the sheet: the
+ * fullness bar with what one stamp would add, then SNAP and STAMP IT. Words
+ * are white with a dark shadow; the lit edge marks what is chosen. */
+/* The sheet's body does not scroll here: the list between the two ways and the bar does. */
+.stamplib-sheet .ws__sheet-body { overflow: hidden; padding-bottom: 0; }
+.stamplib {
+  --sl-cut: 10px;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.stamplib__scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0 -12px;
+  padding: 0 12px 4px;
+}
+.stamplib-sheet .login__note,
+.stamplib-sheet .login__label,
+.stamplib-sheet .secret__act,
+.stamplib-sheet .avatars__input { font-size: 10.5px; }
+.stamplib-sheet .secret__act { min-height: 44px; }
+.stamplib__forms {
+  flex: none;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.stamplib__form {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-height: 56px;
+  padding: 9px 12px 9px 14px;
+  font-family: inherit;
+  text-align: left;
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+  background: rgba(0, 229, 255, 0.07);
+  border: 0;
+  cursor: pointer;
+  clip-path: polygon(var(--sl-cut) 0, 100% 0, 100% calc(100% - var(--sl-cut)), calc(100% - var(--sl-cut)) 100%, 0 100%, 0 var(--sl-cut));
+  box-shadow: inset 0 0 0 1px rgba(0, 229, 255, 0.35);
+}
+/* The cut corners outlined too: a hairline laid along each cut. */
+.stamplib__form::before,
+.stamplib__form::after {
+  content: "";
+  position: absolute;
+  width: calc(var(--sl-cut) * 1.4142);
+  height: 1px;
+  background: rgba(0, 229, 255, 0.35);
+  pointer-events: none;
+}
+.stamplib__form::before { top: 0; left: 0; transform-origin: 0 0; transform: translate(0, var(--sl-cut)) rotate(-45deg); }
+.stamplib__form::after { right: 0; bottom: 0; transform-origin: 100% 100%; transform: translate(0, calc(0px - var(--sl-cut))) rotate(-45deg); }
+.stamplib__form:hover { background: rgba(0, 229, 255, 0.14); }
+.stamplib__form.is-on {
+  background: linear-gradient(135deg, rgba(0, 229, 255, 0.32), rgba(0, 229, 255, 0.12));
+  box-shadow: inset 0 0 0 1px var(--accent), inset 3px 0 0 var(--accent), 0 0 14px rgba(0, 229, 255, 0.25);
+}
+.stamplib__form.is-on::before,
+.stamplib__form.is-on::after { background: var(--accent); }
+.stamplib__form-head { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; letter-spacing: 0.16em; }
+.stamplib__form-head b { font-weight: 700; }
+.stamplib__form.is-on .stamplib__form-head svg { color: var(--accent); filter: drop-shadow(0 0 4px rgba(0, 229, 255, 0.7)); }
+.stamplib__form-line { font-size: 10px; line-height: 1.25; letter-spacing: 0.02em; color: #fff; opacity: 0.85; }
+
+.stamplib__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.stamplib__list > li { display: flex; align-items: center; gap: 6px; }
+.stamplib__row {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: var(--chamfer-size, 80px) minmax(0, 1fr);
+  grid-template-rows: auto 1fr;
+  column-gap: 12px;
+  row-gap: 4px;
+  align-items: start;
+  padding: 6px 10px 6px 6px;
+  font-family: inherit;
+  text-align: left;
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+  background: rgba(0, 229, 255, 0.04);
+  border: 1px solid rgba(0, 229, 255, 0.14);
+  border-radius: 0;
+  cursor: pointer;
+}
+.stamplib__row:hover { border-color: rgba(0, 229, 255, 0.45); background: rgba(0, 229, 255, 0.08); }
+.stamplib__row:disabled { opacity: 0.45; cursor: default; }
+.stamplib__row > .chamfer { grid-column: 1; grid-row: 1 / span 2; }
+.stamplib__name { grid-column: 2; grid-row: 1; padding-top: 4px; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stamplib__meta { grid-column: 2; grid-row: 2; display: flex; flex-direction: column; gap: 3px; font-size: 10px; line-height: 1.2; letter-spacing: 0.02em; opacity: 0.85; }
+.stamplib__state { min-height: 1.2em; font-size: 9.5px; letter-spacing: 0.1em; color: var(--accent); }
+.stamplib__list > li.is-on > .stamplib__row {
+  border-color: var(--accent);
+  background: linear-gradient(90deg, rgba(0, 229, 255, 0.2), rgba(0, 229, 255, 0.05));
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.stamplib__list > li.is-on .chamfer { --chamfer-line: var(--accent); }
+.stamplib__addrnote { min-height: 1.3em; margin: 0; }
+
+/* The foot: the sheet's bottom edge, under the list. */
+.stamplib__foot {
+  flex: none;
+  margin: 0 -12px;
+  padding: 10px 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: linear-gradient(rgba(6, 14, 22, 0.9), rgba(4, 9, 15, 0.98) 30%);
+  border-top: 1px solid rgba(0, 229, 255, 0.25);
+  backdrop-filter: blur(6px);
+  z-index: 1;
+}
+.stamplib__acts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.stamplib__act {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 44px;
+  padding: 0 10px;
+  font-family: inherit;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+  background: rgba(0, 229, 255, 0.07);
+  border: 1px solid rgba(0, 229, 255, 0.4);
+  cursor: pointer;
+  white-space: nowrap;
+  clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px);
+}
+.stamplib__act:hover { background: rgba(0, 229, 255, 0.16); }
+.stamplib__act.is-on { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.stamplib__act.is-on svg { color: var(--accent); }
+.stamplib__act--go { color: #04090f; text-shadow: none; font-weight: 700; background: var(--accent); border-color: var(--accent); }
+.stamplib__act--go:hover { background: #5ff0ff; }
+.stamplib__act:disabled { opacity: 0.4; cursor: default; }
+.stamplib__act .ws__key { top: 4px; right: 10px; }
 
 /* ---- The palette sheet, ported from snocrash (arkinox, 2026-09-27) ---- */
 /*
@@ -13087,7 +13367,7 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
 .partform > svg {
   position: relative;
 }
-.partform--copy {
+.partform--sealed {
   --pf: var(--warn);
 }
 .partform--inline {
@@ -13107,7 +13387,7 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
   letter-spacing: 0.12em;
   color: var(--ok);
 }
-.partform-word--copy {
+.partform-word--sealed {
   color: var(--warn);
 }
 /* On the bench: standing on its object's corner, never in the way of a tap,
@@ -13124,3 +13404,259 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
   filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.95));
 }
 .ws__topbtn--back { color: var(--accent); border-color: var(--accent); }
+
+/* BY SIZE (shell/MoveHandles.tsx; owner, 2026-11-23): the move handles' middle,
+   a chip where the held middle's dot was. 84 by 44, so its corners (47px out)
+   clear the knobs, whose edges stand 50px out (HANDLE_REACH_PX 72 less 22).
+   The top-left and bottom-right corners cut, drawn in two layers: the chip is
+   the line, its ::before the fill, so the cut corners are outlined too. Off:
+   dark, the held orange line, white words. On: the accent fill of every lit
+   chip, dark words. The same size and the same two lines either way. */
+.ws__handle-hub.ws__bysize {
+  --bysize-cut: 8px;
+  left: -42px;
+  top: -22px;
+  width: 84px;
+  height: 44px;
+  padding: 0 4px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  isolation: isolate;
+  font-family: inherit;
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+  background: rgba(255, 176, 32, 0.85);
+  border: 0;
+  border-radius: 0;
+  clip-path: polygon(var(--bysize-cut) 0, 100% 0, 100% calc(100% - var(--bysize-cut)), calc(100% - var(--bysize-cut)) 100%, 0 100%, 0 var(--bysize-cut));
+  pointer-events: auto;
+  touch-action: manipulation;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.ws__handle-hub.ws__bysize::before {
+  --in-cut: calc(var(--bysize-cut) - 1.17px);
+  content: '';
+  position: absolute;
+  inset: 2px;
+  z-index: -1;
+  background: rgba(6, 14, 22, 0.88);
+  clip-path: polygon(var(--in-cut) 0, 100% 0, 100% calc(100% - var(--in-cut)), calc(100% - var(--in-cut)) 100%, 0 100%, 0 var(--in-cut));
+}
+.ws__handle-hub.ws__bysize.is-on { color: var(--ws-ink); text-shadow: none; background: var(--accent); }
+.ws__handle-hub.ws__bysize.is-on::before { background: var(--accent); }
+.ws__handle-hub.ws__bysize:focus-visible { outline: none; background: #fff; }
+.ws__bysize-top { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; white-space: nowrap; }
+.ws__bysize-top > svg { flex: none; }
+.ws__bysize-top b { font-size: 10px; font-weight: 700; letter-spacing: 0.08em; }
+.ws__bysize-step { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 9.5px; letter-spacing: 0.02em; font-variant-numeric: tabular-nums; color: rgba(255, 255, 255, 0.82); }
+.ws__bysize.is-on .ws__bysize-step { color: var(--ws-ink); font-weight: 700; }
+/* The printed X in the top line, not in a corner, where there is a keyboard. */
+@media (min-width: 900px) and (min-height: 521px) and (hover: hover) {
+  .ws__key.ws__bysize-key { display: inline; position: static; color: inherit; opacity: 0.7; }
+}
+
+/* ---------- GROUPS (workshop/sheets/GroupsSheet.tsx, shell/Rail.tsx GroupsKey; owner, 2026-11-23) ----------
+ *
+ * ws-cut: the house chamfer for outlined controls (augmented-ui's look,
+ * drawn by hand, no dependency): the top-left and bottom-right corners cut.
+ * The element's own background is the line, a layer under its content the
+ * fill, inset by the line's width with its cut moved in by (2 - sqrt 2) of
+ * that width (ui/Chamfer's math), so the cut corners are outlined as thick as
+ * the straight sides, which a clip-path over a border cannot do. */
+.ws-cut {
+  --cut: 7px;
+  --cut-line: rgba(0, 229, 255, 0.28);
+  /* Opaque: the line is the whole box behind it. */
+  --cut-fill: #06101a;
+  position: relative;
+  isolation: isolate;
+  border: 0;
+  background: var(--cut-line);
+  clip-path: polygon(var(--cut) 0, 100% 0, 100% calc(100% - var(--cut)), calc(100% - var(--cut)) 100%, 0 100%, 0 var(--cut));
+}
+.ws-cut::before {
+  --in-cut: calc(var(--cut) - 0.5858px);
+  content: '';
+  position: absolute;
+  inset: 1px;
+  z-index: -1;
+  background: var(--cut-fill);
+  clip-path: polygon(var(--in-cut) 0, 100% 0, 100% calc(100% - var(--in-cut)), calc(100% - var(--in-cut)) 100%, 0 100%, 0 var(--in-cut));
+  pointer-events: none;
+}
+/* A clip-path cuts an outline off: focus brightens the line instead. */
+.ws-cut:focus-visible { outline: none; --cut-line: #fff; }
+
+/* The rail's GROUPS key: a rail circle, the word under it in white over the scene. */
+.ws__railkey { display: flex; flex-direction: column; align-items: center; gap: 2px; margin-top: 6px; }
+.ws__railbtn.ws__railbtn--groups { position: relative; color: #fff; }
+.ws__railbtn.ws__railbtn--groups.is-on { color: var(--ws-ink); background: var(--accent); border-color: var(--accent); }
+.ws__railbtn-word { display: none; font-family: inherit; font-size: var(--ws-label); letter-spacing: 0.08em; }
+.ws__railbtn--groups.is-on .ws__railbtn-word { font-weight: 700; }
+.ws__rail-label { display: inline-flex; align-items: center; gap: 4px; font-size: 9.5px; letter-spacing: 0.08em; color: #fff; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9), 0 0 6px rgba(0, 0, 0, 0.7); }
+.ws__railbtn--groups:disabled + .ws__rail-label { opacity: 0.4; }
+/* The printed G beside the word, not in a corner: the circle's corner holds the badge. */
+@media (min-width: 900px) and (min-height: 521px) and (hover: hover) {
+  .ws__key.ws__rail-kbd { display: inline; position: static; color: var(--dim); text-shadow: none; }
+}
+/* How many groups are hidden on the bench: white on dark, not the held orange. */
+.ws__badge.ws__badge--hidden { top: -4px; right: -6px; color: #fff; background: rgba(6, 14, 22, 0.95); box-shadow: inset 0 0 0 1px var(--fg); }
+
+/* NEW GROUP and SHOW ALL, then each row's actions: half the width each, the workshop's 44px floor. */
+.ws__groups-pair { flex: none; display: flex; gap: 6px; }
+.ws__groups-btn.workshop__btn {
+  --cut-fill: linear-gradient(rgba(0, 229, 255, 0.06), rgba(0, 229, 255, 0.06)), #06101a;
+  flex: 1 1 0;
+  min-width: 0;
+  height: auto;
+  min-height: 44px;
+  padding: 0 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: var(--ws-label);
+  letter-spacing: 0.06em;
+  color: var(--fg);
+  border-radius: 0;
+  touch-action: manipulation;
+}
+.ws__groups-btn > span { overflow: hidden; text-overflow: ellipsis; }
+.ws__groups-btn > svg { flex: none; color: var(--accent); }
+.ws__groups-btn:active:not(:disabled) { --cut-fill: linear-gradient(rgba(0, 229, 255, 0.22), rgba(0, 229, 255, 0.22)), #06101a; }
+.ws__groups-btn.ws__groups-btn--danger { --cut-line: rgba(255, 59, 107, 0.55); --cut-fill: linear-gradient(rgba(255, 59, 107, 0.08), rgba(255, 59, 107, 0.08)), #06101a; color: var(--danger); }
+.ws__groups-btn.ws__groups-btn--danger > svg { color: var(--danger); }
+.ws__groups-btn:disabled > svg { color: inherit; }
+
+/* The list: newest first, rows in the house's angular frame (after the Cyberpunk 2077 rows, as .login__held-row). */
+.ws__groups-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.ws__groups-row {
+  --cut-line: rgba(0, 229, 255, 0.2);
+  --cut-fill: linear-gradient(90deg, rgba(0, 229, 255, 0.07), rgba(0, 229, 255, 0.015) 70%), #06101a;
+  --rail: rgba(0, 229, 255, 0.25);
+  flex: none;
+}
+/* The status rail down the left edge: orange while held (the held bar's sign), half for some. */
+.ws__groups-row::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: var(--cut);
+  bottom: 0;
+  width: 3px;
+  background: var(--rail);
+  pointer-events: none;
+}
+.ws__groups-row.is-some { --rail: linear-gradient(var(--warn) 0 50%, rgba(255, 176, 32, 0.18) 50% 100%); }
+.ws__groups-row.is-all {
+  --rail: var(--warn);
+  --cut-line: rgba(255, 176, 32, 0.5);
+  --cut-fill: linear-gradient(90deg, rgba(255, 176, 32, 0.12), rgba(255, 176, 32, 0.04) 70%), #06101a;
+}
+.ws__groups-row.is-hidden {
+  --rail: rgba(91, 125, 143, 0.35);
+  --cut-line: rgba(91, 125, 143, 0.3);
+  --cut-fill: repeating-linear-gradient(135deg, rgba(200, 245, 255, 0.035) 0 6px, transparent 6px 12px), #06101a;
+}
+.ws__groups-row.is-open:not(.is-all) { --cut-line: rgba(0, 229, 255, 0.42); }
+.ws__groups-row.is-renaming { --rail: var(--accent); }
+.ws__groups-row.is-new { animation: ws-groups-arrive 900ms ease-out; }
+/* A new row's line lights and fades back (registered, so it eases; a browser without @property just shows it lit, then not). */
+@property --cut-line { syntax: '<color>'; inherits: false; initial-value: rgba(0, 229, 255, 0.28); }
+@keyframes ws-groups-arrive {
+  0%, 20% { --cut-line: var(--accent); }
+}
+.ws__groups-head { display: flex; align-items: center; min-height: 48px; }
+.ws__groups-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 4px 0 12px;
+  font-family: inherit;
+  text-align: left;
+  color: #fff;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.ws__groups-main:focus-visible { outline: 1px solid #fff; outline-offset: -3px; }
+/* All, some or none held: a small chamfered square, outlined, half filled, or filled with a check. */
+.ws__groups-mark {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  color: var(--ws-ink);
+  background: rgba(0, 229, 255, 0.45);
+  clip-path: polygon(4px 0, 100% 0, 100% calc(100% - 4px), calc(100% - 4px) 100%, 0 100%, 0 4px);
+  position: relative;
+}
+.ws__groups-mark::before {
+  content: '';
+  position: absolute;
+  inset: 1.5px;
+  background: rgba(6, 14, 22, 0.96);
+  clip-path: polygon(3px 0, 100% 0, 100% calc(100% - 3px), calc(100% - 3px) 100%, 0 100%, 0 3px);
+}
+.ws__groups-mark[data-held='some'] { background: var(--warn); }
+.ws__groups-mark[data-held='some']::before { background: linear-gradient(135deg, rgba(6, 14, 22, 0.96) 0 50%, var(--warn) 50% 100%); }
+.ws__groups-mark[data-held='all'] { background: var(--warn); }
+.ws__groups-mark[data-held='all']::before { display: none; }
+.ws__groups-mark > svg { position: relative; }
+.ws__groups-text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.ws__groups-name { font-size: 12px; line-height: 1.2; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ws__groups-counts { font-size: 10px; line-height: 1.2; letter-spacing: 0.02em; color: var(--dim); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ws__groups-row.is-hidden .ws__groups-name { color: var(--dim); }
+.ws__groups-icon {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  color: var(--fg);
+  background: none;
+  border: 0;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.ws__groups-icon:focus-visible { outline: 1px solid #fff; outline-offset: -4px; }
+.ws__groups-row.is-hidden .ws__groups-icon[aria-pressed='true'] { color: var(--dim); }
+.ws__groups-chev > svg { transition: transform 160ms ease; }
+.ws__groups-chev[aria-expanded='true'] > svg { transform: rotate(180deg); }
+.ws__groups-chev[aria-expanded='true'] { color: var(--accent); }
+.ws__groups-acts { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 0 8px 8px 11px; }
+/* The name, typed over in place. */
+.ws__groups-main--rename { cursor: default; }
+.ws__groups-rename { --cut: 5px; --cut-line: var(--accent); --cut-fill: linear-gradient(rgba(0, 229, 255, 0.06), rgba(0, 229, 255, 0.06)), #06101a; flex: 1 1 auto; min-width: 0; display: flex; }
+.ws__groups-rename-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 34px;
+  padding: 0 8px;
+  font-family: inherit;
+  /* 16px on a phone: iOS Safari zooms the page into any smaller field it focuses. */
+  font-size: 16px;
+  color: #fff;
+  background: none;
+  border: 0;
+  outline: none;
+}
+.ws__groups-empty { margin: 0; padding: 8px 4px; font-size: 10px; letter-spacing: 0.02em; color: var(--dim); list-style: none; }
+@media (prefers-reduced-motion: reduce) {
+  .ws__groups-row.is-new { animation: none; }
+  .ws__groups-chev > svg { transition: none; }
+}
+@media (hover: hover) and (pointer: fine) {
+  .ws__groups-rename-input { font-size: 12px; }
+}

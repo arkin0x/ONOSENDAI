@@ -111,7 +111,7 @@ import { loadLedger, retractionTemplate, type Ledger } from '../lib/published'
 import { sealedAsPiece } from '../lib/partForm'
 import { audioInnerTemplate, fadeAt, type AudioItem } from '../lib/audioItem'
 import { resealCopy } from '../lib/audioFile'
-import { movableIntoRoom, openWithSecret, openWithSigner, openerFor, placeOf as eventPlace, plaintextWithSecret, readContents, resealWithout, revealedIn, sealEntries, sealedInside, sealerOf, type ChestEntry, type OpeningKey } from '../lib/chests'
+import { movableIntoRoom, openWithSecret, openWithSigner, openerFor, placeOf as eventPlace, plaintextWithSecret, readContents, resealWithout, revealedIn, sealEntries, sealedInside, sealerOf, sealsLooksFor, type ChestEntry, type OpeningKey } from '../lib/chests'
 import { openedByHand, restoreOpened } from './useOpenedChests'
 import { closeArriving, closedByMe, closedDoorIds, closedSignature } from './closedDoors'
 import { hiderKeys, madeKeys, openingKeys, placeOf, type HeldItem, type HeldPlace, type InChest } from '../lib/inventory'
@@ -142,6 +142,7 @@ import { hidesThing, type Muted } from '../lib/muteList'
 import { useMutes } from './useMutes'
 import { asShown, hintPrefsOf, loadHintPrefs, saveHintPrefs, withHintPrefs } from './deployHintPrefs'
 import { CONSTRAIN_DEFAULT, authoredConstrain, authoredConstrainOf, withAuthoredConstrain, withConstrain, type Constrain } from '../lib/walkConstrain'
+import { hideWholeRefusal } from '../lib/shardFullness'
 import { kvGet, kvSet } from '../lib/kvStore'
 
 /** A workshop model's WALK setting as it publishes, by id; the default for one that never chose or is not there (DECK-0003 §1.12). */
@@ -387,7 +388,7 @@ function workshopPiece(address: string, me: string, ledger: Ledger): Record<stri
   // Published under your key and unedited since, it stays a plain link to the
   // public object, which every finder fetches (owner, 2026-11-22); edited since,
   // the public one is stale and the hide seals the workshop's. The rule the
-  // workshop's LINK and COPY marks show (lib/partForm.ts sealedAsPiece).
+  // workshop's LINK and SEALED marks show (lib/partForm.ts sealedAsPiece).
   if (!s || !sealedAsPiece(s, ledger, me)) return undefined
   return toPayload(withAuthoredConstrain(s)) as unknown as Record<string, unknown>
 }
@@ -1495,6 +1496,13 @@ export interface BagMeter {
   fitted: boolean
   /** The refusal the deploy would give, or null when it fits. */
   refusal: string | null
+  /**
+   * Why the shard itself cannot be hidden whole, or null: going by reference it
+   * is one sealed object, and that object would pass what one may be
+   * (lib/shardFullness.ts hideWholeRefusal). The deploy refuses it before
+   * anything is signed; the bar says so first.
+   */
+  objectRefusal: string | null
 }
 
 /**
@@ -1549,14 +1557,17 @@ export function deployBagMeter(rows: readonly MyDeployment[], planned: NostrEven
   if (large) {
     const es = mergeEntries(before, [['a', `${OBJECT_KIND}:${o.owner}:${'0'.repeat(32)}`, hint, at]])
     const fit = planUnderCap(es, seals, measured, replaced, adds)
-    return { bytes: measureHeld(withReferences(es, fit.convert)), byReference: true, fitted: false, refusal: fit.refusal }
+    // A MOVE of an object already hidden is not held to it, as the deploy does not hold it.
+    const objectRefusal = o.edit ? null : hideWholeRefusal(new TextEncoder().encode(planned.content).length)
+    return { bytes: measureHeld(withReferences(es, fit.convert)), byReference: true, fitted: false, refusal: fit.refusal, objectRefusal }
   }
   const es = mergeEntries(before, [planned])
   const candidate = referenceFor(planned, o.owner, '0'.repeat(32), hint)
   const plan = planUnderCap(es, [...(candidate ? [candidate] : []), ...seals], measured, replaced, adds)
   const written = withReferences(es, plan.convert)
   const byReference = !!candidate && plan.convert.has(candidate.key)
-  return { bytes: measureHeld(written), byReference, fitted: byReference, refusal: plan.refusal }
+  // Inline, or by reference only because the bag is full: under the reference threshold, so far under one object's limit.
+  return { bytes: measureHeld(written), byReference, fitted: byReference, refusal: plan.refusal, objectRefusal: null }
 }
 
 /** The realistic ceiling for interactive scanning (spec §7.3 says 0..16). */
@@ -5140,6 +5151,17 @@ export const useShards = create<ShardsState>((set, get) => {
         }
         // Moved, it names the pieces it named (sealed again below when the key changes).
         if (was?.pieces) pieceAddrs = [...was.pieces]
+        // Hidden by reference, the shard is one sealed object of its own, held to
+        // one event of BAG_SAFE_BYTES as signed, as every hidden object is: one
+        // past it is refused here, in words, before any key is worked out or
+        // anything signed (lib/shardFullness.ts, the SHARD sheet's bar measures
+        // the same). A split build's parent is measured as it goes out; its
+        // pieces were measured above. A MOVE of an object already hidden is left
+        // as it was: its size is not new, and splitting is not what a move does.
+        if (!link && !intoChest && !was && wantsReference(shard)) {
+          const tooBig = hideWholeRefusal(new TextEncoder().encode(JSON.stringify(toPayload(withAuthoredConstrain(shard)))).length)
+          if (tooBig) { set({ deployStatus: 'error', deployError: tooBig }); return }
+        }
       } else if (pending.type === 'key') {
         if (!pending.key.name.trim()) return
         // Moved, it is the very item it was: its keypair, name and every tag.
@@ -5310,6 +5332,8 @@ export const useShards = create<ShardsState>((set, get) => {
             key: rk.key, owner, createdAt, newD: placementId, sign: (t) => signAsOwner(t),
             // A look this client will not read goes exactly as it is.
             sealLarge: pending.look?.from !== 'kept',
+            // A chest past 65,535 bytes seals every look it draws itself, so the chest fits its event (DECK-0004 §3.2, Size).
+            sealAll: sealsLooksFor(chest.payload),
             send: async (object) => {
               if (!live) return ''
               still()

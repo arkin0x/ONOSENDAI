@@ -18,9 +18,11 @@
  * NIP-44 decrypt, given the sender's public key.
  *
  * No cryptography is written here: nostr-tools does the ECDH, the HKDF, the
- * ChaCha20 and the HMAC, and generates the keys. This file only decides what
- * goes in, checks the one limit NIP-44 has (65,535 bytes of plaintext), and
- * reads what comes out as entries. It is pure: the signer that proves a
+ * ChaCha20 and the HMAC, and generates the keys. Past 65,535 bytes of
+ * plaintext it writes and reads NIP-44's extended length prefix (two zero
+ * bytes, then the length in four), so a chest up to the cap below seals and
+ * opens with the same two calls. This file only decides what goes in, checks
+ * the cap (CHEST_MAX_PLAINTEXT), and reads what comes out as entries. It is pure: the signer that proves a
  * person's identity is passed in as a function, and the HUD holds the keys.
  */
 
@@ -54,8 +56,44 @@ export function templateBytes(templates: EventTemplate[], pubkey: string): numbe
   return new TextEncoder().encode(JSON.stringify(events)).length
 }
 
-/** NIP-44 v2 seals at most this many bytes of plaintext; a chest's list of entries must fit. */
-export const NIP44_MAX_PLAINTEXT = 65_535
+/**
+ * The most a chest's list of entries may be, in UTF-8 bytes (DECK-0004 §3.2
+ * step 2 and Size, cyberspace #117). Not NIP-44's limit: past 65,535 bytes
+ * NIP-44 v2 uses its extended length prefix, which nostr-tools writes and
+ * reads. The cap is the event that carries the chest. 131,072 bytes pad to
+ * 131,072, seal to 174,860 characters of content, and a chest of that, alone
+ * in a sealed entry, signs to about 234,900 bytes, under BAG_SAFE_BYTES
+ * (lib/bagSize.ts). One byte more pads to 163,840, and its sealed entry would
+ * be about 293,000 bytes.
+ */
+export const CHEST_MAX_PLAINTEXT = 131_072
+
+/** NIP-44's payload for 65,535 bytes of plaintext, the most its two-byte length prefix carries, in base64 characters. */
+const TWO_BYTE_PAYLOAD_CHARS = 87_472
+
+/**
+ * Whether a chest with this sealed payload carries its looks sealed, each as
+ * its own hidden object (lib/sealedLooks.ts sealAll): past 65,535 bytes of
+ * contents. A chest at the cap leaves about 3,900 bytes of its event for
+ * tags, less than a look in its tag may be, and DECK-0004 §3.2 (Size) asks a
+ * writer to seal the look of a chest near the cap whatever its size.
+ */
+export function sealsLooksFor(payload: string): boolean {
+  return usesExtendedLength(payload)
+}
+
+/** Whether a chest's sealed payload carries NIP-44's extended length prefix: its contents passed 65,535 bytes. */
+export function usesExtendedLength(payload: string): boolean {
+  return payload.length > TWO_BYTE_PAYLOAD_CHARS
+}
+
+/**
+ * What OPEN says when a person's own signer fails on a chest past 65,535
+ * bytes. A signer with an older NIP-44 cannot read the extended length
+ * prefix, and its error names a payload length; the chest is unreadable
+ * through that signer, not broken (DECK-0004 §3.2, Older readers).
+ */
+export const BIG_CHEST_SIGNER_WORDS = 'Your signer could not open this chest. It is a big one, over 64 KB, and some signers cannot read that much.'
 
 /** How many UTF-8 bytes a chest's list of entries is as NIP-44 will see it. */
 export function plaintextBytes(entries: BagEntry[]): number {
@@ -64,8 +102,8 @@ export function plaintextBytes(entries: BagEntry[]): number {
 
 /** Why a list of this many bytes cannot be sealed, in words, or null when it fits. */
 export function sizeRefusal(bytes: number): string | null {
-  if (bytes <= NIP44_MAX_PLAINTEXT) return null
-  return `Too large to seal: ${bytes.toLocaleString('en-US')} of ${NIP44_MAX_PLAINTEXT.toLocaleString('en-US')} bytes. Take something out.`
+  if (bytes <= CHEST_MAX_PLAINTEXT) return null
+  return `Too large to seal: ${bytes.toLocaleString('en-US')} of ${CHEST_MAX_PLAINTEXT.toLocaleString('en-US')} bytes. Take something out.`
 }
 
 /** A sealed list: the payload for the chest's content, and the one-time sender's public key for its lock tag. */

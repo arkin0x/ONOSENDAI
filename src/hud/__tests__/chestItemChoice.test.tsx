@@ -146,7 +146,7 @@ const listed = (m: Mounted): string[] => {
 }
 const meterBytes = (m: Mounted): number => {
   const meter = m.all().find((h) => String(h.props.className ?? '').startsWith('compose__meter'))!
-  return Number(/([\d,]+)\/65,535 B/.exec(textOf(meter))![1].replace(/,/g, ''))
+  return Number(/([\d,]+)\/131,072 B/.exec(textOf(meter))![1].replace(/,/g, ''))
 }
 const chestRow = (): MyDeployment | undefined => S().mine.find((d) => d.type === 'chest')
 /** The chest's contents, opened with its lock as a finder would. */

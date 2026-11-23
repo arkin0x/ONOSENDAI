@@ -117,6 +117,21 @@ describe('writing a sealed look', () => {
     expect(bytes(JSON.stringify(withLarge))).toBeLessThan(bytes(JSON.stringify(withSmall)))
   })
 
+  it('sealAll (a chest near its cap) seals a small look of its own geometry, and leaves a wrapper and a look that places objects as they are', async () => {
+    const key = bagKey()
+    const small = payloadOf(sized('Crate', 4))
+    expect(bytes(small)).toBeLessThanOrEqual(MAX_LOOK_BYTES)
+    const first = await sealLookTags([['look', small], ['look', small, 'open']], io(key, { sealAll: true }))
+    expect(first.objects).toHaveLength(2)
+    expect(sealedLookAddresses(first.tags, PK)).toHaveLength(2)
+    // Again, as an EDIT would: the wrappers are kept, nothing sealed twice.
+    const again = await sealLookTags(first.tags, io(key, { sealAll: true }))
+    expect(again.objects).toEqual([])
+    expect(again.tags).toEqual(first.tags)
+    // Without sealAll the small look stays in its tag.
+    expect((await sealLookTags([['look', small]], io(key))).objects).toEqual([])
+  })
+
   it('the size limit is that of one event of its own (240,000 bytes as signed): a look at it seals, one byte over is refused in words', async () => {
     const limit = sealedLookLimit()
     expect(limit).toBeGreaterThan(170_000)

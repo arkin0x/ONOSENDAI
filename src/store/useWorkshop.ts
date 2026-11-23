@@ -45,6 +45,8 @@ import {
   type ShardModel,
   type ShardVertex, type Part, type Ref, addressesIn, cloneVertex, hexToRgb, rgbToHex } from 'sno-core/shards'
 import { withOpacity } from '../lib/opacityStep'
+import { heldBox, heldSize, sizeStep } from '../lib/heldSize'
+import { useBenchResolved } from './heldSize'
 import { readGlow, withGlow, withPointSize, type Glow } from 'sno-core/glow'
 import { drawnFace, withFace, type FaceMode } from 'sno-core/face'
 import { GLOW_START, suggestedGlowStyle } from '../lib/pointGlow'
@@ -65,10 +67,12 @@ import { flipFace, flipSurface, surfaceOf, windAdded, windOutward } from 'sno-co
 import { Vector3 } from 'three'
 import { ConvexHull } from 'three/examples/jsm/math/ConvexHull.js'
 import { cornerAverage, weld } from '../lib/weld'
+import { stampedIndices, type CopySource, type StampForm, type StampedRange } from '../lib/stampCopy'
 import { subdivide, subdivideNotice } from '../lib/subdivide'
 import { withCredit, type Credit } from 'sno-core/feed'
 import { newestFirst } from '../lib/shardFolders'
 import { attach, initialShards, persist, saveNow as saveStored, workshopReading } from './workshopStorage'
+import { addMembers, allHeld, canAdd, canRemove, cleanName, copyName, freeName, groupsOf, heldBy, heldState, hiddenSets, isEmpty, makeGroup, membersHeld, missing, nextName, remapGroups, removeMembers, withAppendedGroup, withGroups, withoutHidden, type RemapHint, type ShardGroup } from '../lib/shardGroups'
 
 /**
  * OPEN WORKSHOP asked while the library was still reading: opened once it has
@@ -141,6 +145,8 @@ function savePalettes(list: NamedPalette[]): void {
   try { localStorage.setItem(PALETTES_STORAGE, JSON.stringify(list)) } catch { /* quota or private mode */ }
 }
 const AVATAR_KEY = 'onosendai:workshop-avatar'
+/** BY SIZE, kept between visits like the avatar switch. */
+const BY_SIZE_KEY = 'onosendai:workshop-by-size'
 /** Undo depth per shard. */
 const HISTORY = 64
 /**
@@ -217,6 +223,12 @@ export interface ClipPoints {
    * tick, as it always has.
    */
   unit?: number
+  /**
+   * What PASTE names the group it makes: the shard's name for a whole shard
+   * (COPY in MENU), a group's name when exactly that group was copied. Absent:
+   * the group is "Paste 1", "Paste 2".
+   */
+  name?: string
 }
 
 /** The selected points, exactly where they are, with the faces wholly among them, and the selected placed objects. */
@@ -292,11 +304,21 @@ function scaleTicks(p: P3, k: number): P3 {
 /**
  * An object chosen to stamp with OBJECT: the reference each placement will
  * name, and the object as it was when chosen, which is what the ghost draws.
+ * Chosen in STAMP's library (workshop/StampLibrary.tsx), it also carries what
+ * COPY puts down and its size for SNAP TO ITS SIZE (workshop/stampPrepare.ts).
  */
 export interface StampObject {
   ref: Ref
   name: string
   shard: ShardModel
+  /** The shard and everything it places, flattened (lib/stampCopy.ts bakeSource): what COPY puts down. Null or absent when it cannot be copied. */
+  copy?: CopySource | null
+  /** Its bounds in its own ticks and unit, everything it places included: what SNAP TO ITS SIZE steps by. */
+  size?: { min: [number, number, number]; max: [number, number, number]; unit: number } | null
+  /** A shard of your workshop library, chosen there (not one read from the relays). */
+  local?: boolean
+  /** The addresses of every object it places, at any depth, read or not: LINK never places a shard that places the one it goes into. */
+  places?: string[]
 }
 
 /** "1 point" or "7 points", with its faces and placed objects when it has any. */
@@ -452,6 +474,33 @@ export interface WorkshopState {
   setStampMode: (mode: 'shape' | 'object') => void
   setStampObject: (object: StampObject | null) => void
   /**
+   * How OBJECT stamps it (owner, 2026-11-23): COPY puts its points and faces
+   * in as your own (lib/stampCopy.ts), LINK places it as one object by
+   * reference. COPY is the default.
+   */
+  stampForm: StampForm
+  setStampForm: (form: StampForm) => void
+  /** SNAP TO ITS SIZE: OBJECT's taps step by the object's own size along the working plane, so pieces of one size line up. On by default. */
+  stampSnap: boolean
+  setStampSnap: (on: boolean) => void
+  /**
+   * The points and faces the last COPY stamp made, in the shard it made them
+   * in (lib/stampCopy.ts stampedIndices reads every index): for whatever
+   * acts on just what one stamp made, such as making it a group. Null once
+   * anything else changes the shard's points or faces, or another shard is
+   * opened, so it never names indices that moved.
+   */
+  lastCopy: StampedRange | null
+  /**
+   * One stamp, already worked out and checked by the tap (workshop/stampTap.ts):
+   * the shard as it will be, as one undoable edit, with its line. A COPY
+   * names what it added (`added`), which becomes `lastCopy`; a LINK passes
+   * null. A COPY with a `name` (the stamped shard's) is a group of its own
+   * under that name, in the same UNDO (GROUPS, item 3; lib/shardGroups.ts).
+   * The selection is let go, as every stamp lets it go.
+   */
+  commitStamp: (shard: ShardModel, added: Omit<StampedRange, 'shardId'> | null, notice: string, name?: string) => StampedRange | null
+  /**
    * Place the chosen object at `at`, turned by the stamp's facing. `self` is
    * this object's own address if this key published it, so an object is never
    * made to place itself (every reader would draw a loop placeholder).
@@ -546,6 +595,17 @@ export interface WorkshopState {
   setPlane: (plane: WorkPlane) => void
   setDivision: (division: Division) => void
   setShowAvatar: (on: boolean) => void
+  /**
+   * BY SIZE (owner, 2026-11-23, item 8): while on, a move steps what is held
+   * by its own size on that axis (lib/heldSize.ts), so a 16x16x16 block moves
+   * 16 gibsons a step, and a quarter turn pivots on the middle of what is
+   * held. Off: the snap's step and the turn pivot as before. A tool setting,
+   * kept between visits.
+   */
+  stepBySize: boolean
+  setStepBySize: (on: boolean) => void
+  /** One move's step on `axis`, in ticks: the held size there with BY SIZE on (the snap where it is flat), else the snap's step. */
+  moveStep: (axis: 0 | 1 | 2) => number
   /** One snap step, in ticks. */
   step: () => number
   setColor: (c: [number, number, number]) => void
@@ -698,6 +758,39 @@ export interface WorkshopState {
    */
   subdivideSelection: () => void
   removeFace: (index: number) => void
+  /**
+   * GROUPS (owner, 2026-11-23; lib/shardGroups.ts): named groups of the
+   * current shard's points, faces and placed objects, kept on the workshop's
+   * copy of the shard and never published. Every change to a group is an edit,
+   * so UNDO takes it back like any other; every other edit carries the groups
+   * across (useWorkshop `edit`).
+   *
+   * A new group from what is held, under `name` (else "Group 1", "Group 2").
+   * Its id, or null when nothing is held.
+   */
+  createGroup: (name?: string) => string | null
+  /** A group's new name; a blank name changes nothing. */
+  renameGroup: (id: string, name: string) => void
+  /** The whole group into hand when any of it is not held yet; all of it out of hand when it is all held. A hidden group shows first. */
+  toggleGroupSelection: (id: string) => void
+  /** What is held, added to the group. */
+  addSelectionToGroup: (id: string) => void
+  /** What is held, taken out of the group. A group left empty goes (UNDO brings it back). */
+  removeSelectionFromGroup: (id: string) => void
+  /**
+   * Groups hidden on the bench, as `groupKey(shard, group)`: drawn nowhere
+   * and picked by nothing in the workshop, and published as always. This
+   * session only, and not an edit.
+   */
+  hiddenGroups: string[]
+  /** Hide a group on the bench, or show it again. Hiding lets go of what of it is held. */
+  setGroupHidden: (id: string, hidden: boolean) => void
+  /** A copy of the group's geometry, put down on the original as a group of its own ("Rock 2"), held and ready to move. The new group's id. */
+  duplicateGroup: (id: string) => string | null
+  /** The group goes; its geometry stays. */
+  deleteGroup: (id: string) => void
+  /** The group goes with every point, face and placed object it holds, in one UNDO. The panel asks first. */
+  deleteGroupAndGeometry: (id: string) => void
   clearShard: () => void
   undo: () => void
   redo: () => void
@@ -928,12 +1021,26 @@ function loadPalette(): string[] {
   } catch { return [] }
 }
 
+function loadBySize(): boolean {
+  try { return localStorage.getItem(BY_SIZE_KEY) === '1' } catch { return false }
+}
+
 function loadShowAvatar(): boolean {
   try { return localStorage.getItem(AVATAR_KEY) !== '0' } catch { return true }
 }
 
 function savePalette(palette: string[]): void {
   try { localStorage.setItem(PALETTE_STORAGE, JSON.stringify(palette)) } catch { /* quota or private mode */ }
+}
+
+/** A hidden group's key in `hiddenGroups`: the shard and the group, so a group hidden in one shard never hides its namesake in a duplicate. */
+export const groupKey = (shardId: string, groupId: string): string => `${shardId}/${groupId}`
+
+/** The groups of `s` hidden on the bench. */
+export function hiddenIn(hidden: readonly string[], s: ShardModel | null): ShardGroup[] {
+  if (!s || hidden.length === 0) return []
+  const keys = new Set(hidden)
+  return groupsOf(s).filter((g) => keys.has(groupKey(s.id, g.id)))
 }
 
 /**
@@ -1073,6 +1180,9 @@ function facesFor(pts: P3[]): Tris | null {
 /** A GRID SIZE step this soon after the last one joins its undo step: a held key repeats every 110 ms (useRepeatable). */
 const EXTENT_RUN_GAP_MS = 1000
 
+/** The shard object the last COPY stamp left on the bench (useWorkshop lastCopy): once the bench holds anything else, lastCopy names nothing. */
+let copiedInto: ShardModel | null = null
+
 export const useWorkshop = create<WorkshopState>((set, get) => {
   /**
    * The last change of GRID SIZE (setExtent): the shard as it left it, how
@@ -1091,12 +1201,17 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
    * was refused by every reader; the answer was to drop the limit, not to
    * enforce it earlier.
    */
-  const edit = (fn: (s: ShardModel) => ShardModel | null, notice: string | null = null): boolean => {
+  const edit = (fn: (s: ShardModel) => ShardModel | null, notice: string | null = null, opts: { hint?: RemapHint; ownGroups?: boolean } = {}): boolean => {
     const { shards, currentId, past } = get()
     const i = shards.findIndex((s) => s.id === currentId)
     if (i < 0) return false
-    const next = fn(shards[i])
-    if (!next) return false
+    const made = fn(shards[i])
+    if (!made) return false
+    // The groups follow the geometry (lib/shardGroups.ts): carried across
+    // whatever the edit did, unless the edit is one that sets them itself
+    // (a group's own change, PASTE's new group).
+    const had = groupsOf(shards[i])
+    const next = opts.ownGroups || (had.length === 0 && groupsOf(made).length === 0) ? made : withGroups(made, remapGroups(shards[i], made, had, opts.hint))
     let list = shards.slice()
     list[i] = { ...next, updatedAt: Date.now() }
     // A look copy this edit places is stored now (keepPlacedCopies).
@@ -1106,7 +1221,9 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     // its parent at it, one edit of the parent that the parent's UNDO takes back.
     const stack = get().backStack
     const top = stack[stack.length - 1]
-    const pointed = top?.pending && !top.pending.done && top.pending.copyId === shards[i].id ? pointParent(list, top) : null
+    // A change to groups alone changes nothing a parent draws: it stays pointed where it was.
+    const groupsOnly = opts.ownGroups && made.vertices === shards[i].vertices && made.faces === shards[i].faces && made.parts === shards[i].parts && made.refs === shards[i].refs
+    const pointed = !groupsOnly && top?.pending && !top.pending.done && top.pending.copyId === shards[i].id ? pointParent(list, top) : null
     const backStack = pointed ? [...stack.slice(0, -1), pointed] : null
     set({ shards: list, past: [...past.slice(-(HISTORY - 1)), shards[i]], future: [], notice, turnPivot: null, partSel, ...(backStack ? { backStack } : {}) })
     save(list)
@@ -1197,6 +1314,20 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       ? { mode: 'solid', notice: 'Switched to SOLID so the faces show. POINTS and LINES are one tap away.' }
       : { mode: after.mode, notice: null }
 
+  /** A clip of exactly one group's members carries that group's name, so its paste is "Rock 2" rather than "Paste 3". */
+  const namedClip = (s: ShardModel, clip: ClipPoints | null): ClipPoints | null => {
+    if (!clip) return null
+    const { selection, partSel, selectedFaces } = get()
+    const g = groupsOf(s).find((x) => heldState(s, x, { selection, partSel, selectedFaces }) === 'all' && missing(heldMembers(s, x), membersHeld({ selection, partSel, selectedFaces: [] })) === 0)
+    return g ? { ...clip, name: g.name } : clip
+  }
+
+  /** What selecting a group holds, as members. */
+  const heldMembers = (s: ShardModel, g: ShardGroup): { vertices: number[]; faces: number[]; parts: number[] } => {
+    const h = heldBy(s, g)
+    return { vertices: h.selection, faces: [], parts: h.partSel }
+  }
+
   /**
    * Points put down in the current shard, selected and ready to be moved, in
    * one undoable step: PASTE's path, and IMPORT's. `exact` puts them where
@@ -1244,7 +1375,13 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     const base = s.vertices.length
     const firstPart = s.parts?.length ?? 0
     const many = clip.points.length + clip.parts.length > 1
-    const added = edit((m) => {
+    // What it puts down is a group of its own (owner, 2026-11-23, item 2):
+    // named after the shard or the group it was copied from, the file it was
+    // imported from, or "Paste 1", "Paste 2". In the same edit, so one UNDO
+    // takes the paste and its group together.
+    const groups = groupsOf(s)
+    const groupName = as ? freeName(groups, as.name ?? 'Import') : clip.name ? freeName(groups, clip.name) : nextName(groups, 'Paste')
+    const added = edit((m) => withAppendedGroup(m, ((): ShardModel => {
       const pasted = clip.faces.map((f) => f.map((i) => base + i) as [number, number, number])
       const { facecolors: _held, ...bare } = m
       let next: ShardModel = {
@@ -1277,7 +1414,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       if (as && empty && clip.faces.length === 0) return { ...next, mode: 'points' }
       // The first faces switch the shard to SOLID, as a stamp's or FILL's do.
       return { ...next, mode: solidIfFirstFaces(m, next).mode }
-    }, as?.notice ?? `${countLabel(clip)} pasted ${where === 'floor' ? 'on the working plane' : 'where they were taken from'}${k ? ', kept at true size' : ''}, selected: move ${many ? 'them' : 'it'} into place.`)
+    })(), groupName), as?.notice ?? `${countLabel(clip)} pasted ${where === 'floor' ? 'on the working plane' : 'where they were taken from'}${k ? ', kept at true size' : ''}, selected: move ${many ? 'them' : 'it'} into place. New group: ${groupName}.`, { ownGroups: true })
     // The selection is set here rather than through setSelection, which
     // widens to every vertex sharing a point: pasted exactly, the copy sits
     // on its original and widening would take both, so the nudges could
@@ -1304,6 +1441,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     facePick: [],
     selectedFaces: [],
     clip: null,
+    hiddenGroups: [],
     palette: loadPalette(),
     palettes: loadPalettes(),
     level: 0,
@@ -1312,7 +1450,11 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     turnPivot: null,
     stampMode: 'shape',
     stampObject: null,
+    stampForm: 'copy',
+    stampSnap: true,
+    lastCopy: null,
     showAvatar: loadShowAvatar(),
+    stepBySize: loadBySize(),
     color: [0, 0.9, 1],
     glowLast: { ...GLOW_START },
     stampKind: 'block',
@@ -1543,6 +1685,14 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     },
     setDivision: (division) => { if (DIVISIONS.includes(division)) set({ division }) },
     setShowAvatar: (on) => { set({ showAvatar: on }); try { localStorage.setItem(AVATAR_KEY, on ? '1' : '0') } catch { /* private mode */ } },
+    setStepBySize: (on) => { set({ stepBySize: on, turnPivot: null }); try { localStorage.setItem(BY_SIZE_KEY, on ? '1' : '0') } catch { /* private mode */ } },
+    moveStep: (axis) => {
+      const { stepBySize, selection, partSel } = get()
+      const snap = get().step()
+      const s = get().current()
+      if (!stepBySize || !s) return snap
+      return sizeStep(heldSize(s, selection, partSel, useBenchResolved.getState().resolved), axis, snap, true)
+    },
     step: () => TICKS_PER_UNIT / get().division,
     setColor: (c) => set({ color: clampColor(c) }),
     setStampKind: (stampKind) => set({ stampKind, stampMode: 'shape' }),
@@ -1556,6 +1706,29 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     },
 
     setStampMode: (stampMode) => set({ stampMode }),
+    setStampForm: (stampForm) => set({ stampForm }),
+    setStampSnap: (stampSnap) => set({ stampSnap }),
+
+    commitStamp: (shard, added, notice, name) => {
+      const id = get().currentId
+      if (!id || !get().current()) return null
+      // A COPY is a group of what it put in, named after the shard stamped (made free: "Rock 2"), in this same edit.
+      // Every COPY makes one, even of a shard whose name was cleared (freeName says "Group" then).
+      const groupName = added && name !== undefined ? freeName(groupsOf(get().current()), name) : null
+      const done = groupName && added
+        ? edit((before) => {
+          const g = makeGroup(shard, groupName, { ...stampedIndices(added), parts: [] })
+          const kept = remapGroups(before, shard, groupsOf(before))
+          return withGroups(shard, g ? [...kept, g] : kept)
+        }, `${notice} New group: ${groupName.replace(/\.+$/, '')}.`, { ownGroups: true })
+        : edit(() => shard, notice)
+      if (!done) return null
+      const range: StampedRange | null = added ? { shardId: id, vertices: [...added.vertices] as [number, number], faces: [...added.faces] as [number, number] } : null
+      // The shard exactly as this stamp left it: any later change (an edit, UNDO, another shard) lets lastCopy go (below the store).
+      copiedInto = range ? get().current() : null
+      set({ selection: [], partSel: [], selectedFaces: [], facePick: [], lastCopy: range })
+      return range
+    },
     setStampObject: (stampObject) => {
       // A look copy picked to stamp is stored now: whatever it is stamped into names a shard that stays.
       const me = you()
@@ -1593,7 +1766,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
         // Not found is not expected, but it costs that face its seam, never the stamp.
         return k < s.faces.length ? k++ : -1
       })
-      edit(() => ({ ...seamsFollow(s, res.shard, from), mode }), notice)
+      edit(() => ({ ...seamsFollow(s, res.shard, from), mode }), notice, { hint: { faceFrom: from } })
       set({ selection: [], partSel: [], selectedFaces: [], facePick: [] })
     },
 
@@ -1697,11 +1870,13 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       const { selectedFaces } = get()
       if (selectedFaces.length === 0) return
       const gone = new Set(selectedFaces)
+      const hint: RemapHint = {}
       edit((s) => {
         const kept = s.faces.map((_, i) => i).filter((i) => !gone.has(i))
         if (kept.length === s.faces.length) return null
+        hint.faceFrom = kept
         return seamsFollow(s, { ...s, faces: kept.map((i) => s.faces[i]) }, kept)
-      })
+      }, null, { hint })
       set({ selectedFaces: [] })
     },
 
@@ -1909,6 +2084,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     moveSelected: (axis, delta) => {
       const { selection, partSel } = get()
       if (selection.length === 0 && partSel.length === 0) return
+      let refused = false
       edit((s) => {
         // Every selected point and placed object moves the same unit; if any
         // would leave the grid the whole move is refused, so a shape never tears.
@@ -1919,18 +2095,20 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
         for (const i of chosen) {
           const p = ticksOf(vertices[i])
           p[axis] += delta
-          if (!validPoint(p, s.extent)) return null
+          if (!validPoint(p, s.extent)) { refused = true; return null }
           vertices[i] = vertexAt(p, vertices[i].c)
         }
         const parts = (s.parts ?? []).slice()
         for (const i of placed) {
           const at = [...parts[i].at] as P3
           at[axis] += delta
-          if (!validPoint(at, s.extent)) return null
+          if (!validPoint(at, s.extent)) { refused = true; return null }
           parts[i] = { ...parts[i], at }
         }
         return placed.size ? { ...s, vertices, parts } : { ...s, vertices }
       })
+      // Said, so a big BY SIZE step at the edge is not a key that does nothing.
+      if (refused) set({ notice: 'That move would carry a point or an object off the grid. GRID SIZE makes it bigger.' })
     },
 
     rotateSelected: (turns) => {
@@ -1949,8 +2127,10 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       // The plane is part of the key: turning, tipping the grid on its side and
       // turning again are two different turns about two different axes.
       const axes = turnAxes(plane)
-      const key = `${step}:${plane}:${[...chosen].sort((a, b) => a - b).join(',')}:${placed.join(',')}`
-      const at = turnPivot?.key === key ? turnPivot.at : turnPivotFor(pts, step, axes)
+      const key = `${get().stepBySize ? 'size:' : ''}${step}:${plane}:${[...chosen].sort((a, b) => a - b).join(',')}:${placed.join(',')}`
+      // BY SIZE: about the middle of what is held as drawn, placed objects' own size included, so a kit piece turns in place.
+      const box = get().stepBySize ? heldBox(s, chosen, placed, useBenchResolved.getState().resolved) : null
+      const at = turnPivot?.key === key ? turnPivot.at : turnPivotFor(box ? [box.min, box.max] : pts, step, axes)
       const [ca, cb] = at
       const [ax, bx] = axes
       let refused = false
@@ -2030,6 +2210,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     deleteSelected: () => {
       const { selection, partSel } = get()
       if (selection.length === 0 && partSel.length === 0) return
+      const hint: RemapHint = { partsGone: new Set(partSel) }
       edit((before) => {
         // Selected placed objects go first; references nothing places any more go with them.
         const s = partSel.length ? removeParts(before, partSel) : before
@@ -2040,8 +2221,9 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
         s.vertices.forEach((_, i) => { if (!gone.has(i)) remap.set(i, remap.size) })
         const kept = s.faces.map((_, i) => i).filter((i) => !s.faces[i].some((v) => gone.has(v)))
         const faces = kept.map((i) => s.faces[i].map((v) => remap.get(v) as number) as [number, number, number])
+        hint.faceFrom = kept
         return seamsFollow(s, { ...s, vertices: s.vertices.filter((_, i) => !gone.has(i)), faces }, kept)
-      })
+      }, null, { hint })
       set({ selection: [], partSel: [], selectedFaces: [], facePick: [] })
     },
 
@@ -2052,13 +2234,13 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       const res = weld(s, selection.length >= 2 ? new Set(selection) : undefined)
       if (!res) { set({ notice: 'Nothing to weld: no two points stand on the same spot.' }); return }
       const n = res.shard.vertices.length
-      edit(() => res.shard, `${res.merged} point${res.merged === 1 ? '' : 's'} welded${res.colored ? ', and the faces keep their own colors now' : ''}. ${n} vert${n === 1 ? 'ex' : 'ices'}.`)
+      edit(() => res.shard, `${res.merged} point${res.merged === 1 ? '' : 's'} welded${res.colored ? ', and the faces keep their own colors now' : ''}. ${n} vert${n === 1 ? 'ex' : 'ices'}.`, { hint: { vertexTo: res.vertexTo, faceTo: res.faceTo } })
       set({ selection: [], partSel: [], selectedFaces: [], facePick: [] })
     },
 
     cutSelection: () => {
       const s = get().current()
-      const clip = s ? clipOf(s, get().selection, get().partSel) : null
+      const clip = s ? namedClip(s, clipOf(s, get().selection, get().partSel)) : null
       if (!clip) return
       set({ clip })
       get().deleteSelected()
@@ -2067,7 +2249,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
 
     copySelection: () => {
       const s = get().current()
-      const clip = s ? clipOf(s, get().selection, get().partSel) : null
+      const clip = s ? namedClip(s, clipOf(s, get().selection, get().partSel)) : null
       if (!clip) return
       set({ clip, notice: `${countLabel(clip)} copied. PASTE puts ${clip.points.length === 1 ? 'it' : 'them'} down, on any tool.` })
     },
@@ -2076,7 +2258,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
 
     duplicateSelection: () => {
       const s = get().current()
-      const clip = s ? clipOf(s, get().selection, get().partSel) : null
+      const clip = s ? namedClip(s, clipOf(s, get().selection, get().partSel)) : null
       if (!clip) return
       set({ clip })
       get().pasteClip('exact')
@@ -2085,7 +2267,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     copyShard: (model) => {
       const clip = clipOf(model, model.vertices.map((_, i) => i), (model.parts ?? []).map((_, i) => i))
       if (!clip) return false
-      set({ clip: { ...clip, unit: model.unit }, notice: `Copied "${model.name}". PASTE puts it in any shard.` })
+      set({ clip: { ...clip, unit: model.unit, name: model.name }, notice: `Copied "${model.name}". PASTE puts it in any shard.` })
       return true
     },
 
@@ -2176,10 +2358,134 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       if (!s || selection.length === 0) return
       const res = subdivide(s, selection)
       if ('refused' in res) { set({ notice: res.refused }); return }
-      edit(() => res.shard, subdivideNotice(res))
+      edit(() => res.shard, subdivideNotice(res), { hint: { faceFrom: res.faceFrom, midpoints: res.midpoints } })
       // Whole points, as every selection is, so a midpoint that landed on an
       // occupied spot is in hand with what stands there.
       get().setSelection([...res.corners, ...res.added])
+    },
+
+    createGroup: (name) => {
+      const s = get().current()
+      if (!s) return null
+      const groups = groupsOf(s)
+      const g = makeGroup(s, name && cleanName(name) ? freeName(groups, name) : nextName(groups), membersHeld(get()))
+      if (!g) { set({ notice: 'Select something first: a new group holds what you hold.' }); return null }
+      edit((cur) => withGroups(cur, [...groupsOf(cur), g]), `New group: ${g.name}.`, { ownGroups: true })
+      return g.id
+    },
+
+    renameGroup: (id, name) => {
+      const n = cleanName(name)
+      const g = groupsOf(get().current()).find((x) => x.id === id)
+      if (!g || !n || n === g.name) return
+      edit((cur) => withGroups(cur, groupsOf(cur).map((x) => (x.id === id ? { ...x, name: n } : x))), null, { ownGroups: true })
+    },
+
+    toggleGroupSelection: (id) => {
+      const s = get().current()
+      const g = groupsOf(s).find((x) => x.id === id)
+      if (!s || !g) return
+      const { selection, partSel, selectedFaces } = get()
+      const want = heldBy(s, g)
+      if (heldState(s, g, { selection, partSel, selectedFaces }) === 'all') {
+        const faces = new Set(want.selectedFaces)
+        set({ selection: nextSelection(selection, want.selection, true), partSel: nextSelection(partSel, want.partSel, true), selectedFaces: selectedFaces.filter((k) => !faces.has(k)), facePick: [] })
+        return
+      }
+      // A hidden group shows as it is taken in hand: nothing is held out of sight.
+      const key = groupKey(s.id, id)
+      const hiddenGroups = get().hiddenGroups.filter((k) => k !== key)
+      // A group of faces is held as faces, as a tapped face is; one with points
+      // as points, and faces held before become their corners, still held.
+      // SELECT's switch follows, so the next tap gathers more of the same.
+      const facesOnly = want.selectedFaces.length > 0
+      set({
+        hiddenGroups,
+        selection: nextSelection(selection, want.selection, false),
+        partSel: nextSelection(partSel, want.partSel, false),
+        selectedFaces: facesOnly ? [...selectedFaces, ...want.selectedFaces.filter((k) => !selectedFaces.includes(k))] : [],
+        selectKind: facesOnly ? 'faces' : want.selection.length === 0 && want.partSel.length > 0 ? 'objects' : 'points',
+        facePick: [],
+      })
+    },
+
+    addSelectionToGroup: (id) => {
+      const g = groupsOf(get().current()).find((x) => x.id === id)
+      if (!g || !canAdd(g, get())) return
+      const m = membersHeld(get())
+      edit((cur) => withGroups(cur, groupsOf(cur).map((x) => (x.id === id ? addMembers(x, m) : x))), `Added to ${g.name}.`, { ownGroups: true })
+    },
+
+    removeSelectionFromGroup: (id) => {
+      const g = groupsOf(get().current()).find((x) => x.id === id)
+      if (!g || !canRemove(g, get())) return
+      const out = removeMembers(g, allHeld(get()))
+      const gone = isEmpty(out)
+      edit((cur) => withGroups(cur, groupsOf(cur).flatMap((x) => (x.id !== id ? [x] : gone ? [] : [removeMembers(x, allHeld(get()))]))), gone ? `${g.name} held nothing else, so it went. UNDO brings it back.` : `Taken out of ${g.name}.`, { ownGroups: true })
+    },
+
+    setGroupHidden: (id, hidden) => {
+      const s = get().current()
+      const g = groupsOf(s).find((x) => x.id === id)
+      if (!s || !g) return
+      const key = groupKey(s.id, id)
+      const rest = get().hiddenGroups.filter((k) => k !== key)
+      if (!hidden) { set({ hiddenGroups: rest }); return }
+      // What of it is held is let go: nothing moves or goes out of sight.
+      const want = heldBy(s, g)
+      const pts = new Set([...g.vertices, ...g.faces.flatMap((k) => s.faces[k] ?? [])])
+      const faces = new Set(g.faces)
+      const { selection, partSel, selectedFaces } = get()
+      set({
+        hiddenGroups: [...rest, key],
+        selection: selection.filter((i) => !pts.has(i)),
+        partSel: nextSelection(partSel, want.partSel, true),
+        selectedFaces: selectedFaces.filter((k) => !faces.has(k) && !(s.faces[k] ?? []).some((v) => pts.has(v))),
+        facePick: [],
+      })
+    },
+
+    duplicateGroup: (id) => {
+      const s = get().current()
+      const g = groupsOf(s).find((x) => x.id === id)
+      if (!s || !g) return null
+      const want = heldBy(s, g)
+      const clip = clipOf(s, want.selection, want.partSel)
+      if (!clip) return null
+      const name = copyName(groupsOf(s), g.name)
+      // PASTE's own path, without touching the clipboard: on the original, held, its own group.
+      const me = you()
+      const ok = putDown(clip, 'exact', me ? ownAddress(me, s.id) : undefined, { notice: `${name} put down on ${g.name}, held: move it into place.`, name })
+      if (!ok) return null
+      const after = groupsOf(get().current())
+      return after[after.length - 1]?.id ?? null
+    },
+
+    deleteGroup: (id) => {
+      const g = groupsOf(get().current()).find((x) => x.id === id)
+      if (!g) return
+      const key = groupKey(get().currentId ?? '', id)
+      if (edit((cur) => withGroups(cur, groupsOf(cur).filter((x) => x.id !== id)), `Group ${g.name} deleted. What it held stays.`, { ownGroups: true })) set({ hiddenGroups: get().hiddenGroups.filter((k) => k !== key) })
+    },
+
+    deleteGroupAndGeometry: (id) => {
+      const s = get().current()
+      const g = groupsOf(s).find((x) => x.id === id)
+      if (!s || !g) return
+      const hint: RemapHint = { partsGone: new Set(g.parts.filter((i) => s.parts?.[i])) }
+      const done = edit((before) => {
+        // Its placed objects first, references nothing places any more with them; then its points, with every face on them; then its own faces.
+        const p = g.parts.length ? removeParts(before, g.parts) : before
+        const gone = new Set(g.vertices.filter((i) => p.vertices[i]))
+        const own = new Set(g.faces)
+        const remap = new Map<number, number>()
+        p.vertices.forEach((_, i) => { if (!gone.has(i)) remap.set(i, remap.size) })
+        const kept = p.faces.map((_, i) => i).filter((i) => !own.has(i) && !p.faces[i].some((v) => gone.has(v)))
+        const faces = kept.map((i) => p.faces[i].map((v) => remap.get(v) as number) as [number, number, number])
+        const after = seamsFollow(p, { ...p, vertices: gone.size ? p.vertices.filter((_, i) => !gone.has(i)) : p.vertices, faces }, kept)
+        return withGroups(after, remapGroups(before, after, groupsOf(before).filter((x) => x.id !== id), { ...hint, faceFrom: kept }))
+      }, `${g.name} deleted, with everything it held. UNDO brings it back.`, { ownGroups: true })
+      if (done) set({ selection: [], partSel: [], selectedFaces: [], facePick: [], hiddenGroups: get().hiddenGroups.filter((k) => k !== groupKey(s.id, id)) })
     },
 
     removeFace: (index) => edit((s) => {
@@ -2287,7 +2593,8 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       const benchBounce = bounceOf(old)
       const walk = benchBounce !== 0 && bounceOf(walled) === 0 ? withBounce(walled, benchBounce, springboardOf(old)) : walled
       const list = shards.slice()
-      list[i] = walk
+      // The groups were the old geometry's: the new one starts without (lib/shardGroups.ts).
+      list[i] = withGroups(walk, [])
       // On the bench it is an edit like any other: UNDO brings the old one back.
       if (id === currentId) set({ shards: list, past: [...past.slice(-(HISTORY - 1)), old], future: [], selection: [], partSel: [], selectedFaces: [], facePick: [] })
       else set({ shards: list })
@@ -2436,6 +2743,16 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
   }
 })
 
+// lastCopy names indices in one shard object, the one the stamp left: an edit,
+// UNDO, REDO, another shard opened or the library read again replaces it, and
+// then the indices may have moved, so it goes.
+useWorkshop.subscribe((st) => {
+  if (st.lastCopy && (st.currentId !== st.lastCopy.shardId || st.current() !== copiedInto)) {
+    copiedInto = null
+    useWorkshop.setState({ lastCopy: null })
+  }
+})
+
 attach({
   shards: () => kept(useWorkshop.getState().shards),
   replace: (given) => useWorkshop.setState((s) => {
@@ -2456,3 +2773,18 @@ attach({
 if (import.meta.env.DEV && typeof window !== 'undefined') {
   ;(window as unknown as { __workshop?: unknown }).__workshop = useWorkshop
 }
+
+/**
+ * Nothing hidden is ever held (GROUPS' HIDE): whatever put it in hand (a
+ * tap on a stack whose other vertex is hidden, a box, ALL, JOINED), it is
+ * let go as it arrives. One place, rather than in every way of selecting.
+ */
+useWorkshop.subscribe((st, prev) => {
+  if (st.hiddenGroups.length === 0) return
+  if (st.selection === prev.selection && st.partSel === prev.partSel && st.selectedFaces === prev.selectedFaces && st.hiddenGroups === prev.hiddenGroups && st.currentId === prev.currentId) return
+  const s = st.current()
+  if (!s) return
+  const held = { selection: st.selection, partSel: st.partSel, selectedFaces: st.selectedFaces }
+  const kept = withoutHidden(held, hiddenSets(s, hiddenIn(st.hiddenGroups, s)))
+  if (kept !== held) useWorkshop.setState(kept)
+})

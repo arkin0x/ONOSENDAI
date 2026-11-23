@@ -387,7 +387,7 @@ function workshopPiece(address: string, me: string, ledger: Ledger): Record<stri
   // Published under your key and unedited since, it stays a plain link to the
   // public object, which every finder fetches (owner, 2026-11-22); edited since,
   // the public one is stale and the hide seals the workshop's. The rule the
-  // workshop's LINK and COPY marks show (lib/partForm.ts sealedAsPiece).
+  // workshop's LINK and SEALED marks show (lib/partForm.ts sealedAsPiece).
   if (!s || !sealedAsPiece(s, ledger, me)) return undefined
   return toPayload(withAuthoredConstrain(s)) as unknown as Record<string, unknown>
 }

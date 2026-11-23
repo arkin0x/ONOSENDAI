@@ -1290,7 +1290,7 @@ function BenchImpl(): JSX.Element {
       {/* While the AVATAR sheet is open, turned as FACING would turn it on a move up and to the right (FacingPreview). */}
       <FacingPreviewGroup><AnimClock.Provider value={benchClock}><BenchShard onFace={onFace} onPart={onPart} /></AnimClock.Provider></FacingPreviewGroup>
       <FacingArrow />
-      {/* LINK or COPY, in a corner of every placed object (lib/partForm.ts). */}
+      {/* LINK or SEALED, in a corner of every placed object (lib/partForm.ts). */}
       {!facingShown && <PartBadges />}
       {look && <BenchLookRig />}
       {look && <BenchBloom />}

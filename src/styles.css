@@ -13351,7 +13351,7 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
 .partform > svg {
   position: relative;
 }
-.partform--copy {
+.partform--sealed {
   --pf: var(--warn);
 }
 .partform--inline {
@@ -13371,7 +13371,7 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
   letter-spacing: 0.12em;
   color: var(--ok);
 }
-.partform-word--copy {
+.partform-word--sealed {
   color: var(--warn);
 }
 /* On the bench: standing on its object's corner, never in the way of a tap,

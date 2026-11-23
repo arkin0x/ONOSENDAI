@@ -48,6 +48,12 @@ export function handleAt(frame: HandleFrame, axis: 0 | 1 | 2, reach = HANDLE_REA
   return [frame.center[0] + (dx / len) * reach, frame.center[1] + (dy / len) * reach]
 }
 
+/** One step's length on `axis`, in ticks: the snap's for the eye; for the selection, its own size there with BY SIZE on (useWorkshop moveStep). */
+function stepOf(axis: 0 | 1 | 2): number {
+  const w = useWorkshop.getState()
+  return w.eyeEdit ? w.step() : w.moveStep(axis)
+}
+
 /** One move of what the handles hold: the eye in SET EYE, else the selection. */
 function moveHeld(axis: 0 | 1 | 2, delta: number): void {
   const w = useWorkshop.getState()
@@ -119,8 +125,7 @@ export function MoveHandles(): JSX.Element {
     const dy = e.clientY - d.y
     d.travel = Math.max(d.travel, Math.hypot(dx, dy))
     if (d.travel < d.slop) return
-    const w = useWorkshop.getState()
-    const step = w.step()
+    const step = stepOf(d.axis)
     const steps = handleSteps(dx, dy, d.perUnit, TICKS_PER_UNIT, step)
     if (steps !== d.steps) {
       moveHeld(d.axis, (steps - d.steps) * step)
@@ -131,9 +136,8 @@ export function MoveHandles(): JSX.Element {
     const d = drag.current
     if (!d || d.id !== e.pointerId) return
     drag.current = null
-    const w = useWorkshop.getState()
     // A tap: one step the handle's way.
-    if (d.travel < d.slop && e.type === 'pointerup') { moveHeld(d.axis, w.step()); return }
+    if (d.travel < d.slop && e.type === 'pointerup') { moveHeld(d.axis, stepOf(d.axis)); return }
     // A drag: every step it made, one UNDO, as an OPACITY drag is (shardRows),
     // a full history too: the history keeps its cap, so its length tells nothing.
     const now = useWorkshop.getState()
@@ -169,7 +173,7 @@ export function MoveHandles(): JSX.Element {
           onPointerCancel={up}
           onContextMenu={(e) => e.preventDefault()}
           // From the keyboard: one step, as a tap.
-          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); moveHeld(axis, useWorkshop.getState().step()) } }}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); moveHeld(axis, stepOf(axis)) } }}
         >
           <span>{label}</span>
         </button>

@@ -48,6 +48,7 @@ import { ShardLights } from '../scene/shardLight'
 import { nextSelection, ownAddress, useWorkshop, type Tool } from '../store/useWorkshop'
 import { partMatrix } from 'sno-core/parts'
 import { OwnPartsContext, fetchRef, useResolved } from '../lib/parts'
+import { useBenchResolved } from '../store/heldSize'
 import { PartBadges } from './PartBadges'
 import { BASE_FAR, BASE_NEAR, MIN_DISTANCE, clipPlanes, fitDistance, nextMaxDistance, reachFor, reachRadius, shardSphere, type Sphere } from './benchReach'
 import { useCyberspace } from '../store/useCyberspace'
@@ -842,13 +843,16 @@ export function Keys(): null {
       const look = isLook(w.tool)
       // SET EYE: the same keys step the eye, in any tool (shell/EyeBar).
       if (nudge[e.code] && w.eyeEdit) { e.preventDefault(); const n = nudgeFor(benchAxes(camera), nudge[e.code]); w.moveEye(n.axis, n.delta * w.step()); return }
-      if (nudge[e.code]) { e.preventDefault(); if (look) return; const n = nudgeFor(benchAxes(camera), nudge[e.code]); w.moveSelected(n.axis, n.delta * w.step()); return }
+      // BY SIZE steps what is held by its own size on that axis (moveStep).
+      if (nudge[e.code]) { e.preventDefault(); if (look) return; const n = nudgeFor(benchAxes(camera), nudge[e.code]); w.moveSelected(n.axis, n.delta * w.moveStep(n.axis)); return }
       if (e.code === 'Delete' || e.code === 'Backspace') { e.preventDefault(); if (look) return; if (w.selectedFaces.length > 0) w.deleteSelectedFace(); else w.deleteSelected(); return }
       if (e.code === 'Enter') { e.preventDefault(); if (look) return; if (w.facePick.length >= 3) w.fill(); else if (w.selection.length >= 3) w.fillSelection(); return }
       // Escape is not here: it goes through the Escape stack (useEscape), so
       // the palette sheet and the confirmations over the bench close before
       // the bench does. Workshop registers what it clears and closes.
       if (e.code === 'KeyC') { if (!look) w.selectConnected(); return }
+      // X: BY SIZE on or off (the switch on the move handles, shell/MoveHandles).
+      if (e.code === 'KeyX') { if (!look) w.setStepBySize(!w.stepBySize); return }
       // B, the held bar's COLOR: the color in hand onto what is held (points, or a face's corners).
       if (e.code === 'KeyB') { if (w.selection.length && !look) w.colorSelected(w.color); return }
       // The keys run 1 to 6 along the dock, left to right (Dock.tsx DOCK).
@@ -874,6 +878,18 @@ export function Keys(): null {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [camera])
+  return null
+}
+
+/**
+ * What the placed objects on the bench resolve to, handed to the store for
+ * BY SIZE (store/heldSize.ts), so a held object is measured as it is drawn.
+ */
+function HeldProbe(): null {
+  const shard = useWorkshop((s) => s.current())
+  const resolved = useResolved(shard ?? null)
+  useEffect(() => { useBenchResolved.setState({ resolved }) }, [resolved])
+  useEffect(() => () => useBenchResolved.setState({ resolved: new Map() }), [])
   return null
 }
 
@@ -1265,6 +1281,7 @@ function BenchImpl(): JSX.Element {
       <HandleProjector />
       <Aim />
       <Keys />
+      <HeldProbe />
       <BenchWake />
       <AnimWake />
       <AxesReporter />

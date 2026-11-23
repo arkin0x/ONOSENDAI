@@ -27,7 +27,7 @@
  *
  * The step waits for 'placed' (something placed since it came up) and stays
  * on its ✓ with FINISH (TutorialStep stay); BACK and SKIP stay as on every
- * step. Nothing here moves, places or signs anything: those are the
+ * step. Nothing here moves or places anything, and no event is made here: those are the
  * player's presses.
  */
 

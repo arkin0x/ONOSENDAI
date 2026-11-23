@@ -99,7 +99,7 @@ export function GreenTargetBox({ centre, scale, turn, side, guiding, name }: Gre
             <meshBasicMaterial color={TARGET_GREEN} toneMapped={false} transparent opacity={0.9} depthWrite={false} />
           </mesh>
           {/* The beam and the ping, translucent, each twice split by the stencil (ClipWalls OFF_FACES / OVER_FACES):
-              over a shard face the face keeps its alpha tag, so the bloom never blows the course's platforms out behind them. */}
+              over a shard face the face keeps its alpha tag, so the bloom never blows the course's slabs out behind them. */}
           {[{ ...OFF_FACES, blending: AdditiveBlending }, OVER_FACES].map((split, i) => (
             <mesh key={`beam-${i}`} position={[0, side / 2 + beam.length / 2, 0]} raycast={noRaycast}>
               <cylinderGeometry args={[beam.radius, beam.radius, beam.length, 12, 1, true]} />

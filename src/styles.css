@@ -13277,6 +13277,8 @@ html.tv-broadcast body { overflow: hidden; }
 .payterms a:hover, .payterms a:focus-visible { color: var(--fg); }
 .shards__terms, .deploybar__terms { grid-column: 1 / -1; margin: 0; }
 .hyper__terms { margin-top: 6px; }
+/* Under the AUTO budget's field, with the budget's own room below it. */
+.cloud__budget-terms { margin: -6px 0 10px; }
 /* In a column that already spaces its rows, the gap is the margin. */
 .cloud__topup-form .payterms, .offer__body .payterms { margin: 0; }
 .payterms--scene { margin: 0; color: rgba(255, 255, 255, 0.78); font-weight: 600; text-shadow: var(--scanorbs-edge); }

@@ -935,8 +935,9 @@ function regionMeets(w: WallItem, lo: Position, hi: Position): boolean {
  * the first, so the answer is not kept. Nothing moves, nothing is published:
  * this is where the camera looks from.
  *
- * With `stand` (fluid WALK, the walker drawn standing on the surface between
- * gibsons, store/walkFluid.ts groundFluid; a number is the most the ground
+ * With `stand` (fluid WALK, and the step WALK at a gibson's zoom: the walker
+ * drawn standing on the surface between gibsons, store/walkFluid.ts
+ * groundFluid and stepFloor; a number is the most the ground
  * climbs, in gibsons, true is 2), the walker's point as drawn is reached the
  * way the ground was found (groundUnder): up from the gibson's centre to its
  * height, if it is higher, or a whole gibson or two, then level, then down
@@ -1107,8 +1108,25 @@ const EYE_PUSH_STEPS = 4
  * the walker, as eyeReach does.
  */
 export function eyePlace(from: Position, lead: readonly [number, number, number], eye: readonly [number, number, number], margin: number, items: readonly WallItem[], up: AxisDirection = UP_Y, out?: { pending: boolean }, stand: boolean | number = false, place: [number, number, number] = [0, 0, 0]): [number, number, number] {
-  const core = eyeCore(from, lead, eye, margin, items, up, out, stand, margin * (EYE_PUSH_STEPS + 1))
-  if (typeof core === 'number') { place[0] = eye[0] * core; place[1] = eye[1] * core; place[2] = eye[2] * core; return place }
+  let core = eyeCore(from, lead, eye, margin, items, up, out, stand, margin * (EYE_PUSH_STEPS + 1))
+  // Feet standing in a crease, where a steep face meets the floor they are on
+  // (a culvert's side, a cliff's toe; arkinox, 2026-11-23: "I am dipping under
+  // the floor"): the face passes through the line's start and held the camera
+  // at the feet, down on the ground. Asked again from EYE_CREASE higher; a wall
+  // the walker really stands in, or a solid it is inside, still holds it there.
+  let lift = 0
+  if (core === 0 && stand !== false && stand !== 0 && !(out && out.pending)) {
+    const raisedLead: [number, number, number] = [lead[0], lead[1], lead[2]]
+    raisedLead[AXIS_INDEX[up.axis]] += up.dir * EYE_CREASE
+    const again = eyeCore(from, raisedLead, eye, margin, items, up, out, stand, margin * (EYE_PUSH_STEPS + 1))
+    // A shard still being built under the higher line keeps `out.pending` set: the rig asks again next frame.
+    if (again !== 0 && !(out && out.pending)) { core = again; lead = raisedLead; lift = EYE_CREASE }
+  }
+  if (typeof core === 'number') {
+    place[0] = eye[0] * core; place[1] = eye[1] * core; place[2] = eye[2] * core
+    if (lift > 0) place[AXIS_INDEX[up.axis]] += up.dir * lift
+    return place
+  }
   const { near, len } = core
   const s = core.reach / len
   const upC = [0, 0, 0]
@@ -1170,8 +1188,12 @@ export function eyePlace(from: Position, lead: readonly [number, number, number]
     p = [p[0] + d[0], p[1] + d[1], p[2] + d[2]]
   }
   place[0] = p[0] + 0; place[1] = p[1] + 0; place[2] = p[2] + 0
+  if (lift > 0) place[AXIS_INDEX[up.axis]] += up.dir * lift
   return place
 }
+
+/** How much higher than the feet, in gibsons, eyePlace asks again when a face through the feet held the camera at them: a sixteenth, under a centimetre at the walker's scale. */
+const EYE_CREASE = 1 / 16
 
 /**
  * Fluid WALK's ground (store/walkFluid.ts groundFluid): how high the surface
@@ -1213,28 +1235,10 @@ export function groundUnder(from: Position, lead: readonly [number, number, numb
   }
   lo[ui] = Math.min(lo[ui], up.dir > 0 ? h0 - drop - 1 : -(h0 + rise) - 1)
   hi[ui] = Math.max(hi[ui], up.dir > 0 ? h0 + rise + 1 : -(h0 - drop) + 1)
-  const blo = { x: from.x + BigInt(Math.floor(lo[0])), y: from.y + BigInt(Math.floor(lo[1])), z: from.z + BigInt(Math.floor(lo[2])) }
-  const bhi = { x: from.x + BigInt(Math.ceil(hi[0])), y: from.y + BigInt(Math.ceil(hi[1])), z: from.z + BigInt(Math.ceil(hi[2])) }
-  const near: Array<{ e: Entry; g: number; off: [number, number, number] }> = []
-  let tol = 0
-  for (const w of items) {
-    // A closed door's slab that holds the walker lets it go (WallItem `inside`).
-    if (w.inside || !regionMeets(w, blo, bhi)) continue
-    const e = lookup(w)
-    if (e.first) { if (out) out.pending = true; return null }
-    if (!e.reach) continue
-    const g = 2 ** w.shard.unit
-    const off: [number, number, number] = [Number(from.x - w.at.x), Number(from.y - w.at.y), Number(from.z - w.at.z)]
-    const r = e.reach
-    const wlo = [Number(r.lo.x), Number(r.lo.y), Number(r.lo.z)], whi = [Number(r.hi.x), Number(r.hi.y), Number(r.hi.z)]
-    let apart = false
-    for (let q = 0; q < 3; q++) if (off[q] + hi[q] < wlo[q] - 1 || off[q] + lo[q] > whi[q] + 1) apart = true
-    if (apart) continue
-    near.push({ e, g, off })
-    tol = Math.max(tol, tolerance(e, g, 0n))
-  }
-  if (near.length === 0) return null
-  const hair = Math.max(EYE_LIFT, 16 * tol)
+  const found = groundNear(from, lo, hi, items, out, lookup)
+  if (found === null || found.near.length === 0) return null
+  const { near } = found
+  const hair = Math.max(EYE_LIFT, 16 * found.tol)
   // A point `h` gibsons up from `from`, `along` of the way out to the drawn point, in a shard's render frame (Z flips, as stepLimit has it).
   const at = (c: { g: number; off: [number, number, number] }, h: number, along: number): [number, number, number] => {
     const p = [c.off[0] + flat[0] * along, c.off[1] + flat[1] * along, c.off[2] + flat[2] * along]
@@ -1266,6 +1270,233 @@ export function groundUnder(from: Position, lead: readonly [number, number, numb
     return best === null ? null : h - best
   }
   return null
+}
+
+/** One shard near a ground question (groundNear): its walls, its unit's size in gibsons, and the walker's gibson from its coordinate (cyberspace gibsons). */
+interface GroundNear { e: Entry; g: number; off: [number, number, number] }
+
+/**
+ * The shards whose walls come within the box `lo`..`hi` (cyberspace gibsons
+ * from the middle of `from`), and the largest of their measuring tolerances;
+ * null when one in reach is still being built (`out.pending`). A closed
+ * door's slab that holds the walker lets it go (WallItem `inside`).
+ */
+function groundNear(from: Position, lo: readonly number[], hi: readonly number[], items: readonly WallItem[], out: { pending: boolean } | undefined, lookup: (w: WallItem) => Entry): { near: GroundNear[]; tol: number } | null {
+  const blo = { x: from.x + BigInt(Math.floor(lo[0])), y: from.y + BigInt(Math.floor(lo[1])), z: from.z + BigInt(Math.floor(lo[2])) }
+  const bhi = { x: from.x + BigInt(Math.ceil(hi[0])), y: from.y + BigInt(Math.ceil(hi[1])), z: from.z + BigInt(Math.ceil(hi[2])) }
+  const near: GroundNear[] = []
+  let tol = 0
+  for (const w of items) {
+    if (w.inside || !regionMeets(w, blo, bhi)) continue
+    const e = lookup(w)
+    if (e.first) { if (out) out.pending = true; return null }
+    if (!e.reach) continue
+    const g = 2 ** w.shard.unit
+    const off: [number, number, number] = [Number(from.x - w.at.x), Number(from.y - w.at.y), Number(from.z - w.at.z)]
+    const r = e.reach
+    const wlo = [Number(r.lo.x), Number(r.lo.y), Number(r.lo.z)], whi = [Number(r.hi.x), Number(r.hi.y), Number(r.hi.z)]
+    let apart = false
+    for (let q = 0; q < 3; q++) if (off[q] + hi[q] < wlo[q] - 1 || off[q] + lo[q] > whi[q] + 1) apart = true
+    if (apart) continue
+    near.push({ e, g, off })
+    tol = Math.max(tol, tolerance(e, g, 0n))
+  }
+  return { near, tol }
+}
+
+/** A cyberspace point `p` (gibsons from the middle of the walker's gibson) in a near shard's render frame, model units, into `out`: Z flips, as stepLimit has it. */
+function nearPoint(c: GroundNear, p: readonly number[], out: [number, number, number] = [0, 0, 0]): [number, number, number] {
+  out[0] = (c.off[0] + p[0]) / c.g; out[1] = (c.off[1] + p[1]) / c.g; out[2] = -(c.off[2] + p[2]) / c.g
+  return out
+}
+
+/** A cyberspace way `d` (gibsons) in a near shard's render frame, model units, into `out`. */
+function nearWay(c: GroundNear, d: readonly number[], out: [number, number, number]): [number, number, number] {
+  out[0] = d[0] / c.g; out[1] = d[1] / c.g; out[2] = -d[2] / c.g
+  return out
+}
+
+/** nearCross's point and way in a shard's frame, reused: the footprint asks thirty-odd times a frame. */
+const crossAt: [number, number, number] = [0, 0, 0]
+const crossWay: [number, number, number] = [0, 0, 0]
+
+/** Each near shard's blocking triangles in the cyberspace box `lo`..`hi` (gibsons from the walker's middle), with the shard they belong to. */
+function nearTriangles(near: readonly GroundNear[], lo: readonly number[], hi: readonly number[]): Array<{ c: GroundNear; tris: Float64Array }> {
+  const out: Array<{ c: GroundNear; tris: Float64Array }> = []
+  for (const c of near) {
+    const a = nearPoint(c, lo), b = nearPoint(c, hi)
+    const tris = trianglesNear(c.e.mesh, [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.min(a[2], b[2])], [Math.max(a[0], b[0]), Math.max(a[1], b[1]), Math.max(a[2], b[2])], c.e.clip)
+    if (tris.length > 0) out.push({ c, tris })
+  }
+  return out
+}
+
+/** The first face the segment from `p` along `d` (cyberspace gibsons from the walker's middle) crosses over every near shard's triangles: how far along, as a share of the way (0 to 1), and how squarely (segmentHit); null when it crosses none. */
+function nearCross(sets: ReadonlyArray<{ c: GroundNear; tris: Float64Array }>, p: readonly number[], d: readonly number[]): { s: number; square: number } | null {
+  let best: { s: number; square: number } | null = null
+  for (const { c, tris } of sets) {
+    const hit = segmentHit(tris, nearPoint(c, p, crossAt), nearWay(c, d, crossWay), 0)
+    if (hit !== null && (best === null || hit.s < best.s)) best = hit
+  }
+  return best
+}
+
+/**
+ * How wide the drawn walker's footprint is, in gibsons: one across, the
+ * owner's "average over a gibson" (arkinox, 2026-11-23: "I am dipping under
+ * the floor"). The feet stand on the highest ground under it (footGround).
+ */
+export const FOOT_RADIUS = 0.5
+
+/**
+ * The steepest ground the footprint stands on, as rise over run: the stair
+ * step-up's own, STEP_UP_MAX (2) a gibson (store/walkStep.ts). A face under
+ * the footprint steeper than this (a wall, a cliff, a culvert's side), or
+ * ground rising faster than this from the middle (a riser's top), is one
+ * only the walk itself climbs: it never lifts the feet. Engines call it the
+ * walkable floor angle (Unreal's WalkableFloorAngle, Quake's MIN_WALK_NORMAL).
+ */
+export const FOOT_SLOPE = 2
+
+/** How near FOOT_SLOPE's rise, in gibsons, counts as reaching it: a riser exactly as tall as the rim allows (a whole gibson at FOOT_RADIUS) never lifts the feet, whatever the float rounding. */
+const FOOT_TIE = 1e-6
+
+/** FOOT_SLOPE as the least a face's normal may point up (its cosine with up): 1 / sqrt(1 + 4), about 0.447. */
+const FOOT_FLAT_MIN = 1 / Math.sqrt(1 + FOOT_SLOPE * FOOT_SLOPE)
+
+/** Where the footprint is sampled, as shares of FOOT_RADIUS across the two axes level with the ground: a ring at the rim and one halfway, eight each. */
+const FOOT_RING: ReadonlyArray<readonly [number, number]> = (() => {
+  const out: Array<[number, number]> = []
+  for (const r of [1, 0.5]) for (let k = 0; k < 8; k++) out.push([r * Math.cos((k * Math.PI) / 4), r * Math.sin((k * Math.PI) / 4)])
+  return out
+})()
+
+/**
+ * Fluid WALK's feet, and the step WALK's eased walker point (store/walkFluid.ts
+ * groundFluid, stepFloor): how high the ground under the walker's footprint
+ * stands, in gibsons along `up` (against `down`) from the middle of `from`.
+ * The drawn point is `lead` gibsons from that middle (its height is ignored),
+ * standing on `ground`, the surface groundUnder found under it.
+ *
+ * Games stand a walker on the first hit of its collision shape swept down
+ * (Unreal's capsule sweep in FindFloor, Quake's and Source's box trace, Unity's
+ * and Godot's capsules), which is the highest ground under the shape within a
+ * step: a single ray under the middle sinks the rest of the footprint into
+ * every slope and ridge beside it. This is that sweep for a flat footprint
+ * a gibson across (FOOT_RADIUS round the middle), sampled: the middle and
+ * sixteen points round it. Each point is reached the way a foot would reach
+ * it, never through a face: up from the drawn point by as much as the
+ * footprint can rise (FOOT_SLOPE times FOOT_RADIUS, less under a ceiling),
+ * level out to it, then down onto the first face. A face steeper than
+ * FOOT_SLOPE, or ground rising faster than that from the middle, is left out,
+ * so the feet never climb a wall or perch on a riser the walk itself has not
+ * stepped up. Standing on the lowest point of the footprint's middle band
+ * instead is what engines leave to foot IK, which bends a leg and never
+ * moves the body: the body stood there sinks its middle into every slope.
+ *
+ * A question about where to draw only: nothing moves and nothing is
+ * published. `ground` itself when nothing under the footprint is higher, or
+ * when a shard in reach is still being built, which `out.pending` says.
+ */
+export function footGround(from: Position, lead: readonly [number, number, number], ground: number, items: readonly WallItem[], down: AxisDirection, out?: { pending: boolean }, lookup: (w: WallItem) => Entry = entryFor): number {
+  const up = upOf(down)
+  const ui = AXIS_INDEX[up.axis]
+  const ja = ((ui + 1) % 3) as 0 | 1 | 2, ka = ((ui + 2) % 3) as 0 | 1 | 2
+  const top = FOOT_SLOPE * FOOT_RADIUS
+  // The drawn point on the ground, cyberspace gibsons from the middle of `from`.
+  const p = [lead[0], lead[1], lead[2]]
+  p[ui] = up.dir * ground
+  const lo = [p[0] - FOOT_RADIUS, p[1] - FOOT_RADIUS, p[2] - FOOT_RADIUS], hi = [p[0] + FOOT_RADIUS, p[1] + FOOT_RADIUS, p[2] + FOOT_RADIUS]
+  lo[ui] = Math.min(p[ui], p[ui] + up.dir * (top + 1)) - 1
+  hi[ui] = Math.max(p[ui], p[ui] + up.dir * (top + 1)) + 1
+  const found = groundNear(from, lo, hi, items, out, lookup)
+  if (found === null || found.near.length === 0) return ground
+  const hair = Math.max(EYE_LIFT, 16 * found.tol)
+  const sets = nearTriangles(found.near, lo, hi)
+  if (sets.length === 0) return ground
+  // A hair above the feet, and how far up from there the footprint may reach: under a ceiling, less.
+  const start = [p[0], p[1], p[2]]
+  start[ui] += up.dir * hair
+  const upWay = [0, 0, 0]
+  upWay[ui] = up.dir * top
+  const ceiling = nearCross(sets, start, upWay)
+  const reach = ceiling === null ? top : ceiling.s * top - hair
+  if (!(reach > hair)) return ground
+  const top0 = [start[0], start[1], start[2]]
+  top0[ui] += up.dir * reach
+  const downWay = [0, 0, 0]
+  downWay[ui] = -up.dir * reach
+  const way = [0, 0, 0]
+  const at = [0, 0, 0]
+  let best = ground
+  for (const [a, b] of FOOT_RING) {
+    way[ja] = a * FOOT_RADIUS
+    way[ka] = b * FOOT_RADIUS
+    way[ui] = 0
+    // Level out to the point: a face on the way is a wall between, and the point is not stood on.
+    if (nearCross(sets, top0, way) !== null) continue
+    at[0] = top0[0] + way[0]; at[1] = top0[1] + way[1]; at[2] = top0[2] + way[2]
+    const hit = nearCross(sets, at, downWay)
+    // Nothing above the feet's own height there, or a face too steep to stand on.
+    if (hit === null || hit.square < FOOT_FLAT_MIN) continue
+    const h = ground + hair + reach * (1 - hit.s)
+    // Rising faster than FOOT_SLOPE from the middle: a riser's top, never stood on from here.
+    if (h - ground >= FOOT_SLOPE * FOOT_RADIUS * Math.hypot(a, b) - FOOT_TIE) continue
+    if (h > best) best = h
+  }
+  return best
+}
+
+/**
+ * Whether the ground under the drawn point `lead` (cyberspace gibsons from the
+ * middle of `from`, its height ignored), at `ground` gibsons up from that
+ * middle (groundUnder's answer), is a face steeper than FOOT_SLOPE: the side
+ * of a wall or a cliff the ground search climbed onto by its lifts, which
+ * nobody stands on (store/walkFluid.ts groundFluid).
+ */
+export function steepGround(from: Position, lead: readonly [number, number, number], ground: number, items: readonly WallItem[], down: AxisDirection, lookup: (w: WallItem) => Entry = entryFor): boolean {
+  const up = upOf(down)
+  const ui = AXIS_INDEX[up.axis]
+  const p = [lead[0], lead[1], lead[2]]
+  p[ui] = up.dir * ground
+  const lo = [p[0] - 1, p[1] - 1, p[2] - 1], hi = [p[0] + 1, p[1] + 1, p[2] + 1]
+  const found = groundNear(from, lo, hi, items, undefined, lookup)
+  if (found === null || found.near.length === 0) return false
+  const hair = Math.max(EYE_LIFT, 16 * found.tol)
+  p[ui] += up.dir * 2 * hair
+  const way = [0, 0, 0]
+  way[ui] = -up.dir * 4 * hair
+  const hit = nearCross(nearTriangles(found.near, lo, hi), p, way)
+  return hit !== null && hit.square < FOOT_FLAT_MIN
+}
+
+/**
+ * How much of the way out to the drawn point `lead` (cyberspace gibsons from
+ * the middle of `from`, level across `down`) is clear at the feet's height,
+ * `height` gibsons up from that middle: 1 when the level line from the
+ * column over the middle out to it crosses no face, else the share that
+ * keeps it `margin` gibsons short of the first face it crosses (0 at least).
+ * For a drawn point the ground search could not reach at all, which is
+ * inside something (store/walkFluid.ts holdBack).
+ */
+export function clearShare(from: Position, lead: readonly [number, number, number], height: number, items: readonly WallItem[], down: AxisDirection, margin: number, lookup: (w: WallItem) => Entry = entryFor): number {
+  const up = upOf(down)
+  const ui = AXIS_INDEX[up.axis]
+  const way = [lead[0], lead[1], lead[2]]
+  way[ui] = 0
+  const len = Math.hypot(way[0], way[1], way[2])
+  if (!(len > 0)) return 1
+  const o = [0, 0, 0]
+  o[ui] = up.dir * height
+  const lo = [Math.min(0, way[0]) - 1, Math.min(0, way[1]) - 1, Math.min(0, way[2]) - 1]
+  const hi = [Math.max(0, way[0]) + 1, Math.max(0, way[1]) + 1, Math.max(0, way[2]) + 1]
+  lo[ui] = o[ui] - 1
+  hi[ui] = o[ui] + 1
+  const found = groundNear(from, lo, hi, items, undefined, lookup)
+  if (found === null || found.near.length === 0) return 1
+  o[ui] += up.dir * Math.max(EYE_LIFT, 16 * found.tol)
+  const hit = nearCross(nearTriangles(found.near, lo, hi), o, way)
+  return hit === null ? 1 : Math.max(0, hit.s - margin / len)
 }
 
 /**

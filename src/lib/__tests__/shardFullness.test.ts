@@ -13,7 +13,7 @@ import { signedBytes, BAG_SAFE_BYTES } from '../bagSize'
 import { objectTemplate } from '../hidden'
 import { largestRemotePiece, pieceRefusal } from '../pieces'
 import { withAuthoredConstrain } from '../walkConstrain'
-import { fullnessOf, fullnessWords, hiddenObjectBytes, HIDE_WHOLE_BYTES, NEAR_FULL, placedApart, wholePayloadLimit } from '../shardFullness'
+import { fullnessNote, fullnessOf, fullnessWords, hiddenObjectBytes, HIDE_WHOLE_BYTES, NEAR_FULL, placedApart, wholePayloadLimit } from '../shardFullness'
 
 const KEY = new Uint8Array(32).fill(7)
 const D = 'a'.repeat(32)
@@ -30,9 +30,9 @@ const payloadOf = (s: ShardModel): string => JSON.stringify(toPayload(withAuthor
 const bytes = (t: string): number => new TextEncoder().encode(t).length
 
 describe('the hidden object a payload seals into', () => {
-  it('is exactly the size of the real sealed object, as signed', async () => {
-    for (const n of [3, 400, 4000]) {
-      const s = shardOf(n)
+  it('is exactly the size of the real sealed object, as signed, names in any script included', async () => {
+    for (const [n, name] of [[3, 'fullness test'], [400, 'Caf\u00e9 \u00fcber Stra\u00dfe'], [4000, 'Tower \u{1F5FC} \u5854']] as const) {
+      const s = { ...shardOf(n), name }
       const real = signedBytes(await objectTemplate(s, KEY, D, 1_800_000_000))
       expect(hiddenObjectBytes(bytes(payloadOf(s)))).toBe(real)
     }
@@ -74,8 +74,9 @@ describe('fullnessOf', () => {
     expect(fullnessOf(limit + 1).level).toBe('over')
   })
 
-  it('never says 100% while it fits short of the limit, nor 0% with anything in it', () => {
+  it('says 100% exactly when full, never while it fits short of the limit, nor 0% with anything in it', () => {
     const limit = wholePayloadLimit()
+    expect(fullnessOf(limit).percent).toBe(100)
     expect(fullnessOf(limit - 2).percent).toBeLessThanOrEqual(99)
     expect(fullnessOf(1).percent).toBe(1)
     expect(fullnessOf(limit + 5000).percent).toBeGreaterThan(100)
@@ -86,21 +87,38 @@ describe('fullnessOf', () => {
     const words = fullnessWords(f)
     expect(words).toContain('41,816 of ')
     expect(words).toContain(`of ${wholePayloadLimit().toLocaleString('en-US')} bytes`)
-    expect(words).toMatch(/^\d+% of what one hide holds: /)
+    expect(words).toMatch(/^\d+% of one hidden object: /)
+    expect(f.percent).toBe(Math.round((41_816 / wholePayloadLimit()) * 100))
     expect(words).not.toMatch(/—|–/)
-    expect(fullnessWords(fullnessOf(wholePayloadLimit() + 1))).toMatch(/^Too big to hide in one piece: /)
+    expect(fullnessWords(fullnessOf(wholePayloadLimit() + 1))).toMatch(/^Too big for one hidden object: /)
+  })
+
+  it('keeps each line to one line at a phone width (58 characters of 10px monospace)', () => {
+    const big = wholePayloadLimit() + 99_999
+    for (const f of [fullnessOf(1), fullnessOf(wholePayloadLimit()), fullnessOf(big)]) {
+      expect(fullnessWords(f).length).toBeLessThanOrEqual(58)
+      for (const apart of [0, 1, 1234]) expect(fullnessNote(f, apart).length).toBeLessThanOrEqual(58)
+    }
+  })
+
+  it('notes what to do when too big, else that it counts this shard alone when it places objects', () => {
+    expect(fullnessNote(fullnessOf(1000), 0)).toBe('')
+    expect(fullnessNote(fullnessOf(1000), 1)).toBe('Only this shard: 1 placed object goes out on its own.')
+    expect(fullnessNote(fullnessOf(1000), 3)).toBe('Only this shard: 3 placed objects go out on their own.')
+    expect(fullnessNote(fullnessOf(wholePayloadLimit() + 1), 3)).toMatch(/^Split it: /)
   })
 })
 
 describe('placedApart', () => {
-  it('counts the placements that go out on their own, never a table entry carried inside', () => {
+  it('counts each object that goes out on its own once, never a table entry carried inside', () => {
     const me = 'b'.repeat(64)
     const s: Pick<ShardModel, 'refs' | 'parts' | 'objects'> = {
       refs: [['a', `33331:${me}:piece`], ['a', `33331:${me}:carried`], ['a', `33331:${'c'.repeat(64)}:theirs`, 'wss://relay.example']],
       parts: [0, 1, 2, 0].map((ref) => ({ ref, at: [0, 0, 0], turn: [0, 0, 0], step: 0 })),
       objects: { [`33331:${me}:carried`]: {} },
     }
-    expect(placedApart(s)).toBe(3)
+    // The piece placed twice is one object; the carried one is inside the payload.
+    expect(placedApart(s)).toBe(2)
     expect(placedApart({})).toBe(0)
   })
 })

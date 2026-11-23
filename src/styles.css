@@ -8215,18 +8215,19 @@ select.avatars__input option:checked {
   line-height: 1.2;
 }
 
-/* How full the shard is against one hide (workshop/FullnessBar.tsx, lib/shardFullness.ts;
-   owner, 2026-11-23). A segmented HUD meter in the house chamfer (top-left and
-   bottom-right cut), calm cyan until close to full, amber near it, red past it.
-   The words below keep two lines always, so nothing under them moves. */
+/* How full the shard is against one hidden object (workshop/FullnessBar.tsx,
+   lib/shardFullness.ts; owner, 2026-11-23). A segmented HUD meter in the house
+   chamfer (top-left and bottom-right cut), calm cyan until close to full, amber
+   near it, red past it. The two lines of words are always there, one line each,
+   so nothing under them moves. */
 .fullbar {
   --fb: var(--accent);
   --fb-dim: rgba(0, 229, 255, 0.16);
   --fb-cut: 6px;
+  --fb-in: 2px;
   display: flex;
   flex-direction: column;
   gap: 4px;
-  flex-basis: 100%;
   min-width: 0;
 }
 .fullbar--near { --fb: var(--warn); --fb-dim: rgba(255, 176, 32, 0.16); }
@@ -8241,14 +8242,12 @@ select.avatars__input option:checked {
   color: #fff;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
 }
-.fullbar__label { color: #fff; }
 .fullbar__pct {
   font-variant-numeric: tabular-nums;
   color: var(--fb);
   font-weight: 700;
   letter-spacing: 0.06em;
 }
-.fullbar__arrow { color: #fff; font-weight: 400; letter-spacing: 0.12em; }
 .fullbar__track {
   position: relative;
   height: 12px;
@@ -8266,42 +8265,41 @@ select.avatars__input option:checked {
   clip-path: polygon(var(--in-cut) 0, 100% 0, 100% calc(100% - var(--in-cut)), calc(100% - var(--in-cut)) 100%, 0 100%, 0 var(--in-cut));
   pointer-events: none;
 }
-.fullbar__fill, .fullbar__next {
-  position: absolute;
-  top: 2px;
-  bottom: 2px;
-  left: 2px;
-  max-width: calc(100% - 4px);
-  transition: width 0.25s ease, left 0.25s ease;
-}
+/* The fill runs inside the frame: its share of the inner width, so full is full. */
 .fullbar__fill {
+  position: absolute;
+  top: var(--fb-in);
+  bottom: var(--fb-in);
+  left: var(--fb-in);
+  width: calc((100% - 2 * var(--fb-in)) * var(--fb-share, 0));
   background: linear-gradient(90deg, color-mix(in srgb, var(--fb) 55%, transparent), var(--fb));
   box-shadow: 0 0 8px color-mix(in srgb, var(--fb) 60%, transparent);
+  transition: width 0.25s ease;
 }
-/* What a stamp would add: hatched, in the colour the result would be. */
-.fullbar__next {
-  background: repeating-linear-gradient(135deg, var(--fb) 0 2px, transparent 2px 5px);
-  opacity: 0.85;
-}
-/* A gap every tenth: the meter's segments. */
+/* A gap every tenth: the meter's segments, inside the frame so its line stays whole. */
 .fullbar__ticks {
   position: absolute;
-  inset: 0;
+  inset: var(--fb-in);
   background: repeating-linear-gradient(90deg, transparent 0 calc(10% - 2px), rgba(4, 9, 15, 0.9) calc(10% - 2px) 10%);
   pointer-events: none;
 }
 .fullbar__words {
   display: flex;
   flex-direction: column;
-  min-height: calc(2 * 1.25em);
   font-size: 10px;
   line-height: 1.25;
   color: #fff;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
   font-variant-numeric: tabular-nums;
-  overflow-wrap: anywhere;
 }
-.fullbar__note { color: var(--fg); opacity: 0.8; }
+.fullbar__line {
+  display: block;
+  min-height: 1.25em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fullbar__note { opacity: 0.85; }
 
 
 /* Something deployed while LOCAL, and the button that sends it. */

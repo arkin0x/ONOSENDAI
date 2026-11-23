@@ -1,72 +1,59 @@
 /**
- * FullnessBar.tsx: how full the open shard is against what one hide holds
- * whole (lib/shardFullness.ts), as a bar and in words, under BYTES ON THE
- * WIRE in the SHARD sheet (owner, 2026-11-23), and in STAMP's library with
- * what a stamp would add (`next`).
+ * FullnessBar.tsx: how full the open shard is against what one hidden object
+ * holds (lib/shardFullness.ts), as a bar and in words, under BYTES ON THE
+ * WIRE in the SHARD sheet (owner, 2026-11-23: "add a bar indicating how
+ * 'full' your shard is getting ... so we have a visual").
  *
  * Drawn as a segmented HUD meter in a chamfered frame, top-left and
  * bottom-right corners cut like the item thumbnails, a lit edge on the fill
- * and a tick every tenth (inspired by the segmented status and capacity
+ * and a gap every tenth (inspired by the segmented status and capacity
  * meters in the HUD/FUI collections on Dribbble: pbranigan's "HUD FUI
  * Inspiration", albemala's "Sci-Fi Futuristic UIs"). Calm cyan until it is
  * close to full, amber from NEAR_FULL, red past the limit: nothing shouts
- * until it matters. What a stamp would add shows as a hatched run after the
- * fill, in the colour the result would be.
+ * until it matters.
  *
- * The words keep their two lines whatever they say, so nothing under the bar
- * moves when a shard grows past a line, or a note about placed objects comes
- * or goes.
+ * Two lines of words under it, each one line at a phone's width and both
+ * always there (the second may be empty), so nothing under the bar moves
+ * when a shard grows past the limit or places its first object.
  */
 
-import { fullnessOf, fullnessWords, HIDE_WHOLE_BYTES, type Fullness } from '../lib/shardFullness'
+import type { CSSProperties } from 'react'
+import { fullnessNote, fullnessOf, fullnessWords, HIDE_WHOLE_BYTES } from '../lib/shardFullness'
 
 interface Props {
   /** The open shard's payload, in UTF-8 bytes (BYTES ON THE WIRE). */
   payload: number
-  /** The payload a stamp would leave, when one is chosen: shown as a hatched run after the fill. */
-  next?: number | null
   /** How many objects it places that go out on their own (lib/shardFullness.ts placedApart). */
   apart?: number
-  /** Words in place of the usual ones under the bar (STAMP's own). */
-  words?: string
 }
 
-const pct = (share: number): string => `${Math.max(0, Math.min(1, share)) * 100}%`
-
-export function FullnessBar({ payload, next = null, apart = 0, words }: Props): JSX.Element {
-  const now: Fullness = fullnessOf(payload)
-  const then: Fullness | null = next === null ? null : fullnessOf(next)
-  // The bar takes the colour of what it would be after the stamp, so the warning comes before the tap.
-  const level = then && then.share > now.share ? then.level : now.level
-  const note = apart > 0
-    ? `Counts this shard itself. The ${apart === 1 ? 'object' : `${apart} objects`} it places ${apart === 1 ? 'goes' : 'go'} out on ${apart === 1 ? 'its' : 'their'} own.`
-    : ''
+export function FullnessBar({ payload, apart = 0 }: Props): JSX.Element {
+  const f = fullnessOf(payload)
+  const words = fullnessWords(f)
+  const note = fullnessNote(f, apart)
+  const style = { '--fb-share': Math.max(0, Math.min(1, f.share)) } as CSSProperties
   return (
-    <div className={`fullbar fullbar--${level}`}>
+    <div className={`fullbar fullbar--${f.level}`}>
       <div className="fullbar__head">
         <span className="fullbar__label">FULL</span>
-        <span className="fullbar__pct" data-testid="fullbar-pct">
-          {now.percent}%{then && then.payload !== now.payload ? <> <span className="fullbar__arrow">to</span> {then.percent}%</> : null}
-        </span>
+        <span className="fullbar__pct" data-testid="fullbar-pct">{f.percent}%</span>
       </div>
       <div
         className="fullbar__track"
+        style={style}
         role="meter"
-        aria-label="How full this shard is for one hide"
+        aria-label="How full this shard is for one hidden object"
         aria-valuemin={0}
         aria-valuemax={HIDE_WHOLE_BYTES}
-        aria-valuenow={Math.min(now.signed, HIDE_WHOLE_BYTES)}
-        aria-valuetext={fullnessWords(now)}
+        aria-valuenow={Math.min(f.signed, HIDE_WHOLE_BYTES)}
+        aria-valuetext={words}
       >
-        <span className="fullbar__fill" style={{ width: pct(now.share) }} />
-        {then && then.share > now.share && (
-          <span className="fullbar__next" data-testid="fullbar-next" style={{ left: pct(now.share), width: pct(Math.min(1, then.share) - Math.min(1, now.share)) }} />
-        )}
+        <span className="fullbar__fill" />
         <span className="fullbar__ticks" aria-hidden />
       </div>
       <div className="fullbar__words" data-testid="fullbar-words">
-        <span>{words ?? fullnessWords(now)}</span>
-        <span className="fullbar__note">{note}</span>
+        <span className="fullbar__line" title={words}>{words}</span>
+        <span className="fullbar__line fullbar__note" title={note || undefined}>{note}</span>
       </div>
     </div>
   )

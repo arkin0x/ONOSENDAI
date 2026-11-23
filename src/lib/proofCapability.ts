@@ -55,7 +55,8 @@ export const RIDE_GRIND_HEIGHT = 16
 /** The largest BigInt a ride makes, in bits (the temporary product of a height-22 tree's top pairing). */
 export const RIDE_BIGINT_BITS = cantorTreeBits(RIDE_TREE_HEIGHT)
 
-export const RIDE_CAPABILITY_ISSUE = 'This browser cannot compute or check a ride proof (BigInt limit): use Chrome.'
+/** Chrome on an iPhone is WebKit with the same cap, so the notice says which devices too. */
+export const RIDE_CAPABILITY_ISSUE = 'This browser cannot compute or check a ride proof: use Chrome, Edge or Brave on a computer or an Android phone.'
 
 let rideProbe: boolean | undefined
 
@@ -66,12 +67,9 @@ let rideProbe: boolean | undefined
  * one BigInt of RIDE_BIGINT_BITS bits, about 46 MB for an instant, the size a
  * K=16 block makes anyway. Once per session.
  */
-export function canRideBigints(): boolean {
+export function canRideBigints(limit: number = bigintBitLimit()): boolean {
+  if (Number.isFinite(limit)) return RIDE_BIGINT_BITS <= limit
   if (rideProbe !== undefined) return rideProbe
-  if (Number.isFinite(bigintBitLimit())) {
-    rideProbe = false
-    return rideProbe
-  }
   try {
     const probe = 1n << BigInt(RIDE_BIGINT_BITS - 1)
     rideProbe = probe > 0n

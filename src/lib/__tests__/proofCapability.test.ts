@@ -62,8 +62,10 @@ describe('ride capability', () => {
     expect(RIDE_BIGINT_BITS).toBeLessThan(2 ** 30)
   })
 
-  it('the probe passes under V8, and the notice says what to do', () => {
+  it('the probe passes under V8, fails under a 2^20-bit cap, and the notice says what to do', () => {
     expect(canRideBigints()).toBe(true)
+    expect(canRideBigints(FIREFOX_BIGINT_BITS)).toBe(false)
+    expect(canRideBigints(2 ** 30)).toBe(true)
     expect(rideCapabilityIssue()).toBeNull()
     expect(rideCapabilityIssue(false)).toBe(RIDE_CAPABILITY_ISSUE)
     expect(RIDE_CAPABILITY_ISSUE).toMatch(/use Chrome/)

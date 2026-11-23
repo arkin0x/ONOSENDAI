@@ -470,6 +470,8 @@ export function HyperspacePanel(): JSX.Element {
   // the number exists the estimate says so rather than guessing.
   const [bench, setBench] = useState<RideBench | null>(() => rideBenchmark())
   useEffect(() => {
+    // Nothing to measure where a ride cannot run (its sample would only throw).
+    if (rideCapabilityIssue() !== null) return
     let alive = true
     calibrate().then((b) => { if (alive) setBench(b) }).catch(() => {})
     return () => { alive = false }
@@ -516,7 +518,9 @@ export function HyperspacePanel(): JSX.Element {
   const localMs = estimate && bench !== null && rideIssue === null ? rideEstimateMs(estimate.length, bench) : null
   // HOSAKA's price beside it, when the provider sells rides and this one
   // fits (useRideQuote); hidden otherwise, and never for a zero-length ride.
-  const quote = useRideQuote(estimate && !zeroRide ? estimate.from : null, estimate && !zeroRide ? destination : null)
+  // Not asked at all where this browser could not check what it sells.
+  const quotable = estimate !== null && !zeroRide && rideIssue === null
+  const quote = useRideQuote(quotable ? estimate.from : null, quotable ? destination : null)
   const offer = quote.status === 'ready' ? quote.offer : null
   // The highlighted choice follows the cloud profile; it is only a highlight.
   const best = rideChoice(profile, localMs === null ? null : localMs / 1000, offer, PAYMENT_SECONDS, rideIssue === null)

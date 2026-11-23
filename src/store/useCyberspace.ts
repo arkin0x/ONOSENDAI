@@ -8618,6 +8618,13 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       settle(null, 'A pending cloud job was dropped: its invoice expired.')
       return
     }
+    // A ride kept from before this browser's check existed: following it would
+    // pay an open invoice or start the job from the balance for a proof that
+    // can never be checked here. Kept, never dropped: it is paid work.
+    if (record.action === 'ride' && rideCapabilityIssue() !== null) {
+      settle(record, `A HOSAKA ride is kept but cannot be finished here. ${rideCapabilityIssue()}`)
+      return
+    }
     const id = ++requestId
     if (record.action === 'ride') {
       // A ride bought before a reload: the head is held again at once, and

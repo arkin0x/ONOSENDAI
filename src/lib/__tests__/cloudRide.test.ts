@@ -93,10 +93,10 @@ describe('which way to ride is highlighted', () => {
     expect(rideChoice('time', 3600 * 17, offer)).toBe('hosaka')
     expect(rideChoice('loot', 3600 * 17, offer)).toBe('hosaka')
     expect(rideChoice('time', 120, offer)).toBe('local')
-    // A browser that cannot ride here is never pointed at RIDE HERE, under any profile.
+    // A browser that cannot ride lights neither way, under any profile.
     for (const profile of ['cost', 'time', 'loot'] as const) {
-      expect(rideChoice(profile, 120, offer, 30, false)).toBe('hosaka')
-      expect(rideChoice(profile, null, null, 30, false)).toBe('hosaka')
+      expect(rideChoice(profile, 120, offer, 30, false)).toBeNull()
+      expect(rideChoice(profile, null, null, 30, false)).toBeNull()
     }
     expect(rideChoice('time', 590, offer)).toBe('local') // 571 s + 30 s of paying is not faster than 590 s
     expect(rideChoice('time', null, offer)).toBe('hosaka') // still calibrating: rides are long

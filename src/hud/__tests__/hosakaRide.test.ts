@@ -367,6 +367,30 @@ describe('a reload while HOSAKA computes', () => {
     expect(loadCloudJob(useCyberspace.getState().identity.pubkey)).toBeNull()
   })
 
+  it('on a browser that cannot check a ride, a kept ride is neither paid nor started: kept, with the words why', async () => {
+    const prev = await boarded()
+    const before = useCyberspace.getState().events.length
+    cap.canRide = false
+    const record: PendingCloudJob = {
+      version: 1, jobId: 'job-ride', pollToken: 'tok', action: 'ride', pubkey: useCyberspace.getState().identity.pubkey,
+      from: wirePosition(useCyberspace.getState().position), to: wirePosition({ x: 1n, y: 2n, z: 3n }), plane: 1,
+      prevEventId: prev, costMsats: 6_000, createdAt: Date.now() - 30_000, stage: 'paid', deposit: null, estSeconds: 60,
+      ride: { fromHeight: 100, toHeight: 105, asOf: 110, toCoordHex: 'cd'.repeat(32) },
+    }
+    saveCloudJob(record)
+    await useCyberspace.getState().resumeCloudJob()
+    expect(fake.startJob).not.toHaveBeenCalled()
+    expect(fake.claimDeposit).not.toHaveBeenCalled()
+    expect(fake.waitForJob).not.toHaveBeenCalled()
+    const cloud = useCyberspace.getState().cloud
+    expect(cloud.status).toBe('idle')
+    expect(cloud.invoiceOpen).toBe(false)
+    expect(cloud.message).toMatch(/kept but cannot be finished here.*cannot compute or check a ride proof/)
+    expect(useCyberspace.getState().proof.status).toBe('idle')
+    expect(loadCloudJob(useCyberspace.getState().identity.pubkey)?.jobId).toBe('job-ride')
+    expect(useCyberspace.getState().events).toHaveLength(before)
+  })
+
   it('a record whose head has moved is dropped, never signed', async () => {
     await boarded()
     const before = useCyberspace.getState().events.length

@@ -159,7 +159,7 @@ describe('the HOSAKA choice in the Hyperspace panel', () => {
       quote.state = { status: 'hidden' }
       let page = html()
       expect(button(page, '>RIDE<')).toContain('disabled')
-      expect(page).toContain('cannot compute or check a ride proof (BigInt limit): use Chrome.')
+      expect(page).toContain('cannot compute or check a ride proof: use Chrome, Edge or Brave on a computer or an Android phone.')
       expect(page).toContain('<dt>Est. time</dt><dd>NOT IN THIS BROWSER</dd>')
       quote.state = { status: 'ready', offer: OFFER }
       // Even under COST, which would light RIDE HERE anywhere else.
@@ -169,6 +169,7 @@ describe('the HOSAKA choice in the Hyperspace panel', () => {
       expect(button(page, 'RIDE HERE')).not.toContain('hyper__btn--ride')
       // A HOSAKA proof is checked here with the same numbers before it is signed: not bought either.
       expect(button(page, 'RIDE VIA HOSAKA')).toContain('disabled')
+      expect(button(page, 'RIDE VIA HOSAKA')).not.toContain('hyper__btn--ride')
       expect(page).not.toMatch(/RIDE HERE<\/span><span class="hyper__choicemeta">FREE ·/)
     } finally {
       cap.canRide = true

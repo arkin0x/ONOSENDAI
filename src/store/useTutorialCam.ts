@@ -39,7 +39,7 @@ export interface CamDir { x: number; y: number; z: number }
 
 /** Things to frame together (the `shot`): their gibsons, the chest first, and the room left round them. */
 export interface TutorialShot {
-  /** The same key is the same shot: a step that asks for it again keeps it as it is, eased or not. */
+  /** The same key is the same shot: a step that asks for it again keeps it as it is, eased or not (the director keys it by the chest and where the avatar stands). */
   key: string
   /** The chest's gibson. */
   chest: Position

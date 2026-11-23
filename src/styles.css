@@ -13481,6 +13481,33 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
   padding: 0 4px;
 }
 
+/* A hand-cut chamfered button (top-left and bottom-right corners cut, the
+ * item-picture corners; owner, 2026-11-15): the button is the line's colour,
+ * clipped; its ::before is the fill, a line's width in, with its cut moved
+ * in by the line's width times (2 - sqrt 2) so the diagonal edges are as
+ * thick as the straight ones (as .chamfer__in). The content stands over the
+ * fill. Every edge keeps its outline, the two diagonals too, lit or not. */
+.cham-btn {
+  --cham-cut: 8px;
+  --cham-line-w: 1px;
+  --cham-line: rgba(0, 229, 255, 0.4);
+  --cham-fill: #04090f;
+  position: relative;
+  isolation: isolate;
+  border: 0;
+  background: var(--cham-line);
+  clip-path: polygon(var(--cham-cut) 0, 100% 0, 100% calc(100% - var(--cham-cut)), calc(100% - var(--cham-cut)) 100%, 0 100%, 0 var(--cham-cut));
+}
+.cham-btn::before {
+  --in-cut: calc(var(--cham-cut) - var(--cham-line-w) * 0.5858);
+  content: '';
+  position: absolute;
+  inset: var(--cham-line-w);
+  z-index: -1;
+  background: var(--cham-fill);
+  clip-path: polygon(var(--in-cut) 0, 100% 0, 100% calc(100% - var(--in-cut)), calc(100% - var(--in-cut)) 100%, 0 100%, 0 var(--in-cut));
+}
+
 /* The tour's short trips (hud/EarthTrips.tsx): one row per trip, a fixed
  * height, in a chamfered frame cut by hand (top-left and bottom-right, the
  * item-picture corners): the outer box is the line's color, the inner the
@@ -13527,32 +13554,7 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
 }
 .nc-setting__opt.is-on { --cham-line: var(--accent); --cham-fill: var(--accent); color: #05070d; font-weight: 700; }
 
-/* A hand-cut chamfered button (top-left and bottom-right corners cut, the
- * item-picture corners; owner, 2026-11-15): the button is the line's colour,
- * clipped; its ::before is the fill, a line's width in, with its cut moved
- * in by the line's width times (2 - sqrt 2) so the diagonal edges are as
- * thick as the straight ones (as .chamfer__in). The content stands over the
- * fill. Every edge keeps its outline, the two diagonals too, lit or not. */
-.cham-btn {
-  --cham-cut: 8px;
-  --cham-line-w: 1px;
-  --cham-line: rgba(0, 229, 255, 0.4);
-  --cham-fill: #04090f;
-  position: relative;
-  isolation: isolate;
-  border: 0;
-  background: var(--cham-line);
-  clip-path: polygon(var(--cham-cut) 0, 100% 0, 100% calc(100% - var(--cham-cut)), calc(100% - var(--cham-cut)) 100%, 0 100%, 0 var(--cham-cut));
-}
-.cham-btn::before {
-  --in-cut: calc(var(--cham-cut) - var(--cham-line-w) * 0.5858);
-  content: '';
-  position: absolute;
-  inset: var(--cham-line-w);
-  z-index: -1;
-  background: var(--cham-fill);
-  clip-path: polygon(var(--in-cut) 0, 100% 0, 100% calc(100% - var(--in-cut)), calc(100% - var(--in-cut)) 100%, 0 100%, 0 var(--in-cut));
-}
+
 /* BY SIZE (shell/MoveHandles.tsx; owner, 2026-11-23): the move handles' middle,
    a chip where the held middle's dot was. 84 by 44, so its corners (47px out)
    clear the knobs, whose edges stand 50px out (HANDLE_REACH_PX 72 less 22).

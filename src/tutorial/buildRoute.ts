@@ -17,8 +17,10 @@
  *   2. loot      OTHER LOOT, with ITEMS alone in the menu;
  *   3. actions   ACTIONS on a shard's row; then
  *      move      MOVE TO WORKSHOP under it;
- *   4. close     the ITEMS card's ✕, then the menu button, to see the world;
- *      build     the mode button, round to BUILD (or B);
+ *   4. close     the ITEMS card's ✕, then the menu button, to see the world
+ *                (KEY ITEMS opened by mistake: its ✕, 'keys');
+ *      build     the mode button, round to BUILD (or B); with the cursor off
+ *                the avatar the slot is COMMIT, so RECALL first ('recall');
  *   5. object    OBJECT on the BUILD bar; then
  *      pick      a shard in the picker;
  *   6. place     HIDE on the placing bar, aimed with the arrows.
@@ -30,7 +32,7 @@
  */
 
 import { registerTutorialEffect, registerTutorialWatcher, useTutorial } from '../store/useTutorial'
-import { useCyberspace } from '../store/useCyberspace'
+import { samePosition, useCyberspace } from '../store/useCyberspace'
 import { useBuilder } from '../store/useBuilder'
 import { useShards } from '../store/useShards'
 import { useWorkshop } from '../store/useWorkshop'
@@ -41,7 +43,7 @@ import { useStash } from '../hud/stash'
 import { MENU_SHUT } from './script'
 
 /** Where the player is in placing something. */
-export type BuildStage = 'menu' | 'loot' | 'actions' | 'move' | 'close' | 'build' | 'object' | 'pick' | 'place'
+export type BuildStage = 'menu' | 'loot' | 'keys' | 'actions' | 'move' | 'close' | 'recall' | 'build' | 'object' | 'pick' | 'place'
 
 /** What buildStage reads: the player's real state, nothing the tour keeps. */
 export interface BuildFacts {
@@ -53,6 +55,8 @@ export interface BuildFacts {
   /** A shard of the player's is in the workshop: moved there in this step, or there already. */
   inWorkshop: boolean
   building: boolean
+  /** The cursor is off the avatar: the mode button's slot is COMMIT until RECALL brings it home. */
+  armed: boolean
   /** The OBJECT picker open. */
   picking: boolean
   /** Something lined up to place. */
@@ -66,10 +70,10 @@ export function buildStage(f: BuildFacts): BuildStage {
   if (f.building) return 'object'
   if (f.inWorkshop) {
     if (f.itemsOpen !== null || f.menuOpen) return 'close'
-    return 'build'
+    return f.armed ? 'recall' : 'build'
   }
   if (f.itemsOpen === 'loot') return f.shardActionsOpen ? 'move' : 'actions'
-  if (f.itemsOpen === 'keys') return 'close'
+  if (f.itemsOpen === 'keys') return 'keys'
   return f.menuOpen ? 'loot' : 'menu'
 }
 
@@ -77,9 +81,11 @@ export function buildStage(f: BuildFacts): BuildStage {
 export const BUILD_STAGES: Readonly<Record<BuildStage, { note: string; glow: string }>> = {
   menu: { note: 'Open the menu.', glow: MENU_SHUT },
   loot: { note: 'Tap OTHER LOOT.', glow: '[data-panel-id="items"] .items-kinds__go--loot' },
+  keys: { note: 'Your shards are in OTHER LOOT: close KEY ITEMS.', glow: '.items-modal--keys .modal-close' },
   actions: { note: 'Pick a shard: tap its ACTIONS.', glow: '.items-modal--loot [data-kind="shard"] .held__acts .chest__act' },
   move: { note: 'Tap MOVE TO WORKSHOP.', glow: '.items-modal--loot .held__move' },
   close: { note: 'Close the menu to see the world.', glow: '.items-modal .modal-close, .hamburger-menu[aria-expanded="true"]' },
+  recall: { note: 'Tap RECALL to bring your cursor home first.', glow: '.touchops__cancel' },
   build: { note: 'Tap the mode button until it says BUILD (or press B).', glow: '.touchops__commit.is-hop, .touchops__commit.is-view, .touchops__commit.is-scan' },
   object: { note: 'Tap OBJECT.', glow: '.buildbar__act[aria-label="Place object"]' },
   pick: { note: 'Tap the shard you moved.', glow: '.objpick__row:not(:disabled)' },
@@ -109,8 +115,10 @@ registerTutorialEffect('teach-build', () => {
       menuOpen: useMenuIsOpen.getState().open,
       itemsOpen: useItemsModal.getState().open,
       shardActionsOpen: open !== null && typeof document !== 'undefined' && document.querySelector(`[data-actions-row="${CSS.escape(open)}"][data-kind="shard"]`) !== null,
-      inWorkshop: ownShards() > 0,
+      // A row saying MOVED INTO WORKSHOP counts at once, while the move is still fetching its pieces.
+      inWorkshop: ownShards() > 0 || (typeof document !== 'undefined' && document.querySelector('.items-modal--loot .held__row--moved') !== null),
       building: useBuilder.getState().active,
+      armed: !samePosition(useCyberspace.getState().cursor, useCyberspace.getState().position),
       picking: useStash.getState().models,
       lined: useShards.getState().pending !== null,
     }
@@ -127,7 +135,7 @@ registerTutorialEffect('teach-build', () => {
     useBuilder.subscribe((s, prev) => { if (s.active !== prev.active) point() }),
     useStash.subscribe(point),
     useShards.subscribe((s, prev) => { if (s.pending !== prev.pending) point() }),
-    useCyberspace.subscribe((s, prev) => { if (s.walking !== prev.walking) point() }),
+    useCyberspace.subscribe((s, prev) => { if (s.walking !== prev.walking || s.cursor !== prev.cursor || s.position !== prev.position) point() }),
   ]
   return () => {
     for (const off of offs) off()

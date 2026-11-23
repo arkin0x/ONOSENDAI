@@ -23,7 +23,7 @@
  * unit is a gibson, and turned so its up is cyberspace +Y.
  */
 
-import { useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { AdditiveBlending, BoxGeometry, EdgesGeometry, type Group, type Mesh, type MeshBasicMaterial, type Quaternion } from 'three'
 import { OFF_FACES, OVER_FACES } from './ClipWalls'
@@ -69,13 +69,16 @@ export function GreenTargetBox({ centre, scale, turn, side, guiding, name }: Gre
     box.dispose()
     return e
   }, [side])
+  useEffect(() => () => edges.dispose(), [edges])
   const ring = ringRadius(side)
   const beam = beamOf(side)
   const tube = Math.max(0.05, side * 0.008)
   const pings = useRef<Array<Mesh | null>>([])
   const group = useRef<Group>(null)
   useFrame(({ clock }) => {
-    if (!guiding || !group.current?.visible) return
+    // Still while hidden, here or by the parent that stands it down inside the cube.
+    const g = group.current
+    if (!guiding || !g || !g.visible || g.parent?.visible === false) return
     const k = (clock.getElapsedTime() % PING_S) / PING_S
     for (const m of pings.current) {
       if (!m) continue

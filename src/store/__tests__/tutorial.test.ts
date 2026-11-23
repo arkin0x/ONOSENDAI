@@ -276,7 +276,7 @@ describe('the script', () => {
     const { BUILD_STAGES } = await import('../../tutorial/buildRoute')
     const said = Object.values(BUILD_STAGES).map((b) => b.note).join(' ')
     expect(said).not.toMatch(/HOLD/)
-    expect(said).toMatch(/ACTIONS[\s\S]*MOVE TO WORKSHOP[\s\S]*BUILD[\s\S]*OBJECT[\s\S]*PLACE/)
+    expect(said).toMatch(/ACTIONS[\s\S]*MOVE TO WORKSHOP[\s\S]*BUILD[\s\S]*OBJECT[\s\S]*HIDE to place it/)
   })
 
   it('has no em dash in any line the player reads', () => {

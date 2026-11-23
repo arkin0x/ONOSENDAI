@@ -166,6 +166,14 @@ describe('the chest shot (owner: "this new view is below and to the right")', ()
     expect(band).toBeGreaterThan(whole)
   })
 
+  it('the shot is keyed by where the avatar stands: OPEN to TAKE keeps it, a new place frames again', async () => {
+    const { welcomeChestShot } = await import('../director')
+    const l = tutorialLayout({ x: 1n << 40n, y: 1n << 40n, z: 1n << 40n }, 0)
+    const here = { x: 5n, y: 6n, z: 7n }
+    expect(welcomeChestShot(l, here).key).toBe(welcomeChestShot(l, { ...here }).key)
+    expect(welcomeChestShot(l, { ...here, x: 6n }).key).not.toBe(welcomeChestShot(l, here).key)
+  })
+
   it('a step asking for the same chest keeps the shot as it is, eased or not', () => {
     const shot: TutorialShot = { key: 'welcome-chest', chest: { x: 0n, y: 0n, z: 0n }, points: [], margin: 1, ease: true }
     setTutorialShot(shot)
@@ -243,7 +251,7 @@ describe('the tour steps that wait on a press', () => {
   })
 
   it('works out the next press from what the player has really done, in any order', () => {
-    const base: BuildFacts = { menuOpen: false, itemsOpen: null, shardActionsOpen: false, inWorkshop: false, building: false, picking: false, lined: false }
+    const base: BuildFacts = { menuOpen: false, itemsOpen: null, shardActionsOpen: false, inWorkshop: false, building: false, armed: false, picking: false, lined: false }
     const walk: Array<[Partial<BuildFacts>, string]> = [
       [{}, 'menu'],
       [{ menuOpen: true }, 'loot'],
@@ -259,7 +267,9 @@ describe('the tour steps that wait on a press', () => {
     for (const [f, stage] of walk) expect(buildStage({ ...base, ...f })).toBe(stage)
     // Off script: the menu shut before OTHER LOOT points back at the menu; KEY ITEMS opened by mistake points at its ✕.
     expect(buildStage({ ...base, menuOpen: false })).toBe('menu')
-    expect(buildStage({ ...base, menuOpen: true, itemsOpen: 'keys' })).toBe('close')
+    expect(buildStage({ ...base, menuOpen: true, itemsOpen: 'keys' })).toBe('keys')
+    // The cursor off the avatar: the slot is COMMIT, so RECALL first, then the mode button.
+    expect(buildStage({ ...base, inWorkshop: true, armed: true })).toBe('recall')
     // Straight into BUILD with a shard already in the workshop: OBJECT.
     expect(buildStage({ ...base, building: true })).toBe('object')
   })

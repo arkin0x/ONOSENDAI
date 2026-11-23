@@ -154,6 +154,8 @@ async function restoreKept(player: string): Promise<void> {
     const stage = st.readStage(player, guide.pubkey, st.stageKey(layout))
     if (!stage || mine !== run || useTutorial.getState().active || useCyberspace.getState().identity.pubkey !== player) return
     setGuideBags(stage.bags, { passTaps: passTapsOf(stage), drawnByMark: [stage.ids.blueBox] })
+    // The stage and its layout too, so step 1's box is drawn by its mark (scene/TutorialTarget.tsx) in place of the shard hidden above.
+    useTutorialStage.setState({ stage, layout, error: null })
   } catch (err) {
     console.warn('[tutorial] could not put the kept stage back:', err)
   }
@@ -359,11 +361,11 @@ const LOOT_TOP = 2
 /** Room past the farthest framed point, in gibsons: half the loot row's width (ChestLoot LOOT_GAP and LOOT_SIDE for four, rounded up). */
 const LOOT_MARGIN = 1.3
 
-/** A chest shot: the chest at `c` (a layout cell), the top of its loot, and the avatar at `at`. */
+/** A chest shot: the chest at `c` (a layout cell), the top of its loot, and the avatar at `at`; keyed by the chest and where the avatar stands, so a step asking again from the same place keeps it. */
 function chestShot(key: string, layout: TutorialLayout, c: { f: number; r: number; u: number }, at: Position): TutorialShot {
   const chest = toWorld(layout.frame, c.f, c.r, c.u)
   const top = toWorld(layout.frame, c.f, c.r, c.u + LOOT_TOP)
-  return { key, chest, points: [chest, top, { ...at }], margin: LOOT_MARGIN, ease: true }
+  return { key: `${key}@${at.x},${at.y},${at.z}`, chest, points: [chest, top, { ...at }], margin: LOOT_MARGIN, ease: true }
 }
 
 /** The welcome chest's shot, from where the player stands. */
@@ -389,19 +391,27 @@ let shotClaims = 0
 function shotEffect(shotOf: (layout: TutorialLayout, at: Position) => TutorialShot): () => () => void {
   return () => {
     const mine = ++shotClaims
+    // The player moved the cursor off their avatar: they are off to move, and the camera is theirs until they stand somewhere new.
+    let released = false
     const ask = (): void => {
       const layout = useTutorialStage.getState().layout
       const cs = useCyberspace.getState()
-      if (!layout || cs.walking || !cs.atHead() || cs.headPlane !== layout.plane) return
+      if (released || !layout || cs.walking || !cs.atHead() || cs.headPlane !== layout.plane) return
       setTutorialShot(shotOf(layout, cs.position))
     }
     ask()
     const off = onStage(ask)
-    // Out of WALK at the finish chest: the shot then.
-    const offWalk = useCyberspace.subscribe((s, prev) => { if (s.walking !== prev.walking && !s.walking) ask() })
+    const offMoves = useCyberspace.subscribe((s, prev) => {
+      // Out of WALK, a hop landed, the head confirmed: framed again from where they stand now (a new key, eased again).
+      if ((s.walking !== prev.walking && !s.walking) || s.position !== prev.position) { released = false; ask(); return }
+      if (s.cursor !== prev.cursor && !samePosition(s.cursor, s.position) && useTutorialCam.getState().shot !== null) {
+        released = true
+        setTutorialShot(null)
+      }
+    })
     return () => {
       off()
-      offWalk()
+      offMoves()
       queueMicrotask(() => { if (shotClaims === mine) setTutorialShot(null) })
     }
   }

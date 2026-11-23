@@ -77,7 +77,7 @@ import { StopCubes } from './StopCubes'
 import { StopBurst } from './StopBurst'
 import { TourLine } from './TourLine'
 import { useDemo } from '../store/useDemo'
-import { HOP_FRAME_MS, clearTutorialZoom, endShotEase, setTutorialFrame, useTutorialCam, type HopFrame } from '../store/useTutorialCam'
+import { HOP_FRAME_MS, clearTutorialZoom, endShotEase, setTutorialFrame, useTutorialCam, type HopFrame, type TutorialShot } from '../store/useTutorialCam'
 import { chestShotDir, easeOrbit, fitInBand, frameHop, liftSide, smooth01, type Orbit } from '../lib/hopFraming'
 import { TourCameraState } from '../demo/tourDistance'
 import { TransitAvatar } from './TransitAvatar'
@@ -599,8 +599,6 @@ function LensShift(): null {
 const WALK_EYE = 0.001
 /** Scratch for the eye's line of sight, so the frame loop allocates nothing. */
 const walkDir = new Vector3()
-/** The chest shot's front, reused each frame (useTutorialCam shot). */
-const shotFront = new Vector3()
 /**
  * Where a fall's up (lib/walkEye.ts walkFallUp: cyberspace +Y unless the view
  * is turned) points in the render frame of a view: worked out once per view
@@ -727,6 +725,8 @@ function Rig(): JSX.Element {
   // The tutorial's framed hop (useTutorialCam frame): the shot under way,
   // and whether the last frame was framing one.
   const frameShot = useRef<{ frame: HopFrame; t0: number; from: Orbit; to: Orbit } | null>(null)
+  // The chest shot's centre, size and front, worked out once per shot, render frame and view (useTutorialCam shot), not every frame.
+  const shotHold = useRef<{ shot: TutorialShot; ox: bigint; oy: bigint; oz: bigint; scaleExp: number; axes: unknown; t: [number, number, number]; radius: number; front: Vector3 } | null>(null)
   const framing = useRef(false)
   const sideVec = useMemo(() => new Vector3(), [])
   const turnVec = useMemo(() => new Vector3(), [])
@@ -1128,19 +1128,26 @@ function Rig(): JSX.Element {
       // of what it frames, held for as long as it is asked, a drag or not, so
       // the player's own orbit turns about the chest.
       frameShot.current = null
+      // Coming onto the shot, the centre sails over rather than flicking (as it does coming off one).
+      if (!framing.current) glideLeft.current = Math.max(glideLeft.current, FRAME_RETURN_S)
       const axes = s.axes()
-      const pts = shot.points.map((p) => placeCentre(p, origin, s.scaleExp, axes))
-      const lo = [0, 1, 2].map((i) => Math.min(...pts.map((p) => p[i])))
-      const hi = [0, 1, 2].map((i) => Math.max(...pts.map((p) => p[i])))
-      tx = (lo[0] + hi[0]) / 2
-      ty = (lo[1] + hi[1]) / 2
-      tz = (lo[2] + hi[2]) / 2
-      const cell = 1 / Number(1n << BigInt(s.scaleExp))
-      const radius = Math.max(...pts.map((p) => Math.hypot(p[0] - tx, p[1] - ty, p[2] - tz))) + shot.margin * cell
-      const chest = placeCentre(shot.chest, origin, s.scaleExp, axes)
-      // The chest's front: toward the avatar (the last point), as the tour stood them.
-      const av = pts[pts.length - 1]
-      shotAim = { radius, front: shotFront.set(av[0] - chest[0], av[1] - chest[1], av[2] - chest[2]) }
+      let hold = shotHold.current
+      if (!hold || hold.shot !== shot || hold.ox !== origin.x || hold.oy !== origin.y || hold.oz !== origin.z || hold.scaleExp !== s.scaleExp || hold.axes !== axes) {
+        const pts = shot.points.map((p) => placeCentre(p, origin, s.scaleExp, axes))
+        const lo = [0, 1, 2].map((i) => Math.min(...pts.map((p) => p[i])))
+        const hi = [0, 1, 2].map((i) => Math.max(...pts.map((p) => p[i])))
+        const t: [number, number, number] = [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2]
+        const cell = 1 / Number(1n << BigInt(s.scaleExp))
+        const radius = Math.max(...pts.map((p) => Math.hypot(p[0] - t[0], p[1] - t[1], p[2] - t[2]))) + shot.margin * cell
+        const chest = placeCentre(shot.chest, origin, s.scaleExp, axes)
+        // The chest's front: toward the avatar (the last point), as the tour stood them.
+        const av = pts[pts.length - 1]
+        hold = shotHold.current = { shot, ox: origin.x, oy: origin.y, oz: origin.z, scaleExp: s.scaleExp, axes, t, radius, front: new Vector3(av[0] - chest[0], av[1] - chest[1], av[2] - chest[2]) }
+      }
+      tx = hold.t[0]
+      ty = hold.t[1]
+      tz = hold.t[2]
+      shotAim = hold
     } else {
       frameShot.current = null
       if (framing.current && !s.walking) glideLeft.current = Math.max(glideLeft.current, FRAME_RETURN_S)
@@ -1384,7 +1391,7 @@ function Rig(): JSX.Element {
       const back = viewRig.takeRestore()
       if (back !== null) outTo.current = back
     }
-    if (viewRig.restoreOrbit(c.object.position, c.target, dt, s.walking || pressed() > 0 || tutorialZoom !== null || frame !== null || want !== null || eye.current !== null)) {
+    if (viewRig.restoreOrbit(c.object.position, c.target, dt, s.walking || pressed() > 0 || tutorialZoom !== null || frame !== null || cam.shot?.ease === true || want !== null || eye.current !== null)) {
       lastOffset.current.copy(c.object.position).sub(c.target)
     }
     // How far the orbit pulls back: 96 cells, or in BUILD BUILD_MAX_GIBSONS at

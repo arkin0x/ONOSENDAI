@@ -45,9 +45,11 @@ import type { ClockReading } from '../lib/worldClock'
 import { useAnimPreview } from '../store/animPreview'
 import { OVERLAY_ORDER } from '../scene/shardFaces'
 import { ShardLights } from '../scene/shardLight'
-import { nextSelection, ownAddress, useWorkshop, type Tool } from '../store/useWorkshop'
+import { hiddenIn, nextSelection, ownAddress, useWorkshop, type Tool } from '../store/useWorkshop'
+import { hiddenSets } from '../lib/shardGroups'
 import { partMatrix } from 'sno-core/parts'
 import { OwnPartsContext, fetchRef, useResolved } from '../lib/parts'
+import { useBenchResolved } from '../store/heldSize'
 import { PartBadges } from './PartBadges'
 import { BASE_FAR, BASE_NEAR, MIN_DISTANCE, clipPlanes, fitDistance, nextMaxDistance, reachFor, reachRadius, shardSphere, type Sphere } from './benchReach'
 import { useCyberspace } from '../store/useCyberspace'
@@ -317,6 +319,9 @@ export function Handles(): JSX.Element | null {
   const moving = previewing
   const invalidate = useThree((s) => s.invalidate)
   const chosen = useMemo(() => new Set(selection), [selection])
+  // GROUPS' HIDE: a spot whose every vertex is hidden has no dot; a stack with one shown keeps its dot, and what is hidden of it is never taken (useWorkshop).
+  const hiddenKeys = useWorkshop((s) => s.hiddenGroups)
+  const hiddenVerts = useMemo(() => (shard ? hiddenSets(shard, hiddenIn(hiddenKeys, shard))?.vertices ?? null : null), [shard, hiddenKeys])
   const groups = useMemo(() => {
     const m = new Map<string, number[]>()
     shard?.vertices.forEach((v, i) => {
@@ -324,8 +329,9 @@ export function Handles(): JSX.Element | null {
       const g = m.get(k)
       if (g) g.push(i); else m.set(k, [i])
     })
-    return [...m.values()]
-  }, [shard?.vertices])
+    const all = [...m.values()]
+    return hiddenVerts ? all.filter((g) => g.some((i) => !hiddenVerts.has(i))).map((g) => { const shown = g.filter((i) => !hiddenVerts.has(i)); return [...shown, ...g.filter((i) => hiddenVerts.has(i))] }) : all
+  }, [shard?.vertices, hiddenVerts])
   // Made again only when the points outgrow them, so placing points one by one does not make one each time.
   const capacity = dotCapacity(groups.length)
   const dots = useMemo(() => new HandleDots(capacity), [capacity])
@@ -852,13 +858,16 @@ export function Keys(): null {
       const look = isLook(w.tool)
       // SET EYE: the same keys step the eye, in any tool (shell/EyeBar).
       if (nudge[e.code] && w.eyeEdit) { e.preventDefault(); const n = nudgeFor(benchAxes(camera), nudge[e.code]); w.moveEye(n.axis, n.delta * w.step()); return }
-      if (nudge[e.code]) { e.preventDefault(); if (look) return; const n = nudgeFor(benchAxes(camera), nudge[e.code]); w.moveSelected(n.axis, n.delta * w.step()); return }
+      // BY SIZE steps what is held by its own size on that axis (moveStep).
+      if (nudge[e.code]) { e.preventDefault(); if (look) return; const n = nudgeFor(benchAxes(camera), nudge[e.code]); w.moveSelected(n.axis, n.delta * w.moveStep(n.axis)); return }
       if (e.code === 'Delete' || e.code === 'Backspace') { e.preventDefault(); if (look) return; if (w.selectedFaces.length > 0) w.deleteSelectedFace(); else w.deleteSelected(); return }
       if (e.code === 'Enter') { e.preventDefault(); if (look) return; if (w.facePick.length >= 3) w.fill(); else if (w.selection.length >= 3) w.fillSelection(); return }
       // Escape is not here: it goes through the Escape stack (useEscape), so
       // the palette sheet and the confirmations over the bench close before
       // the bench does. Workshop registers what it clears and closes.
       if (e.code === 'KeyC') { if (!look) w.selectConnected(); return }
+      // X: BY SIZE on or off (the switch on the move handles, shell/MoveHandles).
+      if (e.code === 'KeyX') { if (!look && !w.eyeEdit && !e.repeat) w.setStepBySize(!w.stepBySize); return }
       // B, the held bar's COLOR: the color in hand onto what is held (points, or a face's corners).
       if (e.code === 'KeyB') { if (w.selection.length && !look) w.colorSelected(w.color); return }
       // The keys run 1 to 6 along the dock, left to right (Dock.tsx DOCK).
@@ -886,6 +895,18 @@ export function Keys(): null {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [camera])
+  return null
+}
+
+/**
+ * What the placed objects on the bench resolve to, handed to the store for
+ * BY SIZE (store/heldSize.ts), so a held object is measured as it is drawn.
+ */
+function HeldProbe(): null {
+  const shard = useWorkshop((s) => s.current())
+  const resolved = useResolved(shard ?? null)
+  useEffect(() => { useBenchResolved.setState({ resolved }) }, [resolved])
+  useEffect(() => () => useBenchResolved.setState({ resolved: new Map() }), [])
   return null
 }
 
@@ -1277,6 +1298,7 @@ function BenchImpl(): JSX.Element {
       <HandleProjector />
       <Aim />
       <Keys />
+      <HeldProbe />
       <BenchWake />
       <AnimWake />
       <AxesReporter />

@@ -10,7 +10,7 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { Color, DoubleSide, type BufferAttribute } from 'three'
+import { Color, DoubleSide, Vector3, type BufferAttribute } from 'three'
 import { DIVISIONS, MAX_EXTENT, TICKS_PER_UNIT } from 'sno-core/shards'
 import { ACCENT } from '../../lib/palette'
 import { TRANSLUCENT_ORDER } from '../../scene/shardFaces'
@@ -50,7 +50,7 @@ describe('every division draws as itself', () => {
 
   it('the shader spaces its lines by the uniform with nothing capping it', () => {
     const src = new BenchGrid().mesh.material.fragmentShader
-    expect(src).toMatch(/lines\(vGrid, uDivision\)/)
+    expect(src).toMatch(/lines\(vLocal, uDivision\)/)
     expect(src).toMatch(/fract\(c - 0\.5\)/)
   })
 
@@ -119,11 +119,39 @@ describe('the cost', () => {
     g.dispose()
   })
 
-  it('has no per-frame hook, so a bench left alone does no grid work on the CPU', () => {
-    const g = made()
-    const hook = g.mesh.onBeforeRender
-    expect(hook).toBe(made().mesh.onBeforeRender) // three's shared no-op, never one of ours.
+  it('has no per-frame hook of React\'s: its only hook runs when the bench draws, and is arithmetic', () => {
+    // The bench draws on demand, so a bench left alone runs nothing. Each frame
+    // it does draw, the hook moves uOrigin, and only when the camera crosses a unit.
+    const src = readFileSync('src/workshop/benchGrid.ts', 'utf8')
+    expect(src).not.toMatch(/useFrame/)
+    const g = made(4096, 120)
+    g.mesh.updateMatrixWorld()
+    const o = uniforms(g).uOrigin.value
+    const before = o
+    g.follow(new Vector3(4090.4, 0.9, -4089.6))
+    expect([o.x, o.y]).toEqual([4090, -4090])
+    expect(uniforms(g).uOrigin.value).toBe(before) // the same object, set in place
     g.dispose()
+  })
+
+  it('follows the camera in the grid\'s own frame, turned to its plane', () => {
+    const g = made(4096, 120)
+    // Facing +X (plane 0): a quarter about Z, as Bench Grid turns it.
+    g.mesh.rotation.set(0, 0, -Math.PI / 2)
+    g.mesh.updateMatrixWorld()
+    g.follow(new Vector3(0.2, 12.6, -30.4))
+    const o = uniforms(g).uOrigin.value
+    // Its local X is world -Y there.
+    expect([o.x, o.y]).toEqual([-13, -30])
+    g.dispose()
+  })
+
+  it('draws the unit and division lines from a whole unit near the camera, and the rest from the origin', () => {
+    const src = new BenchGrid().mesh.material.fragmentShader
+    expect(src).toMatch(/lines\(vLocal, uDivision\)/)
+    expect(src).toMatch(/float a = lines\(vLocal, 1\.0\);/)
+    expect(src).toMatch(/lines\(vGrid, cells\)/)
+    expect(new BenchGrid().mesh.material.vertexShader).toMatch(/vLocal = position\.xz - uOrigin;/)
   })
 
   it('cannot be tapped: the tap plane is its own mesh', () => {

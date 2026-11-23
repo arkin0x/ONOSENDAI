@@ -66,8 +66,10 @@ export function gridSphere(extent: number, plane: number, level: number): Sphere
 
 /**
  * How far the orbit may pull back to see the grid whole: just the fit, with
- * none of the shard's extra room, so a small grid keeps the reach the bench
- * always had (reachFor's 60 is larger) and a large one fits snugly.
+ * none of the shard's extra room, so on a desktop a grid up to 15 keeps the
+ * reach the bench always had (reachFor's 60 is larger) and a large one fits
+ * snugly. On a phone held upright the default grid fits across its narrow
+ * side at about 66, and up to about twice that with the target panned off.
  */
 export function gridReach(radius: number, fovDeg: number, aspect: number): number {
   return fitDistance(radius, fovDeg, aspect)

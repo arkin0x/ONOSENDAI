@@ -6,7 +6,7 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { newShard, vertexAt, type ShardModel } from 'sno-core/shards'
-import { nearEdge, shardReach } from '../WorldShards'
+import { keptWithin, nearEdge, shardReach, type PlacedShardDraw } from '../WorldShards'
 
 /** A shard declaring `extent`, with one point `reach` units out. */
 function shard(extent: number, reach: number): ShardModel {
@@ -35,6 +35,12 @@ describe('shardReach', () => {
     const big = shard(4096, 4096)
     expect(nearEdge({ centre: [3000, 0, 0], shard: big, scale: 1 })).toBe(0)
     expect(nearEdge({ centre: [3000, 0, 0], shard: shard(8, 1), scale: 1 })).toBeCloseTo(3000 - Math.sqrt(3))
+  })
+  it('keeps a big shard around you in the draw list, where its centre alone would drop it', () => {
+    const draw = (key: string, s: ShardModel, x: number): PlacedShardDraw => ({ key, shard: s, centre: [x, 0, 0], scale: 1 } as unknown as PlacedShardDraw)
+    const big = draw('big', shard(4096, 4096), 3000)
+    const small = draw('small', shard(8, 1), 3000)
+    expect(keptWithin([big, small], 384, 0, new Set()).map((w) => w.key)).toEqual(['big'])
   })
   it('counts toward the limit everywhere the reach is tested, so a shard around you is drawn', () => {
     const src = readFileSync('src/scene/WorldShards.tsx', 'utf8')

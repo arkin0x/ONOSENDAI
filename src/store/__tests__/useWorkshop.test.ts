@@ -5,7 +5,7 @@
  * the clipboard.
  */
 
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { MAX_EXTENT, TICKS_PER_UNIT as T, ticksOf, vertexAt } from 'sno-core/shards'
 import { DEFAULT_PALETTE, nextSelection, settleSelection, tapSelection, useWorkshop } from '../useWorkshop'
 import { stackedCount } from '../../lib/weld'
@@ -997,6 +997,42 @@ describe('GRID SIZE held down (review of #555)', () => {
     expect(w2().past).toHaveLength(1)
     w2().undo()
     expect(w2().current()!.extent).toBe(start)
+  })
+
+  it('starts a step of its own after the workshop reopens, so UNDO can take it back', () => {
+    const start = w2().current()!.extent
+    w2().setExtent(start + 1)
+    w2().openWorkshop()
+    w2().setExtent(start + 2)
+    expect(w2().past).toHaveLength(1)
+    w2().undo()
+    expect(w2().current()!.extent).toBe(start + 1)
+  })
+
+  it('starts a step of its own after an undo', () => {
+    const start = w2().current()!.extent
+    w2().addVertex([0, 0, 0])
+    w2().setExtent(start + 1)
+    w2().undo()
+    w2().setExtent(start + 3)
+    w2().undo()
+    expect(w2().current()!.extent).toBe(start)
+  })
+
+  it('starts a step of its own after a pause, so separate presses are separate steps', () => {
+    const start = w2().current()!.extent
+    const t = Date.now()
+    const clock = vi.spyOn(Date, 'now')
+    try {
+      clock.mockReturnValue(t)
+      w2().setExtent(start + 1)
+      clock.mockReturnValue(t + 500)
+      w2().setExtent(start + 2)
+      expect(w2().past).toHaveLength(1)
+      clock.mockReturnValue(t + 5000)
+      w2().setExtent(start + 3)
+      expect(w2().past).toHaveLength(2)
+    } finally { clock.mockRestore() }
   })
 
   it('does not push what came before it out of the history', () => {

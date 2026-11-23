@@ -140,7 +140,7 @@ const cost = async (name) => {
   await settle(); await settle()
   const b = await ev('({ ...window.__gl })')
   const g = await ev(`(() => { let n = 0, objs = 0; window.__benchScene.traverse((o) => { if (o.type === 'GridHelper' || o.name === 'bench-grid') { objs++; n += o.geometry.attributes.position.count } }); return { n, objs } })()`)
-  const row = { name, extent: await ev('window.__ws.getState().current().extent'), gridObjects: g.objs, gridVertices: g.n, drawsPerFrame: b.frames > a.frames ? Math.round(((b.draws - a.draws) / (b.frames - a.frames)) * 10) / 10 : null, far: await ev('Math.round(window.__benchCamera.far)'), near: await ev('Math.round(window.__benchCamera.near * 1000) / 1000'), maxDistance: await ev('Math.round(window.__benchControls.maxDistance)') }
+  const row = { name, extent: await ev('window.__ws.getState().current().extent'), gridObjects: g.objs, gridVertices: g.n, far: await ev('Math.round(window.__benchCamera.far)'), near: await ev('Math.round(window.__benchCamera.near * 1000) / 1000'), maxDistance: await ev('Math.round(window.__benchControls.maxDistance)') }
   report.cost.push(row)
   console.log('COST', JSON.stringify(row))
 }
@@ -173,7 +173,7 @@ let presses = 0
 while ((await ev('window.__ws.getState().current().extent')) < 4096 && presses < 400) { await plus(); presses++ }
 const top = await ev('window.__ws.getState().current().extent')
 const disabled = await ev(`document.querySelector('button[aria-label="Larger grid"]').disabled`)
-report.stepper.push({ pressesFrom64ToTop: presses, top, plusDisabledAtTop: disabled, undoSteps: await ev('window.__ws.getState().past.length') })
+report.stepper.push({ pressesFrom60ToTop: presses, top, plusDisabledAtTop: disabled, undoSteps: await ev('window.__ws.getState().past.length') })
 console.log('TOP', JSON.stringify(report.stepper[1]))
 await sleep(600)
 save('grid-sheet', await shot())

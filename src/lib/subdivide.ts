@@ -49,6 +49,10 @@ export interface Subdivided {
   cut: number
   /** Faces cut in two or three because a neighbor's edge was cut, or every face holding the edge in an edge cut. */
   split: number
+  /** Which face of the shard before each face after came from (a child, its parent). */
+  faceFrom: number[]
+  /** Each midpoint made, with the two vertices of the edge it halves: a workshop group holding both ends holds it. */
+  midpoints: Array<{ at: number; ends: [number, number] }>
 }
 
 export type SubdivideResult = Subdivided | { refused: string }
@@ -156,13 +160,14 @@ export function subdivide(s: ShardModel, selection: readonly number[]): Subdivid
   const seams: Rgb[] | null = s.faces.length > 0 && s.facecolors && s.facecolors.length === s.faces.length ? s.facecolors : null
   const faces: Tri[] = []
   const facecolors: Rgb[] = []
+  const faceFrom: number[] = []
   const corners = new Set<number>()
   let cut = 0, split = 0
   s.faces.forEach((f, i) => {
     const kids = children(f, mid)
     if (kids.length === 4) cut++
     else if (kids.length > 1) split++
-    for (const k of kids) { faces.push(k); if (seams) facecolors.push(seams[i]) }
+    for (const k of kids) { faces.push(k); faceFrom.push(i); if (seams) facecolors.push(seams[i]) }
   })
   for (const [a, b] of edges) { corners.add(a); corners.add(b) }
 
@@ -172,6 +177,8 @@ export function subdivide(s: ShardModel, selection: readonly number[]): Subdivid
     added,
     cut,
     split,
+    faceFrom,
+    midpoints: edges.map(([a, b]) => ({ at: mid.get(edgeKey(a, b)) as number, ends: [a, b] as [number, number] })),
   }
 }
 

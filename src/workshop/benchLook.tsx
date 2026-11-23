@@ -35,7 +35,7 @@
  * it alone (Bench Keys): a true preview, with nothing to move by accident.
  */
 
-import { useLayoutEffect } from 'react'
+import { useLayoutEffect, useMemo } from 'react'
 import { useFrame, useThree, type ThreeEvent } from '@react-three/fiber'
 import type { Vector3 } from 'three'
 import { ShardMesh } from '../scene/ShardMesh'
@@ -44,7 +44,8 @@ import { headlampUniforms } from '../scene/headlamp'
 import { LINE_FADE_FROM, LINE_FADE_TO, lineFade } from '../scene/nearFade'
 import { useCyberspace } from '../store/useCyberspace'
 import { useAnimPreview } from '../store/animPreview'
-import { useWorkshop } from '../store/useWorkshop'
+import { hiddenIn, useWorkshop } from '../store/useWorkshop'
+import { hiddenSets, hiddenView } from '../lib/shardGroups'
 import { benchReach, benchShardLook, isLook, lookDotScale } from './lookTool'
 
 /**
@@ -52,7 +53,7 @@ import { benchReach, benchShardLook, isLook, lookDotScale } from './lookTool'
  * every tool, so switching tools swaps its materials, never the mesh or the
  * camera.
  */
-export function BenchShard({ onFace, onPart }: {
+export function BenchShard({ onFace: onShardFace, onPart: onShardPart }: {
   onFace: (e: ThreeEvent<MouseEvent>, face: number) => void
   onPart: (e: ThreeEvent<MouseEvent>, part: number) => void
 }): JSX.Element | null {
@@ -63,17 +64,24 @@ export function BenchShard({ onFace, onPart }: {
   // The motion editor's preview draws the motion whatever the tool (store/animPreview.ts).
   const previewing = useAnimPreview((s) => s.on)
   const scaleExp = useCyberspace((s) => s.scaleExp)
-  if (!shard) return null
+  // GROUPS' HIDE: the bench draws the shard without the hidden groups, and a tap on what it draws still names the shard's own face or object.
+  const hidden = useWorkshop((s) => s.hiddenGroups)
+  // LOOK shows the shard as the world will: every group drawn.
   const look = isLook(tool)
+  const view = useMemo(() => (shard && !look ? hiddenView(shard, hiddenSets(shard, hiddenIn(hidden, shard))) : null), [shard, hidden, look])
+  const drawnSel = useMemo(() => (view ? partSel.map((i) => view.partOf.indexOf(i)).filter((i) => i >= 0) : partSel), [view, partSel])
+  if (!shard) return null
+  const onFace = (e: ThreeEvent<MouseEvent>, face: number): void => onShardFace(e, view ? view.faceOf[face] : face)
+  const onPart = (e: ThreeEvent<MouseEvent>, part: number): void => onShardPart(e, view ? view.partOf[part] : part)
   return (
     <DotScale.Provider value={look ? lookDotScale(shard.unit, scaleExp) : 1}>
       <ShardMesh
-        shard={shard}
+        shard={view?.shard ?? shard}
         {...benchShardLook(look)}
         still={!look && !previewing}
         onFaceClick={tool === 'paint' || (tool === 'select' && selectKind === 'faces') ? onFace : undefined}
         onPartClick={tool === 'select' || tool === 'face' || tool === 'paint' || tool === 'view' ? onPart : undefined}
-        selectedParts={look ? undefined : partSel}
+        selectedParts={look ? undefined : drawnSel}
       />
     </DotScale.Provider>
   )

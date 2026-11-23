@@ -30,7 +30,7 @@ export type TutorialWait = Exclude<DemoAction, 'spawn'> | TutorialAction
  * hop target over the course's start reached, gravity on in WALK, the finish chest found and
  * something in it taken; the workshop opened and closed again.
  */
-export type TutorialAction = 'see-chest' | 'open-chest' | 'take' | 'at-target' | 'gravity' | 'see-finish' | 'take-finish' | 'workshop' | 'at-plot' | 'plant' | EarthRouteAction
+export type TutorialAction = 'see-chest' | 'open-chest' | 'take' | 'at-target' | 'gravity' | 'see-finish' | 'take-finish' | 'workshop' | 'at-plot' | 'plant' | 'agent-copy' | 'placed' | EarthRouteAction
 
 /**
  * The Earth route's waits (tutorial/earthRoute.ts): a stop picked as the
@@ -83,6 +83,12 @@ export interface TutorialStep {
    * when it arrives at the stop or stops short, never over the ride itself.
    */
   advanceOn?: TutorialWait
+  /**
+   * Done, but never on by itself: the step stays with its ✓ and FINISH (or
+   * NEXT) until the player taps it. The AI step (owner, 2026-11-23: "give
+   * you the Finish button once you've pressed the copy button").
+   */
+  stay?: boolean
   /** The one-line instruction shown while waiting. */
   hint?: string
   /** NEXT stays off until the `wait` has happened; otherwise NEXT reads SKIP while waiting. */

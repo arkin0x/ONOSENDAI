@@ -60,6 +60,8 @@ export const OPEN: TutorialStep = {
   explain: "Nothing opens by itself. This chest is locked to the box's region, and standing in the box gave you its key.",
   keepChips: ['found'],
   scene: { target: 'keep', highlight: '.foundchip' },
+  // The chest, its loot and the avatar framed clear of this card (owner, 2026-11-23).
+  effect: 'chest-shot',
   wait: 'open-chest',
 }
 
@@ -72,6 +74,7 @@ export const TAKE: TutorialStep = {
   keepChips: ['found'],
   scene: { target: 'keep', highlight: '.foundchip' },
   explain: 'What you take goes in your ITEMS, in the menu. A shard you take can be placed in the world, built with, or changed in the workshop.',
+  effect: 'chest-shot',
   wait: 'take',
   // No SKIP: the moon blossom's DNA must be claimed here, or the plant step has nothing to plant (feedback 2026-11-12, item 8).
   gate: true,
@@ -190,11 +193,13 @@ export const RUN: TutorialStep = {
 /** The finish chest: pieces to build a course of your own. */
 export const FINISH: TutorialStep = {
   id: 'finish',
-  title: 'You made it',
+  title: 'You made it!',
   caption: 'Another chest, with pieces to build a course of your own. OPEN it and TAKE them.',
   hint: 'Tap the chest to OPEN it, then again to TAKE ALL.',
   keepChips: ['found'],
   scene: { target: 'keep', highlight: '.foundchip' },
+  // Framed as the welcome chest is, once the player is out of WALK (in WALK the eye is theirs).
+  effect: 'finish-shot',
   wait: 'take-finish',
 }
 
@@ -331,8 +336,14 @@ export const AGENTS: TutorialStep = {
   id: 'agents',
   title: 'Your AI',
   caption: 'Your AI can be in cyberspace with you, and you can give it commands through ONOSENDAI.',
-  hint: 'Open the menu, then AGENTS.',
-  scene: { target: 'keep', highlight: '.hamburger-menu' },
+  captionDone: 'Copied. Paste it to your AI, and it can join you here.',
+  hint: 'Tap COPY under Invite an agent.',
+  // The menu opens on AGENTS by itself, and COPY pulses (owner, 2026-11-23: "this tutorial doesnt require you to do anything").
+  scene: { target: 'keep', highlight: `${MENU_SHUT}, [data-panel-id="agents"] .agents__invite-copy` },
+  effect: 'teach-agents',
+  // Done on the press; FINISH only then, and the step waits for it.
+  wait: 'agent-copy',
+  stay: true,
   branch: true,
 }
 
@@ -356,11 +367,15 @@ export const BUILD_PLACE: TutorialStep = {
   id: 'build-place',
   title: 'Build something',
   caption: 'Move a shard from ITEMS to your workshop, then place it in BUILD.',
-  hint: 'ITEMS: OTHER LOOT, ACTIONS, MOVE TO WORKSHOP. Then BUILD, OBJECT, pick it, PLACE.',
+  captionDone: 'It stands in the world now, for everyone who finds it.',
+  hint: 'Open the menu.',
   explain: 'BUILD puts what you hold into the world where the cursor is. The workshop is where you change or make a shard; it will not interrupt this.',
-  // The hamburger while the menu is shut, then ITEMS, which the caption panel keeps clear of (owner, 2026-11-15).
-  scene: { target: 'keep', highlight: `${MENU_SHUT}, [data-panel-id="items"]` },
+  // One press at a time (owner, 2026-11-23): each press's line and its pulsing control, worked out from what the player has done (tutorial/buildRoute.ts).
+  scene: { target: 'keep', highlight: MENU_SHUT },
   effect: 'teach-build',
+  // FINISH only once something is placed; the step waits for it.
+  wait: 'placed',
+  stay: true,
   branch: true,
 }
 

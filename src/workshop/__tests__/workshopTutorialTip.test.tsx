@@ -164,16 +164,16 @@ describe('the tip, as written', () => {
     await m.unmount()
   })
 
-  it('is plain and fits: no em dash, no jargon, two lines at most at 375px, white text in a kept two-line slot, clear of the rail', () => {
+  it('is plain and fits: no em dash, no jargon, four lines at most at 375px, white text in a kept four-line slot, clear of the rail', () => {
     for (const line of Object.values(TIP_TEXT)) {
       expect(line).not.toContain('—')
       expect(line).not.toMatch(/commit|shard|vertex|extent|sno/i)
-      // About 25 characters a line in the narrowest card (a short phone, the rail folded to two columns).
-      expect(line.length).toBeLessThanOrEqual(46)
+      // About 25 characters a line in the narrowest card (a short phone, the rail folded to two columns): the owner's bench line (2026-11-23) takes four.
+      expect(line.length).toBeLessThanOrEqual(100)
     }
     const rule = (sel: string): string => { const i = CSS.indexOf(sel); return CSS.slice(i, CSS.indexOf('}', i)) }
     expect(rule('.ws__tuttip-text {')).toContain('color: #fff')
-    expect(rule('.ws__tuttip-text {')).toContain('min-height: calc(2 * 1.45em)')
+    expect(rule('.ws__tuttip-text {')).toContain('min-height: calc(4 * 1.45em)')
     // One place in every state: under the top bar, clear of the rail, one column or folded to two.
     expect(rule('.ws__tuttip {')).toContain('top: calc(var(--ws-top-end) + 10px)')
     expect(rule('.ws__tuttip {')).toContain('left: calc(var(--ws-gutter) + 44px + 8px)')
@@ -182,5 +182,13 @@ describe('the tip, as written', () => {
     // The workshop's notices stand below it, never under it.
     expect(CSS).toContain('.workshop:has(.ws__tuttip) .ws__toast {')
     expect(CSS).toContain('.workshop:has(.ws__tuttip) .ws__storage {')
+  })
+
+  it("names ADD only where ADD is on the dock: the tour's workshop step shows all six tools to a beginner, without keeping the choice", async () => {
+    expect(TIP_TEXT.bench).toBe("Drag to turn it. Tap STAMP to add pre-made shapes, or ADD to hand-craft your object's points.")
+    const { dockShowsFour } = await import('../shell/Dock')
+    expect(dockShowsFour('four', 'view', false)).toBe(true)
+    expect(dockShowsFour('four', 'view', true)).toBe(false)
+    expect(dockShowsFour('all', 'view', false)).toBe(false)
   })
 })

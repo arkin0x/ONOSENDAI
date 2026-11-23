@@ -4157,7 +4157,7 @@ select.avatars__input option:checked {
   clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px);
 }
 .ws__tuttip-icon { color: var(--accent); vertical-align: -2px; margin-right: 6px; }
-.ws__tuttip-text { margin: 0; min-height: calc(2 * 1.45em); font-size: 12px; line-height: 1.45; color: #fff; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9); }
+.ws__tuttip-text { margin: 0; min-height: calc(4 * 1.45em); font-size: 12px; line-height: 1.45; color: #fff; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9); }
 .ws__tuttip-back {
   display: inline-flex;
   align-items: center;
@@ -12727,6 +12727,13 @@ html.tv-broadcast body { overflow: hidden; }
 .tutorial-card__foot .tutorial-card__go { flex: 1 1 0; align-self: auto; }
 .tutorial__back { flex: 0 0 auto; padding: 0 12px; background: transparent; }
 .tutorial__next { flex: 1 1 0; }
+/* Every tour button row is one height, every button in it, in every state
+ * (owner, 2026-11-23: "back and done buttons should be the same height"):
+ * the caption panel's row at 32px, the centred card's at 40px. */
+.demo__foot { --tour-row-h: 32px; }
+.tutorial-card__foot { --tour-row-h: 40px; }
+.demo__foot > .demo__btn,
+.tutorial-card__foot > .demo__btn { height: var(--tour-row-h); min-height: var(--tour-row-h); align-self: stretch; }
 
 /* In-game mode (game/GameView.tsx, DECK-0002 §2.3): the game's world full
    screen over cyberspace, its bar on top, its pad at the bottom. Pink, the
@@ -13424,6 +13431,9 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
   40% { opacity: 1; transform: none; box-shadow: 0 0 0 1px rgba(0, 229, 255, 0.7), 0 0 18px rgba(0, 229, 255, 0.35); }
   100% { opacity: 1; transform: none; box-shadow: 0 0 0 0 rgba(0, 229, 255, 0); }
 }
+/* A control that arrives on the very step that points at it keeps the tour's
+ * pulse: both run, the pulse last so its ring is the one seen. */
+.nc-arrive.demo-pulse { animation: nc-arrive 1.4s cubic-bezier(0.2, 0.7, 0.2, 1) backwards, demo-pulse 1.4s ease-out infinite; }
 /* A menu panel only fades and rises: its frame is its own. */
 .slot.nc-arrive { animation-name: nc-arrive-panel; }
 @keyframes nc-arrive-panel {
@@ -13432,6 +13442,7 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
 }
 @media (prefers-reduced-motion: reduce) {
   .nc-arrive, .slot.nc-arrive { animation: nc-arrive-still 0.3s linear backwards; }
+  .nc-arrive.demo-pulse { animation: nc-arrive-still 0.3s linear backwards; box-shadow: 0 0 0 3px rgba(0, 229, 255, 0.85); }
   @keyframes nc-arrive-still { from { opacity: 0; } to { opacity: 1; } }
 }
 
@@ -13476,32 +13487,20 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
  * fill, inset by a pixel with its cut moved in to match. */
 .earth-trips { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-top: 2px; }
 .earth-trips__row {
-  --cut: 9px;
+  --cham-cut: 9px;
+  --cham-line: rgba(0, 229, 255, 0.35);
+  --cham-fill: rgba(6, 14, 22, 0.94);
   display: block;
   width: 100%;
   min-height: 62px;
-  padding: 1px;
-  border: 0;
-  background: rgba(0, 229, 255, 0.35);
-  clip-path: polygon(var(--cut) 0, 100% 0, 100% calc(100% - var(--cut)), calc(100% - var(--cut)) 100%, 0 100%, 0 var(--cut));
   color: #fff;
   font: inherit;
   text-align: left;
   cursor: pointer;
 }
-.earth-trips__in {
-  display: flex;
-  align-items: flex-start;
-  gap: 6px;
-  height: 100%;
-  min-height: 60px;
-  padding: 7px 8px;
-  background: rgba(6, 14, 22, 0.94);
-  clip-path: polygon(calc(var(--cut) - 0.4px) 0, 100% 0, 100% calc(100% - var(--cut) + 0.4px), calc(100% - var(--cut) + 0.4px) 100%, 0 100%, 0 calc(var(--cut) - 0.4px));
-}
-.earth-trips__row:hover .earth-trips__in, .earth-trips__row:focus-visible .earth-trips__in { background: rgba(0, 229, 255, 0.1); }
-.earth-trips__row.is-on { background: var(--accent); }
-.earth-trips__row.is-on .earth-trips__in { background: rgba(0, 229, 255, 0.16); }
+.earth-trips__in { display: flex; align-items: flex-start; gap: 6px; height: 100%; min-height: 62px; padding: 7px 8px; }
+.earth-trips__row:hover, .earth-trips__row:focus-visible { --cham-fill: #0a1f29; }
+.earth-trips__row.is-on { --cham-line: var(--accent); --cham-fill: #0b2c36; }
 .earth-trips__icon { display: flex; color: var(--accent); flex: none; padding-top: 1px; }
 .earth-trips__text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .earth-trips__place { font-size: 11px; letter-spacing: 0.04em; color: #fff; white-space: nowrap; }
@@ -13515,19 +13514,45 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
 .nc-setting { flex-direction: column; align-items: stretch; gap: 8px; }
 .nc-setting__pair { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 .nc-setting__opt {
-  --cut: 7px;
+  --cham-cut: 7px;
+  --cham-line: rgba(0, 229, 255, 0.4);
+  --cham-fill: rgba(6, 14, 22, 0.92);
   font: inherit;
   font-size: 10px;
   letter-spacing: 0.08em;
   min-height: 34px;
   padding: 0 6px;
   color: var(--fg);
-  background: rgba(6, 14, 22, 0.72);
-  border: 1px solid var(--border);
-  clip-path: polygon(var(--cut) 0, 100% 0, 100% calc(100% - var(--cut)), calc(100% - var(--cut)) 100%, 0 100%, 0 var(--cut));
   cursor: pointer;
 }
-.nc-setting__opt.is-on { color: #05070d; background: var(--accent); border-color: var(--accent); font-weight: 700; }
+.nc-setting__opt.is-on { --cham-line: var(--accent); --cham-fill: var(--accent); color: #05070d; font-weight: 700; }
+
+/* A hand-cut chamfered button (top-left and bottom-right corners cut, the
+ * item-picture corners; owner, 2026-11-15): the button is the line's colour,
+ * clipped; its ::before is the fill, a line's width in, with its cut moved
+ * in by the line's width times (2 - sqrt 2) so the diagonal edges are as
+ * thick as the straight ones (as .chamfer__in). The content stands over the
+ * fill. Every edge keeps its outline, the two diagonals too, lit or not. */
+.cham-btn {
+  --cham-cut: 8px;
+  --cham-line-w: 1px;
+  --cham-line: rgba(0, 229, 255, 0.4);
+  --cham-fill: #04090f;
+  position: relative;
+  isolation: isolate;
+  border: 0;
+  background: var(--cham-line);
+  clip-path: polygon(var(--cham-cut) 0, 100% 0, 100% calc(100% - var(--cham-cut)), calc(100% - var(--cham-cut)) 100%, 0 100%, 0 var(--cham-cut));
+}
+.cham-btn::before {
+  --in-cut: calc(var(--cham-cut) - var(--cham-line-w) * 0.5858);
+  content: '';
+  position: absolute;
+  inset: var(--cham-line-w);
+  z-index: -1;
+  background: var(--cham-fill);
+  clip-path: polygon(var(--in-cut) 0, 100% 0, 100% calc(100% - var(--in-cut)), calc(100% - var(--in-cut)) 100%, 0 100%, 0 var(--in-cut));
+}
 /* BY SIZE (shell/MoveHandles.tsx; owner, 2026-11-23): the move handles' middle,
    a chip where the held middle's dot was. 84 by 44, so its corners (47px out)
    clear the knobs, whose edges stand 50px out (HANDLE_REACH_PX 72 less 22).

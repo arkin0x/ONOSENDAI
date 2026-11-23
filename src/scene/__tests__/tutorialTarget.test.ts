@@ -58,10 +58,21 @@ describe('the hop target mark', () => {
     expect(targetPhase({ active: true, done: false, index: 0, script: { steps: [{ id: 'welcome' }] } })).toBe('off')
   })
 
-  it('can never be tapped: every mesh has its raycast off', () => {
-    const src = readFileSync(new URL('../TutorialTarget.tsx', import.meta.url), 'utf8')
-    const meshes = src.match(/<mesh\b[\s\S]*?>/g) ?? []
+  it('can never be tapped: every mesh and line of the shared green target box has its raycast off', () => {
+    const src = readFileSync(new URL('../GreenTargetBox.tsx', import.meta.url), 'utf8')
+    const meshes = src.match(/<(mesh|lineSegments)\b[\s\S]*?>/g) ?? []
     expect(meshes.length).toBeGreaterThanOrEqual(4)
     for (const m of meshes) expect(m).toContain('raycast={noRaycast}')
+  })
+
+  it('hides nothing inside it: no solid diamond, nothing that writes depth, the beam starting at the cube\'s top (owner, 2026-11-23)', () => {
+    const src = readFileSync(new URL('../GreenTargetBox.tsx', import.meta.url), 'utf8')
+    expect(src).not.toMatch(/octahedron/i)
+    expect(src).not.toContain("'#ffffff'")
+    for (const mat of src.match(/<(meshBasicMaterial|lineBasicMaterial)\b[^>]*>/g) ?? []) expect(mat).toContain('depthWrite={false}')
+    expect(src).toContain('position={[0, side / 2 + beam.length / 2, 0]}')
+    // Both marks are the one component, in the one green.
+    const marks = readFileSync(new URL('../TutorialTarget.tsx', import.meta.url), 'utf8')
+    expect(marks.match(/<GreenTargetBox\b/g)?.length).toBe(2)
   })
 })

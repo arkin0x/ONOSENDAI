@@ -92,6 +92,15 @@ export function writeRecord(pubkey: string, rec: NewcomerRecord): void {
 }
 
 /**
+ * Who starts in the newcomer view with no choice made in Settings (owner,
+ * 2026-11-23: "i think it should be the default"): 'newcomers', every
+ * first arrival until their tour is finished or skipped, which is what ships;
+ * 'everyone', every identity that never finished, skipped or chose (an
+ * experienced player with no record too). One word to flip it.
+ */
+export const NEWCOMER_DEFAULT: 'newcomers' | 'everyone' = 'newcomers'
+
+/**
  * Whether the newcomer view is on for a record: the choice in Settings, else
  * the stage, while the tour can still run on this device (its switch on): a
  * newcomer who turns the tutorial off is never left in a partial HUD with
@@ -99,7 +108,8 @@ export function writeRecord(pubkey: string, rec: NewcomerRecord): void {
  */
 export function newcomerViewOf(rec: NewcomerRecord, tourOn: boolean = tutorialOn()): boolean {
   if (rec.choice) return rec.choice === 'newcomer'
-  return rec.stage === 'newcomer' && tourOn
+  if (rec.stage === 'graduated') return false
+  return tourOn && (rec.stage === 'newcomer' || (NEWCOMER_DEFAULT as string) === 'everyone')
 }
 
 interface NewcomerState {

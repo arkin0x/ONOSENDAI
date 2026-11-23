@@ -28,6 +28,20 @@ import { useNewcomerView } from '../newcomer/useNewcomer'
 import { NEWCOMER_CAPTIONS, plainText } from '../newcomer/names'
 import { ModalClose } from './ui/ModalClose'
 
+/**
+ * The step's pulse on exactly the elements that match now (`next`): taken
+ * off those that no longer match, put on any that lack it, and nothing
+ * touched that already has it, so marking again after a class change settles
+ * at once instead of feeding the observer that called it. Returns what is
+ * marked.
+ */
+export function markPulse(was: readonly Element[], next: readonly Element[]): Element[] {
+  const now = new Set(next)
+  for (const el of was) if (!now.has(el)) el.classList.remove('demo-pulse')
+  for (const el of next) if (!el.classList.contains('demo-pulse')) el.classList.add('demo-pulse')
+  return [...next]
+}
+
 /** How far along a step is, 0 to 1, along the steps that are not branches; a branch is the end. */
 export function progressOf(steps: ReadonlyArray<{ branch?: boolean }>, index: number): number {
   if (steps[index]?.branch) return 1
@@ -154,11 +168,7 @@ export function TutorialCoach(): JSX.Element | null {
   useEffect(() => {
     if (!highlight) { setSpot(AT_TOP); return }
     let marked: Element[] = []
-    const mark = (): void => {
-      for (const el of marked) el.classList.remove('demo-pulse')
-      marked = Array.from(document.querySelectorAll(highlight))
-      for (const el of marked) el.classList.add('demo-pulse')
-    }
+    const mark = (): void => { marked = markPulse(marked, Array.from(document.querySelectorAll(highlight))) }
     // Keeping clear of a menu panel the step points at (owner, 2026-11-15:
     // the "Your items" box covered ITEMS). Only what sits in a menu panel
     // counts: the pad, the chips and the hamburger have their own places,
@@ -206,7 +216,10 @@ export function TutorialCoach(): JSX.Element | null {
     mark()
     place()
     const mo = new MutationObserver(update)
-    mo.observe(document.body, { childList: true, subtree: true })
+    // Class changes too: React writes a control's whole class when its state
+    // changes (a newcomer control arriving, COMMIT arming), which drops the
+    // pulse; marking again puts it back, and finds nothing to change after.
+    mo.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] })
     // A turn of the phone changes the safe area: read again (outside place, whose probe the observer would see).
     const resized = (): void => { safe = safeArea(); update() }
     window.addEventListener('resize', resized)

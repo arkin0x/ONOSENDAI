@@ -47,7 +47,7 @@ import { buildPlane, buildStepOf } from '../lib/buildCursor'
 import { viewHyperspace } from '../store/useHyperspace'
 import { EARTH_SCALE_EXP, earthFrameDistance } from '../lib/hyperspace/interest'
 import { FOV } from '../scene/camera'
-import { PLOT_STAND, atStart, inPlot, onDeck, onPlot, onTarget, plantCell, targetAt } from './course'
+import { FINISH_CHEST, PLOT_STAND, atStart, courseToFrame, inPlot, onDeck, onPlot, onTarget, plantCell, targetAt } from './course'
 import { regionKeyOffThread } from '../lib/regionKeyOffThread'
 import { deployPoint, type Position } from '../lib/space'
 import { setGuideBags } from './guideBags'
@@ -55,9 +55,11 @@ import { readProgress, type TutorialAnchor } from './gate'
 import { COMMIT, OWNER_PUBKEY } from './script'
 import { arrivalCell, chestCell, inRegion, toWorld, type TutorialLayout } from './layout'
 import type { Stage } from './stage'
-import { HOP_FRAME_MS, setTutorialFrame, setTutorialSpin, setTutorialZoom, useTutorialCam, type HopFrame } from '../store/useTutorialCam'
+import { HOP_FRAME_MS, setTutorialFrame, setTutorialShot, setTutorialSpin, setTutorialZoom, useTutorialCam, type HopFrame, type TutorialShot } from '../store/useTutorialCam'
 import { afterHop, holdGlide } from '../lib/hopStage'
 import { setMenuOpen } from '../hooks/useMenuOpen'
+import { usePanelLayout } from '../store/usePanelLayout'
+import { useAgentInviteCopies } from '../hud/AgentsPanel'
 import { assignToFolder, createFolderPath } from '../store/useShardFolders'
 import type { ShardModel } from 'sno-core/shards'
 
@@ -68,11 +70,6 @@ import type { ShardModel } from 'sno-core/shards'
  */
 const COURSE_ZOOM = 12
 
-/**
- * How close the camera comes after the first hop, in render cells: over the
- * avatar's shoulder, the chest just past it in view (owner, 2026-11-12).
- */
-const SHOULDER_ZOOM = 6
 
 interface StageState {
   /** What is staged for the run on screen, once it is. */
@@ -135,7 +132,7 @@ async function stageFor(player: string, restart: boolean): Promise<void> {
     }
     if (!current()) return
     // The blue box lets taps through to the chest inside it, and the deck's wall to the finish chest before it.
-    setGuideBags(stage.bags, { passTaps: passTapsOf(stage) })
+    setGuideBags(stage.bags, { passTaps: passTapsOf(stage), drawnByMark: [stage.ids.blueBox] })
     useTutorialStage.setState({ stage, layout })
   } catch (err) {
     if (mine !== run) return
@@ -156,7 +153,7 @@ async function restoreKept(player: string): Promise<void> {
     const { st, layout, guide } = await setupFor(player, anchorFor(player))
     const stage = st.readStage(player, guide.pubkey, st.stageKey(layout))
     if (!stage || mine !== run || useTutorial.getState().active || useCyberspace.getState().identity.pubkey !== player) return
-    setGuideBags(stage.bags, { passTaps: passTapsOf(stage) })
+    setGuideBags(stage.bags, { passTaps: passTapsOf(stage), drawnByMark: [stage.ids.blueBox] })
   } catch (err) {
     console.warn('[tutorial] could not put the kept stage back:', err)
   }
@@ -270,6 +267,7 @@ onTutorialLifecycle({
     setTutorialSpin(false)
     setTutorialZoom(null)
     setTutorialFrame(null)
+    setTutorialShot(null)
     if (how !== 'finished') unstage()
   },
   restore: (player) => { void restoreKept(player) },
@@ -301,14 +299,15 @@ registerTutorialEffect('aim-box', () => {
  * is up (the cursor is lined up for it) stops the spin and frames that hop,
  * start and end from the side, while the proof is made; the avatar waits
  * where it is until the camera is there (HOP_FRAME_MS), then glides. Once it
- * has arrived (lib/hopStage.ts afterHop), the camera eases in close over its
- * shoulder, from behind it as seen from the chest (`chest`, the layout's),
- * so the chest is just past it; discovery, which reveals the chest, runs
+ * has arrived (lib/hopStage.ts afterHop), the camera takes the chest shot
+ * (welcomeChestShot; owner, 2026-11-23): the chest, its loot and the avatar
+ * from below and to the right, clear of the tour card, where the shoulder
+ * shot (`chest` names the chest the hop is toward) used to stand; discovery, which reveals the chest, runs
  * then too. A hop that does not land puts the spin back. A player who takes
  * the camera meanwhile (a press, a pinch, the wheel: scene/Scene.tsx ends the
  * framing) keeps it: no shot follows. Returns the stop.
  */
-export function showFirstHop(chest: (layout: TutorialLayout) => Position): () => void {
+export function showFirstHop(_chest: (layout: TutorialLayout) => Position): () => void {
   let live = true
   let to: Position | null = null
   let framed: HopFrame | null = null
@@ -335,9 +334,8 @@ export function showFirstHop(chest: (layout: TutorialLayout) => Position): () =>
         setTutorialFrame(null)
         const layout = useTutorialStage.getState().layout
         if (!layout) return
-        const c = chest(layout)
-        const from = { x: Number(landed.x - c.x), y: Number(landed.y - c.y), z: Number(landed.z - c.z) }
-        if (from.x !== 0 || from.y !== 0 || from.z !== 0) setTutorialZoom(SHOULDER_ZOOM, from)
+        // The chest shot (owner, 2026-11-23): the chest, its loot and the avatar, from below and to the right, clear of the tour card.
+        setTutorialShot(welcomeChestShot(layout, landed))
       })
       return
     }
@@ -355,6 +353,62 @@ export function showFirstHop(chest: (layout: TutorialLayout) => Position): () =>
   })
   return () => { live = false; offStore(); if (useTutorialCam.getState().frame === framed) setTutorialFrame(null) }
 }
+
+/** How high over the chest's gibson its floating loot reaches, in gibsons (scene/ChestLoot.tsx HOVER_Y plus a loot object's reach, rounded up). */
+const LOOT_TOP = 2
+/** Room past the farthest framed point, in gibsons: half the loot row's width (ChestLoot LOOT_GAP and LOOT_SIDE for four, rounded up). */
+const LOOT_MARGIN = 1.3
+
+/** A chest shot: the chest at `c` (a layout cell), the top of its loot, and the avatar at `at`. */
+function chestShot(key: string, layout: TutorialLayout, c: { f: number; r: number; u: number }, at: Position): TutorialShot {
+  const chest = toWorld(layout.frame, c.f, c.r, c.u)
+  const top = toWorld(layout.frame, c.f, c.r, c.u + LOOT_TOP)
+  return { key, chest, points: [chest, top, { ...at }], margin: LOOT_MARGIN, ease: true }
+}
+
+/** The welcome chest's shot, from where the player stands. */
+export function welcomeChestShot(layout: TutorialLayout, at: Position): TutorialShot {
+  return chestShot('welcome-chest', layout, chestCell(layout), at)
+}
+
+/** The finish chest's shot, from where the player stands. */
+export function finishChestShot(layout: TutorialLayout, at: Position): TutorialShot {
+  return chestShot('finish-chest', layout, courseToFrame(FINISH_CHEST), at)
+}
+
+/** Steps that want a shot have asked since the last one let go: a step handing over to another that wants the same shot keeps it. */
+let shotClaims = 0
+
+/**
+ * A step effect that frames a chest (OPEN, TAKE, the finish chest): asked
+ * as the step comes up, from where the player stands, only at their own head
+ * and out of WALK (the rig ignores it in WALK anyway). Let go a moment after
+ * the step goes, unless the next step asks for a shot too, so OPEN to TAKE
+ * neither moves nor eases again.
+ */
+function shotEffect(shotOf: (layout: TutorialLayout, at: Position) => TutorialShot): () => () => void {
+  return () => {
+    const mine = ++shotClaims
+    const ask = (): void => {
+      const layout = useTutorialStage.getState().layout
+      const cs = useCyberspace.getState()
+      if (!layout || cs.walking || !cs.atHead() || cs.headPlane !== layout.plane) return
+      setTutorialShot(shotOf(layout, cs.position))
+    }
+    ask()
+    const off = onStage(ask)
+    // Out of WALK at the finish chest: the shot then.
+    const offWalk = useCyberspace.subscribe((s, prev) => { if (s.walking !== prev.walking && !s.walking) ask() })
+    return () => {
+      off()
+      offWalk()
+      queueMicrotask(() => { if (shotClaims === mine) setTutorialShot(null) })
+    }
+  }
+}
+
+registerTutorialEffect('chest-shot', shotEffect(welcomeChestShot))
+registerTutorialEffect('finish-shot', shotEffect(finishChestShot))
 
 /**
  * Arrival (T7): `inside` is true of where the player stands, their chain's
@@ -516,6 +570,24 @@ registerTutorialEffect('to-course', () => {
  */
 registerTutorialEffect('teach-inventory', () => { setMenuOpen(true) })
 
+/**
+ * The AI step (owner, 2026-11-23): the menu opens with AGENTS first in it
+ * (usePanelLayout front, never written to the saved order), and COPY under
+ * Invite an agent pulses (the step's highlight). Taken away as the step goes.
+ */
+registerTutorialEffect('teach-agents', () => {
+  setMenuOpen(true)
+  usePanelLayout.getState().setFront('agents')
+  return () => { if (usePanelLayout.getState().front === 'agents') usePanelLayout.getState().setFront(null) }
+})
+
+/** COPY under Invite an agent pressed since the step came up (hud/AgentsPanel.tsx useAgentInviteCopies). */
+registerTutorialWatcher('agent-copy', (onDone) => {
+  const before = useAgentInviteCopies.getState().presses
+  let fired = false
+  return useAgentInviteCopies.subscribe((s) => { if (!fired && s.presses > before) { fired = true; onDone() } })
+})
+
 /** NEXT on the inventory step closes the menu again, as the hamburger does (feedback 2026-11-12, item 15). */
 registerTutorialEffect('close-menu', () => { setMenuOpen(false) })
 
@@ -526,7 +598,6 @@ registerTutorialEffect('add-friend', () => {
 })
 
 /** The build step opens the menu, ITEMS in it to place a shard from (feedback item 11b); the order is the player's. */
-registerTutorialEffect('teach-build', () => { setMenuOpen(true) })
 
 /**
  * The workshop opened, and closed again: the player has been in it (the next

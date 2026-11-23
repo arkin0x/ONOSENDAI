@@ -29,14 +29,18 @@ const byLookup = new Map<string, NostrEvent>()
 const guides = new Set<string>()
 /** Shards that let a tap through to what is inside them (the blue box around the chest). */
 const passTaps = new Set<string>()
+/** Shards the scene draws as a mark of its own in their place (step 1's green box: scene/TutorialTarget.tsx TutorialBoxMark). */
+const drawnByMarks = new Set<string>()
 
 /**
  * Put the guide's bags in place of any before (null or empty takes them all
  * away). `opts.passTaps`: item ids that take no taps.
  */
-export function setGuideBags(bags: readonly NostrEvent[] | null, opts: { passTaps?: readonly string[] } = {}): void {
+export function setGuideBags(bags: readonly NostrEvent[] | null, opts: { passTaps?: readonly string[]; drawnByMark?: readonly string[] } = {}): void {
   byLookup.clear()
   passTaps.clear()
+  drawnByMarks.clear()
+  for (const id of opts.drawnByMark ?? []) drawnByMarks.add(id)
   for (const b of bags ?? []) {
     const d = b.tags.find((t) => t[0] === 'd')?.[1]
     if (d) byLookup.set(d, b)
@@ -49,6 +53,11 @@ export function setGuideBags(bags: readonly NostrEvent[] | null, opts: { passTap
 /** Whether a pubkey is a tutorial guide key from this device. */
 export function isGuideAuthor(pubkey: string | null | undefined): boolean {
   return !!pubkey && guides.size > 0 && guides.has(pubkey)
+}
+
+/** Whether a world item is drawn by a scene mark in its place, so the world does not draw it (scene/WorldShards). */
+export function drawnByMark(itemId: string): boolean {
+  return drawnByMarks.size > 0 && drawnByMarks.has(itemId)
 }
 
 /** Whether a world item lets taps through (scene/WorldShards). */

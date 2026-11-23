@@ -69,8 +69,8 @@ export function EarthTrips(): JSX.Element | null {
       ) : trips.map((t) => {
         const on = picked === t.height
         return (
-          // A chamfered frame drawn by hand (styles.css .earth-trips__row): the outer box is the line, the inner the fill.
-          <button key={t.height} className={`earth-trips__row${on ? ' is-on' : ''}`} onClick={() => pick(t)} aria-pressed={on}>
+          // A chamfered frame cut by hand (styles.css .cham-btn): every edge outlined, the two diagonals too.
+          <button key={t.height} className={`cham-btn earth-trips__row${on ? ' is-on' : ''}`} onClick={() => pick(t)} aria-pressed={on}>
             <span className="earth-trips__in">
               <span className="earth-trips__icon" aria-hidden>{on ? <Check size={16} strokeWidth={2.25} /> : <MapPin size={16} strokeWidth={2} />}</span>
               <span className="earth-trips__text">

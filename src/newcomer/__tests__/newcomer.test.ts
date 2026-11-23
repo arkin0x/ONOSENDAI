@@ -150,7 +150,8 @@ describe('a first arrival is a newcomer, and the screen comes in step by step', 
     // GO before the arrows, the arrows before the menu's later panels, the menu before identity.
     expect(order(REVEAL['pad.go'])).toBeLessThan(order(REVEAL['pad.arrows']))
     expect(order(REVEAL.menu)).toBeLessThan(order(REVEAL['panel.identity']))
-    expect(order(REVEAL['pad.arrows'])).toBeLessThan(order(REVEAL['pad.zoom']))
+    // The zoom comes with the arrows: the course step points at its finer key when the view is coarse.
+    expect(order(REVEAL['pad.arrows'])).toBeLessThanOrEqual(order(REVEAL['pad.zoom']))
   })
 
   it('stamps what each step brings in, for its arrival', async () => {

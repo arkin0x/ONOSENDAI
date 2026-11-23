@@ -54,7 +54,7 @@ export const REVEAL: Readonly<Record<RevealId, RevealAt>> = {
   // The workshop: CREATE is where shards are made.
   'panel.create': 'workshop',
   // Where next?: the basics are done, so the everyday controls come in.
-  'pad.zoom': 'choice',
+  'pad.zoom': 'to-course',
   'pad.jumps': 'choice',
   'pad.publish': 'choice',
   chat: 'choice',

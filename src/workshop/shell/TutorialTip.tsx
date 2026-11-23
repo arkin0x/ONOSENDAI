@@ -30,7 +30,8 @@ export const WORKSHOP_STEP_ID = 'workshop'
 /** What the card says, by where the player is. Short, plain, the owner's voice; two lines at most on a 375px phone. */
 export const TIP_TEXT = {
   menu: 'Your pieces are here. Tap one to open it.',
-  bench: 'Drag to turn it. Tap STAMP to add blocks.',
+  // The owner's words (2026-11-23). ADD is on the dock on this step (shell/Dock.tsx dockShowsFour).
+  bench: "Drag to turn it. Tap STAMP to add pre-made shapes, or ADD to hand-craft your object's points.",
 } as const
 
 /** Which line the card shows, or null when it is not drawn: only on the tour's workshop step, never while the eye is being set. Pure. */

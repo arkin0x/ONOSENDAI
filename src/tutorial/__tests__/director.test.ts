@@ -287,8 +287,8 @@ describe('the director', () => {
     // The arrows glow (the step's own highlight), not COMMIT.
     expect(t().stepHighlight).toBe(null)
     expect(t().script.steps[t().index].scene?.highlight).toBe(PAD_ARROWS)
-    // Near the target is not on it: one under, one beside.
-    for (const near of [{ ...target, y: target.y - 1n }, { ...target, x: target.x + 1n }, courseToWorld(layout.frame, START_STAND)]) {
+    // Near the target's cube is not in it: two under (the start square's top), two beside (owner, 2026-11-23: the target is a 3-gibson cube).
+    for (const near of [{ ...target, y: target.y - 2n }, { ...target, x: target.x + 2n }, courseToWorld(layout.frame, START_STAND)]) {
       useCyberspace.setState({ cursor: near })
       expect(cursorOnTarget()).toBe(false)
       expect(t().stepHighlight).toBe(null)

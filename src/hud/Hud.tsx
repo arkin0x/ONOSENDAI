@@ -747,8 +747,10 @@ export function Hud({ menuOpen = false }: { menuOpen?: boolean }): JSX.Element {
   const veil = useRevealClass()
   const shown = (id: PanelId): boolean => veil(`panel.${id}`) !== ' nc-veiled'
   const hidden = (id: PanelId): boolean => leads.includes(id) || !shown(id)
-  const left = [...leads.filter(shown), ...order.left.filter((id) => !hidden(id))]
-  const right = order.right.filter((id) => !hidden(id))
+  // The tour's build steps show ITEMS alone (usePanelLayout frontOnly).
+  const frontOnly = usePanelLayout((s) => s.frontOnly && s.front !== null)
+  const left = frontOnly && front ? [front] : [...leads.filter(shown), ...order.left.filter((id) => !hidden(id))]
+  const right = frontOnly ? [] : order.right.filter((id) => !hidden(id))
 
   // The drag. The pointer is captured by the drag surface (the .hud__grab
   // div), not by the grip it started on: a lifted panel moves in the DOM as

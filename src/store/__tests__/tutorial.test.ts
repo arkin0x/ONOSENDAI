@@ -272,10 +272,11 @@ describe('the script', () => {
     expect(TUTORIAL_SCRIPT.steps.find((s) => s.id === 'box')?.gate).toBe(true)
   })
 
-  it('teaches the real build flow, with no HOLD button (item 11b)', () => {
-    const build = TUTORIAL_SCRIPT.steps.find((s) => s.id === 'build-place')!
-    expect(build.hint).not.toMatch(/HOLD/)
-    expect(build.hint).toMatch(/ACTIONS[\s\S]*MOVE TO WORKSHOP[\s\S]*BUILD[\s\S]*OBJECT[\s\S]*PLACE/)
+  it('teaches the real build flow, one press at a time, with no HOLD button (item 11b; owner, 2026-11-23)', async () => {
+    const { BUILD_STAGES } = await import('../../tutorial/buildRoute')
+    const said = Object.values(BUILD_STAGES).map((b) => b.note).join(' ')
+    expect(said).not.toMatch(/HOLD/)
+    expect(said).toMatch(/ACTIONS[\s\S]*MOVE TO WORKSHOP[\s\S]*BUILD[\s\S]*OBJECT[\s\S]*PLACE/)
   })
 
   it('has no em dash in any line the player reads', () => {

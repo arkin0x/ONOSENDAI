@@ -26,8 +26,8 @@ export function NewcomerSetting(): JSX.Element {
         <span className="ui-field__hint">{HUD_SETTING_HINT}</span>
       </span>
       <div className="nc-setting__pair">
-        <button className={`nc-setting__opt${plain ? '' : ' is-on'}`} aria-pressed={!plain} onClick={() => setHudChoice('everything')}>SHOW EVERYTHING</button>
-        <button className={`nc-setting__opt${plain ? ' is-on' : ''}`} aria-pressed={plain} onClick={() => setHudChoice('newcomer')}>NEWCOMER VIEW</button>
+        <button className={`cham-btn nc-setting__opt${plain ? '' : ' is-on'}`} aria-pressed={!plain} onClick={() => setHudChoice('everything')}>SHOW EVERYTHING</button>
+        <button className={`cham-btn nc-setting__opt${plain ? ' is-on' : ''}`} aria-pressed={plain} onClick={() => setHudChoice('newcomer')}>NEWCOMER VIEW</button>
       </div>
     </div>
   )

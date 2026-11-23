@@ -15,7 +15,7 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { bytesToHex, sha256 } from 'cyberspace-core'
-import { K_LINE, be32, be64, buildRideProof, computeRideLeaf, expectedPricePairs, expectedRidePairs, lineTerrainK, rideBlocks, verifyRideLevel1 } from '../ride'
+import { K_LINE, attemptWork, attemptsRequired, be32, be64, buildRideProof, computeRideLeaf, expectedRidePairs, lineTerrainK, rideBlocks, verifyRideLevel1 } from '../ride'
 import {
   RIDE_CHUNK_SIZE,
   assembleLeaves,
@@ -239,17 +239,17 @@ describe('calibrate (no workers under node)', () => {
 
 describe('the ride estimate uses the pool\'s measured throughput', () => {
   it('worker rates add up: two workers timed together are twice as fast as one', () => {
-    const one = poolMsPerBlock([{ elapsedMs: 100, pairs: 1_000 }])
+    const one = poolMsPerBlock([{ elapsedMs: 100, work: 1_000 }])
     expect(one).toBeCloseTo((100 / 1_000) * expectedRidePairs(1))
-    expect(poolMsPerBlock([{ elapsedMs: 100, pairs: 1_000 }, { elapsedMs: 100, pairs: 1_000 }])).toBeCloseTo(one / 2)
+    expect(poolMsPerBlock([{ elapsedMs: 100, work: 1_000 }, { elapsedMs: 100, work: 1_000 }])).toBeCloseTo(one / 2)
     // A big core and a little one: the big one counts for what it does.
-    expect(poolMsPerBlock([{ elapsedMs: 100, pairs: 3_000 }, { elapsedMs: 100, pairs: 1_000 }])).toBeCloseTo(one / 4)
+    expect(poolMsPerBlock([{ elapsedMs: 100, work: 3_000 }, { elapsedMs: 100, work: 1_000 }])).toBeCloseTo(one / 4)
   })
 
   it('a long ride takes its blocks and its price at the pool\'s rate, not one worker\'s', () => {
     // The owner's ride: 363,870 blocks. Five workers, 52 ms a mean block for the pool (260 for one).
     const n = 363_870
-    const blocks = n + expectedPricePairs(n) / expectedRidePairs(1)
+    const blocks = n + (attemptsRequired(n) * attemptWork()) / expectedRidePairs(1)
     const pool = rideEstimateMs(n, { msPerBlock: 52, workers: 5 })
     expect(pool).toBeCloseTo(blocks * 52)
     // The one-worker reading of the same device, which the panel used to show.
@@ -261,9 +261,9 @@ describe('the ride estimate uses the pool\'s measured throughput', () => {
     // the pool's mean rate (80 ms a block), done when the 64-block chunk is.
     // The price is four attempts, on four workers.
     const bench = { msPerBlock: 10, workers: 8 }
-    expect(rideEstimateMs(100, bench)).toBeCloseTo(80 * (64 + (4 * 2 ** 16) / expectedRidePairs(1) / 4))
+    expect(rideEstimateMs(100, bench)).toBeCloseTo(80 * (64 + (4 * attemptWork()) / expectedRidePairs(1) / 4))
     // 1,000 blocks are 16 chunks: all eight workers.
-    expect(rideEstimateMs(1_000, bench)).toBeCloseTo(80 * (1_000 / 8 + (32 * 2 ** 16) / expectedRidePairs(1) / 8))
+    expect(rideEstimateMs(1_000, bench)).toBeCloseTo(80 * (1_000 / 8 + (32 * attemptWork()) / expectedRidePairs(1) / 8))
     expect(rideEstimateMs(0, bench)).toBe(0)
   })
 })
@@ -280,18 +280,25 @@ describe('the stored calibration', () => {
     vi.resetModules()
   })
 
-  it('a number from the old one-worker calibration is ignored, never shown, and dropped', async () => {
-    const ls = storage({ 'onosendai:ride-bench-ms': '260' })
+  it('older numbers (one worker, then plain pairings) are ignored, never shown, and dropped', async () => {
+    // Both were stored by earlier clients: the one-worker number, and a pool
+    // number that priced every pairing like the sample's, a tenth short.
+    const ls = storage({
+      'onosendai:ride-bench-ms': '260',
+      'onosendai:ride-pool-bench': JSON.stringify({ msPerBlock: 52, workers: 5 }),
+    })
+    vi.stubGlobal('navigator', { hardwareConcurrency: 6 })
     vi.stubGlobal('localStorage', ls)
     vi.resetModules()
     const fresh = await import('../ridePool')
     expect(fresh.rideBenchmark()).toBeNull()
     expect(ls.getItem('onosendai:ride-bench-ms')).toBeNull()
+    expect(ls.getItem('onosendai:ride-pool-bench')).toBeNull()
   })
 
   it('a pool measurement on this pool\'s width is read back; one from another width is not', async () => {
     vi.stubGlobal('navigator', { hardwareConcurrency: 6 })
-    vi.stubGlobal('localStorage', storage({ 'onosendai:ride-pool-bench': JSON.stringify({ msPerBlock: 52, workers: 5 }) }))
+    vi.stubGlobal('localStorage', storage({ 'onosendai:ride-pool-bench-2': JSON.stringify({ msPerBlock: 52, workers: 5 }) }))
     vi.resetModules()
     expect((await import('../ridePool')).rideBenchmark()).toEqual({ msPerBlock: 52, workers: 5 })
     vi.stubGlobal('navigator', { hardwareConcurrency: 8 })
@@ -328,7 +335,7 @@ describe('calibrate on the pool (fake workers)', () => {
           this.reply({ type: 'error', id: msg.id, message: 'boom' }, 0)
         } else {
           // Worker 0 is a big core, the rest little: 4,000 and 1,000 pairs in 100 ms.
-          this.reply({ type: 'calibrated', id: msg.id, elapsedMs: 100, pairs: this.index === 0 ? 4_000 : 1_000 }, 0)
+          this.reply({ type: 'calibrated', id: msg.id, elapsedMs: 100, work: this.index === 0 ? 4_000 : 1_000 }, 0)
         }
       }
     }
@@ -367,7 +374,7 @@ describe('calibrate on the pool (fake workers)', () => {
     const fresh = await import('../ridePool')
     await expect(fresh.calibrate()).rejects.toThrow('boom')
     expect(fresh.rideBenchmark()).toBeNull()
-    expect(ls.getItem('onosendai:ride-pool-bench')).toBeNull()
+    expect(ls.getItem('onosendai:ride-pool-bench-2')).toBeNull()
     expect(failing.terminated()).toBe(3)
     const working = fakeWorkers({ readyDelay: () => 0 })
     vi.stubGlobal('Worker', working.FakeWorker)

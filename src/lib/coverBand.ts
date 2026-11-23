@@ -30,8 +30,12 @@ export type CoverEdge = 'top' | 'bottom' | 'left' | 'right'
 /** A box in CSS pixels, from the canvas's top left. */
 export interface Box { left: number; top: number; right: number; bottom: number }
 
-/** One overlay over the scene: the edge it stands on and the box it takes. */
-export interface Cover { edge: CoverEdge; box: Box }
+/**
+ * One overlay over the scene: the edge it stands on and the box it takes.
+ * `markers` is false for one the target markers need not keep clear of
+ * (hooks/useCover CoverOptions); the framing counts every cover.
+ */
+export interface Cover { edge: CoverEdge; box: Box; markers?: false }
 
 /**
  * The share of the uncovered width, about its middle, that the focus needs

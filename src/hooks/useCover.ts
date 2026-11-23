@@ -2,10 +2,12 @@
  * useCover.ts - the overlays that cover the scene, measured from the DOM.
  *
  * An overlay opts in with the ref this hook returns and the edge it covers
- * from (lib/coverBand.ts). Nothing is measured unless the scene is watching
- * (setCoverWatch), which it does only while the lens shift is in use, in
- * BUILD: the pad is registered nearly all the time, and a layout read twice a
- * second through HOP, VIEW and TV bought nothing. While watched, the boxes
+ * from (lib/coverBand.ts). Nothing is measured unless someone is watching
+ * (setCoverWatch): the scene, only while the lens shift is in use in BUILD
+ * (the pad is registered nearly all the time, and a layout read twice a
+ * second through HOP, VIEW and TV bought nothing for the framing), and the
+ * target markers, while they are on screen, so a chevron stops beside the
+ * menu instead of drawing over it (hud/Targets.tsx). While watched, the boxes
  * are measured when the watch begins, when one of them changes size (a
  * ResizeObserver, whose callback runs after layout, so the read is free),
  * when the window does, and twice a second, which catches a bar that moves
@@ -24,11 +26,20 @@ import { whileVisible } from '../lib/whileVisible'
 /** How often the boxes are measured again while the scene watches them, ms. */
 const REMEASURE_MS = 500
 
-const entries = new Map<HTMLElement, CoverEdge>()
+/** What an overlay says about itself when it opts in. */
+interface Entry {
+  edge: CoverEdge
+  /** Whether the target markers keep clear of it (Cover.markers). */
+  markers: boolean
+}
+
+const entries = new Map<HTMLElement, Entry>()
 let snapshot: readonly Cover[] = []
 let observer: ResizeObserver | null = null
 let timer: number | null = null
 let watching = false
+/** Who is watching: the boxes are measured while anyone is. */
+const watchers = new Set<string>()
 
 /** Measures the boxes, only while watched: otherwise the last snapshot stands until the watch begins. */
 function remeasure(): void {
@@ -37,16 +48,17 @@ function remeasure(): void {
 
 function measure(): void {
   const next: Cover[] = []
-  for (const [el, edge] of entries) {
+  for (const [el, { edge, markers }] of entries) {
     const r = el.getBoundingClientRect()
     // Hidden (display: none, or under a modal's hidden wrapper) measures empty.
     if (r.width <= 0 || r.height <= 0) continue
-    next.push({ edge, box: { left: r.left, top: r.top, right: r.right, bottom: r.bottom } })
+    const box = { left: r.left, top: r.top, right: r.right, bottom: r.bottom }
+    next.push(markers ? { edge, box } : { edge, box, markers: false })
   }
   // The same boxes keep the same snapshot, so a reader can tell nothing moved.
   const same = next.length === snapshot.length && next.every((c, i) => {
     const o = snapshot[i]
-    return o.edge === c.edge && o.box.left === c.box.left && o.box.top === c.box.top && o.box.right === c.box.right && o.box.bottom === c.box.bottom
+    return o.edge === c.edge && o.markers === c.markers && o.box.left === c.box.left && o.box.top === c.box.top && o.box.right === c.box.right && o.box.bottom === c.box.bottom
   })
   if (!same) snapshot = next
 }
@@ -63,16 +75,20 @@ function stop(): void {
 }
 
 /**
- * Starts or stops measuring. On: measured at once, then on every change and
- * twice a second. Off: nothing is read until the next watch. The scene's
- * lens shift calls this as it turns on and off.
+ * Starts or stops `who`'s watch (the scene's lens shift by default; the
+ * target markers as 'targets'). While anyone watches: measured at once, then
+ * on every change and twice a second. Once nobody does: nothing is read
+ * until the next watch. One watcher ending never stops another's.
  */
-export function setCoverWatch(on: boolean): void {
-  if (on === watching) return
-  watching = on
+export function setCoverWatch(on: boolean, who = 'lens'): void {
+  if (on) watchers.add(who)
+  else watchers.delete(who)
+  const any = watchers.size > 0
+  if (any === watching) return
+  watching = any
   if (timer !== null) window.clearInterval(timer)
   timer = null
-  if (!on) return
+  if (!any) return
   measure()
   timer = window.setInterval(whileVisible(measure), REMEASURE_MS)
 }
@@ -82,10 +98,14 @@ export function readCovers(): readonly Cover[] {
   return snapshot
 }
 
-/** Registers `el` as covering the scene from `edge`; the returned function takes it out. */
-export function registerCover(el: HTMLElement, edge: CoverEdge): () => void {
+/**
+ * Registers `el` as covering the scene from `edge`; the returned function
+ * takes it out. `markers` false for an overlay the target markers need not
+ * keep clear of (CoverOptions).
+ */
+export function registerCover(el: HTMLElement, edge: CoverEdge, markers = true): () => void {
   if (entries.size === 0) start()
-  entries.set(el, edge)
+  entries.set(el, { edge, markers })
   observer?.observe(el)
   remeasure()
   return () => {
@@ -96,15 +116,27 @@ export function registerCover(el: HTMLElement, edge: CoverEdge): () => void {
   }
 }
 
+/** How an overlay takes part, beyond the edge it covers from. */
+export interface CoverOptions {
+  /**
+   * Whether the target markers stop short of it (hud/Targets.tsx); true
+   * unless said otherwise. False for the pad: it folds and comes back with
+   * every tap on the scene, and a marker that dodged it would jump between
+   * the screen's foot and the middle each time. A marker under it is under
+   * it, as it always was (the pad draws over the markers).
+   */
+  markers?: boolean
+}
+
 /**
  * A ref for an overlay that covers the scene from `edge`: attach it to the
  * overlay's outer element. `on` false registers nothing, for an overlay that
  * only sometimes stands over the scene (the menu's columns on a desktop).
  */
-export function useCover(edge: CoverEdge, on = true): (el: HTMLElement | null) => void {
+export function useCover(edge: CoverEdge, on = true, { markers = true }: CoverOptions = {}): (el: HTMLElement | null) => void {
   const off = useRef<(() => void) | null>(null)
   return useCallback((el: HTMLElement | null) => {
     off.current?.()
-    off.current = el && on ? registerCover(el, edge) : null
-  }, [edge, on])
+    off.current = el && on ? registerCover(el, edge, markers) : null
+  }, [edge, on, markers])
 }

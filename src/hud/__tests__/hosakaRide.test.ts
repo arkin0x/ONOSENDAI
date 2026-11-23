@@ -46,6 +46,12 @@ vi.mock('../../store/useHyperspace', async (o) => ({
   getBlockHash: (height: number) => line.get(height) ?? null,
   firstUnhashedHeight: (lo: number, hi: number) => { for (let h = lo; h <= hi; h++) if (!line.get(h)) return h; return null },
 }))
+// Whether this browser can hold a ride's numbers, as each test sets it (a real probe otherwise).
+const cap = vi.hoisted(() => ({ canRide: true }))
+vi.mock('../../lib/proofCapability', async (o) => {
+  const real = await o() as typeof import('../../lib/proofCapability')
+  return { ...real, rideCapabilityIssue: () => real.rideCapabilityIssue(cap.canRide) }
+})
 vi.mock('../../lib/chains', async (o) => ({ ...(await o() as object), fetchChainEvents: vi.fn(async () => []), confirmChainEvents: vi.fn(async () => []) }))
 
 
@@ -110,6 +116,7 @@ beforeEach(() => {
   localStorage.removeItem('onosendai:cloudJob')
   localStorage.removeItem('onosendai:cloudJob:kept')
   useRideRun.setState({ error: null, progress: null, hosaka: false, path: null })
+  cap.canRide = true
   useCyberspace.setState({
     cloudPrefs: { mode: 'auto', autoMaxSats: 0, apiUrl: 'http://fake', profile: 'time' },
     plan: null,
@@ -302,6 +309,20 @@ describe('RIDE VIA HOSAKA', () => {
     await startHosakaRide({ ...OFFER, toHeight: 106 })
     expect(fake.submitRide).not.toHaveBeenCalled()
     expect(useRideRun.getState().error).toMatch(/changed since HOSAKA priced it/)
+  })
+
+  it('a browser that cannot hold a ride\'s numbers buys nothing: the proof could not be checked before signing', async () => {
+    await boarded()
+    cap.canRide = false
+    await startHosakaRide(OFFER)
+    expect(fake.submitRide).not.toHaveBeenCalled()
+    expect(fake.claimDeposit).not.toHaveBeenCalled()
+    expect(useCyberspace.getState().cloud.rideError).toMatch(/cannot compute or check a ride proof.*use Chrome/)
+    expect(useCyberspace.getState().proof.status).toBe('idle')
+    // RIDE HERE is refused before any work.
+    await startRide()
+    expect(useRideRun.getState().error).toMatch(/cannot compute or check a ride proof/)
+    expect(useRideRun.getState().progress).toBeNull()
   })
 
   it('off in the Cloud compute panel: nothing is submitted', async () => {

@@ -91,8 +91,11 @@ export function rideOfferOf(raw: unknown, fromHeight: number, toHeight: number):
  * keys, so LOOT has nothing more to buy here than TIME): HOSAKA's wait plus
  * the payment round trip, against this device's own estimate. An unknown
  * local estimate (still calibrating) is a long one, since rides are long.
+ * A browser that cannot ride here (proofCapability rideCapabilityIssue) is
+ * never pointed at RIDE HERE, whatever the profile.
  */
-export function rideChoice(profile: RouteProfile, localSeconds: number | null, offer: RideOffer | null, paymentSeconds = 30): 'local' | 'hosaka' {
+export function rideChoice(profile: RouteProfile, localSeconds: number | null, offer: RideOffer | null, paymentSeconds = 30, canRideHere = true): 'local' | 'hosaka' {
+  if (!canRideHere) return 'hosaka'
   if (!offer || profile === 'cost') return 'local'
   if (offer.estSeconds === null) return 'local'
   if (localSeconds === null) return 'hosaka'

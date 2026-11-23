@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { AXIS_CENTER, computeHopProof, terrainK } from 'cyberspace-core'
-import { axisComputeCeiling, cantorTreeBits, FIREFOX_BIGINT_BITS, movementCapabilityIssue } from '../proofCapability'
+import { axisComputeCeiling, cantorTreeBits, canRideBigints, FIREFOX_BIGINT_BITS, movementCapabilityIssue, RIDE_BIGINT_BITS, RIDE_CAPABILITY_ISSUE, RIDE_GRIND_HEIGHT, RIDE_TREE_HEIGHT, rideCapabilityIssue } from '../proofCapability'
+import { GRIND_HEIGHT, RIDE_MAX_HEIGHT } from '../hyperspace/ride'
 
 const limit = FIREFOX_BIGINT_BITS
 const a = AXIS_CENTER
@@ -44,5 +45,28 @@ describe('browser proof allocation preflight', () => {
     expect(movementCapabilityIssue('hop', from, to, 0, 'cloud', limit)).toBeNull()
     expect(axisComputeCeiling(20, limit)).toBe(13)
     expect(axisComputeCeiling(20, Infinity)).toBe(20)
+  })
+})
+
+describe('ride capability', () => {
+  it('uses the ride module\'s own heights', () => {
+    expect(RIDE_TREE_HEIGHT).toBe(RIDE_MAX_HEIGHT)
+    expect(RIDE_GRIND_HEIGHT).toBe(GRIND_HEIGHT)
+  })
+
+  it('a 2^20-bit engine holds no tree past height 13, so not even the re-roll attempt: no ride at all', () => {
+    expect(axisComputeCeiling(RIDE_TREE_HEIGHT, FIREFOX_BIGINT_BITS)).toBe(13)
+    expect(cantorTreeBits(RIDE_GRIND_HEIGHT)).toBeGreaterThan(FIREFOX_BIGINT_BITS)
+    // V8's cap, 2^30 bits, holds the largest number a ride makes (a K=16 block's top pairing).
+    expect(RIDE_BIGINT_BITS).toBeGreaterThan(FIREFOX_BIGINT_BITS)
+    expect(RIDE_BIGINT_BITS).toBeLessThan(2 ** 30)
+  })
+
+  it('the probe passes under V8, and the notice says what to do', () => {
+    expect(canRideBigints()).toBe(true)
+    expect(rideCapabilityIssue()).toBeNull()
+    expect(rideCapabilityIssue(false)).toBe(RIDE_CAPABILITY_ISSUE)
+    expect(RIDE_CAPABILITY_ISSUE).toMatch(/use Chrome/)
+    expect(RIDE_CAPABILITY_ISSUE).not.toMatch(/\u2014/)
   })
 })

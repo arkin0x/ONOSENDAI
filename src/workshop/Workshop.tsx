@@ -37,6 +37,8 @@ import { IMPORT_PICKER_ACCEPT } from '../lib/shardZip'
 import { stackedSpots } from '../lib/weld'
 import { useShardFolders } from '../store/useShardFolders'
 import { routeImport, useShardImport } from '../store/useShardImport'
+import { SAVE_BLOCKED_MESSAGE, savingBlocked } from '../lib/versionGate'
+import { SaveGateBar } from '../hud/VersionChip'
 import { useWorkshop } from '../store/useWorkshop'
 import { Bench } from './Bench'
 import { EyePreview, eyeBenchInset } from './EyePreview'
@@ -286,6 +288,8 @@ export function Workshop(): JSX.Element | null {
     const files = list ? Array.from(list) : []
     // While the import's list is open, a drop on it (React carries a portal's events here) changes nothing.
     if (!files.length || importing || useShardImport.getState().open) return
+    // A newer deploy refuses this tab's saves: nothing comes in that could not be kept (lib/versionGate.ts).
+    if (savingBlocked()) { say(SAVE_BLOCKED_MESSAGE); return }
     // READING from the moment the files are sniffed, so a second pick or drop meanwhile is not a second import.
     setImporting(true)
     try {
@@ -324,6 +328,7 @@ export function Workshop(): JSX.Element | null {
       <input ref={fileInput} type="file" accept={IMPORT_PICKER_ACCEPT} multiple hidden aria-hidden tabIndex={-1} onChange={(e) => { const list = e.currentTarget.files; void importFromFiles(list ? Array.from(list) : null); e.currentTarget.value = '' }} />
       {dropping && <div className="workshop__drop" aria-hidden>DROP TO IMPORT</div>}
       <Toast />
+      <SaveGateBar />
       <StorageWarning />
       <ZipImport />
 

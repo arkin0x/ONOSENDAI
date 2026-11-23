@@ -36,12 +36,22 @@
  * and the change is still in hand, retried with the next one. Bulk import
  * publishes nothing that has not been saved (store/useShardImport.ts).
  *
+ * A NEWER DEPLOY. When the deploy requires a newer workshop schema than this
+ * build's (lib/workshopSchema.ts, lib/versionGate.ts savesBlocked), this tab
+ * writes nothing: an older bundle may have read a newer shard wrongly, and
+ * would save it damaged. Its changes stay in hand, as always when a save
+ * fails, and are also held in this tab's sessionStorage (HELD_KEY), which a
+ * reload keeps. The build that loads after the reload puts them back
+ * (restoreHeld): a shard the library does not have comes back as it was, and
+ * a change to a shard the library has comes back as a copy beside it, so a
+ * change made by the older bundle is never written over the stored one.
+ *
  * TABS. Writes are per shard, so two tabs only ever overwrite each other on
  * the same shard. After each commit a BroadcastChannel names what changed and
  * every other tab reads those records back into its list.
  */
 
-import { GRID_HALF, neededExtent, normalizeStored, type ShardModel } from 'sno-core/shards'
+import { GRID_HALF, neededExtent, normalizeStored, uuid, type ShardModel } from 'sno-core/shards'
 import { forOlderReaders } from './olderReaders'
 import {
   commit, databaseExists, fingerprint, localEntries, mergeLocal, newGen, noteReconciled, restoreInto, openWorkshopDb, readAll, readMigrated, readSome, verifyAndMark,
@@ -49,6 +59,7 @@ import {
 } from '../lib/workshopDb'
 import { kvCopiesOf, kvGet, kvSet } from '../lib/kvStore'
 import { saneGroups } from '../lib/shardGroups'
+import { PRE_MOVE_MAX_AGE_MS, PRE_MOVE_TIMEOUT_MS, SAVE_BLOCKED_MESSAGE, checkVersion, lookBeforeSave, savingBlocked, useVersionGate } from '../lib/versionGate'
 
 /** The list as every build before this one kept it, and the backup from now on. */
 export const LOCAL_KEY = 'onosendai:shards'
@@ -61,6 +72,12 @@ export const LOCAL_KEY = 'onosendai:shards'
 export const MOVED_KEY = 'onosendai:shards:moved'
 export const MOVED_COOKIE = 'onosendai_shards_moved'
 export const CHANNEL = 'onosendai:shards'
+/**
+ * sessionStorage, this tab only: the changes a newer deploy's save gate
+ * refused, as they would be stored, kept across a reload and put back by the
+ * build that loads after it (restoreHeld).
+ */
+export const HELD_KEY = 'onosendai:workshop:held'
 
 export type ShardStorage = 'pending' | 'indexeddb' | 'local' | 'unavailable'
 
@@ -85,6 +102,10 @@ const LOADING_REASON = 'Your shards are still loading'
 const TORN = 'Your saved shard list could not be read, so saving is off to keep it exactly as it is.'
 const NOT_LOADED = 'Your shards did not load: their storage is not answering. They are not gone. Nothing is saved until they load. Close every other ONOSENDAI tab and window, then reload. RECOVER SHARDS in MENU looks for every copy.'
 const READABLE_NOW = 'Your shards can be read now. Reload to see them and keep saving.'
+const HELD_FAILED = 'A new version of ONOSENDAI changed how shards are saved, and your latest changes are too big to hold across a reload. Keep this tab open and copy the shard out before you reload.'
+const HELD_REASON = 'A new version changed how shards are saved'
+/** A copy put back beside the stored shard is named after it, with this. */
+export const HELD_COPY_SUFFIX = ' (unsaved edit)'
 
 /**
  * The load's own clock (arkinox, 2026-11-22: "no shards show anymore" after
@@ -221,13 +242,158 @@ export function attach(h: StorageHost): void {
 
 /** Note what changed since the list was last handed over. */
 function diff(list: readonly ShardModel[]): void {
+  // localStorage writes the whole list, but keeps the changes in hand too:
+  // when a write's look learns that saving is refused, they are what is held
+  // (holdBack). writeLocal lets them go once written.
   const next = new Map<string, ShardModel>()
   for (const s of list) {
     next.set(s.id, s)
-    if (mode !== 'local' && handed.get(s.id) !== s) pending.set(s.id, s)
+    if (handed.get(s.id) !== s) pending.set(s.id, s)
   }
-  if (mode !== 'local') for (const id of handed.keys()) if (!next.has(id)) pending.set(id, null)
+  for (const id of handed.keys()) if (!next.has(id)) pending.set(id, null)
   handed = next
+}
+
+function session(): Storage | null {
+  try { return typeof sessionStorage === 'undefined' ? null : sessionStorage } catch { return null }
+}
+
+/** What HELD_KEY holds: each shard as it would be stored, by id. Nothing readable is an empty map. */
+function readHeld(): Map<string, Record<string, unknown>> {
+  const out = new Map<string, Record<string, unknown>>()
+  try {
+    const raw = session()?.getItem(HELD_KEY)
+    if (!raw) return out
+    const data = JSON.parse(raw) as { shards?: unknown }
+    if (!Array.isArray(data?.shards)) return out
+    for (const m of data.shards) {
+      if (m && typeof m === 'object' && typeof (m as { id?: unknown }).id === 'string') out.set((m as { id: string }).id, m as Record<string, unknown>)
+    }
+  } catch { /* unreadable: nothing held */ }
+  return out
+}
+
+function clearHeld(): void {
+  try { session()?.removeItem(HELD_KEY) } catch { /* nothing to clear */ }
+}
+
+/**
+ * Saving is refused (a newer deploy's save gate): the changes in hand stay in
+ * hand, and go into this tab's sessionStorage too, so a reload brings them
+ * back. A shard deleted here is taken out of what is held, never deleted
+ * from the library. Said once per change: the bar asks for the reload, the
+ * line says whether the changes are held.
+ */
+function holdBack(): void {
+  const stash = readHeld()
+  let changed = false
+  for (const [id, m] of pending) {
+    if (m) { stash.set(id, forOlderReaders(m) as unknown as Record<string, unknown>); changed = true }
+    else if (stash.delete(id)) changed = true
+  }
+  if (changed) {
+    try {
+      const store = session()
+      if (!store) throw new Error('no sessionStorage')
+      if (stash.size) store.setItem(HELD_KEY, JSON.stringify({ v: 1, shards: [...stash.values()] }))
+      else store.removeItem(HELD_KEY)
+      holdFailed = false
+    } catch (e) {
+      console.warn(`[workshop] could not hold the refused changes across a reload: ${describe(e)}`)
+      holdFailed = true
+    }
+  }
+  if (stash.size || holdFailed) report(holdFailed ? HELD_FAILED : SAVE_BLOCKED_MESSAGE, HELD_REASON)
+}
+
+/** The last hold did not fit in sessionStorage: a reload would lose the changes, so the browser asks before one. */
+let holdFailed = false
+
+/**
+ * The look before a write (lib/versionGate.ts lookBeforeSave): editing never
+ * waits, only the write does, at most PRE_MOVE_TIMEOUT_MS about once a minute.
+ * Refused: what is in hand is held, and nothing is written.
+ */
+async function mayWrite(): Promise<boolean> {
+  const look = lookBeforeSave()
+  if (look instanceof Promise ? await look : look) return true
+  holdBack()
+  return false
+}
+
+/** A shard as it is stored, for comparing one held with one in the list. */
+const storedJson = (m: unknown): string => JSON.stringify(forOlderReaders(m as ShardModel))
+/** A shard's content as stored, whatever its id, name and time. */
+const contentOf = (m: ShardModel): string => storedJson({ ...m, id: '', name: '', updatedAt: 0 })
+/** Whether `s` is a copy of the held `m` already put back (its stash not cleared since): another id, the same content, its name with HELD_COPY_SUFFIX. */
+const putBackBefore = (s: ShardModel, content: string, m: ShardModel, mContent: string): boolean =>
+  s.id !== m.id && content === mContent && s.name.endsWith(HELD_COPY_SUFFIX) && m.name.startsWith(s.name.slice(0, -HELD_COPY_SUFFIX.length))
+
+let restoring: Promise<void> | null = null
+
+/**
+ * After a reload: put back what a save gate held in this tab (holdBack). Only
+ * once the deploy has been asked and does not refuse this build too (no
+ * answer lets it go, as everywhere in the gate). A held shard the list does
+ * not have comes back under its own id; one the list has, unchanged, is
+ * dropped; one the list has, changed, comes back as a copy beside it, named
+ * with HELD_COPY_SUFFIX. What was held is cleared only once all of it has
+ * saved.
+ */
+export function restoreHeld(): Promise<void> {
+  // Cleared after it settles, never inside it: a run with nothing held ends at once.
+  if (!restoring) restoring = putBack().finally(() => { restoring = null })
+  return restoring
+}
+
+async function putBack(): Promise<void> {
+  try {
+    if (!readHeld().size) return
+    await checkVersion({ maxAgeMs: PRE_MOVE_MAX_AGE_MS, timeoutMs: PRE_MOVE_TIMEOUT_MS })
+    if (!host || (mode !== 'indexeddb' && mode !== 'local')) return
+    const stash = readHeld()
+    const list = host.shards()
+    if (savingBlocked()) {
+      // Still refused (the reload came back to an older build): the held
+      // changes go back on screen under their own ids, so the next edit is
+      // made on them, and are held again; nothing is written.
+      const next = list.slice()
+      for (const raw of stash.values()) {
+        const m = normalizeOne(raw)
+        if (!m) continue
+        const at = next.findIndex((s) => s.id === m.id)
+        if (at >= 0) next[at] = m
+        else next.push(m)
+      }
+      host.replace(next)
+      persist(next)
+      return
+    }
+    const byId = new Map(list.map((s) => [s.id, s]))
+    const contents = list.map((s) => [s, contentOf(s)] as const)
+    const back: ShardModel[] = []
+    for (const raw of stash.values()) {
+      const m = normalizeOne(raw)
+      if (!m) continue
+      const have = byId.get(m.id)
+      if (have && (storedJson(have) === storedJson(m) || storedJson(have) === storedJson(raw))) continue
+      const mContent = contentOf(m)
+      if (have && contents.some(([s, c]) => putBackBefore(s, c, m, mContent))) continue
+      const restored = have ? { ...m, id: uuid(), name: `${m.name.slice(0, 64 - HELD_COPY_SUFFIX.length)}${HELD_COPY_SUFFIX}` } : m
+      back.push(restored)
+      contents.push([restored, mContent])
+    }
+    if (back.length) {
+      const next = [...list, ...back]
+      host.replace(next)
+      persist(next)
+      const names = back.slice(0, 3).map((s) => s.name).join(', ')
+      host.notice(`Your unsaved changes from before the reload are back: ${names}${back.length > 3 ? ` and ${back.length - 3} more` : ''}.`)
+    }
+    if (await saveNow()) clearHeld()
+  } catch (e) {
+    console.warn(`[workshop] could not put back the changes held across the reload: ${describe(e)}`)
+  }
 }
 
 function report(message: string | null, reason: string | null): void {
@@ -239,8 +405,10 @@ function writeLocal(list: readonly ShardModel[]): boolean {
   // Only ever while localStorage is the library: once the move is marked, the
   // list there is the backup, and nothing writes it again.
   if (mode !== 'local') return false
+  if (savingBlocked()) return false
   try {
     kvSet(LOCAL_KEY, JSON.stringify(list.map(forOlderReaders)))
+    pending.clear()
     if (failure) report(null, null)
     return true
   } catch {
@@ -255,7 +423,17 @@ function writeLocal(list: readonly ShardModel[]): boolean {
  */
 export function persist(list: readonly ShardModel[]): void {
   diff(list)
-  if (mode === 'local') { writeLocal(list); return }
+  if (savingBlocked()) { holdBack(); return }
+  if (mode === 'local') {
+    // The look before the write: in hand (a recent answer), at once, so a
+    // change is in localStorage when this returns, as it always was; else
+    // the write waits for it.
+    const look = lookBeforeSave()
+    if (look instanceof Promise) void look.then((ok) => { if (!ok) holdBack(); else if (host) writeLocal(host.shards()) })
+    else if (look) writeLocal(list)
+    else holdBack()
+    return
+  }
   if (mode === 'indexeddb') { void flush(); return }
   if (mode === 'unavailable') report(offline.message, offline.reason)
 }
@@ -264,7 +442,11 @@ export function persist(list: readonly ShardModel[]): void {
 export async function saveNow(): Promise<boolean> {
   if (mode === 'pending') await ready
   if (!host) return false
-  if (mode === 'local') return writeLocal(host.shards())
+  if (savingBlocked()) { diff(host.shards()); holdBack(); return false }
+  if (mode === 'local') {
+    diff(host.shards())
+    return (await mayWrite()) && writeLocal(host.shards())
+  }
   diff(host.shards())
   if (mode === 'unavailable') { report(offline.message, offline.reason); return false }
   return flush()
@@ -362,6 +544,9 @@ function recordOf(id: string, m: ShardModel): ShardRecord {
 
 async function commitPending(): Promise<boolean> {
   if (mode !== 'indexeddb') return false
+  // The deploy is asked before anything is written (a recent answer is
+  // reused): a build it refuses writes nothing, and holdBack keeps the changes.
+  if (!(await mayWrite())) return false
   // Nothing in hand and the database still the one read: saved. A
   // connection that was closed is opened and checked first, so "saved"
   // never stands on a database that was cleared.
@@ -376,7 +561,10 @@ async function commitPending(): Promise<boolean> {
       const deletes: string[] = []
       try {
         const d = await database()
+        // Learned while the database opened: checkStillThere writes too.
+        if (savingBlocked()) { holdBack(); return false }
         await checkStillThere(d)
+        if (savingBlocked()) { holdBack(); return false }
         for (const [id, m] of pending) batch.set(id, m)
         for (const [id, m] of batch) {
           if (m) puts.push(recordOf(id, m))
@@ -463,7 +651,9 @@ function listen(): void {
       // A write still in hand when the tab closes would be lost: the browser
       // asks first (where it lets a page ask: iOS Safari does not).
       window.addEventListener('beforeunload', (ev) => {
-        if ((mode === 'indexeddb' || mode === 'pending') && (pending.size > 0 || inFlight)) { ev.preventDefault(); ev.returnValue = '' }
+        // Refused by a newer deploy and held across the reload (holdBack): the reload is what the bar asks for, so no warning.
+        const held = savingBlocked() && !holdFailed
+        if (!held && (mode === 'indexeddb' || mode === 'pending') && (pending.size > 0 || inFlight)) { ev.preventDefault(); ev.returnValue = '' }
       })
     } catch { /* no window events */ }
   }
@@ -617,6 +807,8 @@ function withoutDatabase(why: unknown, moved: boolean): ShardStorage {
   // library after all, so it is read now, with any change made meanwhile.
   const list = withPending(loadLocal())
   const changed = pending.size > 0
+  // Refused by a newer deploy: the changes made meanwhile are held, not dropped.
+  if (changed && savingBlocked()) holdBack()
   pending.clear()
   become('local', list)
   // Whatever changed before this answered is written now, as it would have
@@ -673,9 +865,28 @@ async function rescue(d: IDBDatabase, raw: string, meta: MigratedMeta): Promise<
  * the first one's answer.
  */
 export function hydrateWorkshop(): Promise<ShardStorage> {
-  if (!hydrating) hydrating = mode === 'pending' ? decide() : Promise.resolve(mode)
+  if (!hydrating) {
+    hydrating = mode === 'pending' ? decide() : Promise.resolve(mode)
+    // What a save gate held before a reload comes back once the library is in; the load never waits on it.
+    void hydrating.then(() => restoreHeld())
+  }
   return hydrating
 }
+
+/**
+ * The save gate changes its mind (lib/versionGate.ts). Refused now: what is
+ * in hand is held at once. Allowed again (a later answer with a lower
+ * number, a revert): the refusal's line goes, and what was held is put back
+ * and saved.
+ */
+useVersionGate.subscribe((now, prev) => {
+  if (now.savesBlocked === prev.savesBlocked) return
+  if (now.savesBlocked) { if (pending.size) holdBack(); return }
+  if (failure === HELD_REASON) report(null, null)
+  void restoreHeld()
+  if (mode === 'indexeddb' && pending.size) void flush()
+  else if (mode === 'local' && host && pending.size) writeLocal(host.shards())
+})
 
 /**
  * The load while it is reading: started and not yet decided. Null before it

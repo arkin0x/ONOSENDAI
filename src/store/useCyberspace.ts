@@ -135,7 +135,7 @@ import {
   enterHyperspaceTemplate,
   hyperjumpTemplate,
 } from '../lib/events'
-import { lookBeforeMove, movementBlocked, useVersionGate, VERSION_BLOCKED_MESSAGE } from '../lib/versionGate'
+import { lookBeforeMove, lookBeforeSave, movementBlocked, useVersionGate, SAVE_BLOCKED_MESSAGE, VERSION_BLOCKED_MESSAGE } from '../lib/versionGate'
 import { enterVirtualTemplate, exitVirtualTemplate, type Links } from '../lib/games/bracket'
 import type { GameDef } from '../lib/games/types'
 import { canLeave, gameFor } from '../lib/games/registry'
@@ -2337,6 +2337,26 @@ let wakeOwed = false
 onSignerAnswered(() => { wakeOwed = false })
 
 /**
+ * The kinds whose content is a shard's payload: a shard in a bag (3330,
+ * lib/hidden.ts SHARD_KIND), an object (33331, lib/hidden.ts OBJECT_KIND), an
+ * avatar (11333, lib/avatar.ts AVATAR_KIND). Numbers, not imports: those
+ * modules pull in half the app (store/__tests__/saveGate.test.ts checks they agree).
+ */
+export const SHARD_PAYLOAD_KINDS: ReadonlySet<number> = new Set([3330, 33331, 11333])
+
+/**
+ * Whether a template carries a shard's payload: one of SHARD_PAYLOAD_KINDS,
+ * or any event with a `look` tag (a chest or a door, DECK-0004 §3.6). Every
+ * look is a shard payload, a built-in or a sealed look's wrapper as much as a
+ * workshop model, so while saving is refused every chest and door hide or
+ * move waits for the reload. Deliberately broad: it lasts only until then.
+ */
+export function carriesShard(template: Pick<EventTemplate, 'kind' | 'tags'>): boolean {
+  if (SHARD_PAYLOAD_KINDS.has(template.kind)) return true
+  return template.tags.some((t) => t[0] === 'look')
+}
+
+/**
  * The identity whose signer was last found on another account, so that is
  * said once (otherAccount) and not on every refused signature, of which a
  * relay's AUTH alone brings one per socket. Cleared when the signer signs as
@@ -2373,6 +2393,14 @@ async function signEvent(template: EventTemplate, patienceMs?: number, signer: S
     const s = useCyberspace.getState()
     const down = rowsDownRefusal(s.identity.pubkey, s.events) ?? lostRefusal(s.identity.pubkey)
     if (down) throw new Error(down)
+  }
+  // Likewise for an event that carries a shard (a hidden shard, an object, an
+  // avatar, a chest or door wearing a look): a deploy requiring a newer
+  // workshop schema gets none from this tab, which may have read the shard
+  // wrongly (lib/workshopSchema.ts).
+  if (carriesShard(template)) {
+    const look = lookBeforeSave()
+    if (!(look instanceof Promise ? await look : look)) throw new Error(SAVE_BLOCKED_MESSAGE)
   }
   if (signer.kind === 'local') {
     // The local key computes the id and the signature itself, so its events

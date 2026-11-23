@@ -7,12 +7,12 @@
 
 import { afterEach, describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { VersionChipView } from '../VersionChip'
+import { SaveGateBarView, VersionChipView } from '../VersionChip'
 import { resetVersionGateForTests, useVersionGate, type Verdict } from '../../lib/versionGate'
 import { setBroadcastForTest } from '../../lib/tv/broadcast'
 
-const html = (verdict: Verdict, build: string | null = 'newer', dismissed: string | null = null): string =>
-  renderToStaticMarkup(<VersionChipView verdict={verdict} build={build} dismissed={dismissed} />)
+const html = (verdict: Verdict, build: string | null = 'newer', dismissed: string | null = null, savesBlocked = false): string =>
+  renderToStaticMarkup(<VersionChipView verdict={verdict} build={build} dismissed={dismissed} savesBlocked={savesBlocked} />)
 const buttons = (h: string): string[] => [...h.matchAll(/<button[^>]*>([^<]*)<\/button>/g)].map((m) => m[1])
 
 afterEach(() => { resetVersionGateForTests(false); setBroadcastForTest(null) })
@@ -48,6 +48,33 @@ describe('the version chip', () => {
     setBroadcastForTest(true)
     expect(html('blocked', 'cutover')).toBe('')
     expect(html('hint', 'newer')).toBe('')
+    expect(html('hint', 'newer', null, true)).toBe('')
+  })
+
+  it('saving refused: the red bar, NEW VERSION, RELOAD TO SAVE YOUR WORK, one RELOAD, and no dismiss', () => {
+    const h = html('hint', 'schema', null, true)
+    expect(h).toContain('hyperbar--broken')
+    expect(h).toContain('NEW VERSION')
+    expect(h).toContain('RELOAD TO SAVE YOUR WORK')
+    expect(h).toContain('role="alert"')
+    expect(buttons(h)).toEqual(['RELOAD'])
+    // A hint once dismissed for that build does not hide a refusal.
+    expect(html('hint', 'schema', 'schema', true)).toContain('RELOAD TO SAVE YOUR WORK')
+  })
+
+  it('the workshop shows the same bar over its bench while saving is refused, and never on the TV stream', () => {
+    expect(renderToStaticMarkup(<SaveGateBarView blocked={false} />)).toBe('')
+    const h = renderToStaticMarkup(<SaveGateBarView blocked />)
+    expect(h).toContain('ws__savegate')
+    expect(h).toContain('RELOAD TO SAVE YOUR WORK')
+    setBroadcastForTest(true)
+    expect(renderToStaticMarkup(<SaveGateBarView blocked />)).toBe('')
+  })
+
+  it('moving and saving both refused: one bar that says both', () => {
+    const h = html('blocked', 'cutover', null, true)
+    expect(h).toContain('RELOAD TO MOVE AND SAVE')
+    expect(buttons(h)).toEqual(['RELOAD'])
   })
 
   it('a dismissed hint stays away for that build, and comes back for the next', () => {

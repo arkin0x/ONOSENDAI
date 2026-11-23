@@ -66,10 +66,11 @@ export function BenchShard({ onFace: onShardFace, onPart: onShardPart }: {
   const scaleExp = useCyberspace((s) => s.scaleExp)
   // GROUPS' HIDE: the bench draws the shard without the hidden groups, and a tap on what it draws still names the shard's own face or object.
   const hidden = useWorkshop((s) => s.hiddenGroups)
-  const view = useMemo(() => (shard ? hiddenView(shard, hiddenSets(shard, hiddenIn(hidden, shard))) : null), [shard, hidden])
+  // LOOK shows the shard as the world will: every group drawn.
+  const look = isLook(tool)
+  const view = useMemo(() => (shard && !look ? hiddenView(shard, hiddenSets(shard, hiddenIn(hidden, shard))) : null), [shard, hidden, look])
   const drawnSel = useMemo(() => (view ? partSel.map((i) => view.partOf.indexOf(i)).filter((i) => i >= 0) : partSel), [view, partSel])
   if (!shard) return null
-  const look = isLook(tool)
   const onFace = (e: ThreeEvent<MouseEvent>, face: number): void => onShardFace(e, view ? view.faceOf[face] : face)
   const onPart = (e: ThreeEvent<MouseEvent>, part: number): void => onShardPart(e, view ? view.partOf[part] : part)
   return (

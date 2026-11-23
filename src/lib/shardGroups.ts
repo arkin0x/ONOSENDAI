@@ -489,3 +489,21 @@ export function hiddenView(s: ShardModel, h: HiddenSets | null): { shard: ShardM
   }
   return { shard, faceOf, partOf }
 }
+
+/**
+ * What DELETE CONTENTS (useWorkshop deleteGroupAndGeometry) takes, so its
+ * confirmation says the real loss: the group's points, every face that goes
+ * (its own and every face on one of its points), its placed objects, how many
+ * of those faces were not the group's own, and the other groups that lose
+ * something too.
+ */
+export function groupLoss(s: ShardModel, g: ShardGroup): { points: number; faces: number; objects: number; facesBesides: number; others: string[] } {
+  const verts = new Set(g.vertices.filter((i) => s.vertices[i]))
+  const own = new Set(g.faces.filter((k) => s.faces[k]))
+  const faces = new Set(own)
+  if (verts.size) s.faces.forEach((f, k) => { if (f.some((i) => verts.has(i))) faces.add(k) })
+  const parts = new Set(g.parts.filter((i) => s.parts?.[i]))
+  const spots = new Set([...verts].map((i) => pointKey(ticksOf(s.vertices[i]))))
+  const others = groupsOf(s).filter((x) => x.id !== g.id && (x.vertices.some((i) => verts.has(i)) || x.faces.some((k) => faces.has(k)) || x.parts.some((i) => parts.has(i)))).map((x) => x.name)
+  return { points: spots.size, faces: faces.size, objects: parts.size, facesBesides: faces.size - own.size, others }
+}

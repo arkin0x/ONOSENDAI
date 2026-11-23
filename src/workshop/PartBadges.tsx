@@ -19,6 +19,9 @@ import { useResolved } from '../lib/parts'
 import type { PartForm } from '../lib/partForm'
 import { hiddenIn, useWorkshop } from '../store/useWorkshop'
 import { hiddenSets } from '../lib/shardGroups'
+import { isLook } from './lookTool'
+
+const NO_KEYS: string[] = []
 import { PartFormBadge } from './PartFormBadge'
 import { usePartForms } from './partForms'
 
@@ -48,7 +51,7 @@ export function PartBadges(): JSX.Element | null {
   const resolved = useResolved(shard ?? null)
   const form = usePartForms(shard)
   // Not on a placed object a hidden group hides (GROUPS' HIDE).
-  const hiddenKeys = useWorkshop((s) => s.hiddenGroups)
+  const hiddenKeys = useWorkshop((s) => (isLook(s.tool) ? NO_KEYS : s.hiddenGroups))
   const spots = useMemo(() => {
     if (!shard) return []
     const gone = hiddenSets(shard, hiddenIn(hiddenKeys, shard))?.parts

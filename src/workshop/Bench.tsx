@@ -825,8 +825,6 @@ export function Keys(): null {
         // Text selected on the page (a shard's name in MENU) copies as text, as anywhere else.
         if (e.code === 'KeyC' && (w.selection.length || w.partSel.length) && !window.getSelection()?.toString()) { e.preventDefault(); w.copySelection() }
         if (e.code === 'KeyV' && w.clip) { e.preventDefault(); w.pasteClip('exact', ownAddress(useCyberspace.getState().identity.pubkey, w.currentId)) }
-        // GROUPS: a new group from what is held (sheets/GroupsSheet). LOOK only looks.
-        if (e.code === 'KeyG' && !isLook(w.tool) && (w.selection.length || w.partSel.length || w.selectedFaces.length)) { e.preventDefault(); w.createGroup() }
         return
       }
       if (e.altKey) return

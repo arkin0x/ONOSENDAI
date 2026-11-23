@@ -2335,7 +2335,8 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     deleteGroup: (id) => {
       const g = groupsOf(get().current()).find((x) => x.id === id)
       if (!g) return
-      edit((cur) => withGroups(cur, groupsOf(cur).filter((x) => x.id !== id)), `Group ${g.name} deleted. What it held stays.`, { ownGroups: true })
+      const key = groupKey(get().currentId ?? '', id)
+      if (edit((cur) => withGroups(cur, groupsOf(cur).filter((x) => x.id !== id)), `Group ${g.name} deleted. What it held stays.`, { ownGroups: true })) set({ hiddenGroups: get().hiddenGroups.filter((k) => k !== key) })
     },
 
     deleteGroupAndGeometry: (id) => {

@@ -13,7 +13,7 @@ import { signedBytes, BAG_SAFE_BYTES } from '../bagSize'
 import { objectTemplate } from '../hidden'
 import { largestRemotePiece, pieceRefusal } from '../pieces'
 import { withAuthoredConstrain } from '../walkConstrain'
-import { fullnessNote, fullnessOf, fullnessWords, hiddenObjectBytes, HIDE_WHOLE_BYTES, NEAR_FULL, placedApart, wholePayloadLimit } from '../shardFullness'
+import { fullnessNote, fullnessOf, hideWholeRefusal, fullnessWords, hiddenObjectBytes, HIDE_WHOLE_BYTES, NEAR_FULL, placedApart, wholePayloadLimit } from '../shardFullness'
 
 const KEY = new Uint8Array(32).fill(7)
 const D = 'a'.repeat(32)
@@ -120,5 +120,12 @@ describe('placedApart', () => {
     // The piece placed twice is one object; the carried one is inside the payload.
     expect(placedApart(s)).toBe(2)
     expect(placedApart({})).toBe(0)
+  })
+})
+
+describe('hideWholeRefusal', () => {
+  it('lets a payload at the limit go and refuses one byte past it, in words with the numbers', () => {
+    expect(hideWholeRefusal(wholePayloadLimit())).toBeNull()
+    expect(hideWholeRefusal(wholePayloadLimit() + 1)).toBe(`Too big to hide whole: ${(wholePayloadLimit() + 1).toLocaleString('en-US')} of 179,477 bytes. Move part of it into its own shard and place that. Nothing was sent.`)
   })
 })

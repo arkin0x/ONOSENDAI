@@ -1,5 +1,5 @@
 /**
- * partForms.ts: the LINK or COPY of every object the shard on the bench places
+ * partForms.ts: the LINK or SEALED of every object the shard on the bench places
  * (lib/partForm.ts), read from the workshop, the publish ledger and who you
  * are; what workshop/PartBadges draws.
  */

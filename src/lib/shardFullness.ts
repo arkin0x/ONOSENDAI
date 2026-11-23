@@ -135,6 +135,17 @@ export function fullnessNote(f: Fullness, apart: number): string {
 }
 
 /**
+ * Why a stamp is not made, or null: it would leave the shard past what one
+ * hidden object holds, and larger than it was (a shard already past it is
+ * never stamped bigger). In plain words, with the numbers.
+ */
+export function stampRefusal(beforeBytes: number, afterBytes: number): string | null {
+  const limit = wholePayloadLimit()
+  if (afterBytes <= limit || afterBytes <= beforeBytes) return null
+  return `Not stamped: the shard would be ${afterBytes.toLocaleString('en-US')} of ${limit.toLocaleString('en-US')} bytes, more than one hidden object holds.`
+}
+
+/**
  * Why a shard cannot be hidden whole, or null: hidden by reference it is one
  * sealed object, and that object as signed would pass HIDE_WHOLE_BYTES (what
  * every hidden object here is held to). In plain words, with the numbers the

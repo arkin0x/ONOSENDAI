@@ -94,7 +94,7 @@ function places(all: Host[]) {
 }
 
 const TOP = ['Close the workshop', 'MENU', 'SHARD', 'MOTION', 'AVATAR', 'GRID', 'DEPLOY']
-const RAIL = ['Undo', 'Redo', 'Raise the grid floor', 'Lower the grid floor']
+const RAIL = ['Undo', 'Redo', 'Raise the grid floor', 'Lower the grid floor', 'Groups']
 const DOCK = ['LOOK', 'STAMP', 'SELECT', 'PAINT', 'ADD', 'FACE', 'COLOR']
 
 beforeEach(() => {
@@ -528,13 +528,13 @@ describe('the strip', () => {
     await m.unmount()
   })
 
-  it('opens the object picker as a sheet from OBJECT', async () => {
+  it('opens STAMP\'s library as a sheet from OBJECT', async () => {
     useWorkshop.getState().setTool('stamp')
     useWorkshop.setState({ stampObject: null, stampMode: 'shape' })
     const m = await mount(<Workshop />)
     await m.press(/^BLOCK|^WEDGE|^PYRAMID|^COLUMN|^RING|^STAR|^ARROW/)
     await m.press('OBJECT')
-    expect(m.all().some((h) => h.props['aria-label'] === 'Choose an object to stamp')).toBe(true)
+    expect(m.all().some((h) => h.props['aria-label'] === 'Choose what STAMP places')).toBe(true)
     expect(places(m.all()).dock).toEqual(DOCK)
     await m.unmount()
   })
@@ -1016,7 +1016,7 @@ describe('phone sideways and desktop (phase 5)', () => {
     expect(l).toContain('.ws__bottom { flex-direction: row;')
     expect(l).toContain('.ws__dock { order: 0;')
     expect(l).toContain('.ws__strip { order: 1;')
-    expect(l).toMatch(/\.ws__sheet,\s+\.ws__sheet\.ws__sheet--tall,\s+\.ws__sheet\[aria-label='Menu'\] \{\s+position: fixed;/)
+    expect(l).toMatch(/\.ws__sheet,\s+\.ws__sheet\.ws__sheet--tall,\s+\.ws__sheet\.ws__sheet--onstrip,\s+\.ws__sheet\[aria-label='Menu'\] \{\s+position: fixed;/)
     expect(l).toContain('env(safe-area-inset-left')
     // The strip's compact rules hold sideways too, so its options fit its half.
     expect(CSS).toContain('@media (max-width: 440px), (orientation: landscape) and (max-height: 520px) {')

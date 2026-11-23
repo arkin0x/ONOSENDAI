@@ -1,7 +1,7 @@
 /**
- * PartBadges.tsx: the LINK or COPY mark (PartFormBadge) in a corner of every
+ * PartBadges.tsx: the LINK or SEALED mark (PartFormBadge) in a corner of every
  * object the shard on the bench places (owner, 2026-11-22): green for a link
- * to a public object, orange for a copy carried with what you hide
+ * to a public object, orange for one sealed inside what you hide
  * (lib/partForm.ts, the rule the hide itself follows).
  *
  * Each mark stands on the top corner of its object's box, in the object's own
@@ -17,9 +17,14 @@ import { placedBounds, refKey, type Placed } from 'sno-core/parts'
 import type { ShardModel } from 'sno-core/shards'
 import { useResolved } from '../lib/parts'
 import type { PartForm } from '../lib/partForm'
-import { useWorkshop } from '../store/useWorkshop'
+import { hiddenIn, useWorkshop } from '../store/useWorkshop'
+import { hiddenSets } from '../lib/shardGroups'
+import { isLook } from './lookTool'
 import { PartFormBadge } from './PartFormBadge'
 import { usePartForms } from './partForms'
+
+/** LOOK hides no group: it draws the shard as the world will. */
+const NO_KEYS: string[] = []
 
 /** Past this many placements, no marks: a floor of tiles would be all marks, and each is a page element moved every frame. */
 export const MAX_BADGES = 32
@@ -46,7 +51,14 @@ export function PartBadges(): JSX.Element | null {
   const shard = useWorkshop((s) => s.current())
   const resolved = useResolved(shard ?? null)
   const form = usePartForms(shard)
-  const spots = useMemo(() => (shard ? badgeSpots(shard, resolved, form) : []), [shard, resolved, form])
+  // Not on a placed object a hidden group hides (GROUPS' HIDE).
+  const hiddenKeys = useWorkshop((s) => (isLook(s.tool) ? NO_KEYS : s.hiddenGroups))
+  const spots = useMemo(() => {
+    if (!shard) return []
+    const gone = hiddenSets(shard, hiddenIn(hiddenKeys, shard))?.parts
+    const all = badgeSpots(shard, resolved, form)
+    return gone?.size ? all.filter((b) => !gone.has(b.index)) : all
+  }, [shard, resolved, form, hiddenKeys])
   if (spots.length === 0) return null
   return (
     <>

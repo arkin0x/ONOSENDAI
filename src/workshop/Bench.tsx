@@ -45,9 +45,11 @@ import type { ClockReading } from '../lib/worldClock'
 import { useAnimPreview } from '../store/animPreview'
 import { OVERLAY_ORDER } from '../scene/shardFaces'
 import { ShardLights } from '../scene/shardLight'
-import { nextSelection, ownAddress, useWorkshop, type Tool } from '../store/useWorkshop'
+import { hiddenIn, nextSelection, ownAddress, useWorkshop, type Tool } from '../store/useWorkshop'
+import { hiddenSets } from '../lib/shardGroups'
 import { partMatrix } from 'sno-core/parts'
 import { OwnPartsContext, fetchRef, useResolved } from '../lib/parts'
+import { useBenchResolved } from '../store/heldSize'
 import { PartBadges } from './PartBadges'
 import { BASE_FAR, BASE_NEAR, MIN_DISTANCE, clipPlanes, fitDistance, nextMaxDistance, reachFor, reachRadius, shardSphere, type Sphere } from './benchReach'
 import { useCyberspace } from '../store/useCyberspace'
@@ -61,6 +63,7 @@ import { BenchBloom } from './benchBloom'
 import { usedBenchEye } from '../lib/avatarEye'
 import { FacingArrow, FacingPreviewGroup } from './FacingPreview'
 import { useFacingPreview } from '../store/facingPreview'
+import { stampAim, stampTap } from './stampTap'
 
 type P3 = [number, number, number]
 
@@ -70,6 +73,15 @@ type P3 = [number, number, number]
  * the current level. Model +Z is render -Z (shards.ts toRender), so the tap's
  * render z comes back negated.
  */
+/**
+ * Where a tap lands: STAMP's OBJECT with SNAP TO ITS SIZE on its object's own
+ * size (workshop/stampTap.ts stampAim), anything else on the grid's step.
+ */
+function aimAt(p: Vector3): P3 {
+  const w = useWorkshop.getState()
+  return stampAim([p.x * TICKS_PER_UNIT, p.y * TICKS_PER_UNIT, 0 - p.z * TICKS_PER_UNIT]) ?? snap(p, w.level, w.step(), w.plane)
+}
+
 function snap(p: Vector3, level: number, step: number, plane: WorkPlane): P3 {
   const q = (v: number): number => Math.round((v * TICKS_PER_UNIT) / step) * step
   // The two coordinates in the plane snap; the one along its normal is the level.
@@ -146,16 +158,16 @@ function Grid(): JSX.Element {
     // changed a moment ago must apply to this tap even if the bench has not
     // re-rendered yet.
     const w = useWorkshop.getState()
-    const at = snap(e.point, w.level, w.step(), w.plane)
+    const at = aimAt(e.point)
+    // OBJECT: COPY or LINK the chosen shard, checked against what one hidden object holds (stampTap).
     if (w.tool === 'stamp' && w.stampMode === 'object') {
-      w.placeObject(at, ownAddress(useCyberspace.getState().identity.pubkey, w.currentId))
+      stampTap(at, ownAddress(useCyberspace.getState().identity.pubkey, w.currentId))
     } else if (w.tool === 'stamp') w.placeStamp(at)
     else w.addVertex(at)
   }
 
   const onMove = (e: ThreeEvent<PointerEvent>): void => {
-    const w = useWorkshop.getState()
-    w.setAim(snap(e.point, w.level, w.step(), w.plane))
+    useWorkshop.getState().setAim(aimAt(e.point))
   }
 
   // A finger lifts and the ghost goes with it; a mouse keeps hovering.
@@ -307,6 +319,9 @@ export function Handles(): JSX.Element | null {
   const moving = previewing
   const invalidate = useThree((s) => s.invalidate)
   const chosen = useMemo(() => new Set(selection), [selection])
+  // GROUPS' HIDE: a spot whose every vertex is hidden has no dot; a stack with one shown keeps its dot, and what is hidden of it is never taken (useWorkshop).
+  const hiddenKeys = useWorkshop((s) => s.hiddenGroups)
+  const hiddenVerts = useMemo(() => (shard ? hiddenSets(shard, hiddenIn(hiddenKeys, shard))?.vertices ?? null : null), [shard, hiddenKeys])
   const groups = useMemo(() => {
     const m = new Map<string, number[]>()
     shard?.vertices.forEach((v, i) => {
@@ -314,8 +329,9 @@ export function Handles(): JSX.Element | null {
       const g = m.get(k)
       if (g) g.push(i); else m.set(k, [i])
     })
-    return [...m.values()]
-  }, [shard?.vertices])
+    const all = [...m.values()]
+    return hiddenVerts ? all.filter((g) => g.some((i) => !hiddenVerts.has(i))).map((g) => { const shown = g.filter((i) => !hiddenVerts.has(i)); return [...shown, ...g.filter((i) => hiddenVerts.has(i))] }) : all
+  }, [shard?.vertices, hiddenVerts])
   // Made again only when the points outgrow them, so placing points one by one does not make one each time.
   const capacity = dotCapacity(groups.length)
   const dots = useMemo(() => new HandleDots(capacity), [capacity])
@@ -842,13 +858,16 @@ export function Keys(): null {
       const look = isLook(w.tool)
       // SET EYE: the same keys step the eye, in any tool (shell/EyeBar).
       if (nudge[e.code] && w.eyeEdit) { e.preventDefault(); const n = nudgeFor(benchAxes(camera), nudge[e.code]); w.moveEye(n.axis, n.delta * w.step()); return }
-      if (nudge[e.code]) { e.preventDefault(); if (look) return; const n = nudgeFor(benchAxes(camera), nudge[e.code]); w.moveSelected(n.axis, n.delta * w.step()); return }
+      // BY SIZE steps what is held by its own size on that axis (moveStep).
+      if (nudge[e.code]) { e.preventDefault(); if (look) return; const n = nudgeFor(benchAxes(camera), nudge[e.code]); w.moveSelected(n.axis, n.delta * w.moveStep(n.axis)); return }
       if (e.code === 'Delete' || e.code === 'Backspace') { e.preventDefault(); if (look) return; if (w.selectedFaces.length > 0) w.deleteSelectedFace(); else w.deleteSelected(); return }
       if (e.code === 'Enter') { e.preventDefault(); if (look) return; if (w.facePick.length >= 3) w.fill(); else if (w.selection.length >= 3) w.fillSelection(); return }
       // Escape is not here: it goes through the Escape stack (useEscape), so
       // the palette sheet and the confirmations over the bench close before
       // the bench does. Workshop registers what it clears and closes.
       if (e.code === 'KeyC') { if (!look) w.selectConnected(); return }
+      // X: BY SIZE on or off (the switch on the move handles, shell/MoveHandles).
+      if (e.code === 'KeyX') { if (!look && !w.eyeEdit && !e.repeat) w.setStepBySize(!w.stepBySize); return }
       // B, the held bar's COLOR: the color in hand onto what is held (points, or a face's corners).
       if (e.code === 'KeyB') { if (w.selection.length && !look) w.colorSelected(w.color); return }
       // The keys run 1 to 6 along the dock, left to right (Dock.tsx DOCK).
@@ -861,6 +880,8 @@ export function Keys(): null {
       if (e.code === 'Digit5') w.setTool('add')
       if (e.code === 'Digit6') w.setTool('face')
       // Q and E turn the selection a quarter turn while SELECT holds one; Q turns the stamp otherwise.
+      // G: SNAP TO ITS SIZE for STAMP's OBJECT, on or off (printed on its button).
+      if (e.code === 'KeyG') { if (!look && w.tool === 'stamp' && w.stampMode === 'object') w.setStampSnap(!w.stampSnap); return }
       if (e.code === 'KeyQ') { if (w.tool === 'select' && (w.selection.length || w.partSel.length)) w.rotateSelected(-1); else if (!look) w.turnStamp() }
       // E: a quarter turn while SELECT holds something; with nothing held and no corners picked, SET EYE in hand or put down (AVATAR's FIRST-PERSON EYE).
       if (e.code === 'KeyE') {
@@ -874,6 +895,18 @@ export function Keys(): null {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [camera])
+  return null
+}
+
+/**
+ * What the placed objects on the bench resolve to, handed to the store for
+ * BY SIZE (store/heldSize.ts), so a held object is measured as it is drawn.
+ */
+function HeldProbe(): null {
+  const shard = useWorkshop((s) => s.current())
+  const resolved = useResolved(shard ?? null)
+  useEffect(() => { useBenchResolved.setState({ resolved }) }, [resolved])
+  useEffect(() => () => useBenchResolved.setState({ resolved: new Map() }), [])
   return null
 }
 
@@ -1265,6 +1298,7 @@ function BenchImpl(): JSX.Element {
       <HandleProjector />
       <Aim />
       <Keys />
+      <HeldProbe />
       <BenchWake />
       <AnimWake />
       <AxesReporter />
@@ -1278,7 +1312,7 @@ function BenchImpl(): JSX.Element {
       {/* While the AVATAR sheet is open, turned as FACING would turn it on a move up and to the right (FacingPreview). */}
       <FacingPreviewGroup><AnimClock.Provider value={benchClock}><BenchShard onFace={onFace} onPart={onPart} /></AnimClock.Provider></FacingPreviewGroup>
       <FacingArrow />
-      {/* LINK or COPY, in a corner of every placed object (lib/partForm.ts). */}
+      {/* LINK or SEALED, in a corner of every placed object (lib/partForm.ts). */}
       {!facingShown && <PartBadges />}
       {look && <BenchLookRig />}
       {look && <BenchBloom />}

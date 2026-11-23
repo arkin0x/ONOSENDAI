@@ -58,7 +58,7 @@ export interface EyeFrame {
   up: AxisDirection
   /** Whether to ask the walls: in WALK. Gliding out, the last answer stands. */
   walls: boolean
-  /** Fluid WALK: the walker is drawn standing on the surface, between gibsons (store/walkFluid.ts groundFluid), and reached the way it stands there (eyeReach `stand`): the most the ground climbs, in gibsons. */
+  /** Fluid WALK, and the step WALK at a gibson's zoom: the walker is drawn standing on the surface, between gibsons (store/walkFluid.ts groundFluid, stepFloor), and reached the way it stands there (eyeReach `stand`): the most the ground climbs, in gibsons. */
   stand?: number
   /**
    * Fluid WALK up a stair (lib/walkEye.ts walkRise): the camera trails the

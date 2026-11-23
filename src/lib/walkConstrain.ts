@@ -420,6 +420,128 @@ const FLAT = 1e-12
 let scratch = new Float64Array(0)
 
 /**
+ * A shard's own triangles, bucketed by a coarse grid over their bounds, so a
+ * question about a small box (a step, the ground under a walker, the eye's
+ * line) reads the few triangles near it instead of every one: a landscape
+ * tile is some 2,200 (arkinox, 2026-11-23; the WALK ground asks several times
+ * a frame). Built once per mesh, on first use, for meshes of TRI_GRID_MIN
+ * triangles or more; it only ever narrows which triangles are tested, in
+ * their own order, so every answer is the one the full loop gives.
+ */
+interface TriGrid {
+  lo: [number, number, number]
+  /** The largest of the bounds' distances from the model's origin, for the slack (gridNear). */
+  ext: number
+  /** Cells per axis, and each cell's size per axis in model units. */
+  n: [number, number, number]
+  size: [number, number, number]
+  /** For each cell, where its triangles start in `items` (one more entry than cells). */
+  start: Int32Array
+  /** Triangle numbers (the triangle at tris[9 n]), cell by cell, ascending within each cell. */
+  items: Int32Array
+  /** Which question last took each triangle, so one taken through two cells is taken once. */
+  seen: Uint32Array
+  stamp: number
+}
+
+/** Meshes this small are read whole: a grid would cost more than it saves. */
+const TRI_GRID_MIN = 128
+
+/** The most cells along an axis. */
+const TRI_GRID_CELLS = 24
+
+const triGrids = new WeakMap<Float64Array, TriGrid | null>()
+
+/** For tests: off, every question reads every triangle, as before the grid, to hold the two answers side by side. */
+export const triGridUse = { on: true }
+
+function triGrid(t: Float64Array): TriGrid | null {
+  const held = triGrids.get(t)
+  if (held !== undefined) return held
+  const count = t.length / 9
+  if (count < TRI_GRID_MIN) { triGrids.set(t, null); return null }
+  const lo: [number, number, number] = [Infinity, Infinity, Infinity], hi: [number, number, number] = [-Infinity, -Infinity, -Infinity]
+  for (let q = 0; q < t.length; q += 3) for (let k = 0; k < 3; k++) { if (t[q + k] < lo[k]) lo[k] = t[q + k]; if (t[q + k] > hi[k]) hi[k] = t[q + k] }
+  const ext = Math.max(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2])
+  if (!(ext > 0) || !Number.isFinite(ext)) { triGrids.set(t, null); return null }
+  const cell = ext / TRI_GRID_CELLS
+  const n = [0, 1, 2].map((k) => Math.max(1, Math.min(TRI_GRID_CELLS, Math.ceil((hi[k] - lo[k]) / cell)))) as [number, number, number]
+  const size = [0, 1, 2].map((k) => Math.max((hi[k] - lo[k]) / n[k], 1e-12)) as [number, number, number]
+  const at = (v: number, k: number): number => Math.max(0, Math.min(n[k] - 1, Math.floor((v - lo[k]) / size[k])))
+  const cells = n[0] * n[1] * n[2]
+  const counts = new Int32Array(cells + 1)
+  const range = (q: number, out: number[]): void => {
+    for (let k = 0; k < 3; k++) {
+      const a = Math.min(t[q + k], t[q + 3 + k], t[q + 6 + k]), b = Math.max(t[q + k], t[q + 3 + k], t[q + 6 + k])
+      out[k * 2] = at(a - NEAR, k)
+      out[k * 2 + 1] = at(b + NEAR, k)
+    }
+  }
+  const r = [0, 0, 0, 0, 0, 0]
+  for (let m = 0; m < count; m++) {
+    range(m * 9, r)
+    for (let x = r[0]; x <= r[1]; x++) for (let y = r[2]; y <= r[3]; y++) for (let z = r[4]; z <= r[5]; z++) counts[(x * n[1] + y) * n[2] + z + 1]++
+  }
+  for (let c = 0; c < cells; c++) counts[c + 1] += counts[c]
+  const items = new Int32Array(counts[cells])
+  const fill = counts.slice(0, cells)
+  for (let m = 0; m < count; m++) {
+    range(m * 9, r)
+    for (let x = r[0]; x <= r[1]; x++) for (let y = r[2]; y <= r[3]; y++) for (let z = r[4]; z <= r[5]; z++) items[fill[(x * n[1] + y) * n[2] + z]++] = m
+  }
+  const g: TriGrid = { lo, ext: Math.max(...lo.map(Math.abs), ...hi.map(Math.abs)), n, size, start: counts, items, seen: new Uint32Array(count), stamp: 0 }
+  triGrids.set(t, g)
+  return g
+}
+
+/** Reused by gridNear: the triangle numbers a question takes. */
+let gridPick = new Int32Array(64)
+
+/** Reused by gridNear: the cell ranges a question covers. */
+const gridRange = [0, 0, 0, 0, 0, 0]
+
+/** Reused by firstHit: the box its step's line spans. */
+const hitLo = [0, 0, 0], hitHi = [0, 0, 0]
+
+/**
+ * The triangle numbers of `t` whose grid cells meet the box `lo`..`hi`
+ * (model units), ascending, in gridPick: how many. -1 when there is no grid
+ * or the box takes in most of it, and the caller reads every triangle.
+ */
+function gridNear(t: Float64Array, lo: readonly number[], hi: readonly number[]): number {
+  if (!triGridUse.on) return -1
+  const g = triGrid(t)
+  if (!g) return -1
+  const r = gridRange
+  let cells = 1
+  for (let k = 0; k < 3; k++) {
+    // A hit's place is a mix of corners with weights a hair below zero (EDGE_SLACK), so a little past a triangle's own bounds: widened as firstHit widens a placement's.
+    const pad = NEAR + 1e-8 * (Math.abs(lo[k]) + Math.abs(hi[k]) + g.ext + 1)
+    const a = Math.floor((lo[k] - pad - g.lo[k]) / g.size[k]), b = Math.floor((hi[k] + pad - g.lo[k]) / g.size[k])
+    if (b < 0 || a > g.n[k] - 1 || !(a <= b)) return 0
+    r[k * 2] = Math.max(0, a)
+    r[k * 2 + 1] = Math.min(g.n[k] - 1, b)
+    cells *= r[k * 2 + 1] - r[k * 2] + 1
+  }
+  if (cells * 2 > g.n[0] * g.n[1] * g.n[2]) return -1
+  g.stamp = (g.stamp + 1) >>> 0
+  if (g.stamp === 0) { g.seen.fill(0); g.stamp = 1 }
+  let m = 0
+  for (let x = r[0]; x <= r[1]; x++) for (let y = r[2]; y <= r[3]; y++) for (let z = r[4]; z <= r[5]; z++) {
+    const c = (x * g.n[1] + y) * g.n[2] + z
+    for (let e = g.start[c]; e < g.start[c + 1]; e++) {
+      const tri = g.items[e]
+      if (g.seen[tri] === g.stamp) continue
+      g.seen[tri] = g.stamp
+      if (m === gridPick.length) { const grown = new Int32Array(m * 2); grown.set(gridPick); gridPick = grown }
+      gridPick[m++] = tri
+    }
+  }
+  gridPick.subarray(0, m).sort()
+  return m
+}
+
+/**
  * How far along a straight step the first blocking face is, in model units,
  * or null when nothing is in the way. The step starts at `o` (the shard's
  * render frame, model units) and goes `s` (+1 or -1) along render axis `i`,
@@ -490,7 +612,14 @@ export function firstHit(mesh: WallMesh, o: readonly [number, number, number], i
     bestUnseen = ownerUnseen
   }
   const t = mesh.tris
-  for (let n = 0; n < t.length; n += 9) test(t, n, n + 3, n + 6, true)
+  // Only the triangles near the step's line (TriGrid), in their own order: the same answer as all of them.
+  const rlo = hitLo, rhi = hitHi
+  rlo[j] = pj - NEAR; rhi[j] = pj + NEAR; rlo[k] = pk - NEAR; rhi[k] = pk + NEAR
+  const a0 = pi + s * Math.min(0, minT), a1 = pi + s * maxT
+  rlo[i] = Math.min(a0, a1); rhi[i] = Math.max(a0, a1)
+  const picked = Number.isFinite(maxT) ? gridNear(t, rlo, rhi) : -1
+  if (picked < 0) for (let n = 0; n < t.length; n += 9) test(t, n, n + 3, n + 6, true)
+  else for (let q = 0; q < picked; q++) { const n = gridPick[q] * 9; test(t, n, n + 3, n + 6, true) }
   for (const p of mesh.placements) {
     // The step's line beside the placement's bounds misses every one of its
     // triangles (each lies inside them); NEAR as the triangle test has it.
@@ -619,11 +748,15 @@ export function trianglesNear(mesh: WallMesh, lo: readonly number[], hi: readonl
     out.push(t[a], t[a + 1], t[a + 2], t[b], t[b + 1], t[b + 2], t[c], t[c + 1], t[c + 2])
   }
   const t = mesh.tris
-  for (let n = 0; n < t.length; n += 9) {
-    if (!triMeetsBox(t, n, n + 3, n + 6, lo, hi)) continue
-    if (clip && !triMeetsBox(t, n, n + 3, n + 6, clip.min, clip.max)) continue
+  const near = (n: number): void => {
+    if (!triMeetsBox(t, n, n + 3, n + 6, lo, hi)) return
+    if (clip && !triMeetsBox(t, n, n + 3, n + 6, clip.min, clip.max)) return
     take(t, n, n + 3, n + 6)
   }
+  // Only the triangles near the box (TriGrid), in their own order.
+  const picked = gridNear(t, lo, hi)
+  if (picked < 0) for (let n = 0; n < t.length; n += 9) near(n)
+  else for (let q = 0; q < picked; q++) near(gridPick[q] * 9)
   for (const p of mesh.placements) {
     let apart = false
     for (let q = 0; q < 3; q++) if (hi[q] < p.min[q] - NEAR || lo[q] > p.max[q] + NEAR) apart = true

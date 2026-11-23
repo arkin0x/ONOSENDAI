@@ -38,7 +38,7 @@ import { aheadOfState, eventsAhead } from './walkAhead'
 import { walkLimitsOn, walkSpeedFactor } from './walkLimits'
 import { useLayers } from './useLayers'
 import { walkInputOpen } from './walkInput'
-import { REST_FLOOR, faceDistance, groundUnder, restDrop, wallItemsAt, type WallItem } from './walkWalls'
+import { FOOT_SLOPE, REST_FLOOR, clearShare, faceDistance, footGround, groundUnder, restDrop, steepGround, wallItemsAt, type WallItem } from './walkWalls'
 import { STEP_DOWN_MAX, STEP_UP_MAX } from './walkStep'
 
 /** How long the eye takes to glide onto a new anchor, in seconds (the time constant): about a third of a second to settle. */
@@ -297,6 +297,8 @@ const foot = {
   lift: 0,
   /** What the feet added to the drawn height at the last frame, gibsons along `upAxis` and `upDir`. */
   extra: 0,
+  /** How far the drawn point was held back from a face at the feet's height at the last frame, cyberspace gibsons (clearShare). */
+  pull: [0, 0, 0] as [number, number, number],
   upAxis: 'y' as AxisName,
   upDir: 1 as 1 | -1,
   /** The walls near the walker, listed every FOOT_ITEMS_MS or on a new gibson. */
@@ -309,6 +311,9 @@ const foot = {
   /** The surface under the drawn point, kept for this gibson, these walls and this point (groundAt). */
   col: null as number | null,
   colKey: '',
+  /** The ground under the footprint there, kept the same way (footAt). */
+  print: 0,
+  printKey: '',
   pending: { pending: false },
 }
 
@@ -319,11 +324,13 @@ function resetFoot(): void {
   foot.falling = false
   foot.lift = 0
   foot.extra = 0
+  foot.pull = [0, 0, 0]
   foot.items = []
   foot.itemsKey = ''
   foot.itemsAt = -Infinity
   foot.underKey = ''
   foot.colKey = ''
+  foot.printKey = ''
 }
 
 /** The drawn feet's height along up, gibsons from the anchor's middle, or null while fluid WALK is not running: for tests and the DEV handle. */
@@ -342,12 +349,13 @@ export function footHeight(): number | null {
  *
  * | Case | The drawn height |
  * |---|---|
- * | standing (a face less than a gibson under the anchor's middle) | the surface under the drawn point (store/walkWalls.ts groundUnder), followed exactly up a slope and down one; a riser it passes over is stood on at once, and the camera follows it up over GLIDE_TAU_S (lib/walkEye.ts walkRise); a drop is eased down at FOOT_DROP_SPEED at least |
+ * | standing (a face less than a gibson under the anchor's middle) | the highest walkable ground under the footprint at the drawn point (store/walkWalls.ts groundUnder, then footGround), followed exactly up a slope and down one; a riser it passes over is stood on at once, and the camera follows it up over GLIDE_TAU_S (lib/walkEye.ts walkRise); a drop is eased down at FOOT_DROP_SPEED at least |
  * | gravity off, rising off the floor | from the surface to the anchor's own height by the time the walker is half a step up, where it leaves the gibson, so the hand-over is seamless |
  * | in the air (a jump, a fall) | the fall's own arc, from where the feet were when it began, easing onto the arc's point (GLIDE_TAU_S) |
  * | a shard in reach still being built | where the feet were, until it is |
  * | not standing (gravity off, floating) | the anchor plus the glide, as before |
- * | always | never under the surface under the drawn point |
+ * | a drawn point inside the foot of a wall, or up its side (a culvert's, a cliff's: the wall leans nearer the walker at the feet than at its middle, where fluid WALK keeps its gap) | drawn short of it, toward the anchor, on the floor before it (holdBack, offWallSide) |
+ * | always | never under the highest walkable ground under the footprint at the drawn point |
  *
  * It adds to walkGlide along up only, so the rig draws it with no change.
  * Leaving fluid WALK, what it added glides off with the rest (GLIDE_TAU_S).
@@ -369,6 +377,7 @@ export function groundFluid(now: number = performance.now()): void {
       const stepG = 2 ** cs.scaleExp
       st.glide[foot.upAxis] += (foot.extra * foot.upDir) / stepG
       walkGlide[foot.upAxis] += (foot.extra * foot.upDir) / stepG
+      for (const a of AXES) { st.glide[a] -= foot.pull[AXIS_INDEX[a]] / stepG; walkGlide[a] -= foot.pull[AXIS_INDEX[a]] / stepG }
       st.glide[su.axis] += (stepDrop * su.dir) / stepG
       walkGlide[su.axis] += (stepDrop * su.dir) / stepG
       walkGlide.active = true
@@ -417,19 +426,25 @@ export function groundFluid(now: number = performance.now()): void {
   const was = foot.h
   let h = was
   const decayK = Math.exp(-dt / GLIDE_TAU_S)
+  const pull: [number, number, number] = [0, 0, 0]
   if (!falling) {
     lead[AXIS_INDEX[ui]] = 0
     foot.pending.pending = false
     const under = underAnchor(cs.cursor, items, g, rise, drop, downKey)
-    const col = groundAt(cs.cursor, lead, items, g, rise, drop, downKey)
+    const stood = under !== null && under > -STAND_REACH && !foot.pending.pending
+    let col = groundAt(cs.cursor, lead, items, g, rise, drop, downKey)
+    // No way to the drawn point at all, a riser's lift included: it is inside the foot of a wall. Drawn short of it (holdBack).
+    if (stood && col === null && holdBack(cs.cursor, lead, under, items, g, pull)) col = groundAt(cs.cursor, lead, items, g, rise, drop, downKey)
+    // Up the side of a wall the search's lifts climbed onto (higher than any walkable slope rises that far out): drawn nearer the anchor until it stands on ground.
+    if (stood && col !== null && col > under + STEEP_RISE + FOOT_SLOPE * Math.hypot(lead[0], lead[1], lead[2])) col = offWallSide(cs.cursor, lead, col, under, items, g, rise, drop, pull)
     // A shard in reach still being built: the feet stay where they are until it is.
     if (!foot.pending.pending) {
       const standing = under !== null && under > -STAND_REACH
       // Not standing on anything: on the floor of the gibson it is drawn in.
       let target = base - REST_FLOOR * stepG
       if (standing) {
-        // Past a rim with nothing near under the drawn point: still on the rim the anchor stands on.
-        const s = col === null || col < under - stepG ? under : col
+        // Past a rim with nothing near under the drawn point: still on the rim the anchor stands on. Else on the highest ground under the footprint (footAt).
+        const s = col === null || col < under - stepG ? under : footAt(cs.cursor, lead, col, items, g, downKey)
         // Gravity off, pushing up off the floor: up to the next gibson's floor by half a step up, where it leaves this one.
         const r = gravity ? 0 : Math.max(0, st.frac[ui] * up.dir * stepG)
         const off = r - REST_FLOOR * stepG
@@ -438,7 +453,10 @@ export function groundFluid(now: number = performance.now()): void {
       if (fresh) h = target
       else if (h < target) h = standing ? target : h + (target - h) * (1 - decayK)
       else if (h > target) h = Math.max(target, Math.min(h - FOOT_DROP_SPEED * stepG * dt, target + (h - target) * decayK))
-      if (col !== null && h < col) h = col
+      if (col !== null) {
+        const floor = footAt(cs.cursor, lead, col, items, g, downKey)
+        if (h < floor) h = floor
+      }
     }
     foot.falling = false
   } else {
@@ -454,10 +472,18 @@ export function groundFluid(now: number = performance.now()): void {
     h = air + foot.lift
     // The ground under the arc, searched from the arc's own point (never
     // from the gibson the fall left, which can be far above or below it), in open air: the drawn origin, half a gibson under it, may be inside a slope.
-    const from = Math.max(h, base)
+    // Or from where the feet were the frame before, when that is higher: the
+    // frame a fall reaches a floor draws its arc a little past it, and a
+    // search from there, under the floor, would miss the floor it went through.
+    const from = Math.max(h, base, fresh ? -Infinity : was)
     lead[AXIS_INDEX[ui]] = from * up.dir
-    const col = groundUnder(cs.cursor, lead, items, g, rise, drop)
-    if (col !== null && h < col) h = col
+    let col = groundUnder(cs.cursor, lead, items, g, rise, drop)
+    // Falling past the foot of a wall, inside it: drawn short of it at the search's height, as standing.
+    if (col === null && holdBack(cs.cursor, lead, from, items, g, pull)) col = groundUnder(cs.cursor, lead, items, g, rise, drop)
+    if (col !== null) {
+      const floor = footGround(cs.cursor, lead, col, items, g)
+      if (h < floor) h = floor
+    }
   }
   // A riser stood on at once (a rise faster than RISE_FOLLOW_SPEED): the
   // feet are on it, and the camera follows them up over GLIDE_TAU_S (walkRise).
@@ -474,6 +500,11 @@ export function groundFluid(now: number = performance.now()): void {
     walkGlide[ui] += (foot.extra * up.dir) / stepG
     walkGlide.active = true
   }
+  foot.pull = pull
+  if (pull[0] !== 0 || pull[1] !== 0 || pull[2] !== 0) {
+    for (const a of AXES) walkGlide[a] -= pull[AXIS_INDEX[a]] / stepG
+    walkGlide.active = true
+  }
 }
 
 /** The step WALK's drop under the cursor (restDrop, along its gravity), in gibsons: kept for this gibson, asked again every FOOT_ITEMS_MS (walls arriving). */
@@ -488,6 +519,81 @@ function stepWalkDrop(at: Position, plane: number, scaleExp: number, g: AxisDire
   return r.drop
 }
 
+/** The step WALK's floor under the eased walker point (stepFloor): the walls near it, and what it lifted the point by at the last frame. */
+const stepKeep = { key: '', at: -Infinity, items: [] as WallItem[], lift: 0, last: null as number | null, floorKey: '', floor: null as number | null }
+
+/**
+ * The step WALK's walker point, as the rig eases it from one gibson to the
+ * next (scene/Scene.tsx Rig): how far, in gibsons along up, to lift it onto
+ * the ground under its footprint, 0 when it is already on or above it
+ * (arkinox, 2026-11-23: "I am dipping under the floor"). The rig eases the
+ * point along a straight line toward the next standing place, which on a
+ * hill's crown or over a stair's nosing runs
+ * under the ground; and a walker point even a hair under the ground holds
+ * the camera at the feet (store/walkWalls.ts eyeReach: inside a solid), so
+ * the whole view dropped into the hill for those frames. `lead` is the eased
+ * point, cyberspace gibsons from the middle of the cursor's gibson. The
+ * ground is found the way fluid WALK finds it (groundUnder from the
+ * cursor's middle, then footGround), at a gibson's zoom only. In a fall
+ * the height is the fall's, which the rig follows exactly, but the way
+ * across still lags, so a fall off a slope is lifted out of the slope behind
+ * it too. A lift that comes on faster than RISE_FOLLOW_SPEED (a stair's
+ * nosing), out of a fall, is followed by the camera over GLIDE_TAU_S, as
+ * fluid WALK's riser is (lib/walkEye.ts walkRise). Display only: nothing
+ * moves and nothing is published.
+ */
+export function stepFloor(lead: readonly [number, number, number], now: number = performance.now()): number {
+  const dt = stepKeep.last === null ? 0 : Math.min(MAX_DT, Math.max(0, (now - stepKeep.last) / 1000))
+  stepKeep.last = now
+  const cs = useCyberspace.getState()
+  if (!cs.walking || walkGlide.exact || cs.scaleExp !== 0) { stepKeep.lift = 0; return 0 }
+  // In a fall the height is the fall's own (the rig follows it exactly), and only the eased way across lags it.
+  const falling = fallState() !== null || walkFall.active
+  const g = useWalk.getState().gravity ? walkDown() : WORLD_DOWN
+  const up = upOf(g)
+  const ui = AXIS_INDEX[up.axis]
+  const k = `${cs.plane}|${cs.cursor.x},${cs.cursor.y},${cs.cursor.z}`
+  if (k !== stepKeep.key || now - stepKeep.at > FOOT_ITEMS_MS) {
+    stepKeep.items = wallItemsAt(cs.plane, cs.cursor)
+    stepKeep.key = k
+    stepKeep.at = now
+    stepKeep.floorKey = ''
+  }
+  const height = lead[ui] * up.dir
+  // Kept while the point across (to GROUND_QUANT gibsons), the walls and their down stay put: a walker
+  // at rest asks nothing. Its height matters only to a search that starts under the middle (below).
+  const low = height + 1 < 0
+  const q = (v: number): number => Math.round(v / GROUND_QUANT)
+  const fk = `${k}|${g.axis}${g.dir}|${ui === 0 ? '' : q(lead[0])},${ui === 1 ? '' : q(lead[1])},${ui === 2 ? '' : q(lead[2])}|${low ? q(height) : ''}`
+  if (fk !== stepKeep.floorKey) {
+    // Searched from the cursor's middle, which is clear: the eased point may be under the ground.
+    const flat: [number, number, number] = [lead[0], lead[1], lead[2]]
+    flat[ui] = 0
+    const pending = { pending: false }
+    let col = groundUnder(cs.cursor, flat, stepKeep.items, g, Number(STEP_UP_MAX), Number(STEP_DOWN_MAX + 1n), pending)
+    // Far under the middle (a fall's last frame, drawn a little past the floor it reaches): searched from a gibson over the point.
+    if (col === null && low) {
+      flat[ui] = (height + 1) * up.dir
+      col = groundUnder(cs.cursor, flat, stepKeep.items, g, Number(STEP_UP_MAX), Number(STEP_DOWN_MAX + 1n), pending)
+    }
+    stepKeep.floor = col === null ? null : footGround(cs.cursor, flat, col, stepKeep.items, g, pending)
+    // A shard still being built is asked about again next frame.
+    stepKeep.floorKey = pending.pending ? '' : fk
+  }
+  const floor = stepKeep.floor
+  const lift = floor === null ? 0 : Math.max(0, floor - height)
+  // A nosing met at once: the camera trails it up (walkRise), as fluid WALK's riser. The rig keeps
+  // each lift in the eased point, so `lift` is this frame's rise alone, measured as fluid WALK measures one.
+  const jump = lift - RISE_FOLLOW_SPEED * dt
+  if (jump > 0 && !falling) {
+    walkRise.offset -= jump
+    walkRise.up.axis = up.axis
+    walkRise.up.dir = up.dir
+  }
+  stepKeep.lift = lift
+  return lift
+}
+
 /** The ground under the drawn point (groundUnder), kept while the anchor, the walls and the drawn point (to GROUND_QUANT gibsons) stay put. */
 function groundAt(at: Position, lead: readonly [number, number, number], items: readonly WallItem[], g: AxisDirection, rise: number, drop: number, downKey: string): number | null {
   const q = (v: number): number => Math.round(v / GROUND_QUANT)
@@ -498,6 +604,85 @@ function groundAt(at: Position, lead: readonly [number, number, number], items: 
   if (out.pending) foot.pending.pending = true
   foot.colKey = out.pending ? '' : k
   return foot.col
+}
+
+/**
+ * The drawn point `lead` (cyberspace gibsons from the anchor's middle), which
+ * the ground search could not reach by any lift (groundUnder's null), held
+ * back toward the anchor, level, HOLD_MARGIN short of the first face the
+ * level line at the feet's height, `height` gibsons up from the middle,
+ * meets on its way out to it (store/walkWalls.ts clearShare). Fluid WALK
+ * holds the smooth position short of a wall at the walker's middle
+ * (FLUID_FACE_GAP), but the feet stand lower, where a steep slope's foot (a
+ * culvert's side, a cliff's toe) leans further toward the walker: drawn the
+ * whole way out, they were inside it, and the camera with them. `lead` is
+ * moved and `pull` says by how much, cyberspace gibsons. True when it moved.
+ */
+function holdBack(at: Position, lead: [number, number, number], height: number, items: readonly WallItem[], g: AxisDirection, pull: [number, number, number]): boolean {
+  const f = clearShare(at, lead, height, items, g, HOLD_MARGIN)
+  if (!(f < 1)) return false
+  const ui = AXIS_INDEX[upOf(g).axis]
+  for (let q = 0; q < 3; q++) {
+    if (q === ui) continue
+    pull[q] += lead[q] * (1 - f)
+    lead[q] *= f
+  }
+  return true
+}
+
+/** How far above the anchor's floor, beyond what a walkable slope rises out to the drawn point (FOOT_SLOPE), its ground must be before offWallSide asks whether it is a wall's side, in gibsons. */
+const STEEP_RISE = 1 / 16
+
+/** How many halvings offWallSide makes to find where the ground stops being a wall's side: to a 64th of the way. */
+const OFF_WALL_STEPS = 6
+
+/**
+ * The drawn point `lead` stood on `col`, `under` being the anchor's floor:
+ * when `col` is the side of a wall (store/walkWalls.ts steepGround), which the
+ * ground search's lifts climb onto beside a steep face, the point is drawn
+ * nearer the anchor, as far out as it still stands on ground, found to a
+ * 64th of the way (OFF_WALL_STEPS), so it slides along the wall's foot
+ * rather than jumping (`lead` and `pull` updated); the ground there comes
+ * back. The anchor's own middle (none of the way) always stands.
+ */
+function offWallSide(at: Position, lead: [number, number, number], col: number, under: number, items: readonly WallItem[], g: AxisDirection, rise: number, drop: number, pull: [number, number, number]): number | null {
+  if (!steepGround(at, lead, col, items, g)) return col
+  const ui = AXIS_INDEX[upOf(g).axis]
+  const was: [number, number, number] = [lead[0], lead[1], lead[2]]
+  const groundAtShare = (f: number): number | null => {
+    for (let q = 0; q < 3; q++) if (q !== ui) lead[q] = was[q] * f
+    return groundUnder(at, lead, items, g, rise, drop)
+  }
+  const stands = (gr: number | null): boolean => gr !== null && (gr <= under + STEEP_RISE || !steepGround(at, lead, gr, items, g))
+  let lo = 0, hi = 1
+  let ground = groundAtShare(0)
+  for (let n = 0; n < OFF_WALL_STEPS; n++) {
+    const mid = (lo + hi) / 2
+    const gr = groundAtShare(mid)
+    if (stands(gr)) { lo = mid; ground = gr } else hi = mid
+  }
+  groundAtShare(lo)
+  // A side all but upright is edge-on to the ground search's line down, which finds the floor under its foot:
+  // the point is held short of the side at the floor's height too (holdBack's line), and the ground found again.
+  const f = clearShare(at, lead, under, items, g, HOLD_MARGIN)
+  if (f < 1) ground = groundAtShare(lo * f)
+  for (let q = 0; q < 3; q++) if (q !== ui) pull[q] += was[q] - lead[q]
+  return ground
+}
+
+/** How far short of a face holdBack holds the drawn point, in gibsons. */
+const HOLD_MARGIN = 1 / 32
+
+/** The ground under the footprint at the drawn point (store/walkWalls.ts footGround), kept while the anchor, the walls, the drawn point and the ground under it stay put. */
+function footAt(at: Position, lead: readonly [number, number, number], ground: number, items: readonly WallItem[], g: AxisDirection, downKey: string): number {
+  const q = (v: number): number => Math.round(v / GROUND_QUANT)
+  const k = `${foot.itemsKey}|${at.x},${at.y},${at.z}|${downKey}|${q(lead[0])},${q(lead[1])},${q(lead[2])}|${q(ground)}`
+  if (k === foot.printKey) return foot.print
+  const out = { pending: false }
+  foot.print = footGround(at, lead, ground, items, g, out)
+  // A shard still being built is asked about again next frame.
+  foot.printKey = out.pending ? '' : k
+  return foot.print
 }
 
 /** How finely groundAt's key tells one drawn point from another, in gibsons: far under a pixel. */
@@ -514,6 +699,7 @@ function itemsNear(plane: number, at: Position, now: number): WallItem[] {
     foot.itemsAt = now
     foot.underKey = ''
     foot.colKey = ''
+    foot.printKey = ''
   }
   return foot.items
 }

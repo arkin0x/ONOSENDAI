@@ -6,7 +6,7 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { newShard, TICKS_PER_UNIT, toPayload, fromPayload, ticksOf, type ShardModel } from 'sno-core/shards'
+import { MAX_EXTENT, newShard, TICKS_PER_UNIT, toPayload, fromPayload, ticksOf, type ShardModel } from 'sno-core/shards'
 import { resolveParts, partMatrix } from 'sno-core/parts'
 import { BUILT_IN, toBytes, toModel } from 'sno-core/snoPalette'
 import { bakeSource, mergePalette, missingIn, snapToSize, stampCopyInto, stampedIndices, stampedShard, stampPart, stampSize, type CopySource } from '../stampCopy'
@@ -150,7 +150,10 @@ describe('stampCopyInto', () => {
     const r = stampCopyInto({ ...newShard('Level'), extent: 8 }, src, [16 * T, 0, 0], 0)
     if (!r.ok) throw new Error(r.why)
     expect(r.shard.extent).toBe(24)
-    const far = stampCopyInto({ ...newShard('Level'), extent: 8 }, src, [60 * T, 0, 0], 0)
+    // GRID SIZE runs to 4,096 (DECK-0003 §1.8): 60 units out now fits, and the edge is MAX_EXTENT.
+    const sixty = stampCopyInto({ ...newShard('Level'), extent: 8 }, src, [60 * T, 0, 0], 0)
+    expect(sixty.ok).toBe(true)
+    const far = stampCopyInto({ ...newShard('Level'), extent: 8 }, src, [(MAX_EXTENT - 4) * T, 0, 0], 0)
     expect(far.ok).toBe(false)
     if (!far.ok) expect(far.why).toMatch(/^Not stamped: /)
   })

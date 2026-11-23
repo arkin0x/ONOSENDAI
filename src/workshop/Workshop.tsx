@@ -47,7 +47,7 @@ import { Guide } from './shell/Guide'
 import { ToolHint } from './shell/ToolHint'
 import { guideDone, startingTools, useBeginner } from './beginner'
 import { useTutorial } from '../store/useTutorial'
-import { ObjectPicker } from './ObjectPicker'
+import { StampLibrary } from './StampLibrary'
 import { PaletteModal } from './PaletteModal'
 import { ZipImport } from './ZipImport'
 import { Dock } from './shell/Dock'
@@ -315,7 +315,7 @@ export function Workshop(): JSX.Element | null {
           </Sheet>
         )}
         {sheet === 'palette' && <PaletteModal onClose={closeSheet} foldAsk={foldAsk} />}
-        {sheet === 'object' && <ObjectPicker onClose={closeSheet} />}
+        {sheet === 'object' && <StampLibrary onClose={closeSheet} />}
         {/* The first visit's guide and the tool's fading hint, over the strip; neither over a sheet. */}
         {sheet === null && !eyeEdit && <Guide />}
         <ToolHint hidden={sheet !== null || eyeEdit} />

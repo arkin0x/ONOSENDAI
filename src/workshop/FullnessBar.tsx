@@ -15,6 +15,11 @@
  * Two lines of words under it, each one line at a phone's width and both
  * always there (the second may be empty), so nothing under the bar moves
  * when a shard grows past the limit or places its first object.
+ *
+ * STAMP's library (StampLibrary) shows the same bar with what one stamp of
+ * the chosen shard would add (`next`): a hatched run after the fill, the
+ * percent "now to then", and the colour of what it would be, so the warning
+ * comes before the tap. It puts its own words in the two lines.
  */
 
 import type { CSSProperties } from 'react'
@@ -25,18 +30,32 @@ interface Props {
   payload: number
   /** How many objects it places that go out on their own (lib/shardFullness.ts placedApart). */
   apart?: number
+  /** The payload one stamp would leave (STAMP's library): a hatched run after the fill. */
+  next?: number | null
+  /** Words for the first line in place of the usual ones. */
+  words?: string
+  /** Words for the second line in place of the usual ones. */
+  note?: string
 }
 
-export function FullnessBar({ payload, apart = 0 }: Props): JSX.Element {
+const clamp = (n: number): number => Math.max(0, Math.min(1, n))
+
+export function FullnessBar({ payload, apart = 0, next = null, words: ownWords, note: ownNote }: Props): JSX.Element {
   const f = fullnessOf(payload)
-  const words = fullnessWords(f)
-  const note = fullnessNote(f, apart)
-  const style = { '--fb-share': Math.max(0, Math.min(1, f.share)) } as CSSProperties
+  const then = next === null ? null : fullnessOf(next)
+  // What a stamp would leave, when it grows the shard: the bar shows it, in the colour it would be.
+  const grown = then && then.payload > f.payload ? then : null
+  const words = ownWords ?? fullnessWords(grown ?? f)
+  const note = ownNote ?? fullnessNote(grown ?? f, apart)
+  const level = (grown ?? f).level
+  const style = { '--fb-share': clamp(f.share), '--fb-next': grown ? clamp(grown.share) - clamp(f.share) : 0 } as CSSProperties
   return (
-    <div className={`fullbar fullbar--${f.level}`}>
+    <div className={`fullbar fullbar--${level}`}>
       <div className="fullbar__head">
         <span className="fullbar__label">FULL</span>
-        <span className="fullbar__pct" data-testid="fullbar-pct">{f.percent}%</span>
+        <span className="fullbar__pct" data-testid="fullbar-pct">
+          {f.percent}%{grown && <> <span className="fullbar__to">TO</span> {grown.percent}%</>}
+        </span>
       </div>
       <div
         className="fullbar__track"
@@ -46,9 +65,10 @@ export function FullnessBar({ payload, apart = 0 }: Props): JSX.Element {
         aria-valuemin={0}
         aria-valuemax={HIDE_WHOLE_BYTES}
         aria-valuenow={Math.min(f.signed, HIDE_WHOLE_BYTES)}
-        aria-valuetext={words}
+        aria-valuetext={fullnessWords(f)}
       >
         <span className="fullbar__fill" />
+        {grown && <span className="fullbar__next" data-testid="fullbar-next" />}
         <span className="fullbar__ticks" aria-hidden />
       </div>
       <div className="fullbar__words" data-testid="fullbar-words">

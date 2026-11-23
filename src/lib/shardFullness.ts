@@ -133,3 +133,14 @@ export function fullnessNote(f: Fullness, apart: number): string {
   if (apart <= 0) return ''
   return apart === 1 ? 'This shard only: 1 placed object is not in it.' : `This shard only: ${apart} placed objects are not in it.`
 }
+
+/**
+ * Why a stamp is not made, or null: it would leave the shard past what one
+ * hidden object holds, and larger than it was (a shard already past it is
+ * never stamped bigger). In plain words, with the numbers.
+ */
+export function stampRefusal(beforeBytes: number, afterBytes: number): string | null {
+  const limit = wholePayloadLimit()
+  if (afterBytes <= limit || afterBytes <= beforeBytes) return null
+  return `Not stamped: the shard would be ${afterBytes.toLocaleString('en-US')} of ${limit.toLocaleString('en-US')} bytes, more than one hidden object holds.`
+}

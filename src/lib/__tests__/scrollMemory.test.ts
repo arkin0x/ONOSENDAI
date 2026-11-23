@@ -223,7 +223,7 @@ describe('the lists that remember', () => {
   const src = (p: string): string => readFileSync(join(__dirname, '..', '..', p), 'utf8')
   it.each([
     ['workshop/Workshop.tsx', 'workshop-menu', 'bodyRef={menuScroll}'],
-    ['workshop/ObjectPicker.tsx', 'workshop-stamp-objects', '<ul className="objpick__list" ref={listScroll}>'],
+    ['workshop/StampLibrary.tsx', 'workshop-stamp-objects', 'bodyRef={listScroll}'],
     ['hud/PlaceObjectPicker.tsx', 'place-object-mine', '<ul className="objpick__list" ref={listScroll}>'],
   ])('%s keeps its own list, %s, on the element that scrolls', (file, list, attached) => {
     const text = src(file)

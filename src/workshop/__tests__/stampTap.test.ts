@@ -66,7 +66,7 @@ describe('COPY', () => {
     expect(range).toEqual({ shardId: s.id, vertices: [0, 4], faces: [0, 2] })
     expect(w().lastCopy).toEqual(range)
     expect(stampedIndices(w().lastCopy!)).toEqual({ vertices: [0, 1, 2, 3], faces: [0, 1] })
-    expect(w().notice).toMatch(/copied in: 4 points and 2 faces, yours to edit\.$/)
+    expect(w().notice).toMatch(/copied in: 4 points and 2 faces, yours to edit\. Switched to SOLID so the faces show\.$/)
     w().undo()
     expect(w().current()!.vertices).toHaveLength(0)
   })
@@ -126,6 +126,14 @@ describe('LINK', () => {
     expect(s.parts).toEqual([{ ref: 0, at: [16 * T, 0, 0], turn: [0, 90, 0], step: 0 }])
     expect(w().lastCopy).toBeNull()
     expect(w().notice).toMatch(/placed\. It is one object/)
+  })
+
+  it('asks to sign in when the chosen shard names no author', () => {
+    w().setStampForm('link')
+    w().setStampObject({ ...chosen(tile()), ref: ['a', '33331:null:x'] })
+    expect(stampTap([0, 0, 0])).toBeNull()
+    expect(w().notice).toMatch(/^Sign in to link a shard/)
+    expect(w().current()!.parts).toBeUndefined()
   })
 
   it('never makes a shard place itself', () => {

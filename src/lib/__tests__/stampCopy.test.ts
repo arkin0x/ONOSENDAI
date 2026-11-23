@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest'
 import { newShard, TICKS_PER_UNIT, toPayload, fromPayload, ticksOf, type ShardModel } from 'sno-core/shards'
 import { resolveParts, partMatrix } from 'sno-core/parts'
 import { BUILT_IN, toBytes, toModel } from 'sno-core/snoPalette'
-import { bakeSource, mergePalette, missingIn, snapToSize, stampCopyInto, stampedIndices, stampPart, stampSize, type CopySource } from '../stampCopy'
+import { bakeSource, mergePalette, missingIn, snapToSize, stampCopyInto, stampedIndices, stampedShard, stampPart, stampSize, type CopySource } from '../stampCopy'
 
 const T = TICKS_PER_UNIT
 const ME = 'b'.repeat(64)
@@ -50,7 +50,7 @@ describe('bakeSource', () => {
     expect(src!.flattened).toBe(1)
     expect(src!.points).toHaveLength(4)
     expect(src!.faces).toEqual([[0, 1, 2], [0, 2, 3]])
-    expect(src!.rounded).toBe(0)
+    expect(src!.places).toEqual([address])
     // Each point is where partMatrix carries it: the bench's own drawing of the placement.
     const m = partMatrix(parent.parts![0], parent.unit, piece.unit)
     piece.vertices.forEach((v, i) => {
@@ -106,11 +106,12 @@ describe('stampCopyInto', () => {
     expect(Math.round(m[0] * 8 + m[8] * -8) * T).toBe(ticksOf(teal)[0])
   })
 
-  it('keeps every colour: an empty shard on the built-in takes the stamp’s colours as its palette', async () => {
+  it('keeps every colour, and an empty shard keeps the whole built-in to pick from, with the stamp’s colours in unused places', async () => {
     const src = (await bake(tile()))!
     const r = stampCopyInto({ ...newShard('Level'), extent: 32 }, src, [0, 0, 0], 0)
     if (!r.ok) throw new Error(r.why)
     expect(r.snapped).toBe(0)
+    expect(r.shard.palette).toHaveLength(256)
     const back = fromPayload(JSON.parse(JSON.stringify(toPayload(r.shard))), 'x')!
     expect(back.vertices.map((v) => toBytes(v.c))).toEqual(r.shard.vertices.map((v) => toBytes(v.c)))
   })
@@ -123,7 +124,12 @@ describe('stampCopyInto', () => {
     if (!one.ok) throw new Error(one.why)
     const two = stampCopyInto(one.shard, b, [16 * T, 0, 0], 0)
     if (!two.ok) throw new Error(two.why)
-    for (let i = 0; i < one.shard.palette!.length; i++) expect(two.shard.palette![i]).toEqual(one.shard.palette![i])
+    // Every entry the first stamp's points use is where it was.
+    for (const v of one.shard.vertices) {
+      const i = one.shard.palette!.findIndex((c) => c.every((n, k) => n === toBytes(v.c)[k]))
+      expect(i).toBeGreaterThanOrEqual(0)
+      expect(two.shard.palette![i]).toEqual(one.shard.palette![i])
+    }
     const back = fromPayload(JSON.parse(JSON.stringify(toPayload(two.shard))), 'x')!
     expect(back.vertices.map((v) => toBytes(v.c))).toEqual(two.shard.vertices.map((v) => toBytes(v.c)))
   })
@@ -156,6 +162,35 @@ describe('stampCopyInto', () => {
   })
 })
 
+describe('nested and scaled', () => {
+  it('flattens a placement inside a placement, each by its own matrix', async () => {
+    const piece = tile('Piece')
+    const a1 = `33331:${ME}:piece`, a2 = `33331:${ME}:mid`
+    const mid: ShardModel = { ...newShard('Mid'), refs: [['a', a1]], parts: [{ ref: 0, at: [4 * T, 0, 0], turn: [0, 0, 0], step: 0 }] }
+    const top: ShardModel = { ...newShard('Top'), author: ME, refs: [['a', a2]], parts: [{ ref: 0, at: [0, 2 * T, 0], turn: [0, 90, 0], step: 0 }], objects: { [a1]: toPayload(piece), [a2]: toPayload(mid) } }
+    const src = (await bake(top))!
+    expect(src.flattened).toBe(2)
+    expect(src.places.sort()).toEqual([a1, a2].sort())
+    // The piece's (-8, 0, -8) corner: +4 along X in Mid, then a quarter about Y and +2 up in Top.
+    const m = partMatrix(top.parts![0], 0, 0)
+    const inMid = [-4, 0, 8] // render frame: (-8 + 4, 0, -(-8))
+    const x = m[0] * inMid[0] + m[4] * inMid[1] + m[8] * inMid[2] + m[12]
+    const y = m[1] * inMid[0] + m[5] * inMid[1] + m[9] * inMid[2] + m[13]
+    const z = m[2] * inMid[0] + m[6] * inMid[1] + m[10] * inMid[2] + m[14]
+    expect(src.points[0].at.map((n) => Math.round(n))).toEqual([Math.round(x * T), Math.round(y * T), Math.round(-z * T)])
+  })
+
+  it('rounds once, where it lands, and says how many points fell between ticks', async () => {
+    // A unit-0 piece stamped into a unit-2 shard: 4 gibsons to a unit, so 8 gibsons is 2 units, but a 1-tick offset is a quarter tick.
+    const piece: ShardModel = { ...tile(), vertices: [{ p: [0, 0, 0], t: [1, 0, 0], c: RED }, { p: [8, 0, 0], c: RED }, { p: [0, 0, 8], c: RED }], faces: [[0, 1, 2]] }
+    const src = (await bake(piece))!
+    const r = stampCopyInto({ ...newShard('Level'), unit: 2, extent: 32 }, src, [0, 0, 0], 0)
+    if (!r.ok) throw new Error(r.why)
+    expect(r.rounded).toBe(1)
+    expect(ticksOf(r.shard.vertices[1])).toEqual([2 * T, 0, 0])
+  })
+})
+
 describe('mergePalette', () => {
   it('appends while there is room, then uses colours the shard does not use, and counts the rest as snapped', () => {
     const full = BUILT_IN.map((c) => [...c] as Rgb)
@@ -173,8 +208,36 @@ describe('mergePalette', () => {
     expect(short.palette).toEqual([[9, 9, 9], [8, 8, 8], [1, 2, 3], [4, 5, 6]])
   })
 
+  it('never moves an entry the shard uses by index, even through a colour not exactly in the palette', () => {
+    const full = BUILT_IN.map((c) => [...c] as Rgb)
+    const last = full[255]
+    // A legacy colour one step off the last entry: the wire writes it as entry 255.
+    const near: Rgb = [Math.min(255, last[0] + 1), last[1], last[2]]
+    const used = full.slice(0, 254).map((c) => ({ p: [0, 0, 0] as [number, number, number], c: toModel(c) }))
+    used.push({ p: [0, 0, 0], c: toModel(near) })
+    const m = mergePalette({ palette: full, vertices: used, faces: [] }, [[1, 2, 3]])
+    expect(m.palette![255]).toEqual(last)
+    expect(m.palette![254]).toEqual([1, 2, 3])
+  })
+
   it('leaves the palette alone when it already has every colour', () => {
     expect(mergePalette({ vertices: [], faces: [] }, [BUILT_IN[3]]).palette).toBeUndefined()
+  })
+})
+
+describe('stampedShard LINK', () => {
+  it('places by reference, grows the grid to hold it, and refuses itself and a shard that places it', async () => {
+    const src = (await bake(tile()))!
+    const target: ShardModel = { ...newShard('Level'), extent: 8 }
+    const self = `33331:${ME}:${target.id}`
+    const ok = stampedShard(target, { ref: ['a', `33331:${ME}:other`], copy: src }, 'link', [20 * T, 0, 0], 0, true, self)
+    if (!ok.ok) throw new Error(ok.why)
+    expect(ok.shard.parts).toHaveLength(1)
+    expect(ok.shard.extent).toBe(20)
+    expect(stampedShard(target, { ref: ['a', self], copy: src }, 'link', [0, 0, 0], 0, true, self)).toEqual({ ok: false, why: 'An object cannot place itself.' })
+    const loop = stampedShard(target, { ref: ['a', `33331:${ME}:other`], copy: null, places: [self] }, 'link', [0, 0, 0], 0, true, self)
+    expect(loop.ok).toBe(false)
+    if (!loop.ok) expect(loop.why).toMatch(/would make a loop/)
   })
 })
 

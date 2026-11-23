@@ -306,6 +306,8 @@ export interface StampObject {
   size?: { min: [number, number, number]; max: [number, number, number]; unit: number } | null
   /** A shard of your workshop library, chosen there (not one read from the relays). */
   local?: boolean
+  /** The addresses of every object it places, at any depth, read or not: LINK never places a shard that places the one it goes into. */
+  places?: string[]
 }
 
 /** "1 point" or "7 points", with its faces and placed objects when it has any. */

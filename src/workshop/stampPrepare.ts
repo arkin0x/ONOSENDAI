@@ -34,6 +34,7 @@ export async function prepareStamp(shard: ShardModel, ref: Ref, author: string |
     copy,
     size: bounds && bounds.min && bounds.max ? { min: bounds.min, max: bounds.max, unit: bounds.unit } : null,
     local: own,
+    places: bounds?.places ?? [],
     missing,
   }
 }

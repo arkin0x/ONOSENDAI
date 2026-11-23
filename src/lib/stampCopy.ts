@@ -26,7 +26,7 @@
 
 import { addPart, partMatrix, type Placed } from 'sno-core/parts'
 import { MAX_EXTENT, TICKS_PER_UNIT, ticksOf, vertexAt, type Ref, type ShardModel, type ShardVertex } from 'sno-core/shards'
-import { BUILT_IN, toBytes, type Palette, type Rgb } from 'sno-core/snoPalette'
+import { BUILT_IN, indexOf, toBytes, type Palette, type Rgb } from 'sno-core/snoPalette'
 import type { Facing } from 'sno-core/stamps'
 
 type P3 = [number, number, number]
@@ -36,6 +36,7 @@ type Tri = [number, number, number]
 export interface CopySource {
   /** The source's unit: its ticks are 2^unit gibsons apart, as a placement of it would be drawn. */
   unit: number
+  /** Where each point is, in the source's ticks, not rounded: a placement turned off the quarter or scaled down falls between ticks, and the stamp rounds once, where it lands. */
   points: Array<{ at: P3; c: Rgb }>
   faces: Tri[]
   /** One hard colour per face (DECK-0003 §1.4a), all or none. */
@@ -47,8 +48,8 @@ export interface CopySource {
   max: P3 | null
   /** How many placed objects were flattened into it. */
   flattened: number
-  /** Points that fell between ticks (a placement turned off the quarter, or scaled down) and were rounded to the nearest. */
-  rounded: number
+  /** The addresses of every object it places, at any depth: LINK refuses one that places the shard it would go into (a loop). */
+  places: string[]
 }
 
 /** The points and faces one COPY stamp added: [first, end) of each, at the end of the shard's lists. */
@@ -124,14 +125,12 @@ export function bakeSource(root: ShardModel, placed: readonly Placed[], partial 
   const faces: Tri[] = []
   const seams: Array<Rgb | null> = []
   let anySeam = false
-  let rounded = 0
   let flattened = 0
+  const places = new Set<string>()
   const take = (model: ShardModel, m: M4 | null): void => {
     const base = points.length
     for (const v of model.vertices) {
-      const raw = m ? carry(m, ticksOf(v)) : ticksOf(v)
-      if (!raw.every(whole)) rounded++
-      points.push({ at: raw.map(tick) as P3, c: [...v.c] as Rgb })
+      points.push({ at: m ? carry(m, ticksOf(v)) : ticksOf(v), c: [...v.c] as Rgb })
     }
     const own = model.facecolors && model.facecolors.length === model.faces.length && model.faces.length > 0 ? model.facecolors : null
     if (own) anySeam = true
@@ -142,6 +141,7 @@ export function bakeSource(root: ShardModel, placed: readonly Placed[], partial 
   }
   const walk = (model: ShardModel, list: readonly Placed[], at: M4): void => {
     for (const p of list) {
+      if (typeof p.ref[1] === 'string') places.add(p.ref[1])
       if (!p.model) continue
       const m = mul(at, partMatrix(p.part, model.unit, p.model.unit))
       flattened++
@@ -161,7 +161,7 @@ export function bakeSource(root: ShardModel, placed: readonly Placed[], partial 
     if (!min || !max) { min = [...p.at] as P3; max = [...p.at] as P3; continue }
     for (let k = 0; k < 3; k++) { min[k] = Math.min(min[k], p.at[k]); max[k] = Math.max(max[k], p.at[k]) }
   }
-  return { unit: root.unit, points, faces, ...(facecolors ? { facecolors } : {}), colors: [...keys.values()], min, max, flattened, rounded }
+  return { unit: root.unit, points, faces, ...(facecolors ? { facecolors } : {}), colors: [...keys.values()], min, max, flattened, places: [...places] }
 }
 
 /** The placement a stamp makes at `at`, turned by its facing: LINK's (store placeObject) and COPY's alike. */
@@ -214,40 +214,34 @@ export interface PaletteMerge {
 /**
  * The colours a stamp brings (`colors`, palette bytes) added to the open
  * shard's palette (DECK-0003 §1.3a), so they go on the wire as they are and
- * are not snapped to the nearest the palette has. An empty shard on the
- * built-in takes the stamp's own colours as its palette. Otherwise each
- * missing colour is appended while there is room (256), then put in the place
- * of a colour the shard does not use, from the end, and only when neither is
- * left is it counted as snapped. Colours the shard uses never move: its
- * points keep their colours and their indices.
+ * are not snapped to the nearest the palette has. The palette keeps all it
+ * had (the built-in, for a shard on none), so the colours you pick from stay
+ * the same: each missing colour is appended while there is room (256), then
+ * put in the place of an entry no point or face of the shard uses, from the
+ * end, and only when neither is left is it counted as snapped. An entry the
+ * shard uses never moves, by index (a colour not exactly in the palette uses
+ * its nearest entry, as the wire writes it), so its points keep their colours
+ * and their indices.
  */
 export function mergePalette(target: Pick<ShardModel, 'palette' | 'vertices' | 'facecolors' | 'faces'>, colors: readonly Rgb[]): PaletteMerge {
   const base: Palette = target.palette ?? BUILT_IN
   const has = new Set(base.map(colorKey))
-  const missing = colors.filter((c) => !has.has(colorKey(c)))
+  const missing: Rgb[] = []
+  for (const c of colors) { const k = colorKey(c); if (!has.has(k)) { has.add(k); missing.push(c) } }
   if (missing.length === 0) return { snapped: 0 }
-  const empty = target.vertices.length === 0 && target.faces.length === 0
-  if (empty && !target.palette) {
-    // Its own colours, at least two (a palette has 2 to 256), the rest of the built-in never needed.
-    const own: Palette = []
-    const seen = new Set<string>()
-    for (const c of colors) { const k = colorKey(c); if (!seen.has(k) && own.length < 256) { seen.add(k); own.push([...c] as Rgb) } }
-    for (const c of BUILT_IN) { if (own.length >= 2) break; if (!seen.has(colorKey(c))) own.push([...c] as Rgb) }
-    return { palette: own, snapped: Math.max(0, seen.size - own.length) }
-  }
-  const used = new Set<string>()
-  for (const v of target.vertices) used.add(colorKey(toBytes(v.c)))
-  if (target.facecolors && target.facecolors.length === target.faces.length) for (const c of target.facecolors) used.add(colorKey(toBytes(c)))
+  // The entries the shard uses, by index, as toPayload writes them (sno-core indexOf: exact, else the nearest).
+  const used = new Set<number>()
+  for (const v of target.vertices) used.add(indexOf(base, toBytes(v.c)))
+  if (target.facecolors && target.facecolors.length === target.faces.length) for (const c of target.facecolors) used.add(indexOf(base, toBytes(c)))
   const pal: Palette = base.map((c) => [...c] as Rgb)
-  const taken = new Set<number>()
   let free = pal.length - 1
   let snapped = 0
   for (const c of missing) {
     if (pal.length < 256) { pal.push([...c] as Rgb); continue }
-    while (free >= 0 && (used.has(colorKey(pal[free])) || taken.has(free) || colors.some((k) => colorKey(k) === colorKey(pal[free])))) free--
+    while (free >= 0 && used.has(free)) free--
     if (free < 0) { snapped++; continue }
     pal[free] = [...c] as Rgb
-    taken.add(free)
+    used.add(free)
     free--
   }
   return { palette: pal, snapped }
@@ -255,7 +249,17 @@ export function mergePalette(target: Pick<ShardModel, 'palette' | 'vertices' | '
 
 /** What one COPY stamp did, or why it was not done. */
 export type CopyResult =
-  | { ok: true; shard: ShardModel; added: Omit<StampedRange, 'shardId'>; snapped: number }
+  | {
+    ok: true
+    shard: ShardModel
+    added: Omit<StampedRange, 'shardId'>
+    /** Colours there was no room for in the palette: each takes its nearest. */
+    snapped: number
+    /** Points that fell between ticks (a placement turned off the quarter, or a smaller unit) and went to the nearest. */
+    rounded: number
+    /** Whether this stamp switched the shard to SOLID, so its faces show. */
+    solid: boolean
+  }
   | { ok: false; why: string }
 
 /**
@@ -268,7 +272,12 @@ export type CopyResult =
 export function stampCopyInto(target: ShardModel, src: CopySource, at: P3, facing: Facing, check = true): CopyResult {
   if (src.points.length === 0) return { ok: false, why: 'That shard has nothing in it to copy.' }
   const m = partMatrix(stampPart(at, facing), target.unit, src.unit)
-  const placed = src.points.map((p) => ({ at: carry(m, p.at).map(tick) as P3, c: p.c }))
+  let rounded = 0
+  const placed = src.points.map((p) => {
+    const raw = carry(m, p.at)
+    if (!raw.every(whole)) rounded++
+    return { at: raw.map(tick) as P3, c: p.c }
+  })
   let reach = 0
   for (const p of placed) for (const n of p.at) reach = Math.max(reach, Math.ceil(Math.abs(n) / TICKS_PER_UNIT))
   if (check && reach > MAX_EXTENT) return { ok: false, why: 'Not stamped: it would reach past the edge of the grid. Stamp it nearer the middle.' }
@@ -295,11 +304,15 @@ export function stampCopyInto(target: ShardModel, src: CopySource, at: P3, facin
       ],
     }
   }
-  const merge = mergePalette(target, src.colors)
+  // Its colours, and any seam averaged for a face that had none, so they go on the wire as they are.
+  const seamed = next.facecolors ? (own ? next.facecolors.slice(fbase) : next.facecolors) : []
+  const wanted = [...src.colors, ...seamed.map((c) => toBytes(c))]
+  const merge = mergePalette(target, wanted)
   if (merge.palette) next = { ...next, palette: merge.palette }
   // The first faces switch the shard to SOLID, as a stamp's do.
-  if (target.faces.length === 0 && next.faces.length > 0 && next.mode !== 'solid') next = { ...next, mode: 'solid' }
-  return { ok: true, shard: next, added: { vertices: [base, next.vertices.length], faces: [fbase, next.faces.length] }, snapped: merge.snapped }
+  const solid = target.faces.length === 0 && next.faces.length > 0 && next.mode !== 'solid'
+  if (solid) next = { ...next, mode: 'solid' }
+  return { ok: true, shard: next, added: { vertices: [base, next.vertices.length], faces: [fbase, next.faces.length] }, snapped: merge.snapped, rounded, solid }
 }
 
 /** STAMP's two ways with a shard: COPY its geometry in, or LINK it as one object by reference. COPY is the default (owner, 2026-11-23). */
@@ -309,13 +322,21 @@ export type StampForm = 'copy' | 'link'
  * What one stamp of `form` at `at` would leave the open shard as: COPY
  * through stampCopyInto, LINK as the one placement store placeObject adds.
  * The store's taps and the library's projection (how full it would be) both
- * come through here, so what the bar shows is what a tap does.
+ * come through here, so what the bar shows is what a tap does. `selfAddress`
+ * is the open shard's own address: a LINK never places the shard into itself,
+ * nor a shard that places it (a loop every reader draws as a placeholder).
  */
-export function stampedShard(target: ShardModel, choice: { ref: Ref; copy?: CopySource | null }, form: StampForm, at: P3, facing: Facing, check = true): CopyResult {
+export function stampedShard(target: ShardModel, choice: { ref: Ref; copy?: CopySource | null; places?: readonly string[] }, form: StampForm, at: P3, facing: Facing, check = true, selfAddress?: string): CopyResult {
+  if (form === 'link' && selfAddress && choice.ref[1] === selfAddress) return { ok: false, why: 'An object cannot place itself.' }
   if (form === 'copy') {
     if (!choice.copy) return { ok: false, why: 'COPY needs a shard from your library whose placed objects can all be read. Choose one, or switch to LINK.' }
     return stampCopyInto(target, choice.copy, at, facing, check)
   }
+  if (selfAddress && (choice.places ?? choice.copy?.places ?? []).includes(selfAddress)) return { ok: false, why: 'Not stamped: that shard places this one, so linking it here would make a loop.' }
   const { shard } = addPart(target, choice.ref, stampPart(at, facing))
-  return { ok: true, shard, added: { vertices: [target.vertices.length, target.vertices.length], faces: [target.faces.length, target.faces.length] }, snapped: 0 }
+  // A placement past this grid's edge grows the grid to hold it, as COPY does, as far as any grid goes.
+  let reach = 0
+  for (const n of at) reach = Math.max(reach, Math.ceil(Math.abs(n) / TICKS_PER_UNIT))
+  const extent = Math.min(MAX_EXTENT, Math.max(target.extent, reach))
+  return { ok: true, shard: extent === shard.extent ? shard : { ...shard, extent }, added: { vertices: [target.vertices.length, target.vertices.length], faces: [target.faces.length, target.faces.length] }, snapped: 0, rounded: 0, solid: false }
 }

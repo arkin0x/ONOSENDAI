@@ -234,16 +234,28 @@ export function clientVersion(ev: Pick<NostrEvent, 'tags'>): string | null | und
 }
 
 /**
+ * The kinds an agent's version is read from: the ones cyberspace-mcp writes
+ * fresh each time and publishes itself (profile, deletion, comment, movement,
+ * relay list, avatar, bag, public object). Never an item kind: a moved item
+ * keeps every tag of the version it replaces, the client tag included
+ * (editedTemplate, as ONOSENDAI's), so a copy of one that reached a relay
+ * would speak for the copy that first signed it. Nor kind 1, where an old
+ * signed message item looks like a travel log entry.
+ */
+export const VERSION_KINDS: ReadonlySet<number> = new Set([0, 5, 1111, 3333, 10002, 11333, 33330, 33331])
+
+/**
  * The agent's newest event signed by cyberspace-mcp (by created_at, then
- * id), and the version it writes. Only the agent's own events with a valid
- * signature count, and none dated more than ten minutes ahead (one such
- * event would otherwise speak for the agent forever). Null when it has none.
+ * id), of a kind in VERSION_KINDS, and the version it writes. Only the
+ * agent's own events with a valid signature count, and none dated more than
+ * ten minutes ahead (one such event would otherwise speak for the agent
+ * forever). Null when it has none.
  */
 export function agentVersionOf(events: NostrEvent[], agent: string, nowS: number): AgentVersion | null {
   let best: NostrEvent | null = null
   let bestVersion: string | null = null
   for (const ev of events) {
-    if (ev.pubkey !== agent || !Number.isSafeInteger(ev.created_at) || ev.created_at > nowS + MAX_FUTURE_S || !Array.isArray(ev.tags)) continue
+    if (ev.pubkey !== agent || !VERSION_KINDS.has(ev.kind) || !Number.isSafeInteger(ev.created_at) || ev.created_at > nowS + MAX_FUTURE_S || !Array.isArray(ev.tags)) continue
     const v = clientVersion(ev)
     if (v === undefined) continue
     if (best && (ev.created_at < best.created_at || (ev.created_at === best.created_at && ev.id >= best.id))) continue
@@ -291,8 +303,9 @@ export interface AgentNotice {
  * the version it is still on.
  */
 export function noticeFor(seen: Seen, agent: AgentVersion | null, dismissal: Dismissal | null): AgentNotice | null {
-  // With no release heard this time, a kept minimum still names a version to update to.
-  const latest = seen.latest?.version ?? seen.minSafe
+  // Never a version below the minimum: with no release heard this time, or
+  // only older ones, the kept minimum is what to update to.
+  const latest = higherVersion(seen.latest?.version ?? null, seen.minSafe)
   if (latest === null || !agent || agent.version === null) return null
   const running = agent.version
   const must = runningBelow(running, seen.minSafe)
@@ -305,10 +318,11 @@ export function noticeFor(seen: Seen, agent: AgentVersion | null, dismissal: Dis
 }
 
 /** The update commands, as cyberspace-mcp's README gives them ("Updating"). Never taken from a release. */
-export function updateSteps(version: string): Array<{ label: string; command: string }> {
+export function updateSteps(version: string): Array<{ label: string; command: string | null; words?: string }> {
   return [
     { label: 'From a clone', command: 'git pull && npm ci --omit=dev --ignore-scripts' },
     { label: 'Installed with npm i -g', command: `npm i -g github:arkin0x/cyberspace-mcp#v${version}` },
     { label: 'Started with npx', command: 'npx github:arkin0x/cyberspace-mcp serve' },
+    { label: 'From a release bundle', command: null, words: 'download the new bundle and check its signature, as its releasing guide says' },
   ]
 }

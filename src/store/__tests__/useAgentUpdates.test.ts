@@ -99,7 +99,8 @@ describe('the update check', () => {
     await new Promise((r) => setTimeout(r, 20))
     await checkAgentUpdates(ME, [AGENT], relays([release('0.1.5')], [hop('0.1.0', now - 50)]))
     expect(useAgentUpdatesState.getState().seen.minSafe).toBe('0.2.0')
-    expect(notice()).toMatchObject({ level: 'must' })
+    // To the kept minimum, never to the older release this relay offered.
+    expect(notice()).toMatchObject({ level: 'must', latest: '0.2.0' })
   })
 
   it("I'VE UPDATED is stored per identity by agent and version, and the notice comes back while the agent is still old", async () => {
@@ -136,6 +137,15 @@ describe('the update check', () => {
     await checkAgentUpdates(OTHER, [AGENT], deps)
     expect(useAgentUpdatesState.getState().me).toBe(OTHER)
     expect(notice()).toMatchObject({ level: 'must', stillOn: null })
+  })
+
+  it('with IndexedDB failing to open, the check still finishes and I\'VE UPDATED works for the session', async () => {
+    const deps: CheckDeps = { ...relays([release('0.3.0', '0.2.0')], [hop('0.1.0', now - 50)]), openDb: async () => { throw new Error('blocked') } }
+    await checkAgentUpdates(ME, [AGENT], deps)
+    expect(useAgentUpdatesState.getState().checked).toBe(true)
+    expect(notice()).toMatchObject({ level: 'must' })
+    await dismissAgentUpdate(ME, AGENT, deps)
+    expect(notice()).toBeNull()
   })
 
   it('with every relay failing, the check still finishes and nags about nothing', async () => {

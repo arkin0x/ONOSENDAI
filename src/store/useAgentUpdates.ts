@@ -59,19 +59,24 @@ export interface CheckDeps {
   nowS: () => number
 }
 
-const defaultDeps = (): CheckDeps => ({
+/** The app's: built once, so the one database connection below is opened once. */
+const DEFAULT_DEPS: CheckDeps = {
   releasePubkey: RELEASE_PUBKEY,
   ask: (relays, filter, onEvent) => askEach(relays, filter, onEvent, { maxWait: WAIT_MS, skipDead: true }),
   openDb: () => openAgentUpdateDb(),
   nowS: () => Math.floor(Date.now() / 1000),
-})
+}
 
+/** One connection per openDb (the app has one); a failed open is null, and the notices live in memory for the session. */
 let db: Promise<IDBDatabase | null> | null = null
 let dbFor: CheckDeps['openDb'] | null = null
 function database(deps: CheckDeps): Promise<IDBDatabase | null> {
   if (!db || dbFor !== deps.openDb) {
     dbFor = deps.openDb
-    db = deps.openDb().catch(() => null)
+    db = deps.openDb().catch((err: unknown) => {
+      console.warn('[agent updates] IndexedDB unavailable; I\'VE UPDATED lasts until reload', err)
+      return null
+    })
   }
   return db
 }
@@ -80,18 +85,29 @@ function database(deps: CheckDeps): Promise<IDBDatabase | null> {
 let asking = 0
 
 /** Check the releases and these agents' versions for `me`. Resolves when the state is set. */
-export async function checkAgentUpdates(me: string, agents: string[], deps: CheckDeps = defaultDeps()): Promise<void> {
+export async function checkAgentUpdates(me: string, agents: string[], deps: CheckDeps = DEFAULT_DEPS): Promise<void> {
   const mine = ++asking
   const prior = useAgentUpdatesState.getState()
   if (prior.me !== me) useAgentUpdatesState.setState({ me, checked: false, seen: NOTHING_SEEN, versions: {}, dismissed: {} })
-  if (!HEX.test(me)) { useAgentUpdatesState.setState({ me, checked: true }); return }
-  const store = await database(deps)
+  try {
+    await check(me, agents, deps, mine)
+  } finally {
+    // Whatever went wrong, MY AGENTS is never held on LOADING by this check.
+    if (mine === asking && !useAgentUpdatesState.getState().checked) useAgentUpdatesState.setState({ me, checked: true })
+  }
+}
+
+async function check(me: string, agents: string[], deps: CheckDeps, mine: number): Promise<void> {
+  if (!HEX.test(me)) return
   const releases: NostrEvent[] = []
   const heard: Record<string, NostrEvent[]> = {}
   const cyberspace = relaySet()
   const agentRelays = [...new Set([...cyberspace, ...GENERAL_RELAYS])]
-  const keptMarks = store ? readSeenMarks(store, me, deps.releasePubkey).catch(() => ({ minSafe: null, security: null })) : Promise.resolve({ minSafe: null, security: null })
-  const keptDismissals = store ? readDismissals(store, me).catch(() => ({})) : Promise.resolve({})
+  // IndexedDB opens while the relays are asked, never before them.
+  const opening = database(deps)
+  const keptMarks = opening.then((store) => (store ? readSeenMarks(store, me, deps.releasePubkey) : null)).catch(() => null)
+    .then((m) => m ?? { minSafe: null, security: null })
+  const keptDismissals = opening.then((store) => (store ? readDismissals(store, me) : {})).catch(() => ({}))
   await Promise.all([
     deps.ask([NOTICE_RELAY, ...cyberspace], releaseFilter(deps.releasePubkey), (ev) => { releases.push(ev) }).catch(() => undefined),
     ...agents.filter((a) => HEX.test(a)).map((a) => {
@@ -99,7 +115,7 @@ export async function checkAgentUpdates(me: string, agents: string[], deps: Chec
       return deps.ask(agentRelays, { authors: [a], limit: AGENT_EVENTS }, (ev) => { heard[a].push(ev) }).catch(() => undefined)
     }),
   ])
-  const [marks, dismissed] = await Promise.all([keptMarks, keptDismissals])
+  const [marks, dismissed, store] = await Promise.all([keptMarks, keptDismissals, opening])
   if (mine !== asking) return
   const nowS = deps.nowS()
   const now = useAgentUpdatesState.getState()
@@ -124,7 +140,7 @@ export async function checkAgentUpdates(me: string, agents: string[], deps: Chec
 }
 
 /** "I'VE UPDATED" for one agent: hides its notice, kept per identity by agent and version. */
-export async function dismissAgentUpdate(me: string, agent: string, deps: CheckDeps = defaultDeps()): Promise<void> {
+export async function dismissAgentUpdate(me: string, agent: string, deps: CheckDeps = DEFAULT_DEPS): Promise<void> {
   const s = useAgentUpdatesState.getState()
   if (s.me !== me) return
   const version = s.versions[agent] ?? null
@@ -143,7 +159,7 @@ export function useAgentUpdates(me: string, agents: string[], agentsReady: boole
   const s = useAgentUpdatesState()
   const key = agents.join(',')
   useEffect(() => {
-    if (agentsReady) void checkAgentUpdates(me, agents)
+    if (agentsReady) checkAgentUpdates(me, agents).catch((err: unknown) => console.warn('[agent updates] check failed', err))
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the list by value
   }, [me, key, agentsReady])
   const current = s.me === me

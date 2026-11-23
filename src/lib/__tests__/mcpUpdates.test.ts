@@ -146,6 +146,14 @@ describe('an agent\'s version', () => {
     expect(agentVersionOf([...events, forged, { ...stranger, pubkey: AGENT }, stranger], AGENT, NOW)).toEqual({ version: '0.2.0', at: NOW - 100 })
   })
 
+  it('is never read from an item kind or kind 1: a moved item keeps the client tag of the copy that first signed it', () => {
+    const tag = (v: string): string[] => ['client', 'cyberspace-mcp', '', '', v]
+    const hop = agentEvent(tag('0.3.0'), NOW - 300)
+    const items = [3330, 3340, 3341, 1063, 1].map((kind, i) => finalizeEvent({ kind, created_at: NOW - 10 + i, content: '', tags: [tag('0.1.0')] }, agentSk) as NostrEvent)
+    expect(agentVersionOf([hop, ...items], AGENT, NOW)).toEqual({ version: '0.3.0', at: NOW - 300 })
+    expect(agentVersionOf(items, AGENT, NOW)).toBeNull()
+  })
+
   it('is unknown when its newest cyberspace-mcp event writes none, and absent when it has none', () => {
     expect(agentVersionOf([agentEvent(['client', 'cyberspace-mcp', '', '', '0.1.0'], NOW - 300), agentEvent(['client', 'cyberspace-mcp'], NOW - 10)], AGENT, NOW)).toEqual({ version: null, at: NOW - 10 })
     expect(agentVersionOf([agentEvent(['client', 'ONOSENDAI'], NOW - 10)], AGENT, NOW)).toBeNull()
@@ -181,8 +189,12 @@ describe('the notice', () => {
     expect(noticeFor(NOTHING_SEEN, at('0.0.1'), null)).toBeNull()
   })
 
-  it('a kept minimum still names a version when no release was heard this time', () => {
+  it('a kept minimum still names a version when no release was heard this time, and never a version below it', () => {
     expect(noticeFor({ latest: null, minSafe: '0.2.0', security: null }, at('0.1.0'), null)).toMatchObject({ level: 'must', latest: '0.2.0' })
+    // Only an older release heard this time: update to the minimum, not to the older release.
+    const older = seenOf(release('0.1.5'))
+    expect(noticeFor({ ...older, minSafe: '0.2.0' }, at('0.1.0'), null)).toMatchObject({ level: 'must', latest: '0.2.0' })
+    expect(noticeFor({ ...older, minSafe: '0.2.0' }, at('0.1.5'), null)).toMatchObject({ level: 'must', latest: '0.2.0' })
   })
 
   it("I'VE UPDATED hides it until a newer event still runs an old version, then it is back with that version", () => {
@@ -207,6 +219,8 @@ describe('the notice', () => {
       'git pull && npm ci --omit=dev --ignore-scripts',
       'npm i -g github:arkin0x/cyberspace-mcp#v0.3.0',
       'npx github:arkin0x/cyberspace-mcp serve',
+      null,
     ])
+    expect(steps[3]).toMatchObject({ label: 'From a release bundle', words: expect.stringMatching(/check its signature/) })
   })
 })

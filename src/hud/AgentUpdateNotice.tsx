@@ -68,7 +68,7 @@ export function HowToUpdate({ version }: { version: string }): JSX.Element {
       {updateSteps(version).map((s) => (
         <div key={s.label} className="agentupd__step">
           <span className="agentupd__step-label">{s.label}:</span>
-          <code>{s.command}</code>
+          {s.command ? <code>{s.command}</code> : <span>{s.words}</span>}
         </div>
       ))}
       <p className="agentupd__line agentupd__line--dim">Then restart serve.</p>

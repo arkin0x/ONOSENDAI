@@ -83,14 +83,25 @@ export async function readSeenMarks(db: IDBDatabase, owner: string, releasePubke
   return { minSafe: higherVersion(null, row.minSafe), security: higherVersion(null, row.security) }
 }
 
-/** Keep the marks, never lower than what is kept. */
-export async function putSeenMarks(db: IDBDatabase, owner: string, releasePubkey: string, marks: { minSafe: string | null; security: string | null }): Promise<void> {
-  const kept = await readSeenMarks(db, owner, releasePubkey)
-  const row: SeenRow = {
-    rowKey: `${owner}:${releasePubkey}`, owner, releasePubkey,
-    minSafe: higherVersion(kept.minSafe, marks.minSafe), security: higherVersion(kept.security, marks.security),
-  }
-  // Nothing new to keep.
-  if (row.minSafe === kept.minSafe && row.security === kept.security) return
-  await write(db, SEEN, row)
+/** Keep the marks, never lower than what is kept: read and written in one transaction, so two tabs cannot lower them. */
+export function putSeenMarks(db: IDBDatabase, owner: string, releasePubkey: string, marks: { minSafe: string | null; security: string | null }): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(SEEN, 'readwrite')
+    const os = tx.objectStore(SEEN)
+    const rowKey = `${owner}:${releasePubkey}`
+    const get = os.get(rowKey)
+    get.onsuccess = () => {
+      const row = get.result as SeenRow | undefined
+      const kept = row && row.owner === owner && row.releasePubkey === releasePubkey ? row : null
+      const minSafe = higherVersion(higherVersion(null, kept?.minSafe ?? null), marks.minSafe)
+      const security = higherVersion(higherVersion(null, kept?.security ?? null), marks.security)
+      // Nothing new to keep.
+      if (kept && minSafe === kept.minSafe && security === kept.security) return
+      if (!kept && minSafe === null && security === null) return
+      os.put({ rowKey, owner, releasePubkey, minSafe, security } satisfies SeenRow)
+    }
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error ?? new Error('IndexedDB write failed'))
+    tx.onabort = () => reject(tx.error ?? new Error('IndexedDB write aborted'))
+  })
 }

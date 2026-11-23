@@ -67,7 +67,7 @@ import { flipFace, flipSurface, surfaceOf, windAdded, windOutward } from 'sno-co
 import { Vector3 } from 'three'
 import { ConvexHull } from 'three/examples/jsm/math/ConvexHull.js'
 import { cornerAverage, weld } from '../lib/weld'
-import type { CopySource, StampForm, StampedRange } from '../lib/stampCopy'
+import { stampedIndices, type CopySource, type StampForm, type StampedRange } from '../lib/stampCopy'
 import { subdivide, subdivideNotice } from '../lib/subdivide'
 import { withCredit, type Credit } from 'sno-core/feed'
 import { newestFirst } from '../lib/shardFolders'
@@ -495,9 +495,11 @@ export interface WorkshopState {
    * One stamp, already worked out and checked by the tap (workshop/stampTap.ts):
    * the shard as it will be, as one undoable edit, with its line. A COPY
    * names what it added (`added`), which becomes `lastCopy`; a LINK passes
-   * null. The selection is let go, as every stamp lets it go.
+   * null. A COPY with a `name` (the stamped shard's) is a group of its own
+   * under that name, in the same UNDO (GROUPS, item 3; lib/shardGroups.ts).
+   * The selection is let go, as every stamp lets it go.
    */
-  commitStamp: (shard: ShardModel, added: Omit<StampedRange, 'shardId'> | null, notice: string) => StampedRange | null
+  commitStamp: (shard: ShardModel, added: Omit<StampedRange, 'shardId'> | null, notice: string, name?: string) => StampedRange | null
   /**
    * Place the chosen object at `at`, turned by the stamp's facing. `self` is
    * this object's own address if this key published it, so an object is never
@@ -1684,10 +1686,18 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     setStampForm: (stampForm) => set({ stampForm }),
     setStampSnap: (stampSnap) => set({ stampSnap }),
 
-    commitStamp: (shard, added, notice) => {
+    commitStamp: (shard, added, notice, name) => {
       const id = get().currentId
       if (!id || !get().current()) return null
-      const done = edit(() => shard, notice)
+      // A COPY is a group of what it put in, named after the shard stamped (made free: "Rock 2"), in this same edit.
+      const groupName = added && name ? freeName(groupsOf(get().current()), name) : null
+      const done = groupName && added
+        ? edit((before) => {
+          const g = makeGroup(shard, groupName, { ...stampedIndices(added), parts: [] })
+          const kept = remapGroups(before, shard, groupsOf(before))
+          return withGroups(shard, g ? [...kept, g] : kept)
+        }, `${notice} New group: ${groupName}.`, { ownGroups: true })
+        : edit(() => shard, notice)
       if (!done) return null
       const range: StampedRange | null = added ? { shardId: id, vertices: [...added.vertices] as [number, number], faces: [...added.faces] as [number, number] } : null
       // The shard exactly as this stamp left it: any later change (an edit, UNDO, another shard) lets lastCopy go (below the store).

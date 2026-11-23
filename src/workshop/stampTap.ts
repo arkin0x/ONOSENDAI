@@ -59,7 +59,7 @@ export function stampTap(at: P3, self?: string): StampedRange | null {
     r.snapped > 0 ? `${plural(r.snapped, 'color')} had no room in the palette and took the nearest.` : '',
     r.rounded > 0 ? `${plural(r.rounded, 'point')} between grid ticks moved to the nearest.` : '',
   ].filter(Boolean).join(' ')
-  return w.commitStamp(r.shard, r.added, `"${object.name}" copied in: ${plural(points, 'point')} and ${plural(faces, 'face')}, yours to edit.${extra ? ` ${extra}` : ''}`)
+  return w.commitStamp(r.shard, r.added, `"${object.name}" copied in: ${plural(points, 'point')} and ${plural(faces, 'face')}, yours to edit.${extra ? ` ${extra}` : ''}`, object.name)
 }
 
 /**

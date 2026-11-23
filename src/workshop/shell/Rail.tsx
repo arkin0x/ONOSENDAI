@@ -55,10 +55,21 @@ function LevelStack(): JSX.Element {
  * badge counts the groups hidden on the bench, so they are not forgotten
  * with the sheet shut. The word under it stands over the scene: white.
  */
+/**
+ * Whether G opens GROUPS now. In STAMP's OBJECT, G is SNAP TO ITS SIZE
+ * (Bench Keys, its key printed on the strip), so there it is SNAP's alone and
+ * this key prints no G: one key, one meaning, one printed hint.
+ */
+export function gOpensGroups(s: { tool: string; stampMode: string }): boolean {
+  return !(s.tool === 'stamp' && s.stampMode === 'object')
+}
+
 function GroupsKey({ open, onToggle }: { open: boolean; onToggle: () => void }): JSX.Element {
   const look = useWorkshop((s) => isLook(s.tool))
   const hidden = useWorkshop((s) => hiddenIn(s.hiddenGroups, s.current()).length)
-  const title = look ? 'GROUPS: pick a tool other than LOOK' : hidden > 0 ? `Groups (G): ${hidden} hidden on the bench` : 'Groups (G)'
+  const keyed = useWorkshop(gOpensGroups)
+  const named = keyed ? 'Groups (G)' : 'Groups'
+  const title = look ? 'GROUPS: pick a tool other than LOOK' : hidden > 0 ? `${named}: ${hidden} hidden on the bench` : named
   return (
     <div className="ws__railkey">
       <button className={`ws__railbtn ws__railbtn--groups${open ? ' is-on' : ''}`} disabled={look} aria-pressed={open} onClick={onToggle} title={title} aria-label="Groups">
@@ -66,7 +77,7 @@ function GroupsKey({ open, onToggle }: { open: boolean; onToggle: () => void }):
         <span className="ws__railbtn-word">GROUPS</span>
         {hidden > 0 && !look && <i className="ws__badge ws__badge--hidden" aria-hidden>{hidden}</i>}
       </button>
-      <span className="ws__rail-label" aria-hidden>GROUPS<kbd className="ws__key ws__rail-kbd">G</kbd></span>
+      <span className="ws__rail-label" aria-hidden>GROUPS{keyed && <kbd className="ws__key ws__rail-kbd">G</kbd>}</span>
     </div>
   )
 }

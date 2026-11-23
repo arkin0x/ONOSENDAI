@@ -63,9 +63,9 @@ describe('making groups', () => {
     w().setSelection([3])
     w().createGroup()
     expect(groups().map((g) => g.name)).toEqual(['Group 1', 'Group 2'])
-    // A name already taken gets the next number.
+    // A name already taken keeps itself and gets the first free number after it.
     w().createGroup('Group 1')
-    expect(groups()[2].name).toBe('Group 3')
+    expect(groups()[2].name).toBe('Group 1 2')
   })
 
   it('faces held in SELECT FACES make a group of faces; objects make a group of objects', () => {

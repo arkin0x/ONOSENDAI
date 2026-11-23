@@ -128,14 +128,20 @@ export function nextName(groups: readonly ShardGroup[], base = 'Group', from = 1
  * makes "Rock 3", always the first number no group has.
  */
 export function copyName(groups: readonly ShardGroup[], name: string): string {
-  const m = /^(.*?) (\d+)$/.exec(name)
+  // A count is a plain number after a space: "Rock 2". "Mountain 03" is a name, so its copy is "Mountain 03 2".
+  const m = /^(.*?) ([1-9]\d*)$/.exec(name)
   return m ? nextName(groups, m[1], Number(m[2]) + 1) : nextName(groups, name, 2)
 }
 
-/** A name nobody has used yet in this shard: `name` itself when it is free, else the next numbered one. */
+/**
+ * A name nobody has used yet in this shard: `name` itself when it is free,
+ * else `name` with the first free number after it. The whole name is kept,
+ * so a second "gibson-mountain-03" is "gibson-mountain-03 2", never
+ * "gibson-mountain-04", which names another piece.
+ */
 export function freeName(groups: readonly ShardGroup[], name: string): string {
   const n = cleanName(name) || 'Group'
-  return groups.some((g) => g.name.toLowerCase() === n.toLowerCase()) ? copyName(groups, n) : n
+  return groups.some((g) => g.name.toLowerCase() === n.toLowerCase()) ? nextName(groups, n, 2) : n
 }
 
 /** A new group of these members (cleaned against `s`), under `name`. Null when it would hold nothing. */

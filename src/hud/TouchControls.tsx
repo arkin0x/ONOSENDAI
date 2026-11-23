@@ -90,6 +90,9 @@ import { holdEnd, holdEndAll, holdStart } from '../store/walkHold'
 import { flyDir, useViewFly } from '../lib/viewFly'
 import { walkHeldDir, type HeldDir } from '../lib/walkKeys'
 import { scanBuying, useScan } from '../store/useScan'
+import { useNewcomerView, useRevealClass } from '../newcomer/useNewcomer'
+import { say } from '../newcomer/names'
+import type { RevealId } from '../newcomer/reveal'
 
 /**
  * arkinox's wording, kept exactly as he wrote it, bullet shapes and blank
@@ -108,6 +111,15 @@ export const GO_LIVE_BODY = [
 
 /** The mode button's word for each mode it can name. */
 const MODE_WORD: Record<WalkFrom, string> = { hop: 'HOP', view: 'VIEW', build: 'BUILD', scan: 'SCAN' }
+
+/**
+ * Which part of the newcomer view a pad key belongs to (newcomer/reveal.ts):
+ * the cursor keys come with the course step, the zoom with "Where next?".
+ * Every key keeps its cell while it waits, so nothing moves when it arrives.
+ */
+export function padKeyReveal(cell: string): RevealId {
+  return cell === 'zoomout' || cell === 'zoomin' ? 'pad.zoom' : 'pad.arrows'
+}
 
 /** One key of the pad: the grid cell it stands in, what it shows, and what a press does. */
 export interface PadKey {
@@ -274,6 +286,10 @@ export function TouchControls(): JSX.Element {
   // row, or RECALL and the mode button stand over the pad's bottom row
   // (review of #588: in BUILD a low tap on a scale key left BUILD).
   const spectating = useCyberspace((s) => s.spectate !== null)
+  // The newcomer view (newcomer/useNewcomer.ts): plain names, and each part
+  // hidden in its place until the tour reaches it, then arriving calmly.
+  const plain = useNewcomerView()
+  const veil = useRevealClass()
   const opsUp = home || viewing || (building && !spectating)
 
   const computing = proof.status === 'computing'
@@ -349,7 +365,7 @@ export function TouchControls(): JSX.Element {
         // Emptied rather than removed: the cell keeps its place in the
         // grid, so the scale keys and the readout stay exactly where the
         // hand already knows to find them.
-        (!atHead && !b.scale ? ' is-standdown' : '')
+        (!atHead && !b.scale ? ' is-standdown' : '') + veil(padKeyReveal(b.cell))
       }
       title={b.title}
       aria-label={b.label ?? b.title}
@@ -380,7 +396,7 @@ export function TouchControls(): JSX.Element {
         title={title}
         {...noCallout}
         onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); if (wait) return; if (on) cycleMode(); else leaveWalk() }}
-      >{m === 'hop' ? <>HOP<span className="touchops__sub">(MODES)</span></> : MODE_WORD[m]}</button>
+      >{m === 'hop' ? <>{say('HOP', plain)}<span className="touchops__sub">(MODES)</span></> : say(MODE_WORD[m], plain)}</button>
     )
   }
 
@@ -388,6 +404,14 @@ export function TouchControls(): JSX.Element {
   // Not while placing, nor off your head, where the pad stands its
   // direction keys down.
   const sideKeys = deploying || !atHead ? [] : pad.filter((b) => b.side)
+  // The ring stays out of the newcomer view until the tour reaches BUILD:
+  // its slot holds a resting GO instead, so the slot never empties or moves.
+  const ringShown = veil('pad.modes') !== ' nc-veiled'
+  const ring = (m: WalkFrom): JSX.Element => ringShown ? modeButton(m, true) : (
+    <button key="commit" className={`touchops__commit${veil('pad.go')}`} disabled title="Move the cursor somewhere first">
+      {say('COMMIT', plain)}{plain && <span className="touchops__keyhint" aria-hidden>SPACE</span>}
+    </button>
+  )
 
   return (
     <>
@@ -429,23 +453,23 @@ export function TouchControls(): JSX.Element {
                 <Scan size={16} strokeWidth={2.25} aria-hidden />
               </button>
             )}
-            <button className="touchpad__key touchpad__key--earth" title="Zoom to Earth's scale (2^52)" aria-label="Zoom to 2^52" {...noCallout} onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); const s = useCyberspace.getState(); s.adjustScale(EARTH_SCALE_EXP - s.scaleExp) }}>
+            <button className={`touchpad__key touchpad__key--earth${veil('pad.jumps')}`} title="Zoom to Earth's scale (2^52)" aria-label="Zoom to 2^52" {...noCallout} onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); const s = useCyberspace.getState(); s.adjustScale(EARTH_SCALE_EXP - s.scaleExp) }}>
               <Globe size={16} strokeWidth={2.25} aria-hidden />
             </button>
-            <button className="touchpad__key touchpad__key--cube" title="Zoom all the way out (2^84)" aria-label="Zoom out to 2^84" {...noCallout} onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); useCyberspace.getState().adjustScale(MAX_SCALE_EXP) }}>
+            <button className={`touchpad__key touchpad__key--cube${veil('pad.jumps')}`} title="Zoom all the way out (2^84)" aria-label="Zoom out to 2^84" {...noCallout} onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); useCyberspace.getState().adjustScale(MAX_SCALE_EXP) }}>
               <Box size={16} strokeWidth={2.25} aria-hidden />
             </button>
           </>
         )}
         {walking && (
           <button
-            className={`touchpad__key touchpad__key--gravity${gravity ? ' is-on' : ''}`}
+            className={`touchpad__key touchpad__key--gravity${gravity ? ' is-on' : ''}${veil('pad.gravity')}`}
             aria-pressed={gravity}
             title="Gravity (Z)"
             aria-label="Gravity"
             {...noCallout}
             onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); useWalk.getState().setGravity(!gravity) }}
-          >GRAVITY</button>
+          >GRAVITY{plain && <span className="touchpad__keyhint" aria-hidden>Z</span>}</button>
         )}
         {pad.filter((b) => !b.side).map(padKey)}
         {/* The hub doubles as the scale readout and its reset: a tap returns
@@ -453,7 +477,7 @@ export function TouchControls(): JSX.Element {
             where it always also lived, so nothing is lost to the reset.
             Not in WALK, where JUMP has its cell (walkPad). */}
         {!walking && <button
-          className="touchpad__hub"
+          className={`touchpad__hub${veil('pad.zoom')}`}
           aria-label={`Scale 2^${scaleExp}. Tap to reset scale to 2^0.`}
           title="Reset scale to 2^0"
           {...noCallout}
@@ -471,7 +495,7 @@ export function TouchControls(): JSX.Element {
         </div>
       )}
 
-      {opsUp && <div ref={opsRef} className={`touchops touchops--mode-${mode}${chainStatus ? ' touchops--status' : ''}`}>
+      {opsUp && <div ref={opsRef} className={`touchops touchops--mode-${mode}${chainStatus ? ' touchops--status' : ''}${plain ? ' touchops--plain' : ''}`}>
         {/* RECALL is RESET while a grown region is up (store/useRegion.ts): it
             returns the region to the size it had when region mode started.
             With the cursor on your avatar the slot is WALK, dim, and lit in
@@ -481,7 +505,7 @@ export function TouchControls(): JSX.Element {
         {walkSlot ? (
           <button
             key="walk"
-            className={`touchops__cancel touchops__walk ${walking ? 'is-on' : 'is-dim'}`}
+            className={`touchops__cancel touchops__walk ${walking ? 'is-on' : 'is-dim'}${veil('pad.recall')}`}
             aria-pressed={walking}
             title={walking
               ? `Walking: every press is a step, proved behind you. Keys: W forward, S back, A and D sideways, Space or R jump, C or F down. Press to go back to ${MODE_WORD[walkFrom]} (X)`
@@ -494,7 +518,7 @@ export function TouchControls(): JSX.Element {
           >WALK</button>
         ) : <button
           key="cancel"
-          className="touchops__cancel"
+          className={`touchops__cancel${veil('pad.recall')}`}
           title={walking ? 'Stop the walk where the chain is now (X)'
             : computing ? 'Cancel proof (X)'
             : !resting && scanning && scanBuying() ? 'Recall the cursor and the view to your avatar, still in SCAN. HOSAKA keeps scanning (X)'
@@ -515,7 +539,8 @@ export function TouchControls(): JSX.Element {
             recall()
           }}
         >
-          {computing || stopping ? 'STOP' : regionActive && regionGrown ? 'RESET' : 'RECALL'}
+          {computing || stopping ? 'STOP' : regionActive && regionGrown ? 'RESET' : say('RECALL', plain)}
+          {plain && <span className="touchops__keyhint" aria-hidden>X</span>}
         </button>}
         {/* The mode switch, in the commit slot while there is nothing to
             commit: HOP to VIEW to BUILD to SCAN and back to HOP
@@ -526,14 +551,14 @@ export function TouchControls(): JSX.Element {
             (2026-11-02 in the ring) places things and never moves you. Keyed
             by the mode it names, so only its own dim to lit eases. */}
         {walking ? modeButton(walkFrom, false)
-          : building ? modeButton('build', true)
-          : viewing && scanning ? modeButton('scan', true)
-          : viewing ? modeButton('view', true)
-          : (!armed && !deploying && !computing) ? modeButton('hop', true)
+          : building ? ring('build')
+          : viewing && scanning ? ring('scan')
+          : viewing ? ring('view')
+          : (!armed && !deploying && !computing) ? ring('hop')
           : (
         <button
           key="commit"
-          className={`touchops__commit ${deploying ? 'is-armed' : computing ? 'is-busy' : tooFar ? 'is-too-far' : offload ? 'is-offload' : armed ? 'is-armed' : ''}`}
+          className={`touchops__commit ${deploying ? 'is-armed' : computing ? 'is-busy' : tooFar ? 'is-too-far' : offload ? 'is-offload' : armed ? 'is-armed' : ''}${veil('pad.go')}`}
           disabled={(!deploying && !armed && !computing) || tooFar || (deploying && placedHere)}
           title={deploying ? (placedHere ? 'The last one stands here. Move to place another' : 'Place shard here') : tooFar ? 'Higher than anyone computes: bring the cursor nearer, or ride hyperspace' : offload ? 'This step needs HOSAKA: see the offer (Space)' : action === 'hop-to-boundary' ? 'Hop to the boundary on the way (Space)' : action === 'sidestep' ? 'Sidestep one gibson through the boundary (Space)' : 'Commit hop (Space)'}
           {...noCallout}
@@ -544,27 +569,28 @@ export function TouchControls(): JSX.Element {
             else useCyberspace.getState().commit()
           }}
         >
-          {deploying ? (placedHere ? 'PLACED' : 'PLACE') : computing ? busyLabel(proof) : action ? ACTION_LABEL[action] : 'COMMIT'}
+          {deploying ? (placedHere ? 'PLACED' : 'PLACE') : computing ? busyLabel(proof) : say(action ? ACTION_LABEL[action] : 'COMMIT', plain)}
+          {plain && !computing && !deploying && <span className="touchops__keyhint" aria-hidden>SPACE</span>}
         </button>
         )}
         {/* Whether a commit leaves the device. Under COMMIT because that is the
             only control whose meaning it changes, and a switch rather than a
             toggle so the current mode is always spelled out, not implied. */}
-        <div className="touchmode" role="group" aria-label="Publishing mode">
+        <div className={`touchmode${plain ? ' touchmode--plain' : ''}${veil('pad.publish')}`} role="group" aria-label="Publishing mode">
           <button
             className={`touchmode__opt ${live ? '' : 'is-on'}`}
             aria-pressed={!live}
             title="Local: sign actions but keep them on this device"
             {...noCallout}
             onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); useCyberspace.getState().setLive(false) }}
-          >LOCAL</button>
+          >{say('LOCAL', plain)}</button>
           <button
             className={`touchmode__opt ${live ? 'is-on' : ''}`}
             aria-pressed={live}
             title={`Live: your next action publishes it and the whole chain behind it to ${DEFAULT_RELAY.replace(/^wss:\/\//, '')}`}
             {...noCallout}
             onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); if (!live) setGoLive(true) }}
-          >LIVE</button>
+          >{say('LIVE', plain)}</button>
         </div>
         {/* Directly under the switch, which itself never changes: it says
             what was chosen, this says what is happening (ChainStatus.tsx). */}

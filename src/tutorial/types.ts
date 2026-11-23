@@ -109,9 +109,10 @@ export interface TutorialStep {
    * A panel of its own under the caption, by name, for a step whose words
    * depend on the player (hud/TutorialCoach.tsx draws it): the Straylight
    * route's identity step says what to do for the signer the player is on
-   * (hud/StraylightIdentity.tsx).
+   * (hud/StraylightIdentity.tsx); the Earth route's pick and BOARD steps
+   * list the short trips from where the player stands (hud/EarthTrips.tsx).
    */
-  panel?: 'straylight-identity'
+  panel?: 'straylight-identity' | 'earth-trips'
   /** A button in the coach that runs a registered effect when tapped (OPEN WORKSHOP); nothing runs untapped. */
   action?: { label: string; effect: string }
   /**
@@ -146,6 +147,8 @@ export interface TutorialChoice {
   step?: string
   /** Shown only when a choice by this name is registered. */
   when?: string
+  /** Shown only while no choice by this name is registered (the ride on a browser that can ride: tutorial/earthRoute.ts). */
+  unless?: string
 }
 
 export interface TutorialScript {

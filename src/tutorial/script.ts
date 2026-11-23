@@ -222,10 +222,13 @@ export const CHOICE: TutorialStep = {
   caption: 'That was the basics. Try as many as you like.',
   modal: true,
   go: 'DONE',
+  // On a browser that cannot ride (Firefox, Safari: tutorial/earthRoute.ts 'ride-check'), Earth is offered to look at instead of to ride to.
+  effect: 'ride-check',
   choices: [
     // First (owner, 2026-11-14): the community, where a newcomer meets the rest of us.
     { id: 'straylight', label: 'JOIN THE COMMUNITY', about: 'Hang out in Straylight Cafe, the cyberspace community.', step: 'straylight' },
-    { id: 'hyperspace', label: 'TRAVEL TO EARTH', about: 'Ride hyperspace to a place on Earth.', step: 'earth' },
+    { id: 'hyperspace', label: 'TRAVEL TO EARTH', about: 'Ride hyperspace to a place on Earth.', step: 'earth', unless: 'cannot-ride' },
+    { id: 'earth-look', label: 'SEE EARTH', about: 'Look at Earth and its train stops.', step: 'earth-look', when: 'cannot-ride' },
     { id: 'dungeon', label: 'PLAY THE DUNGEON', about: 'A game inside cyberspace, with its own rules.', when: 'dungeon' },
     { id: 'agents', label: 'BRING YOUR AI', about: 'Add your AI to cyberspace and talk to it here.', step: 'agents' },
     { id: 'friend', label: 'SEE A FRIEND', about: 'Add a friend and watch where they have been.', step: 'friend' },
@@ -254,11 +257,33 @@ export const EARTH: TutorialStep = {
   then: 'earth-pick',
 }
 
-/** A tap on a stop picks it as the ride's destination (tutorial/earthRoute.ts 'pick-stop'). */
+/**
+ * Earth to look at, on a browser that cannot ride (#896: Firefox and Safari
+ * cap a number below what a ride's proof needs, so every ride is refused
+ * there, HOSAKA's too). One panel: the planet, why there is no ride, and
+ * FINISH back to the choices.
+ */
+export const EARTH_LOOK: TutorialStep = {
+  id: 'earth-look',
+  title: 'Earth',
+  caption: "This is Earth! Hyperspace is a train line with stops all over the planet. Riding it needs Chrome, Edge or Brave on a computer or an Android phone, so here you can look but not ride.",
+  hint: 'Drag to look around. FINISH when you are done.',
+  effect: 'view-earth',
+  branch: true,
+}
+
+/**
+ * A short trip picked as the ride's destination: one listed under the
+ * caption, or a tap on a stop that is one (tutorial/earthRoute.ts
+ * 'pick-stop', tutorial/shortTrip.ts). Never a stop hours away (new-user
+ * write-up, 2026-11-21).
+ */
 export const EARTH_PICK: TutorialStep = {
   id: 'earth-pick',
   title: 'Pick a stop',
-  caption: "Each glowing dot is a stop. Tap one you'd like to visit.",
+  caption: 'Each glowing dot is a stop. Pick a short trip below: a few minutes of computing on this device.',
+  explain: 'A trip costs work for every stop the line passes, not for the distance. Stops a few along the line from yours are a short trip, wherever they are on Earth. HOSAKA can do the work for you, for the price shown.',
+  panel: 'earth-trips',
   effect: 'pick-stop',
   wait: 'pick-stop',
   branch: true,
@@ -271,8 +296,9 @@ export const EARTH_BOARD: TutorialStep = {
   title: 'Board',
   caption: 'Open the menu. Your trip is at the top. Tap BOARD.',
   scene: { target: 'keep', highlight: `${MENU_SHUT}, [data-panel-id="hyperspace"] .hyper__btn--board` },
-  // HYPERSPACE first in the menu; while no stop is picked, the step says so and a tap on one picks it (tutorial/earthRoute.ts).
+  // HYPERSPACE first in the menu; while no short trip is picked, the step says so, lists them, and a tap on one picks it (tutorial/earthRoute.ts).
   effect: 'board-step',
+  panel: 'earth-trips',
   wait: 'board',
   branch: true,
   then: 'earth-ride',
@@ -291,7 +317,8 @@ export const EARTH_RIDE: TutorialStep = {
   caption: 'Tap RIDE to go!',
   explain: 'Every stop you pass takes work, done on this device, or sats if HOSAKA does it for you. Nothing is spent until you RIDE.',
   scene: { target: 'keep', highlight: `${MENU_SHUT}, [data-panel-id="hyperspace"] .hyper__actions .hyper__btn--ride, [data-panel-id="hyperspace"] .hyper__choicebtn--here` },
-  effect: 'hyperspace-first',
+  // HYPERSPACE first, and the step says how long the trip takes here (tutorial/earthRoute.ts 'ride-step').
+  effect: 'ride-step',
   wait: 'ride',
   advanceOn: 'ride-over',
   branch: true,
@@ -381,5 +408,5 @@ export const FAREWELL: TutorialStep = {
 }
 
 export const TUTORIAL_SCRIPT: TutorialScript = {
-  steps: [WELCOME, BOX, OPEN, TAKE, TO_PLOT, PLANT, BUD, INVENTORY, TO_COURSE, WALK, GRAVITY, RUN, FINISH, WORKSHOP, CHOICE, STRAYLIGHT, STRAYLIGHT_IDENTITY, STRAYLIGHT_OPEN, EARTH, EARTH_PICK, EARTH_BOARD, EARTH_RIDE, AGENTS, FRIEND, BUILD_PLACE, FAREWELL],
+  steps: [WELCOME, BOX, OPEN, TAKE, TO_PLOT, PLANT, BUD, INVENTORY, TO_COURSE, WALK, GRAVITY, RUN, FINISH, WORKSHOP, CHOICE, STRAYLIGHT, STRAYLIGHT_IDENTITY, STRAYLIGHT_OPEN, EARTH, EARTH_PICK, EARTH_BOARD, EARTH_RIDE, EARTH_LOOK, AGENTS, FRIEND, BUILD_PLACE, FAREWELL],
 }

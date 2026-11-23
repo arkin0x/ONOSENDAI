@@ -111,9 +111,9 @@ export function registerTutorialChoice(name: string, choice: TutorialChoiceRun):
   useTutorial.setState((s) => ({ choicesVersion: s.choicesVersion + 1 }))
 }
 
-/** Whether a choice is offered: no `when`, or one registered under it. */
-export function choiceOffered(c: { when?: string }): boolean {
-  return !c.when || TUTORIAL_CHOICES.has(c.when)
+/** Whether a choice is offered: no `when`, or one registered under it; and no `unless`, or none registered under that. */
+export function choiceOffered(c: { when?: string; unless?: string }): boolean {
+  return (!c.when || TUTORIAL_CHOICES.has(c.when)) && (!c.unless || !TUTORIAL_CHOICES.has(c.unless))
 }
 
 /**

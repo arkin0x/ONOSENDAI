@@ -23,6 +23,9 @@ import { useTutorialStage } from '../tutorial/director'
 import { placeCoach, type Box, type CoachSide } from '../tutorial/coachPlace'
 import { ProfilePic } from './ProfileBadge'
 import { StraylightIdentity } from './StraylightIdentity'
+import { EarthTrips } from './EarthTrips'
+import { useNewcomerView } from '../newcomer/useNewcomer'
+import { NEWCOMER_CAPTIONS, plainText } from '../newcomer/names'
 import { ModalClose } from './ui/ModalClose'
 
 /** How far along a step is, 0 to 1, along the steps that are not branches; a branch is the end. */
@@ -44,6 +47,7 @@ export function progressOf(steps: ReadonlyArray<{ branch?: boolean }>, index: nu
 export const CHOICE_ICONS: Readonly<Record<string, LucideIcon>> = {
   straylight: Coffee,
   hyperspace: Earth,
+  'earth-look': Earth,
   dungeon: Gamepad2,
   agents: Bot,
   friend: Target,
@@ -139,6 +143,8 @@ export function TutorialCoach(): JSX.Element | null {
   const choiceNote = useTutorial((s) => s.choiceNote)
   // The routes already done this run, checked off on the choices card (item 10).
   const doneChoices = useTutorial((s) => s.doneChoices)
+  // The newcomer view's plain button names in what the coach says (newcomer/names.ts).
+  const plain = useNewcomerView()
   useEffect(() => { if (shown && modal) (firstChoice.current ?? go.current)?.focus() }, [shown, modal, index])
 
   // The control a step points at wears the /demo tour's pulsing ring
@@ -224,7 +230,11 @@ export function TutorialCoach(): JSX.Element | null {
   const waiting = !!step.wait && !done
   // A gate never holds when staging failed: NEXT is the way on (the box step has no SKIP otherwise).
   const held = step.gate === true && waiting && !stageError
-  const caption = done && step.captionDone ? step.captionDone : step.caption
+  const own = plain ? NEWCOMER_CAPTIONS[step.id] : undefined
+  const caption = plainText(done && step.captionDone ? step.captionDone : own?.caption ?? step.caption, plain)
+  const title = plain ? own?.title ?? step.title : step.title
+  const hint = plainText(own?.hint ?? step.hint, plain)
+  const note = plainText(stepNote ?? undefined, plain)
   // BACK shows once there is a step behind this one (not on the welcome). It
   // is the way back out of a branch too (feedback item 8).
   const canBack = index > 0
@@ -238,7 +248,7 @@ export function TutorialCoach(): JSX.Element | null {
             <span className="demo__chapter" />
             <ModalClose onClose={() => t.end('skipped')} label="Close the tutorial" />
           </div>
-          <h2 className="modal__title">{step.title}</h2>
+          <h2 className="modal__title">{title}</h2>
           <p className="demo__caption"><CaptionText caption={caption} /></p>
           {step.choices?.filter(choiceOffered).map((c, i) => {
             const choiceDone = doneChoices.includes(c.id)
@@ -270,7 +280,7 @@ export function TutorialCoach(): JSX.Element | null {
       <div className={`demo demo--min tutorial${spotClass}`} style={spotStyle} ref={ref} role="region" aria-label="Tutorial">
         <button className="demo__bar" onClick={() => t.setMinimized(false)} title="Show the caption">
           <span className="demo__tag">TUTORIAL</span>
-          <span className="demo__bartitle">{step.title}</span>
+          <span className="demo__bartitle">{title}</span>
           <ChevronDown size={14} aria-hidden />
         </button>
         <button className="demo__icon" onClick={t.next} disabled={held} aria-label={(last || (step.branch && !step.then)) ? 'Finish' : waiting ? 'Skip this step' : 'Next'}><ChevronRight size={14} /></button>
@@ -290,7 +300,7 @@ export function TutorialCoach(): JSX.Element | null {
       <div className="demo__bar-track" aria-hidden><div className="demo__bar-fill" style={{ width: `${progressOf(script.steps, index) * 100}%` }} /></div>
       <div className="demo__body" key={index}>
         <div className="demo__titlerow">
-          <h2 className="demo__title">{step.title}</h2>
+          <h2 className="demo__title">{title}</h2>
         </div>
         {step.speaker
           ? (
@@ -301,16 +311,17 @@ export function TutorialCoach(): JSX.Element | null {
           )
           : <p className="demo__caption"><CaptionText caption={caption} /></p>}
         {step.panel === 'straylight-identity' && <StraylightIdentity />}
+        {step.panel === 'earth-trips' && <EarthTrips />}
         {step.image && <img className="tutorial__image" src={step.image.src} alt={step.image.alt} width={160} height={160} onError={(e) => { e.currentTarget.style.display = 'none' }} />}
-        {step.explain && explaining && <p className="demo__caption tutorial__explain">{step.explain}</p>}
+        {step.explain && explaining && <p className="demo__caption tutorial__explain">{plainText(step.explain, plain)}</p>}
       </div>
       {step.wait ? (
         <div className={`demo__wait ${done ? 'is-done' : ''}`} aria-live="polite">
-          <span>{done ? '✓ Done' : stageError ?? stepNote ?? step.hint ?? 'Your turn.'}</span>
+          <span>{done ? '✓ Done' : stageError ?? note ?? hint ?? 'Your turn.'}</span>
         </div>
-      ) : step.hint && (
+      ) : hint && (
         // A step that waits on nothing still says where to go next (the menu, for a ride or an agent).
-        <div className="demo__wait"><span>{step.hint}</span></div>
+        <div className="demo__wait"><span>{hint}</span></div>
       )}
       <div className="demo__foot">
         {step.action && (
@@ -321,7 +332,7 @@ export function TutorialCoach(): JSX.Element | null {
         )}
         {/* BACK is sized to its text and outlined; NEXT fills the rest and is the filled action (feedback item 8). */}
         {canBack && <button className="demo__btn tutorial__back" onClick={t.back} aria-label="Back"><ChevronLeft size={14} aria-hidden /> BACK</button>}
-        <button className={`demo__btn demo__btn--next tutorial__next ${waiting && !held ? 'is-skip' : ''}`} onClick={t.next} disabled={held} title={held ? step.hint : undefined}>
+        <button className={`demo__btn demo__btn--next tutorial__next ${waiting && !held ? 'is-skip' : ''}`} onClick={t.next} disabled={held} title={held ? hint : undefined}>
           {(last || (step.branch && !step.then)) && !waiting ? 'FINISH' : waiting && !held ? 'SKIP' : 'NEXT'} <ChevronRight size={14} aria-hidden />
         </button>
       </div>

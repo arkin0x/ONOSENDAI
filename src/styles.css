@@ -13124,3 +13124,127 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
   filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.95));
 }
 .ws__topbtn--back { color: var(--accent); border-color: var(--accent); }
+
+/* ------------------------------------------------------------------
+ * The newcomer view (newcomer/useNewcomer.ts, newcomer/reveal.ts).
+ * A part the tour has not reached yet keeps its place and is simply not
+ * there to see or press (nc-veiled), so nothing moves when it arrives. When
+ * its step comes up it arrives once (nc-arrive): it rises a few pixels into
+ * place as it fades in, and a thin cyan ring flares and fades around it, the
+ * way a HUD element boots on (gskinner, "FUI FUN: Learning to Make HUDs";
+ * one thing at a time, in context). Calm: 1.4 s, no bounce, nothing loops.
+ * ------------------------------------------------------------------ */
+.nc-veiled {
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+.nc-arrive { animation: nc-arrive 1.4s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+@keyframes nc-arrive {
+  0% { opacity: 0; transform: translateY(6px); box-shadow: 0 0 0 0 rgba(0, 229, 255, 0); }
+  40% { opacity: 1; transform: none; box-shadow: 0 0 0 1px rgba(0, 229, 255, 0.7), 0 0 18px rgba(0, 229, 255, 0.35); }
+  100% { opacity: 1; transform: none; box-shadow: 0 0 0 0 rgba(0, 229, 255, 0); }
+}
+/* A menu panel only fades and rises: its frame is its own. */
+.slot.nc-arrive { animation-name: nc-arrive-panel; }
+@keyframes nc-arrive-panel {
+  0% { opacity: 0; transform: translateY(8px); }
+  100% { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .nc-arrive, .slot.nc-arrive { animation: nc-arrive-still 0.3s linear both; }
+  @keyframes nc-arrive-still { from { opacity: 0; } to { opacity: 1; } }
+}
+
+/* The commit slot's key hints in the newcomer view: SPACE under GO, X under
+ * BACK TO ME, as the pad prints its keys (.touchpad__keyhint). */
+.touchops__cancel, .touchops__commit { position: relative; }
+.touchops__keyhint {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 3px;
+  text-align: center;
+  font-size: 6px;
+  line-height: 1;
+  letter-spacing: 0.06em;
+  font-weight: 400;
+  opacity: 0.6;
+  pointer-events: none;
+}
+/* Plain names are longer than COMMIT and HOP: two short lines inside the same
+ * 40 px button, above its key hint, never a wider button. */
+.touchops--plain .touchops__cancel,
+.touchops--plain .touchops__commit {
+  white-space: normal;
+  line-height: 1.15;
+  letter-spacing: 0.06em;
+  padding: 0 4px 7px;
+}
+.touchops--plain .touchops__sub { display: none; }
+/* ON THIS DEVICE / ONLINE in the switch's 26 px: two lines, the same height. */
+.touchmode--plain .touchmode__opt {
+  font-size: 7px;
+  letter-spacing: 0.05em;
+  line-height: 1.1;
+  white-space: normal;
+  padding: 0 4px;
+}
+
+/* The tour's short trips (hud/EarthTrips.tsx): one row per trip, a fixed
+ * height, in a chamfered frame cut by hand (top-left and bottom-right, the
+ * item-picture corners): the outer box is the line's color, the inner the
+ * fill, inset by a pixel with its cut moved in to match. */
+.earth-trips { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-top: 2px; }
+.earth-trips__row {
+  --cut: 9px;
+  display: block;
+  width: 100%;
+  min-height: 62px;
+  padding: 1px;
+  border: 0;
+  background: rgba(0, 229, 255, 0.35);
+  clip-path: polygon(var(--cut) 0, 100% 0, 100% calc(100% - var(--cut)), calc(100% - var(--cut)) 100%, 0 100%, 0 var(--cut));
+  color: #fff;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.earth-trips__in {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  height: 100%;
+  min-height: 60px;
+  padding: 7px 8px;
+  background: rgba(6, 14, 22, 0.94);
+  clip-path: polygon(calc(var(--cut) - 0.4px) 0, 100% 0, 100% calc(100% - var(--cut) + 0.4px), calc(100% - var(--cut) + 0.4px) 100%, 0 100%, 0 calc(var(--cut) - 0.4px));
+}
+.earth-trips__row:hover .earth-trips__in, .earth-trips__row:focus-visible .earth-trips__in { background: rgba(0, 229, 255, 0.1); }
+.earth-trips__row.is-on { background: var(--accent); }
+.earth-trips__row.is-on .earth-trips__in { background: rgba(0, 229, 255, 0.16); }
+.earth-trips__icon { display: flex; color: var(--accent); flex: none; padding-top: 1px; }
+.earth-trips__text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.earth-trips__place { font-size: 11px; letter-spacing: 0.04em; color: #fff; white-space: nowrap; }
+.earth-trips__meta { font-size: 9px; color: var(--fg); opacity: 0.8; margin-top: 2px; }
+.earth-trips__wait { grid-column: 1 / -1; margin: 0; min-height: 62px; display: flex; align-items: center; font-size: 11px; color: var(--fg); }
+.earth-trips__hosaka { grid-column: 1 / -1; }
+/* Reserved even while empty, so HOSAKA's price arriving moves nothing. */
+.earth-trips__hosaka { margin: 0; min-height: 1.4em; font-size: 11px; color: var(--fg); }
+
+/* Settings > Interface: Screen, two half-width buttons (hud/NewcomerSetting.tsx). */
+.nc-setting { flex-direction: column; align-items: stretch; gap: 8px; }
+.nc-setting__pair { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.nc-setting__opt {
+  --cut: 7px;
+  font: inherit;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  min-height: 34px;
+  padding: 0 6px;
+  color: var(--fg);
+  background: rgba(6, 14, 22, 0.72);
+  border: 1px solid var(--border);
+  clip-path: polygon(var(--cut) 0, 100% 0, 100% calc(100% - var(--cut)), calc(100% - var(--cut)) 100%, 0 100%, 0 var(--cut));
+  cursor: pointer;
+}
+.nc-setting__opt.is-on { color: #05070d; background: var(--accent); border-color: var(--accent); font-weight: 700; }

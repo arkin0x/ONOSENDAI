@@ -679,7 +679,7 @@ describe('1d. review of #690', () => {
     }
   })
 
-  it('round 2, 3: anything else holding the camera (the tutorial\'s zoom or framed hop, a /demo step) ends a pending restore (and the chest shot's ease); Scene.tsx says so', () => {
+  it('round 2, 3: anything else holding the camera (the tutorial\'s zoom or framed hop, a /demo step) ends a pending restore (and the chest shot\'s ease); Scene.tsx says so', () => {
     tap(120)
     rest(90)
     viewToAvatar()

@@ -271,6 +271,9 @@ export function bagTooBigLine(others: boolean, room = false): string {
   return others ? 'This bag is too full for it. Hide it at another height.' : 'Too big for one bag. Hide part of it, and hide the rest at another height.'
 }
 
+/** What to do when the shard itself is too big to hide whole (store/useShards deployBagMeter objectRefusal): one line, as the SHARD sheet's bar says it. */
+export const OBJECT_TOO_BIG_LINE = 'Too big to hide whole. Move part of it into its own shard and place that.'
+
 /**
  * The bag's size with the shard in it, against what one bag may be
  * (lib/bagSize.ts): BY REFERENCE when the shard goes out as its own object,
@@ -278,9 +281,9 @@ export function bagTooBigLine(others: boolean, room = false): string {
  */
 export function BagMeterRow({ meter, others = false, room = false }: { meter: BagMeter; others?: boolean; room?: boolean }): JSX.Element {
   const of = `${meter.bytes.toLocaleString('en-US')} of ${BAG_SAFE_BYTES.toLocaleString('en-US')} bytes`
-  const form = meter.refusal ? 'TOO LARGE' : meter.fitted ? 'BY REFERENCE: THE BAG IS FULL' : meter.byReference ? 'BY REFERENCE' : 'INLINE'
+  const form = meter.refusal || meter.objectRefusal ? 'TOO LARGE' : meter.fitted ? 'BY REFERENCE: THE BAG IS FULL' : meter.byReference ? 'BY REFERENCE' : 'INLINE'
   return (
-    <DeployRow kind="bagsize" label="BAG" hint={meter.refusal ? <span data-testid="bag-too-big">{bagTooBigLine(others, room)}</span> : meter.fitted ? 'Too large to carry inline here, so it goes out as its own sealed object and the bag names it.' : undefined} hintTitle={meter.refusal ?? undefined}>
+    <DeployRow kind="bagsize" label="BAG" hint={meter.objectRefusal ? <span data-testid="object-too-big">{OBJECT_TOO_BIG_LINE}</span> : meter.refusal ? <span data-testid="bag-too-big">{bagTooBigLine(others, room)}</span> : meter.fitted ? 'Too large to carry inline here, so it goes out as its own sealed object and the bag names it.' : undefined} hintTitle={meter.objectRefusal ?? meter.refusal ?? undefined}>
       <span className="deploybar__value" data-testid="bag-meter">{of} · {form}</span>
     </DeployRow>
   )
@@ -449,7 +452,7 @@ function DeployBarOpen({ pad }: { pad: boolean }): JSX.Element | null {
     return deployBagMeter(bagRows, planned, { height, settings: bag, owner: me, room: sealingId !== null, place, edit: editRow ?? undefined })
   }, [planned, bagRows, height, bag, me, sealingId, editRow, plane])
   // Too big for its bag even with entries moved out: the deploy would refuse it, so the button is off and the BAG row says what to do.
-  const tooBig = !!meter?.refusal
+  const tooBig = !!meter?.refusal || !!meter?.objectRefusal
   // A MOVE or EDIT keeps its own bag (review of #633): a room under it is offered, SEAL IN ROOM, never taken on its own.
   const offer = useMemo(
     () => (pending && moving && !sealMove ? autoRoomFor({ mine, pending, deployLeaveOut: leaveOut, deployDoorHeight: chosenRoom, deployHeight: height, deployRoomSnap: snap, deploySealMove: true }, me, cursor, plane) : null),
@@ -570,7 +573,7 @@ function DeployBarOpen({ pad }: { pad: boolean }): JSX.Element | null {
           <button
             className="deploybar__deploy"
             disabled={empty || working || here || !!lookRefusal || tooBig}
-            title={lookRefusal ?? (tooBig ? bagTooBigLine(bagRows.length > 0, sealingId !== null) : placing ? 'Place it here, then fill it' : here ? 'The last one stands here. Move, or change how it goes out, to place another' : localEst)}
+            title={lookRefusal ?? (meter?.objectRefusal ? OBJECT_TOO_BIG_LINE : tooBig ? bagTooBigLine(bagRows.length > 0, sealingId !== null) : placing ? 'Place it here, then fill it' : here ? 'The last one stands here. Move, or change how it goes out, to place another' : localEst)}
             onClick={() => { if (placing) useShards.getState().placeChest(); else void useShards.getState().deploy() }}
             {...noCallout}
           >

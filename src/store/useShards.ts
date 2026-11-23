@@ -142,6 +142,7 @@ import { hidesThing, type Muted } from '../lib/muteList'
 import { useMutes } from './useMutes'
 import { asShown, hintPrefsOf, loadHintPrefs, saveHintPrefs, withHintPrefs } from './deployHintPrefs'
 import { CONSTRAIN_DEFAULT, authoredConstrain, authoredConstrainOf, withAuthoredConstrain, withConstrain, type Constrain } from '../lib/walkConstrain'
+import { hideWholeRefusal } from '../lib/shardFullness'
 import { kvGet, kvSet } from '../lib/kvStore'
 
 /** A workshop model's WALK setting as it publishes, by id; the default for one that never chose or is not there (DECK-0003 §1.12). */
@@ -1495,6 +1496,13 @@ export interface BagMeter {
   fitted: boolean
   /** The refusal the deploy would give, or null when it fits. */
   refusal: string | null
+  /**
+   * Why the shard itself cannot be hidden whole, or null: going by reference it
+   * is one sealed object, and that object would pass what one may be
+   * (lib/shardFullness.ts hideWholeRefusal). The deploy refuses it before
+   * anything is signed; the bar says so first.
+   */
+  objectRefusal: string | null
 }
 
 /**
@@ -1549,14 +1557,16 @@ export function deployBagMeter(rows: readonly MyDeployment[], planned: NostrEven
   if (large) {
     const es = mergeEntries(before, [['a', `${OBJECT_KIND}:${o.owner}:${'0'.repeat(32)}`, hint, at]])
     const fit = planUnderCap(es, seals, measured, replaced, adds)
-    return { bytes: measureHeld(withReferences(es, fit.convert)), byReference: true, fitted: false, refusal: fit.refusal }
+    const objectRefusal = hideWholeRefusal(new TextEncoder().encode(planned.content).length)
+    return { bytes: measureHeld(withReferences(es, fit.convert)), byReference: true, fitted: false, refusal: fit.refusal, objectRefusal }
   }
   const es = mergeEntries(before, [planned])
   const candidate = referenceFor(planned, o.owner, '0'.repeat(32), hint)
   const plan = planUnderCap(es, [...(candidate ? [candidate] : []), ...seals], measured, replaced, adds)
   const written = withReferences(es, plan.convert)
   const byReference = !!candidate && plan.convert.has(candidate.key)
-  return { bytes: measureHeld(written), byReference, fitted: byReference, refusal: plan.refusal }
+  // Inline, or by reference only because the bag is full: under the reference threshold, so far under one object's limit.
+  return { bytes: measureHeld(written), byReference, fitted: byReference, refusal: plan.refusal, objectRefusal: null }
 }
 
 /** The realistic ceiling for interactive scanning (spec §7.3 says 0..16). */
@@ -5140,6 +5150,16 @@ export const useShards = create<ShardsState>((set, get) => {
         }
         // Moved, it names the pieces it named (sealed again below when the key changes).
         if (was?.pieces) pieceAddrs = [...was.pieces]
+        // Hidden by reference, the shard is one sealed object of its own, held to
+        // one event of BAG_SAFE_BYTES as signed, as every hidden object is: one
+        // past it is refused here, in words, before any key is worked out or
+        // anything signed (lib/shardFullness.ts, the SHARD sheet's bar measures
+        // the same). A split build's parent is measured as it goes out; its
+        // pieces were measured above.
+        if (!link && !intoChest && (was ? !!was.ref : wantsReference(shard))) {
+          const tooBig = hideWholeRefusal(new TextEncoder().encode(JSON.stringify(toPayload(withAuthoredConstrain(shard)))).length)
+          if (tooBig) { set({ deployStatus: 'error', deployError: tooBig }); return }
+        }
       } else if (pending.type === 'key') {
         if (!pending.key.name.trim()) return
         // Moved, it is the very item it was: its keypair, name and every tag.

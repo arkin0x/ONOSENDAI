@@ -133,3 +133,15 @@ export function fullnessNote(f: Fullness, apart: number): string {
   if (apart <= 0) return ''
   return apart === 1 ? 'This shard only: 1 placed object is not in it.' : `This shard only: ${apart} placed objects are not in it.`
 }
+
+/**
+ * Why a shard cannot be hidden whole, or null: hidden by reference it is one
+ * sealed object, and that object as signed would pass HIDE_WHOLE_BYTES (what
+ * every hidden object here is held to). In plain words, with the numbers the
+ * SHARD sheet's bar shows and what to do. `payloadBytes` is the payload in
+ * UTF-8 bytes, as the hide seals it.
+ */
+export function hideWholeRefusal(payloadBytes: number): string | null {
+  if (hiddenObjectBytes(payloadBytes) <= HIDE_WHOLE_BYTES) return null
+  return `Too big to hide whole: ${payloadBytes.toLocaleString('en-US')} of ${wholePayloadLimit().toLocaleString('en-US')} bytes. Move part of it into its own shard and place that. Nothing was sent.`
+}

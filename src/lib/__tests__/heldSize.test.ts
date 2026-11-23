@@ -103,7 +103,7 @@ describe('BY SIZE in the workshop', () => {
     const before = cur()
     w().moveSelected(0, w().moveStep(0))
     expect(cur()).toBe(before)
-    expect(w().notice).toMatch(/off the grid\. GRID SIZE in GRID makes room\./)
+    expect(w().notice).toMatch(/off the grid\. GRID SIZE makes it bigger\./)
     w().setStepBySize(false)
   })
 

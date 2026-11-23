@@ -1938,7 +1938,7 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
         return placed.size ? { ...s, vertices, parts } : { ...s, vertices }
       })
       // Said, so a big BY SIZE step at the edge is not a key that does nothing.
-      if (refused) set({ notice: 'That move would carry a point or an object off the grid. GRID SIZE in GRID makes room.' })
+      if (refused) set({ notice: 'That move would carry a point or an object off the grid. GRID SIZE makes it bigger.' })
     },
 
     rotateSelected: (turns) => {

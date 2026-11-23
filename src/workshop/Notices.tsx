@@ -6,6 +6,7 @@
 
 import { useEffect, useState } from 'react'
 import { useWorkshop } from '../store/useWorkshop'
+import { SAVE_BLOCKED_MESSAGE } from '../lib/versionGate'
 
 const TOAST_MS = 4000
 
@@ -29,6 +30,7 @@ export function Toast(): JSX.Element | null {
  */
 export function StorageWarning(): JSX.Element | null {
   const error = useWorkshop((s) => s.storageError)
-  if (!error) return null
+  // The red bar over the bench (SaveGateBar) already says it.
+  if (!error || error === SAVE_BLOCKED_MESSAGE) return null
   return <div className="ws__storage" role="alert">{error}</div>
 }

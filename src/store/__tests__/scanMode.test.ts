@@ -262,6 +262,22 @@ describe('the height', () => {
     }
   })
 
+  it('at a HOSAKA height the orb sells a scan: the pay terms sit under it, in a room kept while HOSAKA scans at all (owner, 2026-11-23)', () => {
+    const html = (): string => renderToString(createElement(ScanControls))
+    const room = (out: string): string | undefined => /<div class="scanorbs__terms">(.*?)<\/div>/.exec(out)?.[1]
+    SC().enter()
+    cloudOn(true, 'ask')
+    SC().setHeight(13)
+    expect(room(html())).toBe('')
+    SC().setHeight(22)
+    const sold = room(html()) ?? ''
+    expect(sold).toMatch(/^<p class="payterms payterms--scene"[^>]*>Payments are final\.(<!-- -->)? (<!-- -->)?<a href="https:\/\/www\.onosendai\.tech\/terms" target="_blank" rel="noopener noreferrer">TERMS<\/a><\/p>$/)
+    // HOSAKA off: no height above this device's, nothing sold, and no room kept: the dock is as it was.
+    cloudOn(false)
+    SC().setHeight(22)
+    expect(html()).not.toContain('scanorbs__terms')
+  })
+
   it('keeps the status line\'s room in every state, one fixed height, so no button ever moves (arkinox, 2026-11-15: "I don\'t like the layout jump")', async () => {
     const html = (): string => renderToString(createElement(ScanControls))
     /** The status slot: its class and what it says, or '' when empty. */

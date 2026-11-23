@@ -39,11 +39,13 @@ interface Props {
   onBackdrop?: () => void
   /** Wraps the body in its own scroll box, for an explanation longer than a phone screen. */
   scroll?: boolean
+  /** A small line under the buttons, such as the pay terms under a PAY. */
+  footer?: ReactNode
   onConfirm: () => void
   onCancel: () => void
 }
 
-export function ConfirmModal({ banner, title, body, figure, busy = false, confirmLabel, confirmDisabled = false, danger = true, cardClassName, cancelLabel = 'CANCEL', onBackdrop, scroll = false, onConfirm, onCancel }: Props): JSX.Element {
+export function ConfirmModal({ banner, title, body, figure, busy = false, confirmLabel, confirmDisabled = false, danger = true, cardClassName, cancelLabel = 'CANCEL', onBackdrop, scroll = false, footer, onConfirm, onCancel }: Props): JSX.Element {
   // Escape is a tap on the backdrop: it answers nothing, so a held-chain
   // prompt sets itself aside and every other one cancels. Opened over another
   // modal, this is the more recent one, so it closes first (arkinox,
@@ -72,6 +74,7 @@ export function ConfirmModal({ banner, title, body, figure, busy = false, confir
             {busy && <span className="spin" aria-hidden="true" />}{confirmLabel}
           </button>
         </div>
+        {footer}
       </div>
     </div>,
     document.body,

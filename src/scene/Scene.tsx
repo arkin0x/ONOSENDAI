@@ -38,7 +38,8 @@ import { sortWithoutBoxing } from '../lib/sortNoAlloc'
 import { FrameDriver } from './frameDriver'
 import { BG } from '../lib/palette'
 import { GRID_RADIUS, cellDelta, claimScreenAxes, itemCentre, levelScreenAxes, originShift, placeCentre, renderDirection, viewAxes, type AxisName, type Position, type ViewAxes } from '../lib/space'
-import { upOf } from '../lib/walkDown'
+import { WORLD_DOWN, upOf } from '../lib/walkDown'
+import { csDirection } from '../lib/pose'
 import { carryOrbit } from '../lib/zoomOrbit'
 import { AVATAR_LERP_MS, lerpRemaining } from '../lib/avatarLerp'
 import { setWalkFacing, walkBody, walkEye, walkFacing, walkFall, walkFallUp, walkGlide, walkRise } from '../lib/walkEye'
@@ -47,7 +48,7 @@ import { useAvatars } from '../store/useAvatars'
 import { tryEyeFor } from '../store/tryEye'
 import { clearWalkLook, lookRadPerPx, takeWalkLook, takeWalkLookRad, walkLookBy } from '../lib/walkLook'
 import { tickFall, useWalk, walkDown } from '../store/useWalk'
-import { groundFluid, tickFluid } from '../store/walkFluid'
+import { groundFluid, stepFloor, tickFluid } from '../store/walkFluid'
 import { STEP_UP_MAX } from '../store/walkStep'
 import { orbitOffset } from '../workshop/benchAxes'
 import { WalkProbe } from './WalkProbe'
@@ -612,6 +613,9 @@ function renderUp(view: Quaternion, axis: AxisName, sign: 1 | -1): [number, numb
   }
   return upFor.dir
 }
+
+/** stepFloor's point out of the step WALK: none, so it forgets its last lift. */
+const NO_LEAD: readonly [number, number, number] = [0, 0, 0]
 
 /** Each cyberspace axis's render direction in `view`, kept for the last view asked: fluid WALK's eye offset (walkGlide) is by cyberspace axis. */
 let glideFor: { view: Quaternion | null; x: [number, number, number]; y: [number, number, number]; z: [number, number, number] } = { view: null, x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1] }
@@ -1212,6 +1216,24 @@ function Rig(): JSX.Element {
     smooth.current.y += dy
     smooth.current.z += dz
 
+    // The step WALK eases the walker point along a straight line between
+    // gibsons, which runs under a hill's crown or a stair's nosing: lifted
+    // onto the ground under its footprint (store/walkFluid.ts stepFloor), so
+    // the camera never drops into the ground with it.
+    if (s.walking && gibson && !walkGlide.exact) {
+      const lead = csDirection(s.axes(), [smooth.current.x - gx, smooth.current.y - gy, smooth.current.z - gz])
+      const lift = stepFloor([lead[0], lead[1], lead[2]])
+      if (lift > 0) {
+        // Along the walker's up: against its gravity, or cyberspace +Y with gravity off (store/walkFluid.ts groundFluid).
+        const g = useWalk.getState().gravity ? walkDown() : WORLD_DOWN
+        const u = renderUp(s.view, g.axis, g.dir < 0 ? 1 : -1)
+        smooth.current.x += u[0] * lift
+        smooth.current.y += u[1] * lift
+        smooth.current.z += u[2] * lift
+        if (locked.current) { c.object.position.x += u[0] * lift; c.object.position.y += u[1] * lift; c.object.position.z += u[2] * lift }
+      }
+    } else stepFloor(NO_LEAD)
+
     // WALK: the eye glides into the avatar on the way in and back out to the
     // orbit it came from on the way out, along the line it is looking down,
     // so the view never turns. While walking it is held there every frame: a
@@ -1269,7 +1291,8 @@ function Rig(): JSX.Element {
         forward: eyeFwd.copy(along).negate(),
         up: upOf(walkDown()),
         walls: s.walking,
-        stand: s.walking && walkGlide.exact ? Number(STEP_UP_MAX) * 2 ** s.scaleExp : undefined,
+        // The step WALK's point stands on the ground too at a gibson's zoom (stepFloor above): reached the same way.
+        stand: s.walking && (walkGlide.exact || s.scaleExp === 0) ? Number(STEP_UP_MAX) * 2 ** s.scaleExp : undefined,
         // Fluid WALK up a stair: the feet are on the step, the camera trails
         // them up (lib/walkEye.ts walkRise), never nearer their height than
         // the near plane's room, and kept out of the step in front. The

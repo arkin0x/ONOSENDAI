@@ -55,7 +55,7 @@ import { useCyberspace } from '../useCyberspace'
 import { tickFall, useWalk } from '../useWalk'
 import { useShards, type WorldItem } from '../useShards'
 import { useWorkshop } from '../useWorkshop'
-import { REST_FLOOR, clearWalls, eyePlace, eyeReach, restDrop, wallItemsAt, wallsBuilt } from '../walkWalls'
+import { FOOT_RADIUS, REST_FLOOR, clearWalls, eyePlace, eyeReach, restDrop, wallItemsAt, wallsBuilt } from '../walkWalls'
 import { MARKER_LIFT, markerEdges } from '../../scene/avatarMarker'
 import { MARKER_EYE } from '../../lib/avatarEye'
 import { groundFluid, resetFluid, tickFluid } from '../walkFluid'
@@ -129,6 +129,19 @@ function rampSurface(): (x: number) => number {
     const b = heights.get((x0 + 2) * 120)!
     return a + ((b - a) * (x - x0)) / 2
   }
+}
+
+/**
+ * The highest of `at` under a footprint FOOT_RADIUS across centred on `x`
+ * (store/walkWalls.ts footGround: the feet stand on the highest ground under
+ * the footprint, not under its middle alone). The ramp's slope is under
+ * FOOT_SLOPE and the same along its width, so that is its height FOOT_RADIUS
+ * further up the slope, or its top.
+ */
+function underFoot(at: (x: number) => number, x: number): number {
+  let best = -Infinity
+  for (let k = -64; k <= 64; k++) best = Math.max(best, at(x + (k / 64) * FOOT_RADIUS))
+  return best
 }
 
 let start: Position
@@ -394,10 +407,10 @@ describe('jumps leave from the feet and land on the surface', () => {
     expect(jumps).toBeGreaterThanOrEqual(4)
     expect(worstFeet).toBeGreaterThanOrEqual(-1e-6)
     expect(worstEye).toBeGreaterThanOrEqual(-1e-6)
-    // Landed and stopped: on the slope, to the float.
+    // Landed and stopped: on the slope under its footprint, to the float.
     const p = drawn()
     expect(walkFall.active).toBe(false)
-    expect(p[1]).toBeCloseTo(surface(p[0]), 9)
+    expect(p[1]).toBeCloseTo(underFoot(surface, p[0]), 9)
   })
 })
 
@@ -447,7 +460,7 @@ describe('a jump onto a block, and leaving WALK', () => {
 
 describe('the walker stands on the geometry, not on the gibson', () => {
   for (const gravity of [true, false]) {
-    it(`at a fractional position on the ramp it is drawn at the surface's height, gravity ${gravity ? 'on' : 'off'}`, async () => {
+    it(`at a fractional position on the ramp it is drawn on the highest ground under its footprint, gravity ${gravity ? 'on' : 'off'}`, async () => {
       const ramp = withConstrain(rampFixture(), 'all')
       world(start, ramp, [24, 0, 0])
       const at = rampSurface()
@@ -457,9 +470,10 @@ describe('the walker stands on the geometry, not on the gibson', () => {
       for (let k = 0; k < 4000 && drawn()[0] < 40; k++) {
         frame(16)
         const p = drawn()
-        // Well up the slope, between gibsons both ways: on it, to the float.
+        // Well up the slope, between gibsons both ways: on it, never below it, its footprint's top edge on it, to the float.
         if (p[0] > 18 && Math.abs(p[0] - Math.round(p[0])) > 0.1 && Math.abs(p[1] - Math.round(p[1])) > 0.05) {
-          expect(p[1]).toBeCloseTo(at(p[0] - 24), 9)
+          expect(p[1]).toBeCloseTo(underFoot((x) => at(x - 24), p[0]), 9)
+          expect(p[1]).toBeGreaterThanOrEqual(at(p[0] - 24) - 1e-9)
           fractional++
         }
       }

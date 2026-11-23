@@ -20,10 +20,11 @@ import type { PartForm } from '../lib/partForm'
 import { hiddenIn, useWorkshop } from '../store/useWorkshop'
 import { hiddenSets } from '../lib/shardGroups'
 import { isLook } from './lookTool'
-
-const NO_KEYS: string[] = []
 import { PartFormBadge } from './PartFormBadge'
 import { usePartForms } from './partForms'
+
+/** LOOK hides no group: it draws the shard as the world will. */
+const NO_KEYS: string[] = []
 
 /** Past this many placements, no marks: a floor of tiles would be all marks, and each is a page element moved every frame. */
 export const MAX_BADGES = 32

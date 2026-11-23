@@ -11511,6 +11511,123 @@ a.feed__act { text-decoration: none; }
  * (arkinox, 2026-10-11). The one on TALK keeps the corner NOTIFICATIONS uses. */
 .notif__dot.agents__dot { position: static; flex: 0 0 auto; width: 7px; height: 7px; }
 
+/* AGENTS: an agent's cyberspace-mcp update notice (hud/AgentUpdateNotice.tsx;
+ * arkinox, 2026-11-23). It spans the row under the face, npub and buttons.
+ * Drawn after red HUD danger frames: the house chamfer (top left and bottom
+ * right cut) as a line on the frame's background with the fill inset a pixel
+ * under the same cut, a hazard-striped left edge on YOU MUST UPDATE, the
+ * warning mark first, white words with a dark shadow. UPDATE AVAILABLE is the
+ * same frame, calm cyan and without the stripes. */
+.agentupd {
+  --agentupd-cut: 9px;
+  --agentupd-line: rgba(0, 229, 255, 0.45);
+  --agentupd-fill: linear-gradient(100deg, rgba(0, 36, 46, 0.92), rgba(6, 14, 22, 0.9));
+  grid-column: 1 / -1;
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 2px 0 2px;
+  padding: 8px 10px 9px 12px;
+  color: #fff;
+  text-shadow: 0 0 1px #000, 0 0 2px rgba(0, 0, 0, 0.95), 0 1px 3px rgba(0, 0, 0, 0.9);
+  background: var(--agentupd-line);
+  clip-path: polygon(var(--agentupd-cut) 0, 100% 0, 100% calc(100% - var(--agentupd-cut)), calc(100% - var(--agentupd-cut)) 100%, 0 100%, 0 var(--agentupd-cut));
+}
+.agentupd::before {
+  content: '';
+  position: absolute;
+  inset: 1px;
+  z-index: -1;
+  background: var(--agentupd-fill);
+  clip-path: polygon(calc(var(--agentupd-cut) - 0.6px) 0, 100% 0, 100% calc(100% - var(--agentupd-cut) + 0.6px), calc(100% - var(--agentupd-cut) + 0.6px) 100%, 0 100%, 0 calc(var(--agentupd-cut) - 0.6px));
+}
+.agentupd--must {
+  --agentupd-line: rgba(255, 59, 107, 0.9);
+  --agentupd-fill: linear-gradient(100deg, rgba(74, 6, 24, 0.95), rgba(26, 4, 12, 0.92) 70%, rgba(12, 6, 14, 0.9));
+  padding-left: 16px;
+}
+/* The hazard edge: red and black stripes down the left side, inside the cut. */
+.agentupd--must::after {
+  content: '';
+  position: absolute;
+  left: 1px;
+  top: var(--agentupd-cut);
+  bottom: 1px;
+  width: 5px;
+  z-index: -1;
+  background: repeating-linear-gradient(-45deg, rgba(255, 59, 107, 0.95) 0 4px, rgba(10, 2, 6, 0.95) 4px 8px);
+}
+.agentupd__head {
+  margin: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  font-size: 10px;
+  line-height: 1.35;
+  letter-spacing: 0.1em;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+.agentupd__head svg { flex: none; margin-top: 1px; color: var(--accent); filter: drop-shadow(0 0 4px rgba(0, 229, 255, 0.7)); }
+.agentupd--must .agentupd__head { font-size: 11px; letter-spacing: 0.08em; }
+.agentupd--must .agentupd__head svg { margin-top: 0; color: #ff6b8e; filter: drop-shadow(0 0 5px rgba(255, 59, 107, 0.9)); }
+.agentupd__line { margin: 0; font-size: 10px; line-height: 1.35; letter-spacing: 0.02em; }
+.agentupd__line--dim { opacity: 0.8; }
+/* Two half-width buttons, as the CREATE panel's. */
+.agentupd__acts { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 4px; }
+/* The same chamfer as the frame: the line is the button's background, the fill a layer inset by a pixel. */
+.agentupd__act {
+  --act-line: rgba(0, 229, 255, 0.45);
+  --act-fill: rgba(4, 22, 30, 0.96);
+  position: relative;
+  isolation: isolate;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 30px;
+  font-family: inherit;
+  font-size: 8.5px;
+  letter-spacing: 0.12em;
+  color: #fff;
+  text-shadow: inherit;
+  background: var(--act-line);
+  border: 0;
+  border-radius: 0;
+  clip-path: polygon(6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%, 0 6px);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.agentupd__act::before {
+  content: '';
+  position: absolute;
+  inset: 1px;
+  z-index: -1;
+  background: var(--act-fill);
+  clip-path: polygon(5.6px 0, 100% 0, 100% calc(100% - 5.6px), calc(100% - 5.6px) 100%, 0 100%, 0 5.6px);
+}
+.agentupd__act:hover { --act-fill: rgba(0, 60, 74, 0.96); }
+.agentupd--must .agentupd__act { --act-line: rgba(255, 59, 107, 0.7); --act-fill: rgba(52, 6, 20, 0.96); }
+.agentupd--must .agentupd__act:hover { --act-fill: rgba(96, 12, 36, 0.96); }
+.agentupd__act svg { transition: transform 160ms ease; }
+.agentupd__act svg.is-open { transform: rotate(180deg); }
+.agentupd__how { display: flex; flex-direction: column; gap: 5px; margin-top: 4px; }
+.agentupd__step { display: flex; flex-direction: column; gap: 2px; font-size: 9.5px; }
+.agentupd__step-label { opacity: 0.8; }
+.agentupd__step code {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  padding: 4px 6px;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.45);
+  border-left: 2px solid var(--agentupd-line);
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+@media (prefers-reduced-motion: reduce) { .agentupd__act svg { transition: none; } }
+
 /* AGENTS TALK: one agent's private conversation (arkinox, 2026-10-10). A
  * column that fits a phone: the STRATEGY line, the history (the one part
  * that scrolls), the quick orders, the composer. */

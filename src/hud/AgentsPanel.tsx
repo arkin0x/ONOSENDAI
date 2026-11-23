@@ -39,6 +39,12 @@
  * opening the conversation puts it out (arkinox, 2026-10-11). The watch that
  * notices is useAgentDmWatch.ts; the TALK modal itself is mounted from App
  * (AgentTalkHost), so the notifications toast can open it with the menu shut.
+ *
+ * Under an agent that runs an old cyberspace-mcp, its update notice
+ * (arkinox, 2026-11-23; AgentUpdateNotice.tsx, store/useAgentUpdates.ts):
+ * YOU MUST UPDATE below the minimum safe version, UPDATE AVAILABLE behind the
+ * latest, nothing when its version is unknown. MY AGENTS draws its rows once
+ * the first check is done, so a notice never pushes them down.
  */
 
 import { useState } from 'react'
@@ -57,6 +63,8 @@ import { Explanation } from './Explanation'
 import { ProfileBadge } from './ProfileBadge'
 import { copyText } from '../lib/copyText'
 import { useAgentInviteCopies } from '../store/agentInvite'
+import { dismissAgentUpdate, useAgentUpdates } from '../store/useAgentUpdates'
+import { AgentUpdateNotice } from './AgentUpdateNotice'
 import { CopyValue } from './ui/CopyValue'
 
 
@@ -77,6 +85,9 @@ export function AgentsPanel(): JSX.Element {
   // agent from: no login first (arkinox, 2026-11-11).
   const ready = /^[0-9a-f]{64}$/.test(identity.pubkey)
   const { agents, status, refresh } = useMyAgents(identity.pubkey)
+  // Each agent's update notice; the rows wait for the first check, so a notice never moves them.
+  const updates = useAgentUpdates(identity.pubkey, agents, status !== 'loading')
+  const rowsReady = agents.length === 0 || updates.checked
   const myInbox = useMyDmInbox(identity.pubkey, ready)
   // 'invite' while its COPY says COPIED (an agent's npub copies itself, ui/CopyValue).
   const [copied, setCopied] = useState<string | null>(null)
@@ -123,7 +134,7 @@ export function AgentsPanel(): JSX.Element {
         {unread.total > 0 && <span className="notif__dot agents__dot" aria-hidden="true" />}
         <span className="tag tag--beta" title={BETA_TIP} aria-label={`BETA. ${BETA_TIP}`}>BETA</span>
       </h2>
-      {ready && (status === 'loading' ? (
+      {ready && (status === 'loading' || !rowsReady ? (
         <span className="tag">LOADING</span>
       ) : (
         <button className="tag tag--tap" onClick={refresh} title="Ask the relays again">{agents.length} MINE</button>
@@ -172,9 +183,10 @@ export function AgentsPanel(): JSX.Element {
 
       <span className="legend__label">My agents</span>
       <ul className="avatars__list">
-        {agents.map((pubkey) => {
+        {rowsReady && agents.map((pubkey) => {
           const npub = safeNpub(pubkey)
           const fresh = unread.byAgent[pubkey] ?? 0
+          const notice = updates.notices[pubkey]
           return (
             <li key={pubkey} className="avatars__row agents__row">
               <ProfileBadge pubkey={pubkey} tappable />
@@ -189,6 +201,7 @@ export function AgentsPanel(): JSX.Element {
                 {fresh > 0 && <span className="notif__dot" aria-hidden="true" />}
               </button>
               <button className="avatars__spectate" onClick={() => void spectate(pubkey)}>SPECTATE</button>
+              {notice && <AgentUpdateNotice notice={notice} onUpdated={() => void dismissAgentUpdate(identity.pubkey, pubkey)} />}
             </li>
           )
         })}

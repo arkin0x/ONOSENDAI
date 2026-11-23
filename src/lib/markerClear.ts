@@ -43,11 +43,6 @@ export function boxesOverlap(a: Box, b: Box): boolean {
   return a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom
 }
 
-/** Whether (x, y) is strictly inside `b`. */
-function inside(x: number, y: number, b: Box): boolean {
-  return x > b.left && x < b.right && y > b.top && y < b.bottom
-}
-
 /**
  * Whether the picture's middle (x, y) is inside `b` or on its edge: a ray
  * from a point on the edge enters at once, so the marker would stand on the

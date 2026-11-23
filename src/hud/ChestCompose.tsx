@@ -48,6 +48,7 @@ import { ItemForgeFields } from './ItemForgeFields'
 import { ShardFolders, modelEditedAt, modelName, modelRef, useNewestFirst } from './ShardFolders'
 import { ShardThumb } from './ShardThumb'
 import { SearchField } from './ui/SearchField'
+import { PayTerms } from './ui/PayTerms'
 import type { ShardModel } from 'sno-core/shards'
 import { nip19 } from 'nostr-tools'
 import { CHEST_MAX_PLAINTEXT, forgeKey, isLockPubkey, sizeRefusal, templateBytes } from '../lib/chests'
@@ -594,6 +595,7 @@ export function ChestCompose({ onDone, target = { mode: 'place' } }: { onDone: (
         <div className="shards__actions">
           <button className="avatars__go" onClick={() => useShards.getState().confirmDeploy()}>{ask.sats !== null ? `${ask.sats} SATS` : 'SEAL VIA HOSAKA'}</button>
           <button className="avatars__go" onClick={() => useShards.getState().declineDeploy()}>NOT NOW</button>
+          <PayTerms className="shards__terms" />
         </div>
       ) : (
         <div className="shards__actions">

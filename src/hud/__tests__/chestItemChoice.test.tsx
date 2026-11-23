@@ -66,6 +66,7 @@ vi.mock('../ui/Switch', () => ({
   Field: ({ children, label }: { children: JSX.Element; label: string }) => <div>{label}{children}</div>,
 }))
 
+import { act } from 'react'
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
 import type { NostrEvent } from '../../lib/events'
 import { forgeKey, openWithSecret, readContents } from '../../lib/chests'
@@ -335,6 +336,20 @@ describe('+ ITEM: FROM MY ITEMS or FORGE NEW', () => {
     expect(options()).toEqual(was)
     await m.unmount()
     S().cancelDeploy()
+  })
+})
+
+describe('pay terms (owner, 2026-11-23)', () => {
+  it('HOSAKA\'s ask to seal: the pay terms under its SATS and NOT NOW, TERMS in a new tab', async () => {
+    const m = await openPlaced()
+    expect(m.says('Payments are final.')).toBe(false)
+    await act(async () => { useShards.setState({ deployAsk: { sats: 21, seconds: 30 } }) })
+    expect(m.buttons('21 SATS')).toHaveLength(1)
+    expect(m.all().filter((h) => String(h.props.className).includes('payterms'))).toHaveLength(1)
+    const link = m.all().find((h) => h.type === 'a' && h.props.href === 'https://www.onosendai.tech/terms')
+    expect(link?.props.target).toBe('_blank')
+    await m.unmount()
+    useShards.setState({ deployAsk: null })
   })
 })
 

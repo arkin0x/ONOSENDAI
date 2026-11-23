@@ -105,4 +105,20 @@ describe('the deploy bar with nothing placed', () => {
     await bar.unmount()
     S().cancelDeploy?.()
   })
+
+  it('HOSAKA\'s ask: the pay terms under its SATS and NOT NOW (owner, 2026-11-23)', async () => {
+    const model = { ...newShard('Block'), id: 'ask-bar-shard' }
+    useWorkshop.setState({ shards: [model] })
+    S().startDeployShard(model.id)
+    const bar = await mount(<DeployBar />)
+    expect(bar.says('Payments are final.')).toBe(false)
+    await act(async () => { useShards.setState({ deployAsk: { sats: 21, seconds: 30 } }) })
+    expect(bar.says('21 SATS')).toBe(true)
+    const line = bar.all().filter((h) => String(h.props.className).includes('payterms'))
+    expect(line).toHaveLength(1)
+    const link = bar.all().find((h) => h.type === 'a' && h.props.href === 'https://www.onosendai.tech/terms')
+    expect(link?.props.target).toBe('_blank')
+    await bar.unmount()
+    S().cancelDeploy?.()
+  })
 })

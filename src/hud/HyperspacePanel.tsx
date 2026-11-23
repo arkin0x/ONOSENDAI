@@ -16,6 +16,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { Cloud, Cpu } from 'lucide-react'
+import { PayTerms } from './ui/PayTerms'
 import { useVersionGate, VERSION_BLOCKED_MESSAGE } from '../lib/versionGate'
 import { create } from 'zustand'
 import { coordToHex, coordToXyz, hexToCoord, xyzToCoord, type Plane } from 'cyberspace-core'
@@ -745,6 +746,7 @@ export function HyperspacePanel(): JSX.Element {
       {/* Two ways to ride once HOSAKA has priced it: here for free, or bought.
           The profile's choice is lit; neither ever runs without a tap. */}
       {offer !== null && progress === null && !hosakaRiding && (
+        <>
         <div className="hyper__choice">
           <button
             className={`hyper__btn hyper__choicebtn hyper__choicebtn--here ${best === 'local' ? 'hyper__btn--ride' : ''}`}
@@ -769,6 +771,9 @@ export function HyperspacePanel(): JSX.Element {
             </span>
           </button>
         </div>
+        {/* Under the two, with them: it comes and goes with the price, never on its own. */}
+        <PayTerms className="hyper__terms" />
+        </>
       )}
       {/* A dead button that never says why reads as broken. One line names
           the gate that is actually holding BOARD shut; the answer is never

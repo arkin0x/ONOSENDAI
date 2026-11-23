@@ -12737,6 +12737,7 @@ html.tv-broadcast body { overflow: hidden; }
 .tutorial__terms { margin: 10px 0 0; text-align: center; font-size: 10px; letter-spacing: 0.08em; color: var(--dim); }
 .tutorial__terms a { color: var(--dim); text-decoration: underline; text-underline-offset: 2px; }
 .tutorial__terms a:hover { color: var(--fg); }
+
 .tutorial__next { flex: 1 1 0; }
 /* Every tour button row is one height, every button in it, in every state
  * (owner, 2026-11-23: "back and done buttons should be the same height"):
@@ -13128,6 +13129,33 @@ html.tv-broadcast body { overflow: hidden; }
 /* DISCOVERED NEARBY's buttons wrap under the words on a narrow phone, right-aligned, rather than run past the row. */
 .nearby__row > .nearby__acts { display: flex; flex-wrap: wrap; justify-content: flex-end; max-width: 100%; }
 .nearby__row > .nearby__acts > .nearby__door { display: contents; }
+
+/* ---------- Pay terms ----------
+ *
+ * One small dim line beside every pay button (hud/ui/PayTerms.tsx; owner,
+ * 2026-11-23): "Payments are final. TERMS". The tutorial's terms line is its
+ * look. Inside a two-column row of buttons it takes the whole width, under
+ * them. Over the scene (the scan dock) it is white with the dock's edge.
+ */
+.payterms { margin: 6px 0 0; font-size: 9px; line-height: 12px; letter-spacing: 0.08em; color: var(--dim); }
+.payterms a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+.payterms a:hover, .payterms a:focus-visible { color: var(--fg); }
+.shards__terms, .deploybar__terms { grid-column: 1 / -1; margin: 0; }
+.hyper__terms { margin-top: 6px; }
+/* In a column that already spaces its rows, the gap is the margin. */
+.cloud__topup-form .payterms, .offer__body .payterms { margin: 0; }
+.payterms--scene { margin: 0; color: rgba(255, 255, 255, 0.78); font-weight: 600; text-shadow: var(--scanorbs-edge); }
+.payterms--scene a:hover, .payterms--scene a:focus-visible { color: #fff; }
+/* Under the scan's status line, one line across the dock's width (the
+   stepper's column is too narrow for it). The room is kept when empty, so the
+   line coming at a HOSAKA height moves nothing. */
+.scanorbs__terms { flex: 0 0 auto; height: 12px; width: var(--scanorbs-w); white-space: nowrap; text-align: center; }
+/* Only the words take a tap; the rest of the room reaches the scene, as the dock's does. */
+.scanorbs__terms .payterms { display: inline-block; pointer-events: auto; }
+/* A phone on its side: over the status line, as the line is over the stepper. */
+@media (max-height: 520px) {
+  .scanorbs__terms { position: absolute; left: 0; bottom: calc(100% + 8px + var(--scanorbs-line-h)); }
+}
 
 /* ---------- Search under a list of shards (hud/ui/SearchField.tsx) ----------
  * The client's own input with a search icon inside it at the left and a

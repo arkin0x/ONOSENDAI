@@ -31,11 +31,17 @@ vi.hoisted(() => {
   ;(globalThis as { sessionStorage?: Storage }).sessionStorage = mk()
 })
 vi.mock('../../lib/relay', async (orig) => ({ ...(await orig() as object), publish: vi.fn(async () => ({ ok: true, accepted: [] })), publishMany: vi.fn(async () => ({ ok: true, accepted: [] })), query: vi.fn(async () => []) }))
+// Whether the key on screen was made on this page load: the test says (by default not).
+const minted = vi.hoisted(() => ({ onLoad: false }))
+vi.mock('../../store/useCyberspace', async (orig) => {
+  const real = await orig<typeof import('../../store/useCyberspace')>()
+  return { ...real, keyMintedOnLoad: () => (minted.onLoad ? real.useCyberspace.getState().identity.pubkey : null) }
+})
 vi.mock('../../hooks/useMenuOpen', async (orig) => ({ ...(await orig() as object), setMenuOpen: vi.fn() }))
 
 import { MINTED_KEY, useCyberspace } from '../../store/useCyberspace'
 import { useTutorial } from '../../store/useTutorial'
-import { PROGRESS_PREFIX, setTutorialSwitch, takeTutorialAsk, tutorialAsked } from '../../tutorial/gate'
+import { PROGRESS_PREFIX, noteLanding, setTutorialSwitch, takeTutorialAsk, tutorialAsked } from '../../tutorial/gate'
 import { TUTORIAL_SCRIPT } from '../../tutorial/script'
 import { kvGet } from '../../lib/kvStore'
 import { NEWCOMER_PREFIX, loadNewcomer, readRecord, revealStateOf, setHudChoice, stepsThrough, useNewcomer, watchNewcomer } from '../useNewcomer'
@@ -70,6 +76,7 @@ beforeEach(() => {
   useCyberspace.setState({ identity: { ...useCyberspace.getState().identity, pubkey: A }, events: [], signerKind: 'local', selfCheck: { pubkey: A, status: 'none' } })
   // A key this app made on this device, with no chain, and the relays found none: a first arrival.
   localStorage.setItem(MINTED_KEY, A)
+  minted.onLoad = false
   useTutorial.setState({ script: TUTORIAL_SCRIPT, active: false, pubkey: null })
   loadNewcomer(A)
   stop = watchNewcomer()
@@ -119,6 +126,19 @@ describe('a first arrival is a newcomer, and the screen comes in step by step', 
 
     await reach('earth-board')
     expect(shows('panel.hyperspace')).toBe(true)
+  })
+
+  it('a key made on this load, its tour about to start, is staged from the first frame: nothing shows and then goes', () => {
+    minted.onLoad = true
+    // The bare address, as a first arrival lands.
+    noteLanding('/')
+    expect(useTutorial.getState().active).toBe(false)
+    expect(state()).toMatchObject({ newcomer: true, staged: true })
+    expect(shows('menu')).toBe(false)
+    expect(shows('pad.go')).toBe(false)
+    // With the tutorial switched off, no tour is coming: the full HUD.
+    setTutorialSwitch(false)
+    expect(state().newcomer).toBe(false)
   })
 
   it('every step a part waits for is in the script, and the order of reveals follows the script', () => {

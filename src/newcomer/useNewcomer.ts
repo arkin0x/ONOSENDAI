@@ -33,9 +33,11 @@
 import { useMemo } from 'react'
 import { create } from 'zustand'
 import { kvGet, kvSet } from '../lib/kvStore'
-import { useCyberspace } from '../store/useCyberspace'
+import { keyMintedOnLoad, useCyberspace } from '../store/useCyberspace'
 import { isNewArrival, onTutorialLifecycle, tutorialMayRun, useTutorial } from '../store/useTutorial'
 import { arrivalModeAsked, readProgress } from '../tutorial/gate'
+import { useDemo } from '../store/useDemo'
+import { useTv } from '../store/useTv'
 import { SESSION_PREFIX, session, sessionNewcomer } from './flag'
 import { REVEAL, revealed, type RevealId, type RevealState } from './reveal'
 
@@ -219,11 +221,24 @@ function resumable(pubkey: string): boolean {
   return p !== null && !p.ended
 }
 
+/**
+ * A key made on this very load, with no chain and no run yet, on a load the
+ * tour will start on: the first arrival's tour is about to begin. Staged from
+ * the first frame, so the full HUD never shows for a moment and then goes.
+ */
+function firstArrivalAhead(rec: NewcomerRecord, pubkey: string): boolean {
+  if (rec.stage || rec.choice || keyMintedOnLoad() !== pubkey) return false
+  if (useCyberspace.getState().events.length > 0 || !tutorialMayRun() || arrivalModeAsked()) return false
+  return readProgress(pubkey) === null
+}
+
 /** How the newcomer view stands, from the record and the tour. Pure but for the progress read. */
 export function revealStateOf(rec: NewcomerRecord, pubkey: string | null, tourMine: boolean): RevealState {
-  const newcomer = newcomerViewOf(rec)
+  // A first arrival whose tour is about to start is a newcomer already.
+  const ahead = !tourMine && pubkey !== null && firstArrivalAhead(rec, pubkey)
+  const newcomer = ahead || newcomerViewOf(rec)
   // A newcomer's run about to resume stages from the first frame, so nothing shows and then goes.
-  const staged = newcomer && (tourMine || (rec.stage === 'newcomer' && pubkey !== null && resumable(pubkey)))
+  const staged = newcomer && (tourMine || ahead || (rec.stage === 'newcomer' && pubkey !== null && resumable(pubkey)))
   return { newcomer, staged, seen: new Set(rec.seen) }
 }
 
@@ -232,7 +247,12 @@ export function useRevealState(): RevealState {
   const rec = useNewcomer((s) => s.record)
   const pubkey = useNewcomer((s) => s.pubkey)
   const tourMine = useTutorial((s) => s.active && s.pubkey !== null && s.pubkey === pubkey)
-  return useMemo(() => revealStateOf(rec, pubkey, tourMine), [rec, pubkey, tourMine])
+  // What decides whether a run is about to start or resume (tutorialMayRun): read again when any changes.
+  const moved = useCyberspace((s) => s.events.length > 0)
+  const tour = useDemo((s) => s.active)
+  const tv = useTv((s) => s.on)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  return useMemo(() => revealStateOf(rec, pubkey, tourMine), [rec, pubkey, tourMine, moved, tour, tv])
 }
 
 /** Whether the newcomer view is on (plain names) for the identity on screen. */

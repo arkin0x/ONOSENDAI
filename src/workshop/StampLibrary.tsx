@@ -129,7 +129,8 @@ export function StampLibrary({ onClose }: { onClose: () => void }): JSX.Element 
       if (ticket === asked.current) setReading(null)
     }
   }
-  const pickLocal = (s: ShardModel): void => { if (me) void choose(s, ['a', `${OBJECT_KIND}:${me}:${s.id}`], me, true) }
+  // Signed out there is no author to name: COPY still works (LINK refuses it in words, workshop/stampTap.ts).
+  const pickLocal = (s: ShardModel): void => { void choose(s, ['a', `${OBJECT_KIND}:${me ?? ''}:${s.id}`], me || null, true) }
 
   const byAddress = async (): Promise<void> => {
     const parsed = parseObjectAddress(address)
@@ -186,9 +187,9 @@ export function StampLibrary({ onClose }: { onClose: () => void }): JSX.Element 
             const empty = s.vertices.length === 0 && (s.parts?.length ?? 0) === 0
             const self = isSelf(s)
             // LINK never places the shard into itself; COPY of it puts a second copy of its points down, as DUPLICATE in place would.
-            const off = empty || !me || reading !== null || (form === 'link' && self)
+            const off = empty || reading !== null || (form === 'link' && (self || !me))
             const on = chosen?.local === true && chosen.shard.id === s.id
-            const state = empty ? 'EMPTY' : !me ? 'SIGN IN TO STAMP YOUR SHARDS' : form === 'link' && self ? 'THIS SHARD' : form === 'link' ? (published.has(s.id) ? 'PUBLISHED: FOLLOWS ITS EDITS' : 'NOT PUBLISHED: SEALED WITH YOUR HIDE') : self ? 'THIS SHARD' : ''
+            const state = empty ? 'EMPTY' : form === 'link' && !me ? 'SIGN IN TO LINK YOUR SHARDS' : form === 'link' && self ? 'THIS SHARD' : form === 'link' ? (published.has(s.id) ? 'PUBLISHED: FOLLOWS ITS EDITS' : 'NOT PUBLISHED: SEALED WITH YOUR HIDE') : self ? 'THIS SHARD' : ''
             return (
               <li key={s.id} {...f.drag} className={on ? 'is-on' : undefined}>
                 <button className="stamplib__row" disabled={off} aria-pressed={on} onClick={() => { if (f.selecting) { f.toggle(); return } pickLocal(s) }} title={off ? state : `${form === 'copy' ? 'Copy' : 'Link'} "${s.name}"`}>

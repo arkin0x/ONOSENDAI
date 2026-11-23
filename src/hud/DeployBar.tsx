@@ -271,7 +271,7 @@ export function bagTooBigLine(others: boolean, room = false): string {
   return others ? 'This bag is too full for it. Hide it at another height.' : 'Too big for one bag. Hide part of it, and hide the rest at another height.'
 }
 
-/** What to do when the shard itself is too big to hide whole (store/useShards deployBagMeter objectRefusal): one line, as the SHARD sheet's bar says it. */
+/** What to do when the shard itself is too big to hide whole (store/useShards deployBagMeter objectRefusal): one line; the deploy's own refusal, with the numbers, is its hover. */
 export const OBJECT_TOO_BIG_LINE = 'Too big to hide whole. Move part of it into its own shard and place that.'
 
 /**
@@ -280,7 +280,8 @@ export const OBJECT_TOO_BIG_LINE = 'Too big to hide whole. Move part of it into 
  * and why; TOO LARGE, with the deploy's own words, when even that does not fit.
  */
 export function BagMeterRow({ meter, others = false, room = false }: { meter: BagMeter; others?: boolean; room?: boolean }): JSX.Element {
-  const of = `${meter.bytes.toLocaleString('en-US')} of ${BAG_SAFE_BYTES.toLocaleString('en-US')} bytes`
+  // The shard itself too big: the bag's own numbers would read as if it fitted, so the row names the shard instead.
+  const of = meter.objectRefusal ? 'THE SHARD ITSELF' : `${meter.bytes.toLocaleString('en-US')} of ${BAG_SAFE_BYTES.toLocaleString('en-US')} bytes`
   const form = meter.refusal || meter.objectRefusal ? 'TOO LARGE' : meter.fitted ? 'BY REFERENCE: THE BAG IS FULL' : meter.byReference ? 'BY REFERENCE' : 'INLINE'
   return (
     <DeployRow kind="bagsize" label="BAG" hint={meter.objectRefusal ? <span data-testid="object-too-big">{OBJECT_TOO_BIG_LINE}</span> : meter.refusal ? <span data-testid="bag-too-big">{bagTooBigLine(others, room)}</span> : meter.fitted ? 'Too large to carry inline here, so it goes out as its own sealed object and the bag names it.' : undefined} hintTitle={meter.objectRefusal ?? meter.refusal ?? undefined}>

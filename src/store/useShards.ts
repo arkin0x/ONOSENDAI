@@ -1557,7 +1557,8 @@ export function deployBagMeter(rows: readonly MyDeployment[], planned: NostrEven
   if (large) {
     const es = mergeEntries(before, [['a', `${OBJECT_KIND}:${o.owner}:${'0'.repeat(32)}`, hint, at]])
     const fit = planUnderCap(es, seals, measured, replaced, adds)
-    const objectRefusal = hideWholeRefusal(new TextEncoder().encode(planned.content).length)
+    // A MOVE of an object already hidden is not held to it, as the deploy does not hold it.
+    const objectRefusal = o.edit ? null : hideWholeRefusal(new TextEncoder().encode(planned.content).length)
     return { bytes: measureHeld(withReferences(es, fit.convert)), byReference: true, fitted: false, refusal: fit.refusal, objectRefusal }
   }
   const es = mergeEntries(before, [planned])
@@ -5155,8 +5156,9 @@ export const useShards = create<ShardsState>((set, get) => {
         // past it is refused here, in words, before any key is worked out or
         // anything signed (lib/shardFullness.ts, the SHARD sheet's bar measures
         // the same). A split build's parent is measured as it goes out; its
-        // pieces were measured above.
-        if (!link && !intoChest && (was ? !!was.ref : wantsReference(shard))) {
+        // pieces were measured above. A MOVE of an object already hidden is left
+        // as it was: its size is not new, and splitting is not what a move does.
+        if (!link && !intoChest && !was && wantsReference(shard)) {
           const tooBig = hideWholeRefusal(new TextEncoder().encode(JSON.stringify(toPayload(withAuthoredConstrain(shard)))).length)
           if (tooBig) { set({ deployStatus: 'error', deployError: tooBig }); return }
         }

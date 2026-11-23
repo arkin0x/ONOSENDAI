@@ -144,7 +144,8 @@ describe('the deploy bar says so first', () => {
 
   it('the BAG row reads TOO LARGE with what to do', () => {
     const html = renderToStaticMarkup(<BagMeterRow meter={{ bytes: 1000, byReference: true, fitted: false, refusal: null, objectRefusal: 'Too big to hide whole: 1 of 2 bytes.' }} />)
-    expect(html).toContain('TOO LARGE')
+    expect(html).toContain('THE SHARD ITSELF · TOO LARGE')
+    expect(html).not.toContain('of 240,000 bytes')
     expect(html).toContain(OBJECT_TOO_BIG_LINE)
     expect(OBJECT_TOO_BIG_LINE).not.toMatch(/\u2014/)
   })

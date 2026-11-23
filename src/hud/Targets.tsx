@@ -27,6 +27,7 @@ import { labelDrop } from '../lib/avatarLabel'
 import { edgePlace, hiddenByCover, type Reach } from '../lib/markerClear'
 import type { Box, Cover } from '../lib/coverBand'
 import { readCovers, setCoverWatch } from '../hooks/useCover'
+import { useWorkshop } from '../store/useWorkshop'
 import { useProfile } from '../hooks/useProfile'
 import { ProfilePic } from './ProfileBadge'
 
@@ -59,6 +60,13 @@ function reachFor(bodyWidth: number, bodyHeight: number): Reach {
   const half = Math.max(CHEVRON.bottom, Math.ceil(bodyHeight / 2) + 2)
   return { left: CHEVRON.left, top: -half, right: Math.max(CHEVRON.right, 14 + w + 4), bottom: half }
 }
+
+/**
+ * How far past a panel's edge a target behind it must come before it is drawn
+ * on the target again, px: a target moving along the edge would otherwise
+ * flick between its ring and a chevron beside the panel.
+ */
+const HIDE_MARGIN = 8
 
 /** Reticle bounds in pixels. Small enough to read as an annotation. */
 const RING_MIN = 15
@@ -108,15 +116,22 @@ export function Targets({ targets }: Props): JSX.Element {
   // measurement or the layer's size changes.
   const local = useRef<{ from: readonly Cover[] | null; w: number; h: number; boxes: Box[] }>({ from: null, w: 0, h: 0, boxes: [] })
 
-  // The overlays are measured while the markers are up (hooks/useCover).
+  // The overlays are measured while there is a marker to keep clear of them
+  // (hooks/useCover), and not under the workshop, which covers the scene and
+  // stops its frames (review of #508).
+  const benchOpen = useWorkshop((s) => s.open)
+  const watch = targets.length > 0 && !benchOpen
   useEffect(() => {
+    if (!watch) return
     setCoverWatch(true, 'targets')
-    return () => {
-      setCoverWatch(false, 'targets')
-      sizer.current?.disconnect()
-      sizer.current = null
-      byBody.current.clear()
-    }
+    return () => { setCoverWatch(false, 'targets') }
+  }, [watch])
+  useEffect(() => () => {
+    sizer.current?.disconnect()
+    sizer.current = null
+    byBody.current.clear()
+    // Every marker is found and observed afresh if the component comes back (a fast refresh).
+    written.current.clear()
   }, [])
 
   useEffect(() => {
@@ -153,7 +168,13 @@ export function Targets({ targets }: Props): JSX.Element {
         lc.w = w
         lc.h = h
         // Not the pad (hooks/useCover CoverOptions).
-        lc.boxes = covers.filter((c) => c.markers !== false).map(({ box }) => ({ left: box.left - o.left, top: box.top - o.top, right: box.right - o.left, bottom: box.bottom - o.top }))
+        // Clipped to the layer: a panel just off the screen is no reason to stop short.
+        lc.boxes = []
+        for (const c of covers) {
+          if (c.markers === false) continue
+          const b = { left: Math.max(0, c.box.left - o.left), top: Math.max(0, c.box.top - o.top), right: Math.min(w, c.box.right - o.left), bottom: Math.min(h, c.box.bottom - o.top) }
+          if (b.right > b.left && b.bottom > b.top) lc.boxes.push(b)
+        }
       }
       const boxes = lc.boxes
       // The picture's middle, which BUILD's lens shift moves off the window's
@@ -166,9 +187,9 @@ export function Targets({ targets }: Props): JSX.Element {
         if (!s) continue
         let m = kept.get(t.id)
         if (!m || !m.el.isConnected) {
+          if (m) { forget(m); kept.delete(t.id) }
           const el = root.querySelector<HTMLElement>(`[data-target="${t.id}"]`)
           if (!el) continue
-          if (m) forget(m)
           m = {
             el,
             body: el.querySelector<HTMLElement>('.target__body'),
@@ -200,7 +221,9 @@ export function Targets({ targets }: Props): JSX.Element {
 
         // On screen but behind a panel, it is out of sight as surely as off
         // the edge: pointed at from the panel's side instead.
-        const shown = (s.onScreen || drawn) && !(boxes.length > 0 && hiddenByCover(px, py, cx, cy, boxes, CHEVRON))
+        // Once hidden it stays so until HIDE_MARGIN clear of the panel.
+        const margin = last.mode === 'off' ? HIDE_MARGIN : 0
+        const shown = (s.onScreen || drawn) && !(boxes.length > 0 && hiddenByCover(px, py, cx, cy, boxes, CHEVRON, margin))
         const under = drawn && shown
 
         if (!shown) {

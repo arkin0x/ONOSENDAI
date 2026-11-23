@@ -136,4 +136,20 @@ describe('hiddenByCover', () => {
     expect(p.x).toBeGreaterThan(left.right)
     expect(boxesOverlap(markerBox(p.x, p.y, MARKER), left)).toBe(false)
   })
+
+  it('with a margin, one already pointed at from the panel stays so until clear of it', () => {
+    // 4px past the column's side: drawn on the target, unless it was hidden a moment ago.
+    expect(hiddenByCover(left.right + 4, 300, 640, 400, [left], CHEVRON)).toBe(false)
+    expect(hiddenByCover(left.right + 4, 300, 640, 400, [left], CHEVRON, 8)).toBe(true)
+    expect(hiddenByCover(left.right + 12, 300, 640, 400, [left], CHEVRON, 8)).toBe(false)
+  })
+})
+
+describe('the picture middle on a cover edge', () => {
+  it('leaves that cover out rather than standing the marker on the middle', () => {
+    // The chevron-grown box's right edge exactly at the middle.
+    const c: Box = { left: 0, top: 0, right: 630, bottom: 800 }
+    const p = edgePlace(1280, 800, 640, 400, -5000, 400, INSET, [c], MARKER, CHEVRON)
+    expect(p.x).toBe(INSET)
+  })
 })

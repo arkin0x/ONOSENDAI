@@ -15,10 +15,10 @@
  * end puts every marker heading that way along the panel's inner side.
  *
  * The overlays are the ones BUILD's framing measures (hooks/useCover.ts:
- * the menu's columns beside the scene, the tour card, the BUILD and deploy
- * bars), so the markers and the framing agree on what is covered; all but
- * the pad, which folds with every tap on the scene and would make the
- * markers jump (hooks/useCover CoverOptions). A marker's whole
+ * the menu's columns beside the scene, the tour card, the BUILD bar), so
+ * the markers and the framing agree on what is covered; all but the pad and
+ * the deploy bar docked beside it, which fold or narrow with every tap on
+ * the scene and would make the markers jump (hooks/useCover CoverOptions). A marker's whole
  * drawing is kept clear, the name and distance as well as the chevron: the
  * cover is grown by how far the drawing reaches from the marker's point, and
  * the point is kept out of the grown box. Pure functions, so the geometry
@@ -46,6 +46,15 @@ export function boxesOverlap(a: Box, b: Box): boolean {
 /** Whether (x, y) is strictly inside `b`. */
 function inside(x: number, y: number, b: Box): boolean {
   return x > b.left && x < b.right && y > b.top && y < b.bottom
+}
+
+/**
+ * Whether the picture's middle (x, y) is inside `b` or on its edge: a ray
+ * from a point on the edge enters at once, so the marker would stand on the
+ * middle of the picture.
+ */
+function holds(x: number, y: number, b: Box): boolean {
+  return x >= b.left && x <= b.right && y >= b.top && y <= b.bottom
 }
 
 /**
@@ -123,8 +132,8 @@ export function edgePlace(
   if (len > 1e-6) {
     for (const cover of covers) {
       let out = keepOut(cover, reach)
-      if (inside(cx, cy, out)) out = keepOut(cover, chevron)
-      if (inside(cx, cy, out)) continue
+      if (holds(cx, cy, out)) out = keepOut(cover, chevron)
+      if (holds(cx, cy, out)) continue
       const at = entry(cx, cy, dx, dy, out)
       if (at < t) t = Math.max(0, at - COVER_GAP / len)
     }
@@ -137,8 +146,13 @@ export function edgePlace(
  * chevron can stand beside: under it, with the picture's middle (cx, cy)
  * outside the box the chevron (`chevron`) must keep out of. Such a target is
  * pointed at from the cover's edge (edgePlace) rather than drawn under it.
+ * `margin` grows each cover for the test, so a target already pointed at
+ * from a panel stays so until it is that far clear of it.
  */
-export function hiddenByCover(x: number, y: number, cx: number, cy: number, covers: readonly Box[], chevron: Reach): boolean {
-  for (const c of covers) if (inside(x, y, c) && !inside(cx, cy, keepOut(c, chevron))) return true
+export function hiddenByCover(x: number, y: number, cx: number, cy: number, covers: readonly Box[], chevron: Reach, margin = 0): boolean {
+  for (const c of covers) {
+    const under = x > c.left - margin && x < c.right + margin && y > c.top - margin && y < c.bottom + margin
+    if (under && !holds(cx, cy, keepOut(c, chevron))) return true
+  }
   return false
 }

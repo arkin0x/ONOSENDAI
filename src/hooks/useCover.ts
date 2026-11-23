@@ -6,8 +6,10 @@
  * (setCoverWatch): the scene, only while the lens shift is in use in BUILD
  * (the pad is registered nearly all the time, and a layout read twice a
  * second through HOP, VIEW and TV bought nothing for the framing), and the
- * target markers, while they are on screen, so a chevron stops beside the
- * menu instead of drawing over it (hud/Targets.tsx). While watched, the boxes
+ * target markers, while there are any and the workshop is closed, so a
+ * chevron stops beside the menu instead of drawing over it (hud/Targets.tsx).
+ * With only the markers watching, the covers they ignore (the pad) are not
+ * measured at all. While watched, the boxes
  * are measured when the watch begins, when one of them changes size (a
  * ResizeObserver, whose callback runs after layout, so the read is free),
  * when the window does, and twice a second, which catches a bar that moves
@@ -23,7 +25,7 @@ import { useCallback, useRef } from 'react'
 import type { Cover, CoverEdge } from '../lib/coverBand'
 import { whileVisible } from '../lib/whileVisible'
 
-/** How often the boxes are measured again while the scene watches them, ms. */
+/** How often the boxes are measured again while anyone watches them, ms. */
 const REMEASURE_MS = 500
 
 /** What an overlay says about itself when it opts in. */
@@ -48,7 +50,10 @@ function remeasure(): void {
 
 function measure(): void {
   const next: Cover[] = []
+  // The markers alone have no use for the covers they do not keep clear of.
+  const all = watchers.has('lens') || [...watchers].some((w) => w !== 'targets')
   for (const [el, { edge, markers }] of entries) {
+    if (!markers && !all) continue
     const r = el.getBoundingClientRect()
     // Hidden (display: none, or under a modal's hidden wrapper) measures empty.
     if (r.width <= 0 || r.height <= 0) continue
@@ -84,7 +89,11 @@ export function setCoverWatch(on: boolean, who = 'lens'): void {
   if (on) watchers.add(who)
   else watchers.delete(who)
   const any = watchers.size > 0
-  if (any === watching) return
+  if (any === watching) {
+    // Someone else joined or left: the covers worth measuring may have changed.
+    if (any) measure()
+    return
+  }
   watching = any
   if (timer !== null) window.clearInterval(timer)
   timer = null
@@ -122,8 +131,9 @@ export interface CoverOptions {
    * Whether the target markers stop short of it (hud/Targets.tsx); true
    * unless said otherwise. False for the pad: it folds and comes back with
    * every tap on the scene, and a marker that dodged it would jump between
-   * the screen's foot and the middle each time. A marker under it is under
-   * it, as it always was (the pad draws over the markers).
+   * the screen's foot and the middle each time; the deploy bar too, which
+   * docks beside the pad and narrows as it folds. A marker under them is
+   * under them, as it always was (both draw over the markers).
    */
   markers?: boolean
 }

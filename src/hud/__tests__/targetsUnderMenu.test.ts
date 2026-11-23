@@ -38,6 +38,10 @@ describe('the target markers and the menu', () => {
 
   it('never takes a tap', () => {
     expect(rule('.targets')).toMatch(/pointer-events:\s*none/)
-    expect(CSS).not.toMatch(/\.target[^s{]*\{[^}]*pointer-events:\s*auto/)
+    // No rule for a marker or any part of one gives taps back: .target,
+    // .target__*, .target--*, and anything under the .targets layer. The
+    // TARGETS panel's own rows (.targets__row and the like) are not markers.
+    expect(CSS).not.toMatch(/\.target(__[a-z-]+|--[a-z-]+)?[\s,:[{][^{}]*\{[^}]*pointer-events:\s*auto/)
+    expect(CSS).not.toMatch(/\.targets[\s,:[{][^{}]*\{[^}]*pointer-events:\s*auto/)
   })
 })

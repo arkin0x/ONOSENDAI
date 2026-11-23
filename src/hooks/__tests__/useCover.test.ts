@@ -91,9 +91,17 @@ describe('useCover', () => {
     const offCol = registerCover(col.el, 'left')
     const offPad = registerCover(pad.el, 'bottom', false)
     setCoverWatch(true, 'targets')
+    // The markers alone: the pad is not even measured.
+    expect(readCovers()).toEqual([{ edge: 'left', box: { left: 16, top: 16, right: 336, bottom: 784 } }])
+    expect(pad.reads()).toBe(0)
+    // BUILD's framing joins and counts it, marked as one the markers ignore.
+    setCoverWatch(true)
     const covers = readCovers()
     expect(covers.find((c) => c.edge === 'left')?.markers).toBeUndefined()
     expect(covers.find((c) => c.edge === 'bottom')?.markers).toBe(false)
+    // And when the framing leaves, the markers' measure drops it again.
+    setCoverWatch(false)
+    expect(readCovers()).toHaveLength(1)
     setCoverWatch(false, 'targets')
     offCol()
     offPad()

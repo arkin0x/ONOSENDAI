@@ -9,7 +9,8 @@
  * workshop step used to get neither. This card is the tour's voice here on
  * that step: what to do first, and the way back. It stands under the top
  * bar, clear of the rail and the view ball, in one place in every state, with
- * room kept for two lines so nothing moves when its words change; BACK TO
+ * room kept for four lines (the owner's bench line takes three or four on a
+ * phone) so nothing moves when its words change; BACK TO
  * THE TOUR closes the workshop as the X does, and the tour goes on.
  *
  *   - MENU up (as the tour opens it): the pieces found are in the list.
@@ -27,10 +28,11 @@ import type { SheetKind } from '../sheets/areas'
 /** The tutorial step this card belongs to (tutorial/script.ts WORKSHOP). */
 export const WORKSHOP_STEP_ID = 'workshop'
 
-/** What the card says, by where the player is. Short, plain, the owner's voice; two lines at most on a 375px phone. */
+/** What the card says, by where the player is. Plain, the owner's voice; four lines at most on a 375px phone. */
 export const TIP_TEXT = {
   menu: 'Your pieces are here. Tap one to open it.',
-  bench: 'Drag to turn it. Tap STAMP to add blocks.',
+  // The owner's words (2026-11-23). ADD is on the dock on this step (shell/Dock.tsx dockShowsFour).
+  bench: "Drag to turn it. Tap STAMP to add pre-made shapes, or ADD to hand-craft your object's points.",
 } as const
 
 /** Which line the card shows, or null when it is not drawn: only on the tour's workshop step, never while the eye is being set. Pure. */

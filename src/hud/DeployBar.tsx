@@ -306,7 +306,8 @@ export function DeployBar({ pad = false }: { pad?: boolean }): JSX.Element | nul
 
 function DeployBarOpen({ pad }: { pad: boolean }): JSX.Element | null {
   // Covers the scene from below: BUILD frames the cursor above it (hooks/useCover).
-  const coverRef = useCover('bottom')
+  // The target markers do not dodge it: it narrows as the pad folds, and they would jump.
+  const coverRef = useCover('bottom', true, { markers: false })
   const pending = useShards((s) => s.pending)
   const shard = useShards((s) => (s.pending?.type === 'shard' ? s.pendingShard() : null))
   // EDIT: a shard you hid, being moved. Its old region (a string, so the bar

@@ -56,7 +56,9 @@ import { DmInboxSetup, useMyDmInbox } from './DmInboxSetup'
 import { Explanation } from './Explanation'
 import { ProfileBadge } from './ProfileBadge'
 import { copyText } from '../lib/copyText'
+import { useAgentInviteCopies } from '../store/agentInvite'
 import { CopyValue } from './ui/CopyValue'
+
 
 /** How long a tapped button says COPIED before its label returns. */
 const COPIED_MS = 1200
@@ -91,6 +93,8 @@ export function AgentsPanel(): JSX.Element {
   const unread = useAgentUnread()
 
   const copy = (key: string, text: string): void => {
+    // The tour's AI step waits for this press (tutorial/director.ts 'agent-copy').
+    if (key === 'invite') useAgentInviteCopies.setState((s) => ({ presses: s.presses + 1 }))
     // The clipboard, or the old copy command where it is refused (lib/copyText).
     void copyText(text).then((ok) => {
       if (ok) { setCopied(key); window.setTimeout(() => setCopied((c) => (c === key ? null : c)), COPIED_MS) }
@@ -146,7 +150,7 @@ export function AgentsPanel(): JSX.Element {
 
       <div className="agents__invite">
         <span className="legend__label">Invite an agent</span>
-        <button className="identity__change" onClick={() => copy('invite', invitationText({ npub: identity.npub }))} title="Copy an invitation for your AI: the guide, the rules, your npub as its operator, the setup commands and a budget">
+        <button className="identity__change agents__invite-copy" onClick={() => copy('invite', invitationText({ npub: identity.npub }))} title="Copy an invitation for your AI: the guide, the rules, your npub as its operator, the setup commands and a budget">
           {copied === 'invite' ? 'COPIED' : 'COPY'}
         </button>
       </div>

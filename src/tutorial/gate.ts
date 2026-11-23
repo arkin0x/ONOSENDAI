@@ -119,6 +119,15 @@ let asked = false
 export function tutorialAsked(): boolean {
   return asked
 }
+/**
+ * Ask for a run on this load, as the /tutorial address does, without the
+ * address: ?newcomer=1 (newcomer/useNewcomer.ts applyNewcomerFlag), so the
+ * owner can try the newcomer view on a preview without a new key.
+ */
+export function askTutorialRun(): void {
+  setTutorialSwitch(true)
+  asked = true
+}
 /** Act on the ask: it is taken once. Returns whether there was one. */
 export function takeTutorialAsk(): boolean {
   const was = asked

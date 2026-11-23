@@ -60,6 +60,8 @@ export const OPEN: TutorialStep = {
   explain: "Nothing opens by itself. This chest is locked to the box's region, and standing in the box gave you its key.",
   keepChips: ['found'],
   scene: { target: 'keep', highlight: '.foundchip' },
+  // The chest, its loot and the avatar framed clear of this card (owner, 2026-11-23).
+  effect: 'chest-shot',
   wait: 'open-chest',
 }
 
@@ -72,6 +74,7 @@ export const TAKE: TutorialStep = {
   keepChips: ['found'],
   scene: { target: 'keep', highlight: '.foundchip' },
   explain: 'What you take goes in your ITEMS, in the menu. A shard you take can be placed in the world, built with, or changed in the workshop.',
+  effect: 'chest-shot',
   wait: 'take',
   // No SKIP: the moon blossom's DNA must be claimed here, or the plant step has nothing to plant (feedback 2026-11-12, item 8).
   gate: true,
@@ -190,11 +193,13 @@ export const RUN: TutorialStep = {
 /** The finish chest: pieces to build a course of your own. */
 export const FINISH: TutorialStep = {
   id: 'finish',
-  title: 'You made it',
+  title: 'You made it!',
   caption: 'Another chest, with pieces to build a course of your own. OPEN it and TAKE them.',
   hint: 'Tap the chest to OPEN it, then again to TAKE ALL.',
   keepChips: ['found'],
   scene: { target: 'keep', highlight: '.foundchip' },
+  // Framed as the welcome chest is, once the player is out of WALK (in WALK the eye is theirs).
+  effect: 'finish-shot',
   wait: 'take-finish',
 }
 
@@ -222,10 +227,13 @@ export const CHOICE: TutorialStep = {
   caption: 'That was the basics. Try as many as you like.',
   modal: true,
   go: 'DONE',
+  // On a browser that cannot ride (Firefox, Safari: tutorial/earthRoute.ts 'ride-check'), Earth is offered to look at instead of to ride to.
+  effect: 'ride-check',
   choices: [
     // First (owner, 2026-11-14): the community, where a newcomer meets the rest of us.
     { id: 'straylight', label: 'JOIN THE COMMUNITY', about: 'Hang out in Straylight Cafe, the cyberspace community.', step: 'straylight' },
-    { id: 'hyperspace', label: 'TRAVEL TO EARTH', about: 'Ride hyperspace to a place on Earth.', step: 'earth' },
+    { id: 'hyperspace', label: 'TRAVEL TO EARTH', about: 'Ride hyperspace to a place on Earth.', step: 'earth', unless: 'cannot-ride' },
+    { id: 'earth-look', label: 'SEE EARTH', about: 'Look at Earth and its train stops.', step: 'earth-look', when: 'cannot-ride' },
     { id: 'dungeon', label: 'PLAY THE DUNGEON', about: 'A game inside cyberspace, with its own rules.', when: 'dungeon' },
     { id: 'agents', label: 'BRING YOUR AI', about: 'Add your AI to cyberspace and talk to it here.', step: 'agents' },
     { id: 'friend', label: 'SEE A FRIEND', about: 'Add a friend and watch where they have been.', step: 'friend' },
@@ -254,11 +262,33 @@ export const EARTH: TutorialStep = {
   then: 'earth-pick',
 }
 
-/** A tap on a stop picks it as the ride's destination (tutorial/earthRoute.ts 'pick-stop'). */
+/**
+ * Earth to look at, on a browser that cannot ride (#896: Firefox and Safari
+ * cap a number below what a ride's proof needs, so every ride is refused
+ * there, HOSAKA's too). One panel: the planet, why there is no ride, and
+ * FINISH back to the choices.
+ */
+export const EARTH_LOOK: TutorialStep = {
+  id: 'earth-look',
+  title: 'Earth',
+  caption: "This is Earth! Hyperspace is a train line with stops all over the planet. Riding it needs Chrome, Edge or Brave on a computer or an Android phone, so here you can look but not ride.",
+  hint: 'Drag to look around. FINISH when you are done.',
+  effect: 'view-earth',
+  branch: true,
+}
+
+/**
+ * A short trip picked as the ride's destination: one listed under the
+ * caption, or a tap on a stop that is one (tutorial/earthRoute.ts
+ * 'pick-stop', tutorial/shortTrip.ts). Never a stop hours away (new-user
+ * write-up, 2026-11-21).
+ */
 export const EARTH_PICK: TutorialStep = {
   id: 'earth-pick',
   title: 'Pick a stop',
-  caption: "Each glowing dot is a stop. Tap one you'd like to visit.",
+  caption: 'Each glowing dot is a stop. Pick a short trip below: a few minutes of computing on this device.',
+  explain: 'A trip costs work for every stop the line passes, not for the distance. Stops a few along the line from yours are a short trip, wherever they are on Earth. HOSAKA can do the work for you, for the price shown.',
+  panel: 'earth-trips',
   effect: 'pick-stop',
   wait: 'pick-stop',
   branch: true,
@@ -271,8 +301,9 @@ export const EARTH_BOARD: TutorialStep = {
   title: 'Board',
   caption: 'Open the menu. Your trip is at the top. Tap BOARD.',
   scene: { target: 'keep', highlight: `${MENU_SHUT}, [data-panel-id="hyperspace"] .hyper__btn--board` },
-  // HYPERSPACE first in the menu; while no stop is picked, the step says so and a tap on one picks it (tutorial/earthRoute.ts).
+  // HYPERSPACE first in the menu; while no short trip is picked, the step says so, lists them, and a tap on one picks it (tutorial/earthRoute.ts).
   effect: 'board-step',
+  panel: 'earth-trips',
   wait: 'board',
   branch: true,
   then: 'earth-ride',
@@ -291,7 +322,10 @@ export const EARTH_RIDE: TutorialStep = {
   caption: 'Tap RIDE to go!',
   explain: 'Every stop you pass takes work, done on this device, or sats if HOSAKA does it for you. Nothing is spent until you RIDE.',
   scene: { target: 'keep', highlight: `${MENU_SHUT}, [data-panel-id="hyperspace"] .hyper__actions .hyper__btn--ride, [data-panel-id="hyperspace"] .hyper__choicebtn--here` },
-  effect: 'hyperspace-first',
+  // HYPERSPACE first, and the step says how long the trip takes here (tutorial/earthRoute.ts 'ride-step').
+  effect: 'ride-step',
+  // Only while the destination is not a short trip (set some other way, or re-priced once the speed is measured): RIDE is not offered then.
+  panel: 'earth-trips',
   wait: 'ride',
   advanceOn: 'ride-over',
   branch: true,
@@ -302,8 +336,14 @@ export const AGENTS: TutorialStep = {
   id: 'agents',
   title: 'Your AI',
   caption: 'Your AI can be in cyberspace with you, and you can give it commands through ONOSENDAI.',
-  hint: 'Open the menu, then AGENTS.',
-  scene: { target: 'keep', highlight: '.hamburger-menu' },
+  captionDone: 'Copied. Paste it to your AI, and it can join you here.',
+  hint: 'Tap COPY under Invite an agent.',
+  // The menu opens on AGENTS by itself, and COPY pulses (owner, 2026-11-23: "this tutorial doesnt require you to do anything").
+  scene: { target: 'keep', highlight: `${MENU_SHUT}, [data-panel-id="agents"] .agents__invite-copy` },
+  effect: 'teach-agents',
+  // Done on the press; FINISH only then, and the step waits for it.
+  wait: 'agent-copy',
+  stay: true,
   branch: true,
 }
 
@@ -327,11 +367,15 @@ export const BUILD_PLACE: TutorialStep = {
   id: 'build-place',
   title: 'Build something',
   caption: 'Move a shard from ITEMS to your workshop, then place it in BUILD.',
-  hint: 'ITEMS: OTHER LOOT, ACTIONS, MOVE TO WORKSHOP. Then BUILD, OBJECT, pick it, PLACE.',
+  captionDone: 'It stands in the world now, for everyone who finds it.',
+  hint: 'Open the menu.',
   explain: 'BUILD puts what you hold into the world where the cursor is. The workshop is where you change or make a shard; it will not interrupt this.',
-  // The hamburger while the menu is shut, then ITEMS, which the caption panel keeps clear of (owner, 2026-11-15).
-  scene: { target: 'keep', highlight: `${MENU_SHUT}, [data-panel-id="items"]` },
+  // One press at a time (owner, 2026-11-23): each press's line and its pulsing control, worked out from what the player has done (tutorial/buildRoute.ts).
+  scene: { target: 'keep', highlight: MENU_SHUT },
   effect: 'teach-build',
+  // FINISH only once something is placed; the step waits for it.
+  wait: 'placed',
+  stay: true,
   branch: true,
 }
 
@@ -381,5 +425,5 @@ export const FAREWELL: TutorialStep = {
 }
 
 export const TUTORIAL_SCRIPT: TutorialScript = {
-  steps: [WELCOME, BOX, OPEN, TAKE, TO_PLOT, PLANT, BUD, INVENTORY, TO_COURSE, WALK, GRAVITY, RUN, FINISH, WORKSHOP, CHOICE, STRAYLIGHT, STRAYLIGHT_IDENTITY, STRAYLIGHT_OPEN, EARTH, EARTH_PICK, EARTH_BOARD, EARTH_RIDE, AGENTS, FRIEND, BUILD_PLACE, FAREWELL],
+  steps: [WELCOME, BOX, OPEN, TAKE, TO_PLOT, PLANT, BUD, INVENTORY, TO_COURSE, WALK, GRAVITY, RUN, FINISH, WORKSHOP, CHOICE, STRAYLIGHT, STRAYLIGHT_IDENTITY, STRAYLIGHT_OPEN, EARTH, EARTH_PICK, EARTH_BOARD, EARTH_RIDE, EARTH_LOOK, AGENTS, FRIEND, BUILD_PLACE, FAREWELL],
 }

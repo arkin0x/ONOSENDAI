@@ -78,8 +78,8 @@ import { StopCubes } from './StopCubes'
 import { StopBurst } from './StopBurst'
 import { TourLine } from './TourLine'
 import { useDemo } from '../store/useDemo'
-import { HOP_FRAME_MS, clearTutorialZoom, setTutorialFrame, useTutorialCam, type HopFrame } from '../store/useTutorialCam'
-import { easeOrbit, frameHop, liftSide, smooth01, type Orbit } from '../lib/hopFraming'
+import { HOP_FRAME_MS, clearTutorialZoom, endShotEase, setTutorialFrame, useTutorialCam, type HopFrame, type TutorialShot } from '../store/useTutorialCam'
+import { chestShotDir, easeOrbit, fitInBand, frameHop, liftSide, smooth01, type Orbit } from '../lib/hopFraming'
 import { TourCameraState } from '../demo/tourDistance'
 import { TransitAvatar } from './TransitAvatar'
 import { RidePath } from './RidePath'
@@ -92,7 +92,7 @@ import { SectorBox } from './SectorBox'
 import { ShaderPointField } from './ShaderPointField'
 import { SecretRegions } from './SecretRegions'
 import { SpawnMarker } from './SpawnMarker'
-import { TutorialTarget } from './TutorialTarget'
+import { TutorialBoxMark, TutorialTarget } from './TutorialTarget'
 import { TargetAvatars } from './TargetAvatars'
 import { PresenceAvatars } from './PresenceAvatars'
 import { WorldShards } from './WorldShards'
@@ -278,6 +278,7 @@ export function World(): JSX.Element {
       <SpawnMarker pubkey={pubkey} axes={axes} />
       {/* The tutorial's hop target over the course's start, while the tutorial runs (owner, 2026-11-13). */}
       <TutorialTarget axes={axes} />
+      <TutorialBoxMark axes={axes} />
       <TargetAvatars axes={axes} />
       <PresenceAvatars axes={axes} />
       <WorldShards axes={axes} />
@@ -561,7 +562,8 @@ function LensShift(): null {
     if (!cam.isPerspectiveCamera) return
     const { width, height, left, top } = state.size
     const tv = useTv.getState().on || isBroadcast()
-    const on = !tv && useBuilder.getState().active && !useCyberspace.getState().walking
+    // BUILD, and the tour's chest shot, which frames the chest in the same band (useTutorialCam shot).
+    const on = !tv && (useBuilder.getState().active || useTutorialCam.getState().shot !== null) && !useCyberspace.getState().walking
     if (on !== watched.current) { watched.current = on; setCoverWatch(on) }
     let target = NO_SHIFT
     if (on) {
@@ -727,6 +729,8 @@ function Rig(): JSX.Element {
   // The tutorial's framed hop (useTutorialCam frame): the shot under way,
   // and whether the last frame was framing one.
   const frameShot = useRef<{ frame: HopFrame; t0: number; from: Orbit; to: Orbit } | null>(null)
+  // The chest shot's centre, size and front, worked out once per shot, render frame and view (useTutorialCam shot), not every frame.
+  const shotHold = useRef<{ shot: TutorialShot; ox: bigint; oy: bigint; oz: bigint; scaleExp: number; axes: unknown; t: [number, number, number]; radius: number; front: Vector3 } | null>(null)
   const framing = useRef(false)
   const sideVec = useMemo(() => new Vector3(), [])
   const turnVec = useMemo(() => new Vector3(), [])
@@ -1112,6 +1116,8 @@ function Rig(): JSX.Element {
     // it stops, the centre settles back onto the avatar over the stretched
     // follow rather than flicking there.
     const frame = s.walking ? null : useTutorialCam.getState().frame
+    const shot = s.walking ? null : useTutorialCam.getState().shot
+    let shotAim: { radius: number; front: Vector3 } | null = null
     let hopEnds: [number[], number[]] | null = null
     if (frame) {
       const axes = s.axes()
@@ -1121,11 +1127,36 @@ function Rig(): JSX.Element {
       tx = (a[0] + b[0]) / 2
       ty = (a[1] + b[1]) / 2
       tz = (a[2] + b[2]) / 2
+    } else if (shot) {
+      // The tour's chest shot (useTutorialCam shot): the centre is the middle
+      // of what it frames, held for as long as it is asked, a drag or not, so
+      // the player's own orbit turns about the chest.
+      frameShot.current = null
+      // Coming onto the shot, the centre sails over rather than flicking (as it does coming off one).
+      if (!framing.current) glideLeft.current = Math.max(glideLeft.current, FRAME_RETURN_S)
+      const axes = s.axes()
+      let hold = shotHold.current
+      if (!hold || hold.shot !== shot || hold.ox !== origin.x || hold.oy !== origin.y || hold.oz !== origin.z || hold.scaleExp !== s.scaleExp || hold.axes !== axes) {
+        const pts = shot.points.map((p) => placeCentre(p, origin, s.scaleExp, axes))
+        const lo = [0, 1, 2].map((i) => Math.min(...pts.map((p) => p[i])))
+        const hi = [0, 1, 2].map((i) => Math.max(...pts.map((p) => p[i])))
+        const t: [number, number, number] = [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2]
+        const cell = 1 / Number(1n << BigInt(s.scaleExp))
+        const radius = Math.max(...pts.map((p) => Math.hypot(p[0] - t[0], p[1] - t[1], p[2] - t[2]))) + shot.margin * cell
+        const chest = placeCentre(shot.chest, origin, s.scaleExp, axes)
+        // The chest's front: toward the avatar (the last point), as the tour stood them.
+        const av = pts[pts.length - 1]
+        hold = shotHold.current = { shot, ox: origin.x, oy: origin.y, oz: origin.z, scaleExp: s.scaleExp, axes, t, radius, front: new Vector3(av[0] - chest[0], av[1] - chest[1], av[2] - chest[2]) }
+      }
+      tx = hold.t[0]
+      ty = hold.t[1]
+      tz = hold.t[2]
+      shotAim = hold
     } else {
       frameShot.current = null
       if (framing.current && !s.walking) glideLeft.current = Math.max(glideLeft.current, FRAME_RETURN_S)
     }
-    framing.current = frame !== null
+    framing.current = frame !== null || shot !== null
 
     // A zoom rescales every render coordinate, so there is no continuous path
     // between the old framing and the new one to ease along.
@@ -1310,6 +1341,8 @@ function Rig(): JSX.Element {
     // the time the avatar is held for it (lib/hopStage.ts holdGlide).
     const cam = useTutorialCam.getState()
     const tutorialZoom = cam.zoom
+    // The chest shot's ease ends as the player takes the camera; its centre stays (above).
+    if (cam.shot?.ease && (s.walking || pressed() > 0)) endShotEase()
     if ((tutorialZoom !== null || cam.frame !== null) && (s.walking || pressed() > 0)) {
       clearTutorialZoom()
       setTutorialFrame(null)
@@ -1329,6 +1362,26 @@ function Rig(): JSX.Element {
         }
         c.object.position.copy(c.target).add(easeOrbit(shot.from, shot.to, smooth01((performance.now() - shot.t0) / HOP_FRAME_MS), turnVec))
         lastOffset.current.copy(c.object.position).sub(c.target)
+      } else if (shotAim !== null && cam.shot?.ease) {
+        // Round to below and to the right of the chest, back to the distance
+        // that fits the chest, its loot and the avatar in what the HUD leaves
+        // uncovered (the BUILD framing's band, lib/coverBand.ts; the lens
+        // shift centres them in it), eased; once there the ease ends and the
+        // camera is the player's.
+        const off = walkDir.copy(c.object.position).sub(c.target)
+        const cur = off.length()
+        if (cur < 1e-4) off.set(0, 0, 1)
+        off.normalize()
+        const { width, height, left, top } = state.size
+        const covers = readCovers()
+        const local = left === 0 && top === 0 ? covers : covers.map((cv) => ({ edge: cv.edge, box: { left: cv.box.left - left, top: cv.box.top - top, right: cv.box.right - left, bottom: cv.box.bottom - top } }))
+        const to = { dir: chestShotDir(shotAim.front), distance: fitInBand(shotAim.radius, rigCam.fov, width, height, uncoveredBand(width, height, local)) }
+        const k = 1 - Math.exp(-dt / 0.45)
+        const nd = (cur < 1e-4 ? to.distance : cur) + (to.distance - (cur < 1e-4 ? to.distance : cur)) * k
+        easeOrbit({ dir: off, distance: 1 }, { dir: to.dir, distance: 1 }, k, turnVec)
+        c.object.position.copy(c.target).addScaledVector(turnVec.normalize(), nd)
+        lastOffset.current.copy(c.object.position).sub(c.target)
+        if (Math.abs(nd - to.distance) < 0.05 && turnVec.angleTo(to.dir) < 0.01) endShotEase()
       } else if (tutorialZoom !== null) {
         const off = walkDir.copy(c.object.position).sub(c.target)
         const cur = off.length()
@@ -1361,7 +1414,7 @@ function Rig(): JSX.Element {
       const back = viewRig.takeRestore()
       if (back !== null) outTo.current = back
     }
-    if (viewRig.restoreOrbit(c.object.position, c.target, dt, s.walking || pressed() > 0 || tutorialZoom !== null || frame !== null || want !== null || eye.current !== null)) {
+    if (viewRig.restoreOrbit(c.object.position, c.target, dt, s.walking || pressed() > 0 || tutorialZoom !== null || frame !== null || cam.shot?.ease === true || want !== null || eye.current !== null)) {
       lastOffset.current.copy(c.object.position).sub(c.target)
     }
     // How far the orbit pulls back: 96 cells, or in BUILD BUILD_MAX_GIBSONS at

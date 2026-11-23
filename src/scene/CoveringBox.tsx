@@ -18,6 +18,7 @@
  */
 
 import { useEffect, useMemo } from 'react'
+import { useNewcomerView } from '../newcomer/useNewcomer'
 import { BoxGeometry, FrontSide } from 'three'
 import { GRID_RADIUS, formatOps, placeCentre, type ViewAxes } from '../lib/space'
 import { estimateHopCost } from 'cyberspace-core'
@@ -37,6 +38,8 @@ interface Props {
 }
 
 export function CoveringBox({ axes }: Props): JSX.Element | null {
+  // The newcomer view hides movement proof terms (newcomer/reveal.ts 'proof-labels'): the box stays, its h, k and cantor ops label goes.
+  const plain = useNewcomerView()
   const position = useCyberspace((s) => s.position)
   // The render origin is the anchor's, as for every other thing in the scene.
   // Looking at a focus (Earth, a stop, the whole of cyberspace) the anchor is
@@ -205,7 +208,7 @@ export function CoveringBox({ axes }: Props): JSX.Element | null {
         />
       </lineSegments>
       <ClipWalls centre={box.centre} size={box.size} faces={faces} color={ACCENT} />
-      {!focused && <WorldLabel text={box.label} color={box.color} at={box.at} offset={[1.5, -1.3, 0]} px={13} />}
+      {!focused && !plain && <WorldLabel text={box.label} color={box.color} at={box.at} offset={[1.5, -1.3, 0]} px={13} />}
     </group>
   )
 }

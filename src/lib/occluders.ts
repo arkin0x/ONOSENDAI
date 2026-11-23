@@ -182,7 +182,23 @@ const stack = new Int32Array(512)
  * face be hit (three's own rule: FrontSide only from in front).
  */
 export function rayHitsBvh(b: Bvh, ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, tmax: number, side: Side): boolean {
-  if (b.nodes.length === 0) return false
+  return rayWalk(b, ox, oy, oz, dx, dy, dz, tmax, side, null, 0) > 0
+}
+
+/**
+ * Every t (0 < t <= `tmax`) where the ray from `o` along `d` meets a triangle
+ * of `b` facing the way `side` lets it be hit, written into `out` from `at`
+ * on, as far as it has room; how many were written. Unsorted. For the game
+ * camera's arm (game/occlusion.ts), which counts the faces it crosses.
+ */
+export function rayCrossings(b: Bvh, ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, tmax: number, side: Side, out: Float64Array, at: number): number {
+  return rayWalk(b, ox, oy, oz, dx, dy, dz, tmax, side, out, at)
+}
+
+/** The walk both share: with no `out`, 1 at the first hit, else 0; with one, every hit written. */
+function rayWalk(b: Bvh, ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, tmax: number, side: Side, out: Float64Array | null, at: number): number {
+  if (b.nodes.length === 0) return 0
+  let hits = 0
   const ix = dx !== 0 ? 1 / dx : 1e30, iy = dy !== 0 ? 1 / dy : 1e30, iz = dz !== 0 ? 1 / dz : 1e30
   const { bounds, nodes, tris, src, index } = b
   let sp = 0
@@ -200,7 +216,7 @@ export function rayHitsBvh(b: Bvh, ox: number, oy: number, oz: number, dx: numbe
     if (t0 > t1) continue
     const count = nodes[n * 2 + 1]
     if (count === 0) {
-      if (sp + 2 > stack.length) return true // deeper than any real shard: count it, rather than miss a wall
+      if (sp + 2 > stack.length) { if (!out) return 1; continue } // deeper than any real shard: count it, rather than miss a wall
       stack[sp++] = n + 1
       stack[sp++] = nodes[n * 2]
       continue
@@ -226,10 +242,13 @@ export function rayHitsBvh(b: Bvh, ox: number, oy: number, oz: number, dx: numbe
       const v = (dx * qx + dy * qy + dz * qz) * inv
       if (v < 0 || u + v > 1) continue
       const tt = (e2x * qx + e2y * qy + e2z * qz) * inv
-      if (tt > 0 && tt <= tmax) return true
+      if (tt > 0 && tt <= tmax) {
+        if (!out) return 1
+        if (at + hits < out.length) out[at + hits++] = tt
+      }
     }
   }
-  return false
+  return hits
 }
 
 // One pick's working state, hoisted: the camera, the cell's centre and the nine points, in world space and in a mesh's.

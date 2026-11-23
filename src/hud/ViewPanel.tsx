@@ -12,7 +12,9 @@
  * Protocol visualization (chain trail, terrain dots, hX boxes, region keys,
  * spatial audio), Movement (gravity, hard mode gravity, fluid walk, optimize
  * chain), Interface (look sphere), Effects (headlamp, glow, hide avatar) and
- * Sync (sync hidden list). Each row is a title and a gray line under it, in
+ * Sync (sync hidden list). Interface also holds the screen's two ways, SHOW
+ * EVERYTHING and NEWCOMER VIEW (hud/NewcomerSetting.tsx); in the newcomer
+ * view only Interface shows. Each row is a title and a gray line under it, in
  * the style the trail switch had; its switch keeps the id it always had, so a
  * link that opens Settings at a row (hud/settingsLink.ts) still finds it.
  *
@@ -53,6 +55,8 @@ import { useHidesSync } from '../store/hidesSync'
 import { Field, Switch } from './ui/Switch'
 import { Explanation } from './Explanation'
 import { WALK_LIMITS_ROW } from './settingsLink'
+import { NewcomerSetting } from './NewcomerSetting'
+import { useNewcomerView } from '../newcomer/useNewcomer'
 
 interface ViewRow {
   id: string
@@ -111,6 +115,8 @@ export function ViewPanel(): JSX.Element {
   const hidesSync = useHidesSync((s) => s.enabled)
   const hidesStatus = useHidesSync((s) => s.status)
   const hidesNote = useHidesSync((s) => s.note)
+  // The newcomer view shows Interface only: the screen's two ways and the look sphere (newcomer/reveal.ts).
+  const plain = useNewcomerView()
 
   const rows: ViewRow[] = [
     // A dot's color is the terrain K of its cell, the height of the temporal
@@ -255,7 +261,8 @@ export function ViewPanel(): JSX.Element {
   const byId = new Map(rows.map((r) => [r.id, r]))
   const grouped = new Set(SETTINGS_GROUPS.flatMap((g) => g.rows))
   const ungrouped = rows.filter((r) => !grouped.has(r.id)).map((r) => r.id)
-  const groups = ungrouped.length ? [...SETTINGS_GROUPS, { id: 'other', title: 'Other', rows: ungrouped }] : SETTINGS_GROUPS
+  const all = ungrouped.length ? [...SETTINGS_GROUPS, { id: 'other', title: 'Other', rows: ungrouped }] : SETTINGS_GROUPS
+  const groups = plain ? all.filter((g) => g.id === 'interface') : all
 
   return (
     <section className="panel panel--view">
@@ -267,6 +274,7 @@ export function ViewPanel(): JSX.Element {
           {i > 0 && <hr className="view__rule" />}
           <div className="view__group" role="group" aria-labelledby={`view-group-${g.id}`}>
             <h3 className="view__subhead" id={`view-group-${g.id}`}>{g.title}</h3>
+            {g.id === 'interface' && <NewcomerSetting />}
             {g.rows.map((id) => byId.get(id)).filter((r): r is ViewRow => r !== undefined).map((r) => (
               <Field key={r.id} id={r.id} label={r.title} hint={r.hint}>
                 <Switch id={r.id} checked={r.on} onCheckedChange={r.set} />
@@ -306,7 +314,9 @@ export function ViewPanel(): JSX.Element {
         how far ahead you are. If your chain falls far behind and something
         interrupts it, like closing the tab or losing connection, moves that
         have not reached your chain can be lost.
-        In Interface, Look sphere in WALK puts a ball in the bottom right while
+        In Interface, Screen picks how much the screen shows: everything, or
+        the newcomer view, which shows only what the tour has reached, with
+        plain names on the buttons. Look sphere in WALK puts a ball in the bottom right while
         you walk: drag it to look around, as a drag on the scene does.
         In Effects, Headlamp lights shards from your view, as a flashlight would:
         a face turned away from you, or far off, is darker, so shapes of one

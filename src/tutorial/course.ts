@@ -133,10 +133,30 @@ export function targetAt(frame: Frame): Position {
   return courseToWorld(frame, TARGET)
 }
 
-/** Whether a world point is the hop target's cell. */
+/**
+ * How far the hop target reaches each way from its gibson: one, so the
+ * region that counts is a 3-gibson cube (owner, 2026-11-23: "the space that we
+ * are supposed to move to is too small ... make the acceptable movement
+ * target a small region denoted by a green box"). Three is the smallest cube
+ * with the target gibson in its middle, three times as forgiving on each axis
+ * as the single gibson, and still wholly over the 7-gibson start square
+ * (START_ZONE x and z -3 to 3, heights 1 to 4: the cube's are -1 to 1 and 2
+ * to 4), so wherever in it the hop lands, GRAVITY drops the player onto the
+ * start.
+ */
+export const TARGET_REACH = 1
+/** The target cube's side, in gibsons. */
+export const TARGET_SIDE = 2 * TARGET_REACH + 1
+/** The target cube in the course frame: cells and heights, inclusive. */
+export const TARGET_ZONE = {
+  x: [TARGET[0] - TARGET_REACH, TARGET[0] + TARGET_REACH],
+  y: [TARGET[1] - TARGET_REACH, TARGET[1] + TARGET_REACH],
+  z: [TARGET[2] - TARGET_REACH, TARGET[2] + TARGET_REACH],
+} as const
+
+/** Whether a world point is in the hop target's cube (TARGET_ZONE): its edges count, one gibson past them does not. */
 export function onTarget(frame: Frame, at: Position): boolean {
-  const t = targetAt(frame)
-  return at.x === t.x && at.y === t.y && at.z === t.z
+  return inZone(frame, TARGET_ZONE, at)
 }
 
 /** Whether a world point is on the finish deck (DECK_ZONE). */

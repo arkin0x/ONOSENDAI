@@ -10,17 +10,63 @@
  * pinned to the nearest edge, rotated to point at it. Both carry the same label
  * and distance, so it reads as one object that is sometimes visible rather than
  * as two different indicators.
+ *
+ * Never over the menu (owner, 2026-11-23: "can we make these target markers
+ * not go over the menus?"). The layer sits under the HUD, so a panel always
+ * draws over a marker (styles.css). And a chevron stops short of the panels
+ * and the other overlays BUILD's framing measures (hooks/useCover), in the
+ * part of the screen they leave uncovered, so it stays in sight instead of
+ * going under them (lib/markerClear). A target on screen but behind a panel
+ * is pointed at from the panel's edge the same way.
  */
 
 import { useEffect, useRef } from 'react'
 import { formatDistance } from 'sno-core/scale'
 import { targetScreens, viewAxis, type CyberTarget } from '../lib/targets'
 import { labelDrop } from '../lib/avatarLabel'
+import { edgePlace, hiddenByCover, type Reach } from '../lib/markerClear'
+import type { Box, Cover } from '../lib/coverBand'
+import { readCovers, setCoverWatch } from '../hooks/useCover'
+import { useWorkshop } from '../store/useWorkshop'
 import { useProfile } from '../hooks/useProfile'
 import { ProfilePic } from './ProfileBadge'
 
 /** Keep chevrons off the very edge, where they get clipped. */
 const EDGE_INSET = 26
+
+/**
+ * How far the chevron reaches from the marker's point, turned any way: the
+ * 13px glyph about the point, with a margin.
+ */
+const CHEVRON: Reach = { left: -10, top: -10, right: 10, bottom: 10 }
+
+/** The name and distance's width before it has been measured, px. */
+const BODY_GUESS = 96
+
+/**
+ * The name and distance's measured width is rounded up to this many pixels,
+ * so a distance ticking from 31.1 to 31.2 nm does not nudge a chevron that
+ * stands beside a panel on the right.
+ */
+const BODY_STEP = 16
+
+/**
+ * How far a marker off screen reaches from its point, its name and distance
+ * as well as the chevron: the body stands 14px right of the point
+ * (styles.css .target__body), centred on it vertically.
+ */
+function reachFor(bodyWidth: number, bodyHeight: number): Reach {
+  const w = Math.ceil(bodyWidth / BODY_STEP) * BODY_STEP
+  const half = Math.max(CHEVRON.bottom, Math.ceil(bodyHeight / 2) + 2)
+  return { left: CHEVRON.left, top: -half, right: Math.max(CHEVRON.right, 14 + w + 4), bottom: half }
+}
+
+/**
+ * How far past a panel's edge a target behind it must come before it is drawn
+ * on the target again, px: a target moving along the edge would otherwise
+ * flick between its ring and a chevron beside the panel.
+ */
+const HIDE_MARGIN = 8
 
 /** Reticle bounds in pixels. Small enough to read as an annotation. */
 const RING_MIN = 15
@@ -37,6 +83,8 @@ interface Written {
   arrow: HTMLElement | null
   ring: HTMLElement | null
   dist: HTMLElement | null
+  /** How far the marker reaches off screen, from its name's measured size. */
+  reach: Reach
   last: {
     transform?: string
     mode?: string
@@ -60,24 +108,86 @@ export function Targets({ targets }: Props): JSX.Element {
   // rebuilt whenever anyone nearby moves, and starting over then would
   // rewrite every marker each time.
   const written = useRef(new Map<string, Written>())
+  // The name and distance's size, from a ResizeObserver (its callback runs
+  // after layout, so the read is free), never read inside the frame.
+  const sizer = useRef<ResizeObserver | null>(null)
+  const byBody = useRef(new Map<Element, Written>())
+  // The covers in this layer's pixels, worked out again only when the
+  // measurement or the layer's size changes.
+  const local = useRef<{ from: readonly Cover[] | null; w: number; h: number; boxes: Box[] }>({ from: null, w: 0, h: 0, boxes: [] })
+
+  // The overlays are measured while there is a marker to keep clear of them
+  // (hooks/useCover), and not under the workshop, which covers the scene and
+  // stops its frames (review of #508).
+  const benchOpen = useWorkshop((s) => s.open)
+  const watch = targets.length > 0 && !benchOpen
+  useEffect(() => {
+    if (!watch) return
+    setCoverWatch(true, 'targets')
+    return () => { setCoverWatch(false, 'targets') }
+  }, [watch])
+  useEffect(() => () => {
+    sizer.current?.disconnect()
+    sizer.current = null
+    byBody.current.clear()
+    // Every marker is found and observed afresh if the component comes back (a fast refresh).
+    written.current.clear()
+  }, [])
 
   useEffect(() => {
     let raf = 0
     const kept = written.current
+    const bodies = byBody.current
     const ids = new Set(targets.map((t) => t.id))
-    for (const id of kept.keys()) if (!ids.has(id)) kept.delete(id)
+    const forget = (m: Written): void => {
+      if (!m.body) return
+      bodies.delete(m.body)
+      sizer.current?.unobserve(m.body)
+    }
+    for (const [id, m] of kept) if (!ids.has(id)) { forget(m); kept.delete(id) }
+    if (!sizer.current && typeof ResizeObserver !== 'undefined') {
+      sizer.current = new ResizeObserver((entries) => {
+        for (const e of entries) {
+          const m = bodies.get(e.target)
+          if (m) m.reach = reachFor(e.contentRect.width, e.contentRect.height)
+        }
+      })
+    }
     const tick = (): void => {
       raf = requestAnimationFrame(tick)
       const root = host.current
       if (!root) return
       const w = root.clientWidth
       const h = root.clientHeight
+      const covers = readCovers()
+      const lc = local.current
+      if (lc.from !== covers || lc.w !== w || lc.h !== h) {
+        // Measured in viewport pixels; this layer's are from its own corner.
+        const o = covers.length ? root.getBoundingClientRect() : { left: 0, top: 0 }
+        lc.from = covers
+        lc.w = w
+        lc.h = h
+        // Not the pad (hooks/useCover CoverOptions).
+        // Clipped to the layer: a panel just off the screen is no reason to stop short.
+        lc.boxes = []
+        for (const c of covers) {
+          if (c.markers === false) continue
+          const b = { left: Math.max(0, c.box.left - o.left), top: Math.max(0, c.box.top - o.top), right: Math.min(w, c.box.right - o.left), bottom: Math.min(h, c.box.bottom - o.top) }
+          if (b.right > b.left && b.bottom > b.top) lc.boxes.push(b)
+        }
+      }
+      const boxes = lc.boxes
+      // The picture's middle, which BUILD's lens shift moves off the window's
+      // (lib/targets viewAxis): an off-screen marker points from here.
+      const cx = ((viewAxis.x + 1) / 2) * w
+      const cy = ((1 - viewAxis.y) / 2) * h
 
       for (const t of targets) {
         const s = targetScreens[t.id]
         if (!s) continue
         let m = kept.get(t.id)
         if (!m || !m.el.isConnected) {
+          if (m) { forget(m); kept.delete(t.id) }
           const el = root.querySelector<HTMLElement>(`[data-target="${t.id}"]`)
           if (!el) continue
           m = {
@@ -86,9 +196,14 @@ export function Targets({ targets }: Props): JSX.Element {
             arrow: el.querySelector<HTMLElement>('.target__arrow'),
             ring: el.querySelector<HTMLElement>('.target__ring'),
             dist: el.querySelector<HTMLElement>('.target__dist'),
+            reach: reachFor(BODY_GUESS, 20),
             last: {},
           }
           kept.set(t.id, m)
+          if (m.body) {
+            bodies.set(m.body, m)
+            sizer.current?.observe(m.body)
+          }
         }
         const { el, body, arrow, ring, dist, last } = m
 
@@ -97,34 +212,30 @@ export function Targets({ targets }: Props): JSX.Element {
         // (lib/avatarLabel; arkinox, 2026-10-11). Otherwise the marker is the
         // raw coordinate, as for Earth or a target out of the field.
         const a = s.avatar
-        const under = !!a && Math.abs(a.x) <= 1 && Math.abs(a.y) <= 1
+        const drawn = !!a && Math.abs(a.x) <= 1 && Math.abs(a.y) <= 1
 
         // Normalised device coords are +y up; screen pixels are +y down.
-        let px = ((under && a ? a.x : s.x) + 1) / 2 * w
-        let py = ((1 - (under && a ? a.y : s.y)) / 2) * h
+        let px = ((drawn && a ? a.x : s.x) + 1) / 2 * w
+        let py = ((1 - (drawn && a ? a.y : s.y)) / 2) * h
         let angle = 0
 
-        if (!s.onScreen && !under) {
-          // Slide along the true bearing until it meets the frame, rather than
-          // clamping x and y separately. Independent clamps pull anything far
-          // off-screen into a corner, so two targets in quite different
-          // directions pile up in the same place and the marker stops meaning
-          // "that way". From the picture's middle, which BUILD's lens shift
-          // moves off the window's (lib/targets viewAxis).
-          const cx = ((viewAxis.x + 1) / 2) * w
-          const cy = ((1 - viewAxis.y) / 2) * h
-          const dx = px - cx
-          const dy = py - cy
-          angle = Math.atan2(dy, dx)
-          // How far the frame's inset edge is from the middle, the way the line goes.
-          const reachX = dx >= 0 ? w - EDGE_INSET - cx : cx - EDGE_INSET
-          const reachY = dy >= 0 ? h - EDGE_INSET - cy : cy - EDGE_INSET
-          const t = Math.max(0, Math.min(
-            reachX / Math.max(Math.abs(dx), 1e-6),
-            reachY / Math.max(Math.abs(dy), 1e-6),
-          ))
-          px = cx + dx * t
-          py = cy + dy * t
+        // On screen but behind a panel, it is out of sight as surely as off
+        // the edge: pointed at from the panel's side instead.
+        // Once hidden it stays so until HIDE_MARGIN clear of the panel.
+        const margin = last.mode === 'off' ? HIDE_MARGIN : 0
+        const shown = (s.onScreen || drawn) && !(boxes.length > 0 && hiddenByCover(px, py, cx, cy, boxes, CHEVRON, margin))
+        const under = drawn && shown
+
+        if (!shown) {
+          // Slide along the true bearing until it meets the frame or a panel,
+          // rather than clamping x and y separately. Independent clamps pull
+          // anything far off-screen into a corner, so two targets in quite
+          // different directions pile up in the same place and the marker
+          // stops meaning "that way" (lib/markerClear).
+          const p = edgePlace(w, h, cx, cy, px, py, EDGE_INSET, boxes, m.reach, CHEVRON)
+          px = p.x
+          py = p.y
+          angle = p.angle
         }
 
         const transform = `translate(${px}px, ${py}px)`
@@ -132,7 +243,7 @@ export function Targets({ targets }: Props): JSX.Element {
           last.transform = transform
           el.style.transform = transform
         }
-        const mode = s.onScreen || under ? 'on' : 'off'
+        const mode = shown ? 'on' : 'off'
         if (last.mode !== mode) {
           last.mode = mode
           el.dataset.mode = mode

@@ -410,7 +410,12 @@ describe('the tutorial', () => {
     const { INVENTORY, BUILD_PLACE } = await import('../../tutorial/script')
     expect(INVENTORY.scene?.highlight).toBe('[data-panel-id="items"]')
     expect(INVENTORY.hint).toMatch(/KEY ITEMS and OTHER LOOT/)
-    expect(BUILD_PLACE.hint).toMatch(/^ITEMS: OTHER LOOT, ACTIONS, MOVE TO WORKSHOP\./)
+    // The build step names each press as it comes (tutorial/buildRoute.ts): OTHER LOOT, then ACTIONS, then MOVE TO WORKSHOP.
+    expect(BUILD_PLACE.effect).toBe('teach-build')
+    const { BUILD_STAGES } = await import('../../tutorial/buildRoute')
+    expect(BUILD_STAGES.loot.note).toMatch(/OTHER LOOT/)
+    expect(BUILD_STAGES.actions.note).toMatch(/ACTIONS/)
+    expect(BUILD_STAGES.move.note).toMatch(/MOVE TO WORKSHOP/)
     const hud = readFileSync(new URL('../Hud.tsx', import.meta.url), 'utf8')
     expect(hud).toMatch(/\n\s*items: InventoryPanel,/)
     const slot = readFileSync(new URL('../PanelSlot.tsx', import.meta.url), 'utf8')

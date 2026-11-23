@@ -47,6 +47,12 @@ vi.mock('../../lib/hyperspace/ride', async (orig) => {
   return { ...real, lineStateOf: (a: Parameters<typeof real.lineStateOf>[0]) => (line.state !== undefined ? line.state : real.lineStateOf(a)) }
 })
 
+// The station a ride starts from, and the synced tip (tutorial/shortTrip.ts): block 840010, so 840000 is a short trip and 800000 is not.
+const STATION = 840010
+vi.mock('../../lib/hyperspace/station', async (orig) => ({ ...(await orig() as object), findStation: () => ({ stop: { height: STATION }, distance: 0 }) }))
+// Never time the ride sample here: the short trip stands at its fallback length.
+vi.mock('../../lib/hyperspace/ridePool', async (orig) => ({ ...(await orig() as object), calibrate: () => Promise.reject(new Error('not in tests')), rideBenchmark: () => null }))
+
 vi.mock('../../hooks/useMenuOpen', async (orig) => {
   const real = await orig<typeof import('../../hooks/useMenuOpen')>()
   return { ...real, setMenuOpen: vi.fn() }
@@ -79,7 +85,7 @@ beforeEach(() => {
   useTutorial.setState({ script: TUTORIAL_SCRIPT, doneChoices: [] })
   // No routes checked off from an earlier test (a resume reads them back).
   writeProgress(pubkey(), null)
-  useHyperspace.setState({ destination: null, viewedStop: null })
+  useHyperspace.setState({ destination: null, viewedStop: null, tipHeight: 900000 })
   useRideRun.setState({ progress: null, hosaka: false, path: null, error: null })
   useCyberspace.setState({ transit: null, events: [] } as never)
   localStorage.setItem(PANEL_LAYOUT_KEY, SAVED)
@@ -291,14 +297,30 @@ describe('the Earth route, walked', () => {
     expect(id()).toBe('choice')
   })
 
-  it('keeps a destination already set: the pick counts at once and the tap changes nothing', () => {
-    useHyperspace.setState({ destination: 900000 })
+  it('keeps a short destination already set: the pick counts at once and the tap changes nothing', () => {
+    useHyperspace.setState({ destination: 840020 })
     chooseEarth()
     useTutorial.getState().next()
     expect(id()).toBe('earth-pick')
     expect(useTutorial.getState().done).toBe(true)
     selectStopInScene(840000)
-    expect(useHyperspace.getState().destination).toBe(900000)
+    expect(useHyperspace.getState().destination).toBe(840020)
+  })
+
+  it('never takes a trip that would take hours: a far stop tapped is refused and said, a long destination already set does not count, and a short tap replaces it', () => {
+    chooseEarth()
+    useTutorial.getState().next()
+    expect(id()).toBe('earth-pick')
+    selectStopInScene(800000)
+    expect(useHyperspace.getState().destination).toBe(null)
+    expect(useTutorial.getState().done).toBe(false)
+    expect(useTutorial.getState().stepNote).toMatch(/Pick one of the short trips below/)
+    // A long destination set some other way (the overlay's SET DESTINATION) does not count.
+    useHyperspace.setState({ destination: 800000 })
+    expect(useTutorial.getState().done).toBe(false)
+    selectStopInScene(840000)
+    expect(useHyperspace.getState().destination).toBe(840000)
+    expect(useTutorial.getState().done).toBe(true)
   })
 
   it('picks only by a tap in the scene: not off the pick step, not by a scrub or VIEW STATION, and the same stop tapped again counts', () => {

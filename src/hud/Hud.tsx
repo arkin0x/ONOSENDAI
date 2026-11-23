@@ -799,10 +799,11 @@ export function Hud({ menuOpen = false }: { menuOpen?: boolean }): JSX.Element {
         {right.map(slot)}
         {/* The licenses, just above the build: the code is CC BY-SA, the
             logo is arkinox's under CC BY-NC-ND, and the name is covered by
-            neither (NOTICE.md). */}
+            neither (NOTICE.md). Under them, the terms (public/terms.html). */}
         <div className="hud__license">
           <div>CODE <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="license noopener noreferrer">CC BY-SA 4.0</a></div>
           <div>LOGO © 2023-2026 ARKINOX <a href="https://creativecommons.org/licenses/by-nc-nd/4.0/" target="_blank" rel="license noopener noreferrer">CC BY-NC-ND 4.0</a></div>
+          <div><a href="/terms" target="_blank" rel="noopener">TERMS AND DISCLAIMER</a></div>
         </div>
         {/* The version, last thing in the menu: the simple one people see
             (2.1, 2.2, ...; owner, 2026-11-12), the build this page runs. The

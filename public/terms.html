@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Terms and disclaimer · ONOSENDAI</title>
+<meta name="description" content="The terms for using ONOSENDAI, Cyberspace TV and the shard workshop: no warranty, no liability, payments are final, nostr is public." />
+<meta name="robots" content="index, follow" />
+<link rel="icon" href="/favicon.ico" />
+<style>
+  /* The terms, as one static page: no script, so it opens anywhere it is linked
+     (the menu, the welcome, the relay, the READMEs). Colors from src/styles.css. */
+  @font-face {
+    font-family: 'Monaspace Krypton';
+    src: url('/fonts/MonaspaceKrypton-Regular.woff') format('woff');
+    font-display: swap;
+  }
+  :root {
+    --bg: #05070d;
+    --fg: #ffffff;
+    --soft: #c8f5ff;
+    --dim: #5b7d8f;
+    --accent: #00e5ff;
+    --panel: rgba(6, 14, 22, 0.82);
+    --border: rgba(0, 229, 255, 0.28);
+    --cut: 14px;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--bg);
+    background-image: radial-gradient(ellipse at 50% -10%, rgba(0, 229, 255, 0.10), transparent 60%);
+    color: var(--soft);
+    font-family: 'Monaspace Krypton', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 14px;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+  .page { max-width: 720px; margin: 0 auto; padding: 32px 16px 64px; }
+  .top { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 24px; }
+  .top a { color: var(--accent); text-decoration: none; letter-spacing: 0.14em; font-size: 12px; }
+  .top a:hover { color: var(--fg); }
+  /* The chamfered card: top-left and bottom-right corners cut, as on the item thumbnails. */
+  .card {
+    position: relative;
+    background: var(--panel);
+    padding: 28px 24px;
+    clip-path: polygon(var(--cut) 0, 100% 0, 100% calc(100% - var(--cut)), calc(100% - var(--cut)) 100%, 0 100%, 0 var(--cut));
+  }
+  .card::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    padding: 1px;
+    background: var(--border);
+    clip-path: inherit;
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    pointer-events: none;
+  }
+  h1 { margin: 0 0 4px; color: var(--fg); font-size: 18px; letter-spacing: 0.16em; font-weight: 400; }
+  .date { margin: 0 0 24px; color: var(--dim); font-size: 12px; letter-spacing: 0.08em; }
+  h2 { margin: 24px 0 6px; color: var(--accent); font-size: 12px; letter-spacing: 0.16em; font-weight: 400; }
+  p { margin: 0; color: var(--fg); }
+  a { color: var(--accent); }
+  .foot { margin-top: 24px; color: var(--dim); font-size: 12px; text-align: center; letter-spacing: 0.08em; }
+  @media (max-width: 480px) {
+    body { font-size: 13px; }
+    .card { padding: 22px 16px; }
+  }
+</style>
+</head>
+<body>
+<main class="page">
+  <div class="top">
+    <a href="/">ONOSENDAI</a>
+    <a href="/tv">CYBERSPACE TV</a>
+  </div>
+  <article class="card">
+    <h1>TERMS AND DISCLAIMER</h1>
+    <p class="date">Last changed: 2026-11-23</p>
+
+    <h2>USING ONOSENDAI</h2>
+    <p>By using ONOSENDAI at onosendai.tech, including Cyberspace TV and the shard workshop, you agree to these terms. If you do not agree, do not use it.</p>
+
+    <h2>EXPERIMENTAL</h2>
+    <p>ONOSENDAI is experimental software, made by arkinox with help from contributors. It can have bugs, lose things, go down or change at any time.</p>
+
+    <h2>NO WARRANTY</h2>
+    <p>ONOSENDAI is provided "as is" and "as available", without warranty of any kind, express or implied, including any warranty of merchantability, fitness for a particular purpose or non-infringement, and any promise that it will be available, secure or free of errors. You use it at your own risk.</p>
+
+    <h2>NO LIABILITY</h2>
+    <p>To the fullest extent the law allows, arkinox and the contributors are not liable for any loss or damage of any kind that comes from using ONOSENDAI or anything connected to it. That includes lost sats, keys, items, data and work, and any indirect, incidental, special or consequential damages, whether it is caused by a bug, a relay, a wallet, a mint, HOSAKA, a speakeasy, another player, an AI agent or anything else. Where the law does not allow a limit this wide, liability is limited as far as the law allows.</p>
+
+    <h2>YOUR KEY</h2>
+    <p>Your nostr key is your identity. Anyone who has it can act as you. If your key is lost or stolen, nobody can get it back for you. Keep a backup somewhere safe.</p>
+
+    <h2>WHAT YOU PUBLISH</h2>
+    <p>What you publish is yours, and so is the responsibility for it: moves, shards, items, chat, comments, audio and anything else. Publish only what you have the right to publish. Do not use ONOSENDAI to break the law or to hurt anyone.</p>
+
+    <h2>NOSTR IS PUBLIC</h2>
+    <p>ONOSENDAI publishes to nostr relays, and most of them are run by other people. Anyone can read what you publish, copy it and keep it. A delete asks relays to drop an event, but nothing can make every relay and every copy forget it.</p>
+
+    <h2>PAYMENTS</h2>
+    <p>HOSAKA cloud compute, speakeasy regions and anything else you buy here are paid in sats over Lightning. A Lightning payment is final: it cannot be reversed, and nobody has to refund it. A service you paid for can be slow, fail or stop, and paying does not promise a result. Pay only what you can afford to lose.</p>
+
+    <h2>OTHER PEOPLE'S SERVICES</h2>
+    <p>ONOSENDAI talks to relays, wallets, mints, hosts and other services that arkinox does not run. They have their own terms, and ONOSENDAI is not responsible for them.</p>
+
+    <h2>AI AGENTS</h2>
+    <p>If you bring an AI agent into cyberspace, you are responsible for everything it does in your name.</p>
+
+    <h2>NOT ADVICE</h2>
+    <p>Nothing in ONOSENDAI is financial, investment, legal or tax advice.</p>
+
+    <h2>THE CODE AND THE NAMES</h2>
+    <p>The code is open source under <a href="https://creativecommons.org/licenses/by-sa/4.0/" rel="license noopener noreferrer">CC BY-SA 4.0</a>. The logos are licensed under <a href="https://creativecommons.org/licenses/by-nc-nd/4.0/" rel="license noopener noreferrer">CC BY-NC-ND 4.0</a>. ONOSENDAI, HOSAKA and CYBERSPACE TV are trademarks of arkinox. See the <a href="https://github.com/arkin0x/ONOSENDAI/blob/v2/NOTICE.md" rel="noopener noreferrer">notice</a>.</p>
+
+    <h2>GOVERNING LAW</h2>
+    <p>These terms are governed by the laws of the United States.</p>
+
+    <h2>CHANGES</h2>
+    <p>These terms can change. The date at the top is when they last did. Using ONOSENDAI after a change means you accept the new terms.</p>
+  </article>
+  <p class="foot">ONOSENDAI · <a href="/">BACK TO CYBERSPACE</a></p>
+</main>
+</body>
+</html>

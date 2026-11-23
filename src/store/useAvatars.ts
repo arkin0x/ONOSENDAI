@@ -40,6 +40,7 @@ import { keepAvatarEvent, migrateAvatarStorage, readKeptAvatar } from '../lib/av
 import type { NostrEvent } from '../lib/events'
 import { publish, query } from '../lib/relay'
 import { SignerAccountMismatch } from '../lib/signers'
+import { SAVE_BLOCKED_MESSAGE } from '../lib/versionGate'
 import type { ShardModel } from 'sno-core/shards'
 import { useCyberspace } from './useCyberspace'
 
@@ -194,7 +195,7 @@ export const useAvatars = create<AvatarsState>((set, get) => ({
       // Switched identity meanwhile: nothing to say to the identity on screen now.
       if (useCyberspace.getState().identity.pubkey !== me) { set({ phase: null }); return false }
       // Signed as another account, it would be someone else's avatar: say that.
-      set({ phase: null, adoptError: err instanceof SignerAccountMismatch ? err.message : 'The signer did not sign the avatar.' })
+      set({ phase: null, adoptError: err instanceof SignerAccountMismatch || (err instanceof Error && err.message === SAVE_BLOCKED_MESSAGE) ? (err as Error).message : 'The signer did not sign the avatar.' })
       return false
     }
     // Switched identity while the signer's prompt was open: kept, unsent, for

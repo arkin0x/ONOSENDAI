@@ -13,6 +13,8 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { CHAIN_RULES_EPOCH, VERSION_FILE, parseVersionFile, versionFileOf } from '../chainRulesEpoch'
+import { WORKSHOP_SCHEMA } from '../workshopSchema'
+import { CHAIN_STORE_VERSION } from '../chainStoreVersion'
 import {
   BACKGROUND_TIMEOUT_MS,
   OWN_BUILD,
@@ -20,6 +22,9 @@ import {
   PRE_MOVE_TIMEOUT_MS,
   checkVersion,
   mayMove,
+  maySave,
+  savesBlockedBy,
+  savingBlocked,
   movementBlocked,
   reloadStreamOnBlock,
   resetVersionGateForTests,
@@ -54,7 +59,7 @@ afterEach(() => {
 
 describe('the version file', () => {
   it('is the build id and the epoch this build requires', () => {
-    expect(versionFileOf('abc123')).toEqual({ build: 'abc123', minChainEpoch: CHAIN_RULES_EPOCH, chainStore: 2 })
+    expect(versionFileOf('abc123')).toEqual({ build: 'abc123', minChainEpoch: CHAIN_RULES_EPOCH, chainStore: 2, minWorkshopSchema: WORKSHOP_SCHEMA })
     expect(VERSION_FILE).toBe('version.json')
   })
 
@@ -65,6 +70,17 @@ describe('the version file', () => {
     expect(parseVersionFile({ build: 'abc', minChainEpoch: 1.5 })).toBeNull()
     expect(parseVersionFile('<!doctype html>')).toBeNull()
     expect(parseVersionFile(null)).toBeNull()
+  })
+
+  it('reads the workshop schema only when it is a whole number; anything else is no word on saving', () => {
+    expect(parseVersionFile({ build: 'abc', minChainEpoch: 2, minWorkshopSchema: 3 })).toEqual({ build: 'abc', minChainEpoch: 2, minWorkshopSchema: 3 })
+    expect(parseVersionFile({ build: 'abc', minChainEpoch: 2, minWorkshopSchema: '3' })).toEqual({ build: 'abc', minChainEpoch: 2 })
+    expect(parseVersionFile({ build: 'abc', minChainEpoch: 2, minWorkshopSchema: 2.5 })).toEqual({ build: 'abc', minChainEpoch: 2 })
+  })
+
+  it('this deploy\'s minimum is the #555 schema (GRID SIZE to 4,096)', () => {
+    expect(WORKSHOP_SCHEMA).toBe(2)
+    expect(versionFileOf('abc').minWorkshopSchema).toBe(2)
   })
 })
 
@@ -210,6 +226,91 @@ describe('the look before a move', () => {
     resetVersionGateForTests(false)
     expect(await mayMove()).toBe(true)
     expect(fetchStub).not.toHaveBeenCalled()
+  })
+})
+
+describe('the save gate (minWorkshopSchema)', () => {
+  const savesNewer = json(versionFileOf('schema-build', CHAIN_RULES_EPOCH, CHAIN_STORE_VERSION, WORKSHOP_SCHEMA + 1))
+  const savesSame = json(versionFileOf('other-build'))
+
+  it('the rule: only a higher number blocks; no answer or no word never does', () => {
+    expect(savesBlockedBy({ build: 'x', minChainEpoch: 1, minWorkshopSchema: 3 }, 2)).toBe(true)
+    expect(savesBlockedBy({ build: 'x', minChainEpoch: 1, minWorkshopSchema: 2 }, 2)).toBe(false)
+    expect(savesBlockedBy({ build: 'x', minChainEpoch: 1, minWorkshopSchema: 1 }, 2)).toBe(false)
+    expect(savesBlockedBy({ build: 'x', minChainEpoch: 1 }, 2)).toBe(false)
+    expect(savesBlockedBy(null, 2)).toBe(false)
+  })
+
+  it('an older build is refused saving when the deploy raises the minimum; moving is untouched', async () => {
+    answer = savesNewer
+    expect(await maySave()).toBe(false)
+    expect(savingBlocked()).toBe(true)
+    expect(useVersionGate.getState().verdict).toBe('hint')
+    expect(movementBlocked()).toBe(false)
+    expect(await mayMove()).toBe(true)
+  })
+
+  it('a build at the same schema saves, even on another build (a hint only)', async () => {
+    answer = savesSame
+    expect(await maySave()).toBe(true)
+    expect(savingBlocked()).toBe(false)
+    expect(useVersionGate.getState().verdict).toBe('hint')
+  })
+
+  it('offline, a 404, a page that is not a version file, or a timeout: saving goes on', async () => {
+    for (const a of [offline, json({ nope: true }), json({}, 404), (() => Promise.resolve(new Response('<!doctype html>', { status: 200 }))) as Answer]) {
+      resetVersionGateForTests(true)
+      answer = a
+      expect(await maySave()).toBe(true)
+      expect(savingBlocked()).toBe(false)
+    }
+    resetVersionGateForTests(true)
+    vi.useFakeTimers()
+    answer = never
+    const p = maySave()
+    await vi.advanceTimersByTimeAsync(PRE_MOVE_TIMEOUT_MS)
+    expect(await p).toBe(true)
+  })
+
+  it('a learned block stays when a later look fails; only a real answer with a lower number lifts it', async () => {
+    answer = savesNewer
+    await checkVersion()
+    expect(savingBlocked()).toBe(true)
+    answer = offline
+    await checkVersion()
+    expect(savingBlocked()).toBe(true)
+    answer = json({ nope: true })
+    await checkVersion()
+    expect(savingBlocked()).toBe(true)
+    // A revert: the deploy itself says the old number again.
+    answer = savesSame
+    await checkVersion()
+    expect(savingBlocked()).toBe(false)
+  })
+
+  it('a recent answer is reused before a save, so a run of saves asks the network about once a minute', async () => {
+    answer = savesSame
+    expect(await maySave()).toBe(true)
+    expect(await maySave()).toBe(true)
+    expect(fetchStub).toHaveBeenCalledTimes(1)
+  })
+
+  it('the gate not started: nothing is fetched, and saving answers from what is known', async () => {
+    resetVersionGateForTests(false)
+    expect(await maySave()).toBe(true)
+    expect(fetchStub).not.toHaveBeenCalled()
+  })
+
+  it('the TV stream does not reload for a save block (it saves nothing)', async () => {
+    const reload = vi.fn()
+    const states: Array<[{ verdict: 'ok' | 'hint' | 'blocked' }, { verdict: 'ok' | 'hint' | 'blocked' }]> = []
+    const off = useVersionGate.subscribe((now, prev) => { states.push([now, prev]) })
+    answer = savesNewer
+    await checkVersion()
+    off()
+    expect(useVersionGate.getState().savesBlocked).toBe(true)
+    for (const [now, prev] of states) reloadStreamOnBlock(now, prev, reload)
+    expect(reload).not.toHaveBeenCalled()
   })
 })
 

@@ -82,6 +82,7 @@ export const CHAIN_RULES_EPOCH = 2
  * own chain store, which every running build obeys (lib/chainStore.ts).
  */
 import { CHAIN_STORE_VERSION } from './chainStoreVersion'
+import { WORKSHOP_SCHEMA } from './workshopSchema'
 
 /** Where every deploy serves its version file, from the site root. */
 export const VERSION_FILE = 'version.json'
@@ -98,18 +99,31 @@ export interface DeployedVersion {
    * deploy from before the rows, and says no.
    */
   chainStore?: number
+  /**
+   * The lowest workshop schema the deploy lets save shards
+   * (lib/workshopSchema.ts). A tab below it saves, imports and publishes no
+   * shard until it reloads. A file without it is a deploy from before the
+   * save gate, and blocks nothing.
+   */
+  minWorkshopSchema?: number
 }
 
 /** The version file for a build of `build`, as the deploy serves it. */
-export function versionFileOf(build: string, epoch: number = CHAIN_RULES_EPOCH, chainStore: number = CHAIN_STORE_VERSION): DeployedVersion {
-  return { build, minChainEpoch: epoch, chainStore }
+export function versionFileOf(build: string, epoch: number = CHAIN_RULES_EPOCH, chainStore: number = CHAIN_STORE_VERSION, workshopSchema: number = WORKSHOP_SCHEMA): DeployedVersion {
+  return { build, minChainEpoch: epoch, chainStore, minWorkshopSchema: workshopSchema }
 }
 
 /** The version file's contents read back, or null for anything that is not one. */
 export function parseVersionFile(data: unknown): DeployedVersion | null {
   if (typeof data !== 'object' || data === null) return null
-  const { build, minChainEpoch, chainStore } = data as Record<string, unknown>
+  const { build, minChainEpoch, chainStore, minWorkshopSchema } = data as Record<string, unknown>
   if (typeof build !== 'string' || build === '') return null
   if (typeof minChainEpoch !== 'number' || !Number.isInteger(minChainEpoch) || minChainEpoch < 0) return null
-  return { build, minChainEpoch, ...(typeof chainStore === 'number' && Number.isInteger(chainStore) ? { chainStore } : {}) }
+  return {
+    build,
+    minChainEpoch,
+    ...(typeof chainStore === 'number' && Number.isInteger(chainStore) ? { chainStore } : {}),
+    // Anything but a whole number is no word on saving: an error never blocks.
+    ...(typeof minWorkshopSchema === 'number' && Number.isInteger(minWorkshopSchema) && minWorkshopSchema >= 0 ? { minWorkshopSchema } : {}),
+  }
 }

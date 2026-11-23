@@ -254,7 +254,7 @@ describe('the modal', () => {
   })
 
   it('has no em dash in what was added', () => {
-    const files = ['PlaceObjectPicker.tsx', 'ui/SearchField.tsx', 'ShardFolders.tsx', 'FeedList.tsx', 'LookPicker.tsx', 'ChestCompose.tsx', '../workshop/sheets/MenuSheet.tsx', '../workshop/ObjectPicker.tsx', '../hooks/useVisualViewport.ts', '../lib/shardSearch.ts']
+    const files = ['PlaceObjectPicker.tsx', 'ui/SearchField.tsx', 'ShardFolders.tsx', 'FeedList.tsx', 'LookPicker.tsx', 'ChestCompose.tsx', '../workshop/sheets/MenuSheet.tsx', '../workshop/ObjectPicker.tsx', '../workshop/StampLibrary.tsx', '../hooks/useVisualViewport.ts', '../lib/shardSearch.ts']
     for (const p of files) expect(src(p)).not.toContain('\u2014')
   })
 })

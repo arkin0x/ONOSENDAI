@@ -61,6 +61,7 @@ import { BenchBloom } from './benchBloom'
 import { usedBenchEye } from '../lib/avatarEye'
 import { FacingArrow, FacingPreviewGroup } from './FacingPreview'
 import { useFacingPreview } from '../store/facingPreview'
+import { stampAim, stampTap } from './stampTap'
 
 type P3 = [number, number, number]
 
@@ -70,6 +71,15 @@ type P3 = [number, number, number]
  * the current level. Model +Z is render -Z (shards.ts toRender), so the tap's
  * render z comes back negated.
  */
+/**
+ * Where a tap lands: STAMP's OBJECT with SNAP TO ITS SIZE on its object's own
+ * size (workshop/stampTap.ts stampAim), anything else on the grid's step.
+ */
+function aimAt(p: Vector3): P3 {
+  const w = useWorkshop.getState()
+  return stampAim([p.x * TICKS_PER_UNIT, p.y * TICKS_PER_UNIT, 0 - p.z * TICKS_PER_UNIT]) ?? snap(p, w.level, w.step(), w.plane)
+}
+
 function snap(p: Vector3, level: number, step: number, plane: WorkPlane): P3 {
   const q = (v: number): number => Math.round((v * TICKS_PER_UNIT) / step) * step
   // The two coordinates in the plane snap; the one along its normal is the level.
@@ -146,16 +156,16 @@ function Grid(): JSX.Element {
     // changed a moment ago must apply to this tap even if the bench has not
     // re-rendered yet.
     const w = useWorkshop.getState()
-    const at = snap(e.point, w.level, w.step(), w.plane)
+    const at = aimAt(e.point)
+    // OBJECT: COPY or LINK the chosen shard, checked against what one hidden object holds (stampTap).
     if (w.tool === 'stamp' && w.stampMode === 'object') {
-      w.placeObject(at, ownAddress(useCyberspace.getState().identity.pubkey, w.currentId))
+      stampTap(at, ownAddress(useCyberspace.getState().identity.pubkey, w.currentId))
     } else if (w.tool === 'stamp') w.placeStamp(at)
     else w.addVertex(at)
   }
 
   const onMove = (e: ThreeEvent<PointerEvent>): void => {
-    const w = useWorkshop.getState()
-    w.setAim(snap(e.point, w.level, w.step(), w.plane))
+    useWorkshop.getState().setAim(aimAt(e.point))
   }
 
   // A finger lifts and the ghost goes with it; a mouse keeps hovering.
@@ -861,6 +871,8 @@ export function Keys(): null {
       if (e.code === 'Digit5') w.setTool('add')
       if (e.code === 'Digit6') w.setTool('face')
       // Q and E turn the selection a quarter turn while SELECT holds one; Q turns the stamp otherwise.
+      // G: SNAP TO ITS SIZE for STAMP's OBJECT, on or off (printed on its button).
+      if (e.code === 'KeyG') { if (!look && w.tool === 'stamp' && w.stampMode === 'object') w.setStampSnap(!w.stampSnap); return }
       if (e.code === 'KeyQ') { if (w.tool === 'select' && (w.selection.length || w.partSel.length)) w.rotateSelected(-1); else if (!look) w.turnStamp() }
       // E: a quarter turn while SELECT holds something; with nothing held and no corners picked, SET EYE in hand or put down (AVATAR's FIRST-PERSON EYE).
       if (e.code === 'KeyE') {

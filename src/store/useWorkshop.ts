@@ -65,6 +65,7 @@ import { flipFace, flipSurface, surfaceOf, windAdded, windOutward } from 'sno-co
 import { Vector3 } from 'three'
 import { ConvexHull } from 'three/examples/jsm/math/ConvexHull.js'
 import { cornerAverage, weld } from '../lib/weld'
+import type { CopySource, StampForm, StampedRange } from '../lib/stampCopy'
 import { subdivide, subdivideNotice } from '../lib/subdivide'
 import { withCredit, type Credit } from 'sno-core/feed'
 import { newestFirst } from '../lib/shardFolders'
@@ -292,11 +293,19 @@ function scaleTicks(p: P3, k: number): P3 {
 /**
  * An object chosen to stamp with OBJECT: the reference each placement will
  * name, and the object as it was when chosen, which is what the ghost draws.
+ * Chosen in STAMP's library (workshop/StampLibrary.tsx), it also carries what
+ * COPY puts down and its size for SNAP TO ITS SIZE (workshop/stampPrepare.ts).
  */
 export interface StampObject {
   ref: Ref
   name: string
   shard: ShardModel
+  /** The shard and everything it places, flattened (lib/stampCopy.ts bakeSource): what COPY puts down. Null or absent when it cannot be copied. */
+  copy?: CopySource | null
+  /** Its bounds in its own ticks and unit, everything it places included: what SNAP TO ITS SIZE steps by. */
+  size?: { min: [number, number, number]; max: [number, number, number]; unit: number } | null
+  /** A shard of your workshop library, chosen there (not one read from the relays). */
+  local?: boolean
 }
 
 /** "1 point" or "7 points", with its faces and placed objects when it has any. */
@@ -451,6 +460,31 @@ export interface WorkshopState {
   stampObject: StampObject | null
   setStampMode: (mode: 'shape' | 'object') => void
   setStampObject: (object: StampObject | null) => void
+  /**
+   * How OBJECT stamps it (owner, 2026-11-23): COPY puts its points and faces
+   * in as your own (lib/stampCopy.ts), LINK places it as one object by
+   * reference. COPY is the default.
+   */
+  stampForm: StampForm
+  setStampForm: (form: StampForm) => void
+  /** SNAP TO ITS SIZE: OBJECT's taps step by the object's own size along the working plane, so pieces of one size line up. On by default. */
+  stampSnap: boolean
+  setStampSnap: (on: boolean) => void
+  /**
+   * The points and faces the last COPY stamp made, in the shard it made them
+   * in (lib/stampCopy.ts stampedIndices reads every index): for whatever
+   * acts on just what one stamp made, such as making it a group. Null once
+   * anything else changes the shard's points or faces, or another shard is
+   * opened, so it never names indices that moved.
+   */
+  lastCopy: StampedRange | null
+  /**
+   * One stamp, already worked out and checked by the tap (workshop/stampTap.ts):
+   * the shard as it will be, as one undoable edit, with its line. A COPY
+   * names what it added (`added`), which becomes `lastCopy`; a LINK passes
+   * null. The selection is let go, as every stamp lets it go.
+   */
+  commitStamp: (shard: ShardModel, added: Omit<StampedRange, 'shardId'> | null, notice: string) => StampedRange | null
   /**
    * Place the chosen object at `at`, turned by the stamp's facing. `self` is
    * this object's own address if this key published it, so an object is never
@@ -1070,6 +1104,9 @@ function facesFor(pts: P3[]): Tris | null {
   return out
 }
 
+/** The shard object the last COPY stamp left on the bench (useWorkshop lastCopy): once the bench holds anything else, lastCopy names nothing. */
+let copiedInto: ShardModel | null = null
+
 export const useWorkshop = create<WorkshopState>((set, get) => {
   /**
    * Apply an edit to the current shard, remember what it was, stamp it, persist.
@@ -1301,6 +1338,9 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     turnPivot: null,
     stampMode: 'shape',
     stampObject: null,
+    stampForm: 'copy',
+    stampSnap: true,
+    lastCopy: null,
     showAvatar: loadShowAvatar(),
     color: [0, 0.9, 1],
     glowLast: { ...GLOW_START },
@@ -1533,6 +1573,20 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
     },
 
     setStampMode: (stampMode) => set({ stampMode }),
+    setStampForm: (stampForm) => set({ stampForm }),
+    setStampSnap: (stampSnap) => set({ stampSnap }),
+
+    commitStamp: (shard, added, notice) => {
+      const id = get().currentId
+      if (!id || !get().current()) return null
+      const done = edit(() => shard, notice)
+      if (!done) return null
+      const range: StampedRange | null = added ? { shardId: id, vertices: [...added.vertices] as [number, number], faces: [...added.faces] as [number, number] } : null
+      // The shard exactly as this stamp left it: any later change (an edit, UNDO, another shard) lets lastCopy go (below the store).
+      copiedInto = range ? get().current() : null
+      set({ selection: [], partSel: [], selectedFaces: [], facePick: [], lastCopy: range })
+      return range
+    },
     setStampObject: (stampObject) => {
       // A look copy picked to stamp is stored now: whatever it is stamped into names a shard that stays.
       const me = you()
@@ -2410,6 +2464,16 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       if (list.length !== get().shards.length || list.some((s, i) => s !== get().shards[i])) save(list)
       set({ shards: list, backStack: stack.slice(0, -1), currentId: frame.id, past: frame.past, future: frame.future, selection: [], partSel: [], selectedFaces: [], facePick: [], turnPivot: null, notice: null })
     },
+  }
+})
+
+// lastCopy names indices in one shard object, the one the stamp left: an edit,
+// UNDO, REDO, another shard opened or the library read again replaces it, and
+// then the indices may have moved, so it goes.
+useWorkshop.subscribe((st) => {
+  if (st.lastCopy && (st.currentId !== st.lastCopy.shardId || st.current() !== copiedInto)) {
+    copiedInto = null
+    useWorkshop.setState({ lastCopy: null })
   }
 })
 

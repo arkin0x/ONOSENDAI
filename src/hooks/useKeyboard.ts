@@ -37,7 +37,8 @@ import { holdEnd, holdReleaseAll, holdStart } from '../store/walkHold'
 import { addWalkInputCloser, setWalkMenuCovering, walkMenuCovering } from '../store/walkInput'
 import { canFly, useViewFly } from '../lib/viewFly'
 import { useRegion } from '../store/useRegion'
-import { buildToScan, inRing, leaveWalk, scanToHop, viewToAvatar } from '../store/padMode'
+import { buildToScan, hotkeyMode, inRing, leaveWalk, MODE_HOTKEYS, scanToHop, viewToAvatar } from '../store/padMode'
+import { toggleMenuOpen } from './useMenuOpen'
 import { scanBuying, scanSpace, useScan } from '../store/useScan'
 
 // Cyberspace TV is watching only: WALK's input is closed while it is on (store/walkInput.ts).
@@ -199,12 +200,19 @@ export function useKeyboard(): void {
       if (useTv.getState().on) return
       // Typing into a field, or building on the bench: not ours.
       const tag = (event.target as HTMLElement | null)?.tagName
-      if (tag === 'INPUT' || tag === 'TEXTAREA') return
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (event.target as HTMLElement | null)?.isContentEditable) return
       // WALK's keys first, so Space and the letters it takes over never reach
       // their HOP meanings below.
       if (walkKeyDown(event)) return
       // Let the browser keep its own shortcuts.
       if (event.metaKey || event.ctrlKey || event.altKey) return
+      // M: the menu open or shut (owner, 2026-11-24), also while it covers
+      // the scene, where it is the way to shut it; not over the workshop.
+      if (event.code === 'KeyM' && !useWorkshop.getState().open) {
+        event.preventDefault()
+        if (!event.repeat) toggleMenuOpen()
+        return
+      }
       if (walkMenuCovering()) return
       // Space and Enter on a focused control press that control. Space is
       // COMMIT here, a proof and possibly a paid one, so a Space meant for a
@@ -248,6 +256,15 @@ export function useKeyboard(): void {
       if (event.code === 'KeyB') {
         event.preventDefault()
         useBuilder.getState().toggle()
+        return
+      }
+
+      // H, V, Y: straight into HOP, VIEW or WALK (owner, 2026-11-24), as
+      // MODES allows (store/padMode.ts hotkeyMode). A held key goes once.
+      const hotkey = MODE_HOTKEYS[event.code]
+      if (hotkey && !event.shiftKey) {
+        event.preventDefault()
+        if (!event.repeat) hotkeyMode(hotkey)
         return
       }
 
@@ -349,10 +366,11 @@ export function useKeyboard(): void {
         return
       }
 
-      // The hyperspace line scrubber: H opens it at the tip of the line, H
-      // again puts it away. The camera fly-to and its clearing live in
-      // LineScrubber's effect, so the key and the chip drive one mechanism.
-      if (event.code === 'KeyH') {
+      // The hyperspace line scrubber: L opens it at the tip of the line, L
+      // again puts it away. It was H until H became HOP (owner, 2026-11-24).
+      // The camera fly-to and its clearing live in LineScrubber's effect, so
+      // the key and the chip drive one mechanism.
+      if (event.code === 'KeyL') {
         event.preventDefault()
         const hs = useHyperspace.getState()
         if (hs.scrubHeight === null) hs.setScrubHeight(hs.viewedStop ?? hs.tipHeight ?? 0)

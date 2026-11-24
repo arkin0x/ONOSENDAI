@@ -295,7 +295,7 @@ export interface WalkState {
   /**
    * Turn WALK on. Only at your own head; a VIEW in progress ends first.
    * `noFall`: GRAVITY waits for the first press before it asks for a floor,
-   * so WALK started by the app itself (MODES' first mode at load,
+   * so WALK started by the app itself (MODES' default mode at load,
    * store/startMode.ts) never falls, makes a hop or turns gravity off
    * before the player does anything.
    */

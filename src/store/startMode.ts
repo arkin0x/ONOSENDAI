@@ -1,10 +1,10 @@
 /**
- * startMode.ts - the mode the app starts in: the first in the player's MODES
- * list (store/modeOrder.ts; owner, 2026-11-24: "someone could make WALK be
+ * startMode.ts - the mode the app starts in: the Default Mode, first in the
+ * ring of the player's MODES list (store/modeOrder.ts; owner, 2026-11-24: "someone could make WALK be
  * the default mode instead of HOP").
  *
  * HOP is where the app has always started, and with the default list
- * nothing here does anything. With another mode first, it is entered once
+ * nothing here does anything. With another default mode, it is entered once
  * per load, the way the mode button enters it (padMode switchMode), when:
  *
  * - the page landed on the bare address: not /tutorial, /demo, /tv, a /C/
@@ -49,7 +49,7 @@ import { moveUnderWay } from '../lib/buildCursor'
 export const WORLD_QUIET_MS = 1200
 /** The longest WALK waits for the world before starting anyway, ms. */
 export const WORLD_WAIT_MS = 6000
-/** The longest the first mode waits for the relays' check of the head; past it the app stays in HOP, ms. */
+/** The longest the default mode waits for the relays' check of the head; past it the app stays in HOP, ms. */
 export const HEAD_WAIT_MS = 15000
 
 /** Whether the page landed on the bare address. */
@@ -73,8 +73,8 @@ function screenOwned(): boolean {
 }
 
 /**
- * The first mode, now, if it applies (see the header): true when the pad is
- * in it. HOP first, or anything in the way, does nothing.
+ * The default mode, now, if it applies (see the header): true when the pad is
+ * in it. HOP the default mode, or anything in the way, does nothing.
  */
 export function applyStartMode(): boolean {
   if (!customModesApply() || screenOwned() || !untouchedStart()) return false
@@ -121,7 +121,7 @@ export function worldSettled(quietMs = WORLD_QUIET_MS, maxMs = WORLD_WAIT_MS): P
 }
 
 /**
- * Enter the first mode once the app can (see the header). Returns what
+ * Enter the default mode once the app can (see the header). Returns what
  * stops the watching (App).
  */
 export function watchStartMode(): () => void {

@@ -14800,3 +14800,8 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
 
 /* Under the open menu on a phone TERRAIN's controls go, as WALK's pad does (App crowded). */
 .terrainview.is-covered { visibility: hidden; }
+
+/* CHAT's chip with no room for its word on the bottom row (hud/ChatDock.tsx chipCrowded): the bubble alone, the chip as
+   tall and at least as wide as it is tall, so the tap is as easy as before. */
+.chatdock__chip.is-tight { min-width: 29px; justify-content: center; padding-left: 8px; padding-right: 8px; }
+.chatdock__chip.is-tight .chatdock__word { display: none; }

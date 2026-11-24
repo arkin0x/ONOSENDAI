@@ -66,6 +66,19 @@ function MentionName({ pubkey, npub, me }: { pubkey: string; npub: string; me: b
 }
 
 /** A line's words with its nostr:npub references as names. */
+/** A box on screen, as getBoundingClientRect gives it. */
+interface Box { left: number; right: number; top: number; bottom: number }
+
+/**
+ * Whether the CHAT chip, at its full width with its word, would touch (or come
+ * within 6px of) anything the bottom row keeps clear of it beside it on the
+ * same row: then it shows the bubble alone.
+ */
+export function chipCrowded(chip: Box, fullWidth: number, avoid: Box[]): boolean {
+  const right = chip.left + fullWidth + 6
+  return avoid.some((b) => b.right > b.left && chip.top < b.bottom && b.top < chip.bottom && chip.left < b.right && right > b.left)
+}
+
 export function LineText({ text, me }: { text: string; me: string }): JSX.Element {
   const parts = useMemo(() => segments(text), [text])
   return (
@@ -230,19 +243,40 @@ export function ChatDock(): JSX.Element {
   // Unfolded, the dock is a chip on the Escape stack: Escape folds it when the
   // caret is elsewhere. In the line, the line's own Escape folds it first.
   useEscape('chip', open, () => useChat.getState().setOpen(false))
+  // Folded, the chip drops its word to the bubble alone wherever the bottom row has no room for it (owner, 2026-11-24:
+  // "at this size, Chat chip should lose 'chat' and just have the conversation bubble"): measured against what the
+  // row keeps clear of it ([data-chat-avoid], TERRAIN's hotbar), never a breakpoint.
+  const chipRef = useRef<HTMLButtonElement>(null)
+  const fullWidth = useRef(0)
+  const [tight, setTight] = useState(false)
+  useEffect(() => {
+    if (open) return
+    const check = (): void => {
+      const el = chipRef.current
+      if (!el) return
+      const r = el.getBoundingClientRect()
+      if (!tight) fullWidth.current = r.width
+      setTight(chipCrowded(r, fullWidth.current, [...document.querySelectorAll('[data-chat-avoid]')].map((o) => o.getBoundingClientRect())))
+    }
+    check()
+    const id = window.setInterval(check, 400)
+    window.addEventListener('resize', check)
+    return () => { window.clearInterval(id); window.removeEventListener('resize', check) }
+  }, [open, tight])
 
   // The star and GOAL beside it, one centered group (arkinox, 2026-10-14).
   if (!open && chip === 'star' && !building) return <StarGoalGroup />
   if (!open) {
     return (
       <button
-        className="chip chatdock__chip"
+        ref={chipRef}
+        className={`chip chatdock__chip${tight ? ' is-tight' : ''}`}
         onPointerDown={(e) => chipPress.press(e.timeStamp)}
         onClick={(e) => { if (chipPress.real(e.detail, e.timeStamp)) useChat.setState({ open: true, unread: 0, mentionsUnread: 0, focusOnOpen: false }) }}
         aria-label={mentionsUnread > 0 ? `Open chat, ${mentionsUnread} ${mentionsUnread === 1 ? 'line tags' : 'lines tag'} you` : unread > 0 ? `Open chat, ${unread} new` : 'Open chat'}
         title="Chat with whoever is standing here (/)"
       >
-        <MessageSquare size={11} strokeWidth={2.25} aria-hidden /> CHAT
+        <MessageSquare size={11} strokeWidth={2.25} aria-hidden /><span className="chatdock__word"> CHAT</span>
         {/* A tag outranks a plain line: the @ with how many, in place of the dot. */}
         {mentionsUnread > 0
           ? <span className="chatdock__at" aria-hidden="true">@{mentionsUnread > 1 ? mentionsUnread : ''}</span>

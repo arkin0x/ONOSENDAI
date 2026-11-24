@@ -145,7 +145,7 @@ function Key({ children }: { children: ReactNode }): JSX.Element {
 function Hotbar(): JSX.Element {
   const inv = useTerrain((s) => s.inventory)
   return (
-    <div className="terrain-hotbar" role="toolbar" aria-label="Blocks you carry">
+    <div className="terrain-hotbar" role="toolbar" aria-label="Blocks you carry" data-chat-avoid>
       {inv.hotbar.map((id, i) => {
         const n = id ? inv.counts[id] ?? 0 : 0
         return (

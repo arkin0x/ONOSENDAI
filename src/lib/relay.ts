@@ -753,6 +753,8 @@ const AUTH_SOCKET_CHECK_MS = 500
  * closes, since the AUTH can then never be sent and nostr-tools never says so.
  */
 function settleAuth(relay: AuthRelay, key: string, challenge: string, lib: Promise<unknown>): Promise<void> {
+  // The socket this AUTH was sent on: a reconnect replaces it (relay.ws), a fresh challenge on the same socket does not.
+  const socket = relay.ws
   return untilSettled(relay, lib).then(() => {
     const as = typeof relay.ws === 'object' && relay.ws !== null ? signedBy.get(relay.ws) : undefined
     // Signed in as the identity before a switch made while the relay's OK
@@ -763,8 +765,16 @@ function settleAuth(relay: AuthRelay, key: string, challenge: string, lib: Promi
       throw new StaleIdentity()
     }
     if (as) authedAs.set(key, as)
-    if (authedFor.get(key) !== challenge) {
-      authedFor.set(key, challenge)
+    // Settled for a socket a reconnect has since replaced: the new socket's
+    // own AUTH is what it is signed in with, and is counted where that settles.
+    if (socket !== undefined && relay.ws !== socket) return
+    // The same socket is signed in, whichever of its challenges this AUTH
+    // answered (a relay may send a fresh one when a REQ beats the AUTH, and
+    // nostr-tools keeps one AUTH per socket): recorded against the current
+    // one and told once, however many waiters share that AUTH.
+    const current = relay.challenge ?? challenge
+    if (authedFor.get(key) !== current) {
+      authedFor.set(key, current)
       noteAuth(key, true)
     }
   }, (err: unknown) => {
@@ -1085,6 +1095,26 @@ async function authRelay(url: string, retry = false, needed = false): Promise<vo
 /** authRelay at each; `needed`: sign in wherever the relay challenges, gating or not (a protected event's publish). */
 async function authAll(relays: string[], needed = false): Promise<void> {
   await Promise.allSettled(relays.map((url) => authRelay(url, false, needed)))
+}
+
+/**
+ * How long a read waits for one relay's sign-in before it asks anyway: a
+ * lookup's wait. A read used to sign in at every relay of its set first,
+ * on the signer's own allowance (up to a reconnect and two prompts, well
+ * over a minute with a phone signer asleep), and only then ask any of them:
+ * MY AGENTS sat empty for minutes (the owner, 2026-11-24). Past this the
+ * question goes out; a relay that gates answers it with "auth-required:" or
+ * an empty EOSE, which the read meets by signing in and asking once more
+ * inside its own time (askOne), and reports as the signer holding it up,
+ * never as the relay having nothing. The sign-in itself carries on, so the
+ * next read finds the socket signed in.
+ */
+export const SIGN_IN_WAIT_MS = MAX_WAIT_MS
+
+/** authRelay for a read, waited for at most `ms` (SIGN_IN_WAIT_MS): true when it settled, false when the wait ran out first. */
+function signInWithin(url: string, ms: number = SIGN_IN_WAIT_MS): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  return Promise.race([authRelay(url).then(() => true), new Promise<boolean>((r) => { timer = setTimeout(() => r(false), ms) })]).finally(() => clearTimeout(timer))
 }
 
 /** Whether this relay's socket in hand was signed in to by this page. */
@@ -1672,16 +1702,27 @@ interface AskAll extends ReadOptions, Pick<AskOptions, 'deferChecks'> { onAnswer
 /**
  * One-shot query, each relay asked and answered on its own, then closed.
  *
- * Authenticates first, as every read here does: the relay requires NIP-42
- * auth for reads, and an unauthed REQ is closed before it is answered. The
- * deadline is ours and is the only timer that ends a wait (see
- * NOSTR_TOOLS_EOSE_MS).
+ * Each relay authenticates first where it gates (relayGates), inside its own
+ * wait of at most SIGN_IN_WAIT_MS, and is asked the moment that is done: no
+ * relay waits on another's sign-in, and none on the signer without limit.
+ * Each then has `maxWait` from its own question, as before; one whose
+ * sign-in ran out of its wait has until `maxWait` from the start of the
+ * read, and at least half of `maxWait` from its question, so a stalled
+ * signer does not double the read. The deadline is ours and is the only
+ * timer that ends a wait (see NOSTR_TOOLS_EOSE_MS).
  */
 async function queryRelays(relays: string[], filter: Filter, maxWait = MAX_WAIT_MS, opts: AskAll = {}): Promise<RelayAnswer[]> {
   const urls = [...new Set(relays.map((r) => normalizeURL(r)))]
   const asked = opts.evenHung ? urls : skipHung(urls)
-  await authAll(asked)
-  const deadline = Date.now() + maxWait
+  const signInMs = Math.min(maxWait, SIGN_IN_WAIT_MS)
+  const began = Date.now()
+  // A relay whose sign-in ran out had a shortened question: its silence is not a full timeout (hung detection, below).
+  const shortened = new Set<string>()
+  const deadlineFor = (url: string, signedIn: boolean): number => {
+    if (signedIn) return Date.now() + maxWait
+    shortened.add(url)
+    return Math.max(began + maxWait, Date.now() + Math.ceil(maxWait / 2))
+  }
   // `graceMs`: once a pinned relay has answered, the others have this long
   // more, then end as no answer in time with what they sent. Ended early, none hung.
   const early = new AbortController()
@@ -1691,14 +1732,14 @@ async function queryRelays(relays: string[], filter: Filter, maxWait = MAX_WAIT_
   // nothing has passed yet when it lands.
   const shared = new Map<string, NostrEvent>()
   const answers = await Promise.all(urls.map((url): Promise<RelayAnswer> => asked.includes(url)
-    ? askOne(url, filter, deadline, { decides: !!(opts.perRelay || opts.written), deferChecks: opts.deferChecks, shared: opts.deferChecks || opts.written || opts.perRelay ? undefined : shared, stop: early.signal, ...(opts.stream ? { quietMs: opts.stream.quietMs, capAt: Date.now() + opts.stream.capMs } : {}) }).then((a) => {
+    ? signInWithin(url, signInMs).then((signedIn) => askOne(url, filter, deadlineFor(url, signedIn), { decides: !!(opts.perRelay || opts.written), deferChecks: opts.deferChecks, shared: opts.deferChecks || opts.written || opts.perRelay ? undefined : shared, stop: early.signal, ...(opts.stream ? { quietMs: opts.stream.quietMs, capAt: Date.now() + opts.stream.capMs } : {}) })).then((a) => {
       if (opts.graceMs !== undefined && a.outcome === 'answered' && pinned.includes(url)) setTimeout(() => early.abort(), opts.graceMs)
       opts.onAnswer?.(a)
       return a
     })
     : Promise.resolve({ url, outcome: 'unreachable', reason: HUNG_REASON, events: [] })))
   // Silent for a whole full-length question, with nothing sent: it hung. A short question says nothing.
-  if (maxWait >= CONNECT_MS && !early.signal.aborted) for (const a of answers) if (a.outcome === 'unreachable' && a.reason === NO_ANSWER && a.events.length === 0) noteTimeout(a.url)
+  if (maxWait >= CONNECT_MS && !early.signal.aborted) for (const a of answers) if (a.outcome === 'unreachable' && a.reason === NO_ANSWER && a.events.length === 0 && !shortened.has(a.url)) noteTimeout(a.url)
   return answers
 }
 

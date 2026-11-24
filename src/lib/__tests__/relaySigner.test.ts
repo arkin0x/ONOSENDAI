@@ -28,6 +28,8 @@ const net = vi.hoisted(() => {
   const sockets: string[] = []
   let challenges = 0
   const events: { url: string; id: string }[] = []
+  /** Each REQ a relay received, and when (the fake clock). */
+  const reqs: { url: string; at: number }[] = []
   const rules = {
     /** Challenges on connect, and without an AUTH answers a REQ with an empty EOSE and refuses an EVENT. The fork case. */
     emptyUntilAuthed: new Set<string>(['wss://cyberspace.nostr1.com/']),
@@ -39,6 +41,8 @@ const net = vi.hoisted(() => {
     eoseMs: new Map<string, number>(),
     /** Refuses the connection. */
     refuse: new Set<string>(),
+    /** Sends a fresh challenge on the same socket when a REQ comes before an AUTH. */
+    rechallengeOnReq: new Set<string>(),
     /** Open: serves reads and takes events unauthenticated, but challenges on connect. */
     openChallenger: new Set<string>(),
     /** The relay itself turns down the first socket's AUTH (not the signer). */
@@ -92,6 +96,8 @@ const net = vi.hoisted(() => {
         if (msg[0] === 'EVENT' && rules.swallowFirstEvent.has(this.url) && firstSocket) return
         if (msg[0] === 'AUTH') { this.authed = true; this.say(['OK', (msg[1] as { id: string }).id, true, '']); return }
         if (msg[0] === 'REQ') {
+          reqs.push({ url: this.url, at: Date.now() })
+          if (rules.rechallengeOnReq.has(this.url) && !this.authed) this.say(['AUTH', `again-${++challenges}`])
           if (!gated || this.authed) {
             for (const f of msg.slice(2) as Record<string, unknown>[]) for (const e of rules.hold.get(this.url) ?? []) if (match(f, e)) this.say(['EVENT', msg[1], e])
           }
@@ -112,7 +118,7 @@ const net = vi.hoisted(() => {
     close(): void { this.readyState = 3; this.onclose?.({ code: 1000, reason: '' }) }
   }
   ;(globalThis as { WebSocket?: unknown }).WebSocket = FakeSocket
-  return { sockets, events, rules, signer }
+  return { sockets, events, reqs, rules, signer }
 })
 // The store's signEvent, as far as an AUTH sees it: the signer, bounded by signWithin (15 s), and a late answer handed on.
 vi.mock('../../store/useCyberspace', async () => {
@@ -143,7 +149,8 @@ import { decideSelfCheck } from '../chainHold'
 import { chainHolders, noteChainHolders } from '../chainHolders'
 import { askChainEvents, confirmChainEvents, fetchChainEvents } from '../chains'
 import { hopTemplate, spawnTemplate, type NostrEvent } from '../events'
-import { CYBERSPACE_RELAY, dropRelays, forgetRelayGates, noteRelayGates, publishMany, queryEachAt, queryEachSettled, retryFailedAuth } from '../relay'
+import { CYBERSPACE_RELAY, SIGN_IN_WAIT_MS, onAuthChange, signedIn, dropRelays, forgetRelayGates, noteRelayGates, publishMany, queryEachAt, queryEachSettled, retryFailedAuth } from '../relay'
+import { fetchContacts } from '../contacts'
 import { AUTH_STALLED } from '../relayOutcome'
 import { SIGN_PATIENCE_MS } from '../signWithin'
 import { signerHeld } from '../authOpen'
@@ -189,6 +196,7 @@ beforeEach(() => {
   useRelays.getState().reset()
   net.sockets.length = 0
   net.events.length = 0
+  net.reqs.length = 0
   net.rules.hold.clear()
   net.rules.emptyUntilAuthed.clear()
   forgetRelayGates()
@@ -197,6 +205,7 @@ beforeEach(() => {
   net.rules.challengeAfterMs.clear()
   net.rules.eoseMs.clear()
   net.rules.refuse.clear()
+  net.rules.rechallengeOnReq.clear()
   net.rules.openChallenger.clear()
   net.rules.refuseFirstAuth.clear()
   net.rules.swallowFirstEvent.clear()
@@ -748,5 +757,70 @@ describe('review of #570 (2026-11-04): each as on v2, or safer for the canonical
     expect(result.value).toEqual({ ok: true, accepted: [other] })
     expect(dials(held)).toBe(1)
     expect(dials(other)).toBe(2)
+  })
+})
+
+describe('a read never waits on the signer before asking (the owner, 2026-11-24: MY AGENTS empty for minutes)', () => {
+  it('each relay is asked on its own: an open relay at once, a gated one after at most SIGN_IN_WAIT_MS, and the read ends bounded', async () => {
+    const open = 'wss://open.example/'
+    net.rules.hold.set(open, [finalizeEvent({ kind: 0, created_at: 1, tags: [], content: '{}' }, generateSecretKey()) as never])
+    net.signer.mode = 'stall'
+    const began = Date.now()
+    const reading = queryEachAt([CANON, open], FILTER, 8_000)
+    await vi.advanceTimersByTimeAsync(50)
+    // The open relay was asked straight away, while the gated one is still signing in.
+    expect(net.reqs.find((r) => r.url === open)!.at - began).toBeLessThan(50)
+    expect(net.reqs.some((r) => r.url === CANON)).toBe(false)
+    // Its sign-in waited for at most SIGN_IN_WAIT_MS, then its question went out anyway.
+    await vi.advanceTimersByTimeAsync(SIGN_IN_WAIT_MS)
+    expect(net.reqs.some((r) => r.url === CANON)).toBe(true)
+    // Half the read's wait from that question, never another whole one: 12 s for an 8 s read, where it was
+    // the signer's whole allowance (15 s, a reconnect, 15 s more) before any relay was asked.
+    const done = await within(4_000 + 200, reading)
+    expect(done.settled).toBe(true)
+    const answers = done.value!
+    expect(answers.find((a) => a.url === open)).toMatchObject({ outcome: 'answered' })
+    expect(answers.find((a) => a.url === open)!.events).toHaveLength(1)
+    // The gated relay's empty answer before a sign-in is the signer holding it up, never "nothing".
+    expect(answers.find((a) => a.url === CANON)).toMatchObject({ outcome: 'refused', reason: AUTH_STALLED })
+    // One AUTH, one prompt: the question after the wait joins the sign-in already asked, never a second one.
+    expect(net.signer.prompts).toBe(1)
+  })
+
+  it('a signer that answers after the wait but inside the read: the relay is signed in to, asked again, and answers whole', async () => {
+    const held = finalizeEvent({ kind: 0, created_at: 1, tags: [], content: '{}' }, generateSecretKey())
+    net.rules.hold.set(CANON, [held as never])
+    net.signer.ms = SIGN_IN_WAIT_MS + 1_000
+    const done = await within(SIGN_IN_WAIT_MS + 4_000 + 200, queryEachAt([CANON], FILTER, 8_000))
+    expect(done.settled).toBe(true)
+    expect(done.value![0]).toMatchObject({ outcome: 'answered' })
+    expect(done.value![0].events.map((e) => e.id)).toEqual([held.id])
+    expect(net.signer.prompts).toBe(1)
+  })
+
+  it('the follow lookup (WALK walls, MY AGENTS) gets the follow list from the general relays while the signer stalls at the canonical one', async () => {
+    const sk = generateSecretKey()
+    const me = getPublicKey(sk)
+    const follows = finalizeEvent({ kind: 3, created_at: 5, tags: [['p', 'a'.repeat(64)]], content: '' }, sk)
+    net.rules.hold.set('wss://relay.damus.io/', [follows as never])
+    net.signer.mode = 'stall'
+    // Bounded by the canonical relay's sign-in wait and half a lookup more, short of the signer's 15 s allowance.
+    const done = await within(SIGN_IN_WAIT_MS + 4_000 + 500, fetchContacts(me))
+    expect(done.settled).toBe(true)
+    expect(done.value).toEqual([{ pubkey: 'a'.repeat(64), name: null }])
+  })
+
+
+  it('a fresh challenge on the same socket while its AUTH is out: signed in, and told so once', async () => {
+    net.rules.rechallengeOnReq.add(CANON)
+    net.signer.ms = SIGN_IN_WAIT_MS + 1_000
+    const told: boolean[] = []
+    const stop = onAuthChange((url, ok) => { if (url === CANON) told.push(ok) })
+    const done = await within(SIGN_IN_WAIT_MS + 4_000 + 200, queryEachAt([CANON], FILTER, 8_000))
+    stop()
+    expect(done.settled).toBe(true)
+    expect(dials(CANON)).toBe(1)
+    expect(told).toEqual([true])
+    expect(signedIn(CANON)).toBe(true)
   })
 })

@@ -117,6 +117,16 @@ body {
   max-height: 100%;
   overflow-y: auto;
   scrollbar-width: thin;
+  /* The whole column takes the pointer, not just its panels (owner,
+     2026-11-24: "if I position my cursor between menu panels I zoom instead
+     of scroll"). .hud is pointer-events: none, so the gaps between panels
+     were the scene's, and a wheel there zoomed the camera. Now a wheel or a
+     finger anywhere from the column's top to its bottom scrolls the menu
+     (the column itself beside the scene, .hud under it once the columns
+     stack), and a tap in a gap lands on the column and does nothing. The
+     column is only as tall as what it holds, so the scene below a short
+     menu, between the columns and in the .hud's margin still zooms. */
+  pointer-events: auto;
 }
 
 .hud__col--right {
@@ -5251,9 +5261,9 @@ select.avatars__input option:checked {
  * While the mobile menu is open the HUD is the scroll container, so it has to
  * receive events across its whole area: .hud is pointer-events: none by
  * default and only .panel opts back in, which left the gaps between panels
- * unable to scroll. Scoped to the open menu rather than the 900px media query,
- * because useIsMobile switches at 768px and a blanket rule would make the HUD
- * swallow grid clicks on desktop windows between the two widths.
+ * unable to scroll. Scoped to the open menu rather than the narrow media
+ * query, so a desktop's .hud never covers the scene: a desktop's menu column
+ * takes the pointer itself (.hud__col), and only as far as its panels reach.
  */
 .hud--menu {
   pointer-events: auto;

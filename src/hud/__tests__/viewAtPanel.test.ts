@@ -112,10 +112,10 @@ afterEach(() => {
 })
 
 describe('the View panel in the menu', () => {
-  it('sits right under Position, in the right column, with no view up', () => {
+  it('sits right under Position and Scale, in the right column, with no view up', () => {
     const { left, right } = columns()
     expect(left).not.toContain('ViewAtPanel')
-    expect(right.slice(0, 3)).toEqual(['ScalePanel', 'PositionPanel', 'ViewAtPanel'])
+    expect(right.slice(0, 5)).toEqual(['ModesPanel', 'TutorialPanel', 'PositionPanel', 'ScalePanel', 'ViewAtPanel'])
   })
 
   it('rises to the first place while the pad VIEW is on, and goes back when it ends', () => {
@@ -129,7 +129,7 @@ describe('the View panel in the menu', () => {
     cs().clearFocus()
     ;({ left, right } = columns())
     expect(left).not.toContain('ViewAtPanel')
-    expect(right.slice(1, 3)).toEqual(['PositionPanel', 'ViewAtPanel'])
+    expect(right.slice(2, 5)).toEqual(['PositionPanel', 'ScalePanel', 'ViewAtPanel'])
   })
 
   it('leads for every free view, a typed place or a star too, and not for a fixed look at a block', () => {
@@ -139,11 +139,14 @@ describe('the View panel in the menu', () => {
     expect(columns().left.slice(0, 2)).toEqual(['Brand', 'ViewAtPanel'])
   })
 
-  it('outranks a move under way', () => {
+  it('leads while a move is under way, and the proof panel stays in its own place', () => {
     useCyberspace.setState({ proof: { ...cs().proof, status: 'computing' } })
     try {
       cs().viewHere()
-      expect(columns().left.slice(0, 3)).toEqual(['Brand', 'ViewAtPanel', 'ProofPanel'])
+      const { left, right } = columns()
+      expect(left.slice(0, 2)).toEqual(['Brand', 'ViewAtPanel'])
+      expect(left).not.toContain('ProofPanel')
+      expect(right).toContain('ProofPanel')
     } finally {
       useCyberspace.setState({ proof: { ...cs().proof, status: 'idle' } })
     }

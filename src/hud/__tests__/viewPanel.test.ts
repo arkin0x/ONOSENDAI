@@ -5,11 +5,12 @@
  * chain trail toggle, not buttons. Each on its own row, each with a title and
  * short subtitle in gray", then moved together into a View panel).
  *
- * Fourteen Field rows with a Switch each, in five groups under subheadings
+ * Fifteen Field rows with a Switch each, in five groups under subheadings
  * with a rule between them (arkinox, 2026-11-22): Protocol visualization
  * (Chain trail, Terrain dots, hX boxes, Region keys, Spatial Audio), Movement
  * (Gravity in WALK, Hard Mode Gravity, Fluid WALK, Optimize chain), Interface
- * (Look sphere in WALK), Effects (Headlamp, Glow, Hide avatar in WALK) and
+ * (Look sphere in WALK), Effects (Headlamp, Glow, Hide avatar in WALK, Sound
+ * effects, kept per identity in IndexedDB; owner, 2026-11-24) and
  * Sync (Sync hidden list). Each drives the flag its old control drove and is
  * remembered the same way. The old controls are gone: no chips under Movement proof, no
  * trail switch in Proof chain, no checkbox in the Region keys list.
@@ -61,6 +62,7 @@ import { useWalk } from '../../store/useWalk'
 import { GRAVITY_KEY, HARD_GRAVITY_KEY } from '../../store/walkGravity'
 import { HARD_GRAVITY_HINT, HARD_GRAVITY_TITLE, SPATIAL_AUDIO_HINT, SPATIAL_AUDIO_TITLE } from '../ViewPanel'
 import { FLUID_KEY, useFluidWalk } from '../../store/fluidSwitch'
+import { SFX_PREFIX, forgetSfxSwitch, sfxOn } from '../../store/sfxSwitch'
 
 type SwitchEl = ReactElement<{ id: string; checked: boolean; onCheckedChange: (v: boolean) => void }>
 
@@ -107,6 +109,7 @@ const ROWS: Array<[string, string, string]> = [
   ['view-headlamp', 'Headlamp', 'Light shards from your view so their shape and depth show.'],
   ['view-spatial-audio', 'Spatial Audio', 'See spatial audio sources and fade perimeters.'],
   ['view-glow', 'Glow', 'Light and fog that objects cast.'],
+  ['view-sfx', 'Sound effects', 'Short game sounds, like the boing when you bounce.'],
   ['view-hides-sync', 'Sync hidden list', 'Your hidden things on every device signed in as you.'],
 ]
 
@@ -115,7 +118,7 @@ const GROUPS: Array<[string, string[]]> = [
   ['Protocol visualization', ['view-chain-trail', 'view-terrain-dots', 'view-hx-boxes', 'view-region-keys', 'view-spatial-audio']],
   ['Movement', ['view-walk-gravity', 'view-walk-gravity-hard', 'view-walk-fluid', 'view-walk-limits']],
   ['Interface', ['view-walk-look']],
-  ['Effects', ['view-headlamp', 'view-glow', 'view-walk-avatar']],
+  ['Effects', ['view-headlamp', 'view-glow', 'view-walk-avatar', 'view-sfx']],
   ['Sync', ['view-hides-sync']],
 ]
 
@@ -127,7 +130,7 @@ const IN_ORDER: Array<[string, string, string]> = GROUPS.flatMap(([, ids]) => id
 })
 
 describe('the Settings panel', () => {
-  it('is a panel titled Settings with fourteen switches, one to a row, each a title and a gray subtitle, in order', () => {
+  it('is a panel titled Settings with fifteen switches, one to a row, each a title and a gray subtitle, in order', () => {
     const html = view()
     expect(html).toMatch(/^<section class="panel panel--view">/)
     expect(html).toContain('<h2>Settings</h2>')
@@ -311,6 +314,31 @@ describe('the Settings panel', () => {
     viewSwitch('view-region-keys').props.onCheckedChange(false)
     expect(useCyberspace.getState().showSecrets).toBe(false)
     expect(localStorage.getItem('onosendai:showSecrets')).toBe('0')
+  })
+
+  it('Sound effects starts on, turns off and on, and is kept for each identity on its own (owner, 2026-11-24)', () => {
+    const me = useCyberspace.getState().identity
+    const other = { pubkey: 'c3'.repeat(32), npub: 'npub-other' }
+    expect(sfxOn()).toBe(true)
+    expect(switchTag(view(), 'view-sfx')).toContain('aria-checked="true"')
+    viewSwitch('view-sfx').props.onCheckedChange(false)
+    expect(sfxOn()).toBe(false)
+    expect(localStorage.getItem(SFX_PREFIX + me.pubkey)).toBe('0')
+    expect(switchTag(view(), 'view-sfx')).toContain('aria-checked="false"')
+    // Another identity has its own switch, on by default; switching back finds yours as you left it.
+    useCyberspace.setState({ identity: other })
+    try {
+      expect(switchTag(view(), 'view-sfx')).toContain('aria-checked="true"')
+      expect(localStorage.getItem(SFX_PREFIX + other.pubkey)).toBeNull()
+    } finally {
+      useCyberspace.setState({ identity: me })
+    }
+    // Read again from storage, as a fresh load does.
+    forgetSfxSwitch()
+    expect(switchTag(view(), 'view-sfx')).toContain('aria-checked="false"')
+    viewSwitch('view-sfx').props.onCheckedChange(true)
+    expect(sfxOn()).toBe(true)
+    expect(localStorage.getItem(SFX_PREFIX + me.pubkey)).toBe('1')
   })
 
   it('touches no other flag: each switch changes only its own', () => {

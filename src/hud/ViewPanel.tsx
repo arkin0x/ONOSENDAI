@@ -11,7 +11,8 @@
  * Settings panel with subheadings and HRs"; SETTINGS_GROUPS below):
  * Protocol visualization (chain trail, terrain dots, hX boxes, region keys,
  * spatial audio), Movement (gravity, hard mode gravity, fluid walk, optimize
- * chain), Interface (look sphere), Effects (headlamp, glow, hide avatar) and
+ * chain), Interface (look sphere), Effects (headlamp, glow, hide avatar,
+ * sound effects) and
  * Sync (sync hidden list). Interface also holds the screen's two ways, SHOW
  * EVERYTHING and NEWCOMER VIEW (hud/NewcomerSetting.tsx); in the newcomer
  * view only Interface shows. Each row is a title and a gray line under it, in
@@ -52,6 +53,7 @@ import { useLayers } from '../store/useLayers'
 import { useWalk } from '../store/useWalk'
 import { useFluidWalk } from '../store/fluidSwitch'
 import { useHidesSync } from '../store/hidesSync'
+import { setSfxOn, useSfxOn } from '../store/sfxSwitch'
 import { Field, Switch } from './ui/Switch'
 import { Explanation } from './Explanation'
 import { WALK_LIMITS_ROW } from './settingsLink'
@@ -79,6 +81,10 @@ export const FLUID_PAUSED_HINT = 'Paused while your chain catches up.'
 export const SPATIAL_AUDIO_TITLE = 'Spatial Audio'
 export const SPATIAL_AUDIO_HINT = 'See spatial audio sources and fade perimeters.'
 
+/** The Sound effects row (owner, 2026-11-24): every sound through lib/sfx.ts obeys it. */
+export const SFX_TITLE = 'Sound effects'
+export const SFX_HINT = 'Short game sounds, like the boing when you bounce.'
+
 /** Hard Mode Gravity's row, in the owner's words (arkinox, 2026-11-22): his dash parts the title from its line. */
 export const HARD_GRAVITY_TITLE = 'Hard Mode Gravity'
 export const HARD_GRAVITY_HINT = 'Gravity will not turn off if there is nothing to catch your fall.'
@@ -93,7 +99,7 @@ export const SETTINGS_GROUPS: ReadonlyArray<{ id: string; title: string; rows: r
   { id: 'protocol', title: 'Protocol visualization', rows: ['view-chain-trail', 'view-terrain-dots', 'view-hx-boxes', 'view-region-keys', 'view-spatial-audio'] },
   { id: 'movement', title: 'Movement', rows: ['view-walk-gravity', 'view-walk-gravity-hard', 'view-walk-fluid', WALK_LIMITS_ROW] },
   { id: 'interface', title: 'Interface', rows: ['view-walk-look'] },
-  { id: 'effects', title: 'Effects', rows: ['view-headlamp', 'view-glow', 'view-walk-avatar'] },
+  { id: 'effects', title: 'Effects', rows: ['view-headlamp', 'view-glow', 'view-walk-avatar', 'view-sfx'] },
   { id: 'sync', title: 'Sync', rows: ['view-hides-sync'] },
 ]
 
@@ -115,6 +121,7 @@ export function ViewPanel(): JSX.Element {
   const hidesSync = useHidesSync((s) => s.enabled)
   const hidesStatus = useHidesSync((s) => s.status)
   const hidesNote = useHidesSync((s) => s.note)
+  const sfxOn = useSfxOn()
   // The newcomer view shows Interface only: the screen's two ways and the look sphere (newcomer/reveal.ts).
   const plain = useNewcomerView()
 
@@ -246,6 +253,16 @@ export function ViewPanel(): JSX.Element {
       on: glow,
       set: (v) => useLayers.getState().setLayer('glow', v),
     },
+    // The game's short sounds through lib/sfx.ts, the bounce's boing among
+    // them (owner, 2026-11-24). On by default, kept per identity in
+    // IndexedDB (store/sfxSwitch.ts). MUTE ALL silences them too.
+    {
+      id: 'view-sfx',
+      title: SFX_TITLE,
+      hint: SFX_HINT,
+      on: sfxOn,
+      set: (v) => setSfxOn(v),
+    },
     // Your list of hidden things, saved to the relay encrypted to you, so every
     // device signed in as you lists it (store/hidesSync.ts; owner ruling,
     // 2026-11-15). On by default; off keeps the list on this device.
@@ -325,7 +342,10 @@ export function ViewPanel(): JSX.Element {
         turn it off if a slow phone struggles. The workshop still shows glow
         on the object you are making. Hide avatar in WALK takes your own
         avatar out of the way while you walk in first person, where the
-        camera sits inside it.
+        camera sits inside it. Sound effects plays the game's short sounds,
+        like the boing when you bounce on a shard; turn it off for quiet. It
+        is kept for each identity you sign in as, and MUTE ALL in NOW PLAYING
+        silences them too.
         In Sync, Sync hidden list is the one switch here that reaches the relay.
         Your list of hidden things is saved to the relay, encrypted so only
         you can read it. Any device signed in as you shows the same list and

@@ -26,6 +26,8 @@
  *   - the page is not Cyberspace TV's broadcast, and TV is not on (TV plays
  *     no game sounds; the stream carries only its music);
  *   - the page is visible: no sound from a tab in the background;
+ *   - Sound effects is on in Settings > Effects (store/sfxSwitch; owner,
+ *     2026-11-24), kept per identity, on by default;
  *   - MUTE ALL (NOW PLAYING; store/useSoundMutes) is off. The app has no
  *     volume of its own: TV's music keeps its own (store/useTvMusic), and a
  *     sound effect is as quiet as the message chime;
@@ -42,6 +44,7 @@ import { onceEvery } from './buzz'
 import { isBroadcast } from './tv/broadcast'
 import { tvIsOn } from '../store/tvOn'
 import { useSoundMutes } from '../store/useSoundMutes'
+import { sfxOn } from '../store/sfxSwitch'
 
 /** The sounds there are. */
 export type SfxName = 'bounce'
@@ -117,11 +120,11 @@ const VOICES: Record<SfxName, SfxVoice> = { bounce: DEFAULT_BOUNCE }
 
 const played = new Map<string, number>()
 
-/** Whether a sound effect may be heard now: not TV, a visible page, MUTE ALL off. */
+/** Whether a sound effect may be heard now: not TV, a visible page, Sound effects on, MUTE ALL off. */
 export function sfxAllowed(): boolean {
   if (isBroadcast() || tvIsOn()) return false
   if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return false
-  return !useSoundMutes.getState().master
+  return !useSoundMutes.getState().master && sfxOn()
 }
 
 /**

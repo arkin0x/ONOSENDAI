@@ -46,6 +46,8 @@ vi.mock('../../lib/relay', async (real) => ({
   queryAnyChecked: vi.fn(async () => ({ events: [], trouble: null })),
   // Profiles (store/useProfiles): none on these relays.
   askEach: vi.fn(async () => []),
+  // MY AGENTS (hooks/useMyAgents, through the agent DM watch): no agents on these relays.
+  askRelay: vi.fn(async (url: string) => ({ url, outcome: 'answered', events: [] })),
   relaySet: () => ['wss://relay.test'],
 }))
 vi.mock('../../lib/inbox', async (real) => ({ ...(await real<typeof import('../../lib/inbox')>()), relaysFor: async () => ['wss://relay.test'] }))

@@ -15,6 +15,7 @@ import { Component, type ErrorInfo, type ReactNode } from 'react'
 import { useLootView } from '../store/useLootView'
 import { useShards } from '../store/useShards'
 import { ModalClose } from './ui/ModalClose'
+import { isWebglRefused } from '../lib/tv/standby'
 
 interface Props {
   /** Which part of the screen this guards, for the note's title. */
@@ -22,6 +23,15 @@ interface Props {
   /** Whether CLOSE also closes the open card: true for the modal boundary,
    * where the card is one of the modals; a HUD or menu crash leaves it open. */
   closesCard?: boolean
+  /**
+   * Whether the note offers CLOSE at all. False where closing would only
+   * draw the same thing again and crash again: the whole app, and the 3D
+   * view, whose usual crash is a WebGL context the browser will not give
+   * (README "Browsers"). RELOAD and COPY stay.
+   */
+  closable?: boolean
+  /** Also run on CLOSE: a coach's boundary puts its tour away, so the caption that threw is not drawn again. */
+  onClose?: () => void
   children: ReactNode
 }
 
@@ -64,6 +74,7 @@ export class CrashNote extends Component<Props, State> {
     // modals. A HUD or menu crash leaves it open, with any unsent comment draft
     // (review of #622).
     if (this.props.closesCard) useShards.getState().selectSecret(null)
+    this.props.onClose?.()
     this.setState({ error: null, stack: '', copied: false })
   }
 
@@ -71,23 +82,24 @@ export class CrashNote extends Component<Props, State> {
     const { error, stack, copied } = this.state
     if (!error) return this.props.children
     const lines = stack.split('\n').filter((l) => l.trim()).slice(0, 8).join('\n')
+    const closable = this.props.closable ?? true
     return (
       <div className="modal" role="alertdialog" aria-modal="true" aria-label="Something crashed">
         <div className="modal__card crash" onPointerDown={(e) => e.stopPropagation()}>
           <header className="panel__head">
             <h2>Crashed</h2>
             <span className="tag tag--warn">{this.props.where}</span>
-            <ModalClose onClose={this.close} />
+            {closable && <ModalClose onClose={this.close} />}
           </header>
           <p className="crash__message">{error.name}: {error.message}</p>
           {/* three.js says "Error creating WebGL context." when the browser
               will not open one: out of memory, too many tabs, or a device too
               old (README "Browsers"). Said in plain words too. */}
-          {/webgl/i.test(error.message) && <p className="crash__hint">3D graphics (WebGL 2) could not start in this browser. Close other tabs and RELOAD. It needs iOS or iPadOS 15.4 or newer, or a current desktop browser.</p>}
+          {isWebglRefused(error) && <p className="crash__hint">3D graphics (WebGL 2) could not start in this browser. Close other tabs and RELOAD. It needs iOS or iPadOS 15.4 or newer, or a current desktop browser.</p>}
           <pre className="crash__stack">{lines}</pre>
           <div className="modal__row">
             <button className="modal__cancel" onClick={this.copy}>{copied ? 'COPIED' : 'COPY'}</button>
-            <button className="modal__cancel" onClick={this.close}>CLOSE</button>
+            {closable && <button className="modal__cancel" onClick={this.close}>CLOSE</button>}
             <button className="modal__cancel" onClick={() => window.location.reload()}>RELOAD</button>
           </div>
         </div>

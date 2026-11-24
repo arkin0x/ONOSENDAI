@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useState, type ReactNode } from 'react'
 import { useRevealClass, watchNewcomer } from './newcomer/useNewcomer'
 import { BitReadout } from './hud/BitReadout'
 import { CrashNote } from './hud/CrashNote'
@@ -374,7 +374,7 @@ export default function App(): JSX.Element {
     return (
       <div className="app">
         <WorldScans />
-        <CrashNote where="the 3D view"><Scene /></CrashNote>
+        <SceneGuard />
         <TvScreen />
       </div>
     )
@@ -385,8 +385,8 @@ export default function App(): JSX.Element {
       <WorldScans />
       <OfferWatch hidden={crowded || secretOpen} onChange={setOfferUp} />
       {/* A 3D view that cannot start (no WebGL 2 context on an old iPad, say)
-          shows why over the panels, which stay up, not a black page. */}
-      <CrashNote where="the 3D view"><Scene /></CrashNote>
+          shows why, over the rest of the screen, instead of a black page. */}
+      <SceneGuard />
       {!crowded && !offerUp && <TargetsHere />}
       {!crowded && !secretOpen && !offerUp && !deploying && (
         <div className="instruments">
@@ -493,9 +493,10 @@ export default function App(): JSX.Element {
       )}
       {/* The /demo tour's caption panel, only while the tour runs. Each coach
           has its own boundary: a caption that throws leaves the world drawn. */}
-      <CrashNote where="the tour"><DemoCoach /></CrashNote>
-      {/* The first-arrival tutorial's caption panel, only while it runs. */}
-      <CrashNote where="the tutorial"><TutorialCoach /></CrashNote>
+      <Guard where="the tour" onClose={() => useDemo.getState().exit()}><DemoCoach /></Guard>
+      {/* The first-arrival tutorial's caption panel, only while it runs. CLOSE
+          puts the run away (LATER), so the controls it hides come back. */}
+      <Guard where="the tutorial" onClose={() => useTutorial.getState().pause()}><TutorialCoach /></Guard>
       {/* WALK's lag, centered over everything and touching nothing. */}
       <SyncWarning />
       {crowded && <div className="mobile-overlay" />}
@@ -558,6 +559,21 @@ export default function App(): JSX.Element {
       </button>
     </div>
   )
+}
+
+/**
+ * A boundary of its own for one part of the screen (hud/CrashNote), except on
+ * the 24/7 stream: there every crash goes on to TvStandby (boot.tsx,
+ * lib/tv/standby.ts), which stands by and reloads, because nobody can tap a
+ * crash note on a stream. Fixed for the page, so it never remounts anything.
+ */
+function Guard({ where, closable, onClose, children }: { where: string; closable?: boolean; onClose?: () => void; children: ReactNode }): JSX.Element {
+  return isBroadcast() ? <>{children}</> : <CrashNote where={where} closable={closable} onClose={onClose}>{children}</CrashNote>
+}
+
+/** The 3D view in its boundary, RELOAD only: closing would ask the browser for the same WebGL context again (README "Browsers"). */
+function SceneGuard(): JSX.Element {
+  return <Guard where="the 3D view" closable={false}><Scene /></Guard>
 }
 
 /**

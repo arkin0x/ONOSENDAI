@@ -33,13 +33,19 @@ interface Page {
 }
 
 /** Runs the preflight in a page of its own. `strip` runs first, in that page, to take away what an older browser lacks. */
-function run({ webgl2 = true, strip = '', drawn = false, ua = 'Mozilla/5.0 (iPad; CPU OS 15_8 like Mac OS X)' } = {}) {
+function run({ webgl2 = true, strip = '', drawn = false, parsed = true, ua = 'Mozilla/5.0 (iPad; CPU OS 15_8 like Mac OS X)' } = {}) {
   const listeners: Record<string, Array<(e?: unknown) => void>> = {}
   const timers: Array<() => void> = []
   const root = { innerHTML: WORDMARK }
+  // `parsed` false: the script runs in the head, as it does in a browser, before #root exists.
+  let rootThere = parsed
+  const docListeners: Record<string, Array<() => void>> = {}
   const page: Record<string, unknown> = {
     navigator: { userAgent: ua },
-    document: { getElementById: (id: string) => (id === 'root' ? root : null), addEventListener: () => undefined },
+    document: {
+      getElementById: (id: string) => (id === 'root' && rootThere ? root : null),
+      addEventListener: (type: string, fn: () => void) => { (docListeners[type] ??= []).push(fn) },
+    },
     addEventListener: (type: string, fn: (e?: unknown) => void) => { (listeners[type] ??= []).push(fn) },
     setTimeout: (fn: () => void) => { timers.push(fn) },
   }
@@ -50,7 +56,10 @@ function run({ webgl2 = true, strip = '', drawn = false, ua = 'Mozilla/5.0 (iPad
   // structuredClone is the host's, not the language's: the page has it unless stripped.
   vm.runInContext('window.structuredClone = function (v) { return v };' + strip, ctx)
   vm.runInContext(script, ctx)
-  const fire = (type: string, e?: unknown): void => { for (const fn of listeners[type] ?? []) fn(e) }
+  const fire = (type: string, e?: unknown): void => {
+    if (type === 'DOMContentLoaded') { rootThere = true; for (const fn of docListeners[type] ?? []) fn(); return }
+    for (const fn of listeners[type] ?? []) fn(e)
+  }
   const elapse = (): void => { for (const fn of timers.splice(0)) fn() }
   return { page: page as Page, root, fire, elapse }
 }
@@ -82,6 +91,14 @@ describe('the preflight', () => {
     // An Apple device without WebGL 2 may be in Lockdown Mode.
     expect(root.innerHTML).toMatch(/Lockdown Mode/)
     expect(root.innerHTML).not.toMatch(/RELOAD/)
+  })
+
+  it('run in the head before #root exists, it puts its page in once the document is parsed', () => {
+    const { page, root, fire } = run({ webgl2: false, parsed: false })
+    expect(page.__onosendaiUnsupported).toEqual(['3D graphics (WebGL 2)'])
+    expect(root.innerHTML).toBe(WORDMARK)
+    fire('DOMContentLoaded')
+    expect(root.innerHTML).toMatch(/class="cannot-run"/)
   })
 
   it('turns away Safari before 15.4 by what it lacks, not by its name', () => {

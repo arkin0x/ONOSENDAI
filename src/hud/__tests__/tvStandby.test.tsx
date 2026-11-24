@@ -51,8 +51,16 @@ describe('the stream\'s stand-by', () => {
     expect(stop).toHaveBeenCalledTimes(1)
   })
 
+  it('on the stream, the 3D view and the coaches have no boundary of their own, so their crashes reach it (App.tsx Guard)', () => {
+    const app = readFileSync(join(__dirname, '../../App.tsx'), 'utf8')
+    expect(app).toMatch(/function Guard\([\s\S]*?\{\s*return isBroadcast\(\) \? <>\{children\}<\/> : <CrashNote /)
+    expect(app).not.toMatch(/<CrashNote where="the 3D view"|<CrashNote where="the tour"|<CrashNote where="the tutorial"/)
+    expect(app.match(/<SceneGuard \/>/g)).toHaveLength(2)
+  })
+
   it('is round the app on the stream only (boot.tsx)', () => {
     const main = readFileSync(join(__dirname, '../../boot.tsx'), 'utf8')
-    expect(main).toMatch(/isBroadcast\(\) \? <TvStandby><App \/><\/TvStandby> : <App \/>/)
+    // Anywhere else the app's own boundary, RELOAD only (hud/CrashNote, README "Browsers").
+    expect(main).toMatch(/isBroadcast\(\) \? <TvStandby><App \/><\/TvStandby> : <CrashNote where="the app" closable=\{false\}><App \/><\/CrashNote>/)
   })
 })

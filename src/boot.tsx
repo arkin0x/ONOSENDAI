@@ -93,8 +93,9 @@ function draw(): void {
       {/* The stream never goes black: it stands by and reloads (hud/TvStandby, lib/tv/standby).
           Anywhere else a render that throws past every inner boundary shows
           its error and RELOAD instead of a black page: a 3D view that cannot
-          start on an old iPad, say (README "Browsers"). */}
-      {isBroadcast() ? <TvStandby><App /></TvStandby> : <CrashNote where="the app"><App /></CrashNote>}
+          start on an old iPad, say (README "Browsers"). No CLOSE: it would
+          draw the same app again. */}
+      {isBroadcast() ? <TvStandby><App /></TvStandby> : <CrashNote where="the app" closable={false}><App /></CrashNote>}
     </React.StrictMode>,
   )
   // The frame after the first render is the one on screen; then the workshop.

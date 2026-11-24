@@ -1,10 +1,13 @@
 /* ONOSENDAI V2 — terminal-adjacent HUD over a dark spatial canvas. */
 
-/* Oldest browser: Safari 15.4 (README "Browsers"). Every color-mix() (Safari
-   16.2) follows the same property in plain colour, which Safari 15.4 to 16.1
-   keeps when it drops the color-mix() line. The build adds the -webkit-
-   prefixes (vite.config.ts build.target), -webkit-backdrop-filter among them.
-   :has() and dvh are Safari 15.4, so neither needs one. */
+/* Oldest browser: Safari 15.4 (README "Browsers"). No bare color-mix()
+   (Safari 16.2): a colour mixed with transparent is written as its rgba(),
+   the same colour exactly, and a mix of a variable that changes per element
+   sits in @supports over a plain fallback (.fullbar). A fallback beside a
+   color-mix() of a var() never works: such a line is kept as the page loads
+   and fails only when drawn. The build adds the -webkit- prefixes
+   (vite.config.ts build.target), -webkit-backdrop-filter among them. :has()
+   and dvh are Safari 15.4, so neither needs one. */
 
 :root {
   --bg: #05070d;
@@ -3834,7 +3837,7 @@ select.avatars__input option:checked {
 }
 .ws__heldbtn:disabled { opacity: 0.32; cursor: default; }
 .ws__heldbtn--danger { color: var(--danger); }
-.ws__heldbtn--count { flex: 1.1 1 0; color: var(--warn); border: 1px solid rgba(255, 176, 32, 0.55); border: 1px solid color-mix(in srgb, var(--warn) 55%, transparent); background: rgba(255, 176, 32, 0.08); }
+.ws__heldbtn--count { flex: 1.1 1 0; color: var(--warn); border: 1px solid rgba(255, 176, 32, 0.55); background: rgba(255, 176, 32, 0.08); }
 .ws__heldbtn--count b { display: inline-flex; align-items: center; gap: 2px; font-size: 14px; font-weight: 700; }
 .ws__heldbtn--two::after { content: ''; position: absolute; top: 6px; right: 8px; width: 5px; height: 5px; border-radius: 50%; background: currentColor; opacity: 0.8; }
 .ws__heldbtn--two[aria-expanded='true']::after { background: var(--accent); opacity: 1; }
@@ -3868,9 +3871,9 @@ select.avatars__input option:checked {
 /* A narrow phone keeps EYE x, y, z and AUTO or CHOSEN; the rest of the sentence goes. */
 @media (max-width: 400px) { .ws__eyeline-from { display: none; } }
 .ws__eyebar { flex: 1 1 0; min-height: 0; }
-.ws__heldbtn.is-on { color: var(--accent); border: 1px solid rgba(0, 229, 255, 0.6); border: 1px solid color-mix(in srgb, var(--accent) 60%, transparent); background: rgba(0, 229, 255, 0.08); }
+.ws__heldbtn.is-on { color: var(--accent); border: 1px solid rgba(0, 229, 255, 0.6); background: rgba(0, 229, 255, 0.08); }
 .ws__heldbtn--ok { color: var(--ok); }
-.ws__eyebar-gap { border-left: 1px solid rgba(0, 229, 255, 0.154); border-left: 1px solid color-mix(in srgb, var(--border) 70%, transparent); border-radius: 0; }
+.ws__eyebar-gap { border-left: 1px solid rgba(0, 229, 255, 0.154); border-radius: 0; }
 /* NUMBERS: X, Y and Z steppers in one row, risen over the strip as its other questions are. */
 .benchpaste.ws__ask.ws__eyenums { left: var(--ws-gutter); right: var(--ws-gutter); width: auto; display: grid; grid-template-columns: repeat(3, auto); justify-content: space-between; align-items: center; gap: 0 2px; padding: 4px 6px; }
 .ws__eyenum { display: flex; align-items: center; gap: 0; }
@@ -3963,7 +3966,7 @@ select.avatars__input option:checked {
 .ws__eyeview.is-big .ws__eyeview-zoom { cursor: zoom-out; }
 /* FIRST-PERSON EYE, the AVATAR sheet's row: its words, the setting, SET EYE,
    and the reserved line under it. */
-.ws__eyerow { display: flex; flex-direction: column; gap: 6px; border-top: 1px solid rgba(0, 229, 255, 0.154); border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent); padding-top: 8px; }
+.ws__eyerow { display: flex; flex-direction: column; gap: 6px; border-top: 1px solid rgba(0, 229, 255, 0.154); padding-top: 8px; }
 .ws__eyerow-main { display: flex; align-items: center; gap: 10px; }
 .ws__eyerow-text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .ws__eyerow-setting { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 3px; font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -4040,7 +4043,7 @@ select.avatars__input option:checked {
 .ws__tile.is-on { color: var(--ws-ink); background: var(--accent); border-color: var(--accent); font-weight: 700; }
 /* MORE's keys: labelled, thumb-sized, in rows that wrap. */
 .ws__more-sec { display: flex; flex-direction: column; gap: 8px; }
-.ws__more-sec + .ws__more-sec { border-top: 1px solid rgba(0, 229, 255, 0.154); border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent); padding-top: 10px; }
+.ws__more-sec + .ws__more-sec { border-top: 1px solid rgba(0, 229, 255, 0.154); padding-top: 10px; }
 .ws__more-title { margin: 0; font-size: 10px; letter-spacing: 0.14em; color: var(--dim); font-weight: 600; }
 .ws__more-keys { display: grid; grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); gap: 6px; }
 .ws__morebtn {
@@ -4365,7 +4368,6 @@ select.avatars__input option:checked {
   min-height: 52px;
   padding: 10px var(--ws-gutter) 4px 14px;
   border-bottom: 1px solid rgba(0, 229, 255, 0.154);
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
   touch-action: none;
 }
 .ws__sheet-grab {
@@ -4400,7 +4402,6 @@ select.avatars__input option:checked {
 /* A rule between the controls, so a row reads as one control. */
 .ws__sheet-body .workshop__row {
   border-top: 1px solid rgba(0, 229, 255, 0.154);
-  border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
   padding-top: 8px;
 }
 .ws__sheet-body .workshop__row:first-child { border-top: none; padding-top: 0; }
@@ -8301,8 +8302,7 @@ select.avatars__input option:checked {
   position: relative;
   height: 12px;
   /* The frame's line: the inner box below covers all but a hairline, cut corners included (as ui/Chamfer.tsx). */
-  background: var(--fb-dim, var(--fb));
-  background: color-mix(in srgb, var(--fb) 55%, transparent);
+  background: var(--fb);
   clip-path: polygon(var(--fb-cut) 0, 100% 0, 100% calc(100% - var(--fb-cut)), calc(100% - var(--fb-cut)) 100%, 0 100%, 0 var(--fb-cut));
   overflow: hidden;
 }
@@ -8323,9 +8323,7 @@ select.avatars__input option:checked {
   left: var(--fb-in);
   width: calc((100% - 2 * var(--fb-in)) * var(--fb-share, 0));
   background: var(--fb);
-  background: linear-gradient(90deg, color-mix(in srgb, var(--fb) 55%, transparent), var(--fb));
   box-shadow: 0 0 8px var(--fb);
-  box-shadow: 0 0 8px color-mix(in srgb, var(--fb) 60%, transparent);
   transition: width 0.25s ease;
 }
 /* What one stamp would add (STAMP's library): hatched, after the fill, in the colour the result would be. */
@@ -8337,8 +8335,19 @@ select.avatars__input option:checked {
   width: calc((100% - 2 * var(--fb-in)) * var(--fb-next, 0));
   background: repeating-linear-gradient(135deg, var(--fb) 0 2px, transparent 2px 5px);
   box-shadow: inset 0 0 0 1px var(--fb);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fb) 70%, transparent);
   transition: width 0.25s ease, left 0.25s ease;
+}
+/* The softer mixes where the browser has color-mix() (Safari 16.2). A line
+   with var() in it is never dropped as the page loads, so a plain fallback in
+   the same rule would never be used: the plain colours above are the
+   fallback, and these replace them only where color-mix() works. */
+@supports (color: color-mix(in srgb, red 50%, red)) {
+  .fullbar__track { background: color-mix(in srgb, var(--fb) 55%, transparent); }
+  .fullbar__fill {
+    background: linear-gradient(90deg, color-mix(in srgb, var(--fb) 55%, transparent), var(--fb));
+    box-shadow: 0 0 8px color-mix(in srgb, var(--fb) 60%, transparent);
+  }
+  .fullbar__next { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fb) 70%, transparent); }
 }
 .fullbar__to { color: #fff; font-weight: 400; letter-spacing: 0.12em; }
 /* A gap every tenth: the meter's segments, inside the frame so its line stays whole. */
@@ -8389,7 +8398,6 @@ select.avatars__input option:checked {
   color: var(--warn);
   background: transparent;
   border: 1px solid rgba(255, 176, 32, 0.45);
-  border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent);
   border-radius: 3px;
 }
 
@@ -8399,7 +8407,6 @@ select.avatars__input option:checked {
 .workshop__btn.workshop__btn--warn {
   color: var(--warn);
   border-color: rgba(255, 176, 32, 0.45);
-  border-color: color-mix(in srgb, var(--warn) 45%, transparent);
 }
 
 
@@ -8648,7 +8655,6 @@ select.avatars__input option:checked {
   color: #52e39f;
   background: transparent;
   border: 1px solid rgba(82, 227, 159, 0.45);
-  border: 1px solid color-mix(in srgb, #52e39f 45%, transparent);
   border-radius: 3px;
 }
 
@@ -8753,7 +8759,6 @@ select.avatars__input option:checked {
   color: var(--danger);
   background: transparent;
   border: 1px solid rgba(255, 59, 107, 0.4);
-  border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent);
   border-radius: 3px;
 }
 
@@ -9604,8 +9609,8 @@ select.avatars__input option:checked {
  * width (arkinox, 2026-11-09: "the buttons on the Items are way too large.
  * Make them like the buttons below on the 'taken' things"), DELETE too. */
 /* DELETE on a held item: it destroys something, so it does not read as COPY does. */
-.chest__act.chest__act--danger { color: var(--danger); border-color: rgba(255, 59, 107, 0.5); border-color: color-mix(in srgb, var(--danger) 50%, transparent); background: transparent; }
-.chest__act.chest__act--danger:hover { background: rgba(255, 59, 107, 0.14); background: color-mix(in srgb, var(--danger) 14%, transparent); }
+.chest__act.chest__act--danger { color: var(--danger); border-color: rgba(255, 59, 107, 0.5); background: transparent; }
+.chest__act.chest__act--danger:hover { background: rgba(255, 59, 107, 0.14); }
 
 /* A seed row's words: one tap opens the seed's card; they read as the other rows' words. */
 .nearby__name { align-items: flex-start; padding: 0; font: inherit; color: inherit; text-align: left; letter-spacing: inherit; background: none; border: 0; cursor: pointer; }
@@ -11352,7 +11357,7 @@ a.feed__act { text-decoration: none; }
 }
 .chest__act:hover { background: rgba(0, 229, 255, 0.16); }
 .chest__act:disabled { opacity: 0.45; cursor: default; }
-.chest__act.is-on { color: var(--ok); border-color: rgba(82, 227, 159, 0.45); border-color: color-mix(in srgb, var(--ok) 45%, transparent); background: transparent; }
+.chest__act.is-on { color: var(--ok); border-color: rgba(82, 227, 159, 0.45); background: transparent; }
 /* TAKE, on a found item and on each row of an opened chest, sized for a
    thumb (arkinox, 2026-10-26: "make the take button bigger"): a card
    action's height and words, kept to the row's end. */
@@ -11716,7 +11721,7 @@ a.feed__act { text-decoration: none; }
 .talk__acts { display: flex; gap: 6px; margin-top: 4px; }
 .talk__act { display: inline-flex; align-items: center; gap: 4px; padding: 2px 7px; font-family: inherit; font-size: 8px; letter-spacing: 0.14em; color: var(--accent); background: rgba(0, 229, 255, 0.06); border: 1px solid rgba(0, 229, 255, 0.4); border-radius: 4px; cursor: pointer; }
 .talk__act:hover { background: rgba(0, 229, 255, 0.16); }
-.talk__act.is-on { color: var(--ok); border-color: rgba(82, 227, 159, 0.45); border-color: color-mix(in srgb, var(--ok) 45%, transparent); }
+.talk__act.is-on { color: var(--ok); border-color: rgba(82, 227, 159, 0.45); }
 .talk__orders { display: flex; flex-wrap: wrap; gap: 6px; }
 .talk__orders .avatars__go,
 .talk__strategy .avatars__go,
@@ -13148,8 +13153,8 @@ html.tv-broadcast body { overflow: hidden; }
 .items-feed__src > span:first-child { flex: none; }
 .items-feed__who { max-width: 100%; min-width: 0; display: inline-flex; align-items: center; gap: 3px; padding: 0; font: inherit; color: inherit; background: none; border: 0; cursor: pointer; vertical-align: middle; }
 .items-feed__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.items-feed__unfound { color: var(--warn); border-color: rgba(255, 176, 32, 0.45); border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
-.items-feed__held { color: var(--ok); border-color: rgba(82, 227, 159, 0.45); border-color: color-mix(in srgb, var(--ok) 45%, transparent); }
+.items-feed__unfound { color: var(--warn); border-color: rgba(255, 176, 32, 0.45); }
+.items-feed__held { color: var(--ok); border-color: rgba(82, 227, 159, 0.45); }
 /* OPENS WITH: the listed key item a locked door or chest is sealed to, its row as the FEED draws it. */
 .lockkey { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding-top: 4px; }
 .lockkey__label { margin-bottom: 0; }

@@ -101,24 +101,32 @@ function pickStratum(strata: ReadonlyArray<readonly [number, number]>, h: number
 }
 
 /**
- * Features, revision 2: what each is placed by. `p` is the chance an
- * eligible chunk gets it (a 32-bit draw from the chunk's feature stream
- * below p times 2^32), `minK` the least K of the chunk's costliest cube for
- * it to be eligible at all. The rare band's `p` is set so that the chance
- * per surveyed chunk (eligible share times p) is the owner's target; the
- * eligible shares are measured (scripts/terrain-calibrate.mjs).
+ * Features, revision 2: what each is placed by. An eligible chunk gets one
+ * when a 32-bit draw from its feature stream is below `t` (so its chance is
+ * t / 2^32, written beside it), `minK` being the least K of the chunk's
+ * costliest cube for it to be eligible at all. Integers only, so any
+ * language draws the same. Tidewater's threshold depends on the chunk's
+ * K (poolThreshold).
  */
 export const FEATURES = {
-  ferrovein: { p: 0.9, minK: 0 },
-  cobaltine: { p: 0.52, minK: 6 },
-  prismite: { p: 0.325, minK: 9 },
-  glowcore: { p: 0.1, minK: 10 },
-  trees: { p: 0.34, minK: 0 },
-  pools: { p: 0.25, minK: 0 },
-  magma: { p: 0.125, minK: 11 },
+  ferrovein: { t: 3865470566, minK: 0 }, // 0.9
+  cobaltine: { t: 2233382993, minK: 6 }, // 0.52
+  prismite: { t: 1395864371, minK: 9 }, // 0.325
+  glowcore: { t: 429496729, minK: 10 }, // 0.1
+  trees: { t: 1460288880, minK: 0 }, // 0.34 of chunks with a tree site
+  magma: { t: 536870912, minK: 11 }, // 0.125 of volcanic chunks
 } as const
 
-/** The rare band, common to rarest (the owner's order): [id, minK, p given eligible]. */
+/**
+ * Tidewater's threshold from the sum of the chunk's 64 cube K: a chance of
+ * (768 - sum) / 1024, a quarter at a mean K of 8, more where K is low,
+ * held between 0.05 and 0.6.
+ */
+export function poolThreshold(sumK: number): number {
+  return Math.min(2576980377, Math.max(214748364, (768 - sumK) * 4194304))
+}
+
+/** The rare band, common to rarest (the owner's order): [id, least K of the costliest cube]. */
 export const RARE: ReadonlyArray<readonly [number, number]> = [
   [B.VOIDPEARL, 11], [B.AURORIC, 11], [B.CHRONITE, 12], [B.GIBSONITE, 12], [B.SINGULARITY, 13], [B.RELIC, 13], [B.GENESIS, 14],
 ]
@@ -364,8 +372,16 @@ function strataAt(L: Lattices, x: number, y: number, z: number, fineByte: number
   return { d9: L.digestAt(9, x + w9[0], y + w9[1], z + w9[2]), d11: L.digestAt(11, x + w11[0], y + w11[1], z + w11[2]) }
 }
 
-/** The rare band with its chance given eligibility: target over the eligible share, so target = share times chance. */
-export const RARE_ODDS: ReadonlyArray<readonly [number, number, number]> = RARE.map(([id, minK]) => [id, minK, Math.min(1, RARE_TARGET[id] / MAXK_AT_LEAST[minK])] as const)
+/**
+ * The rare band with its threshold given eligibility: floor(2^32 x target /
+ * eligible share), so that the chance per surveyed chunk (eligible share
+ * times threshold / 2^32) is the target. Written out as integers (a test
+ * checks them against RARE_TARGET and MAXK_AT_LEAST).
+ */
+export const RARE_ODDS: ReadonlyArray<readonly [number, number, number]> = [
+  [B.VOIDPEARL, 11, 22375156], [B.AURORIC, 11, 11187578], [B.CHRONITE, 12, 11179861], [B.GIBSONITE, 12, 7453240],
+  [B.SINGULARITY, 13, 11799360], [B.RELIC, 13, 7866240], [B.GENESIS, 14, 22053747],
+]
 
 /** Bytes of the chunk's feature stream after its fine stream, read in order. */
 export const FEATURE_BYTES = 8192
@@ -376,12 +392,12 @@ class Draws {
   constructor(private readonly b: Uint8Array) {}
   u8(): number { return this.i < this.b.length ? this.b[this.i++] : 0 }
   u32(): number { return ((this.u8() << 24) | (this.u8() << 16) | (this.u8() << 8) | this.u8()) >>> 0 }
-  /** Whether a 32-bit draw falls under p (0..1) times 2^32: an exact integer test. */
-  chance(p: number): boolean { return this.u32() < Math.floor(p * 4294967296) }
+  /** Whether a 32-bit draw falls under a threshold (chance times 2^32): an integer test. */
+  chance(t: number): boolean { return this.u32() < t }
 }
 
-/** The per-chunk probabilities in force (the rare band's are set by calibration; see RARE). */
-export interface Odds { features: typeof FEATURES; rare: ReadonlyArray<readonly [number, number, number]> }
+/** The thresholds in force (tests raise them to 2^32 to test the gates alone). */
+export interface Odds { features: typeof FEATURES; rare: ReadonlyArray<readonly [number, number, number]>; pools?: number }
 
 /** §3 The ground of one chunk, revision 2: one block id per cell, idx order (coords.ts idx). */
 export function generate(base: ChunkBase, odds: Odds = { features: FEATURES, rare: RARE_ODDS }): Generated {
@@ -442,7 +458,7 @@ export function generate(base: ChunkBase, odds: Odds = { features: FEATURES, rar
   }
   const f = odds.features
   // 2. Magmaflow pockets in volcanic ground of K 11 and up, with Basaltine round them.
-  if (fam0.name === 'volcanic' && maxK >= f.magma.minK && draws.chance(f.magma.p)) {
+  if (fam0.name === 'volcanic' && maxK >= f.magma.minK && draws.chance(f.magma.t)) {
     const at = rockInCostliest()
     for (let t = 0; t < 1 && at >= 0; t++) {
       const cx = at & 31, cz = (at >> 5) & 31, cy = at >> 10
@@ -461,8 +477,7 @@ export function generate(base: ChunkBase, odds: Odds = { features: FEATURES, rar
     }
   }
   // 3. Tidewater pools in low places, more where K is low: a basin of open cells over solid floor, 20 to 200 blocks.
-  const poolP = Math.min(0.6, Math.max(0.05, f.pools.p * (1 + (8 - meanK) / 4)))
-  if (draws.chance(poolP)) {
+  if (draws.chance(odds.pools ?? poolThreshold(sum))) {
     for (let t = 0; t < 8; t++) {
       const px = draws.u8() & 31, pz = draws.u8() & 31, r = 2 + (draws.u8() % 5)
       let floor = -1
@@ -495,7 +510,7 @@ export function generate(base: ChunkBase, odds: Odds = { features: FEATURES, rar
       }
     }
   }
-  if (sites.length > 0 && draws.chance(f.trees.p)) {
+  if (sites.length > 0 && draws.chance(f.trees.t)) {
     const n = 1 + (draws.u8() % 4)
     for (let t = 0; t < n; t++) {
       const site = sites[draws.u32() % sites.length], h = 4 + (draws.u8() % 3)
@@ -531,16 +546,16 @@ export function generate(base: ChunkBase, odds: Odds = { features: FEATURES, rar
       return
     }
   }
-  if (draws.chance(f.ferrovein.p)) {
+  if (draws.chance(f.ferrovein.t)) {
     const n = 2 + (draws.u8() % 4)
     for (let i = 0; i < n; i++) vein(B.FERROVEIN, 4 + (draws.u8() % 9), 0, null)
   }
-  if (maxK >= f.cobaltine.minK && draws.chance(f.cobaltine.p)) {
+  if (maxK >= f.cobaltine.minK && draws.chance(f.cobaltine.t)) {
     const n = 1 + (draws.u8() % 2)
     for (let i = 0; i < n; i++) vein(B.COBALTINE, 3 + (draws.u8() % 6), f.cobaltine.minK, null)
   }
-  if (maxK >= f.prismite.minK && draws.chance(f.prismite.p)) vein(B.PRISMITE, 4 + (draws.u8() % 7), f.prismite.minK, null)
-  if (maxK >= f.glowcore.minK && draws.chance(f.glowcore.p)) vein(B.GLOWCORE, 2 + (draws.u8() % 7), f.glowcore.minK, maxCube)
+  if (maxK >= f.prismite.minK && draws.chance(f.prismite.t)) vein(B.PRISMITE, 4 + (draws.u8() % 7), f.prismite.minK, null)
+  if (maxK >= f.glowcore.minK && draws.chance(f.glowcore.t)) vein(B.GLOWCORE, 2 + (draws.u8() % 7), f.glowcore.minK, maxCube)
   // 6. The rare band: one block (never a vein) in the chunk's costliest cube, rarer kinds needing higher K.
   for (const [id, minK, p] of odds.rare) {
     if (maxK < minK || !draws.chance(p)) continue

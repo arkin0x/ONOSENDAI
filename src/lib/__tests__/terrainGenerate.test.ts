@@ -12,7 +12,7 @@ import { describe, expect, it } from 'vitest'
 import { bigintTo32Bytes, deriveRegionKeys, terrainK, xyzToCoord, coordToXyz } from 'cyberspace-core'
 import { sha256 } from '@noble/hashes/sha2.js'
 import { fastCoordBytes, chunkKey, parseChunkKey, chunkOf, CELLS, type ChunkBase } from '../terrain/coords'
-import { B, FEATURES, RARE, chacha20Keystream, chunkMaxK, cubeK, fineStream, generate, kAt, surveySeed } from '../terrain/generate'
+import { B, FEATURES, MAXK_AT_LEAST, RARE, RARE_ODDS, RARE_TARGET, chacha20Keystream, chunkMaxK, cubeK, fineStream, generate, kAt, surveySeed } from '../terrain/generate'
 import { reachDistance } from '../terrain/world'
 import { EMPTY, KINDS, blockKind, blockName, DECK_TO_KIND } from '../terrain/blocks'
 import { regionKeyAt } from '../shardCrypto'
@@ -142,7 +142,7 @@ describe('terrain K decides', () => {
     const chunks = [...VECTORS.chunks.map(base)]
     for (let i = 0; i < 6; i++) chunks.push(randomChunk(r))
     // Every chance raised to 1, so the gates are what is tested.
-    const odds = { features: Object.fromEntries(Object.entries(FEATURES).map(([k, v]) => [k, { ...v, p: 1 }])) as unknown as typeof FEATURES, rare: RARE.map(([id, k]) => [id, k, 1] as const) }
+    const odds = { features: Object.fromEntries(Object.entries(FEATURES).map(([k, v]) => [k, { ...v, t: 2 ** 32 }])) as unknown as typeof FEATURES, rare: RARE.map(([id, k]) => [id, k, 2 ** 32] as const), pools: 2 ** 32 }
     let seen = 0
     for (const c of chunks) {
       const g = generate(c, odds)
@@ -159,6 +159,16 @@ describe('terrain K decides', () => {
       for (const id of rare) expect(n.get(id) ?? 0).toBeLessThanOrEqual(1)
     }
     expect(seen).toBeGreaterThan(0)
+  })
+})
+
+describe('the rare band\'s thresholds', () => {
+  it('are floor(2^32 x target / eligible share), so a surveyed chunk holds each at the owner\'s rate', () => {
+    for (const [id, k, t] of RARE_ODDS) {
+      expect(t).toBe(Math.floor(4294967296 * Math.min(1, RARE_TARGET[id] / MAXK_AT_LEAST[k])))
+      expect((MAXK_AT_LEAST[k] * t) / 4294967296).toBeCloseTo(RARE_TARGET[id], 9)
+    }
+    expect(RARE_ODDS.map(([id]) => id)).toEqual(RARE.map(([id]) => id))
   })
 })
 

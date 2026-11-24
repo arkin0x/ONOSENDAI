@@ -30,7 +30,7 @@ const fam = {}
 const conds = {}
 const has = {}, amount = {}
 let chunks = 0
-const odds = process.env.RAISE ? { features: G.FEATURES, rare: G.RARE.map(([id, k]) => [id, k, 1]) } : undefined
+const odds = process.env.RAISE ? { features: G.FEATURES, rare: G.RARE.map(([id, k]) => [id, k, 2 ** 32]) } : undefined
 const t0 = Date.now()
 for (let i = 0; i < N_GEN; i++) {
   const b = chunk(i)
@@ -72,4 +72,4 @@ for (const id of Object.keys(name)) {
 }
 for (const [k, v] of Object.entries(conds)) console.log(`${k}: ${v.hit} of ${v.n} = ${(100 * v.hit / Math.max(1, v.n)).toFixed(1)}%`)
 // Per surveyed chunk: this sample's share of eligible chunks times the generator's chance given eligibility (placement never fails when eligible: RAISE=1 checks it).
-console.log('RARE per chunk:', G.RARE_ODDS.map(([id, k, p]) => `${name[id]} 1 in ${Math.round(1 / (atLeast[k] * p))} (target 1 in ${Math.round(1 / G.RARE_TARGET[id])}, eligible ${(100 * atLeast[k]).toFixed(2)}% of chunks)`).join('; '))
+console.log('RARE per chunk:', G.RARE_ODDS.map(([id, k, p]) => `${name[id]} 1 in ${Math.round(4294967296 / (atLeast[k] * p))} (target 1 in ${Math.round(1 / G.RARE_TARGET[id])}, eligible ${(100 * atLeast[k]).toFixed(2)}% of chunks)`).join('; '))

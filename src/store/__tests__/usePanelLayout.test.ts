@@ -47,9 +47,10 @@ describe('the default order', () => {
     // GAMES right under ITEMS (owner, 2026-11-13), then the rest of 2026-11-11's lead: AGENTS, AVATARS, CREATE.
     expect(DEFAULT_ORDER.left).toEqual(['identity', 'items', 'games', 'agents', 'avatars', 'create', 'hidden', 'discovered', 'targets', 'links'])
     // TUTORIAL last of all: the foot of the right column, which a phone stacks under the left (item 17).
-    expect(DEFAULT_ORDER.right).toEqual(['scale', 'position', 'viewat', 'proof', 'cloud', 'chain', 'hyperspace', 'view', 'legend', 'controls', 'derezz', 'relays', 'tutorial'])
+    // MODES under the Legend (owner, 2026-11-24), so Settings stays just above it.
+    expect(DEFAULT_ORDER.right).toEqual(['scale', 'position', 'viewat', 'proof', 'cloud', 'chain', 'hyperspace', 'view', 'legend', 'modes', 'controls', 'derezz', 'relays', 'tutorial'])
     expect(new Set(PANEL_IDS).size).toBe(PANEL_IDS.length)
-    expect(PANEL_IDS).toHaveLength(23)
+    expect(PANEL_IDS).toHaveLength(24)
   })
 
   it('a fresh key (nothing saved) opens on IDENTITY first and ITEMS second', () => {
@@ -114,7 +115,7 @@ describe('moveBefore', () => {
 
 describe('mergeOrder: a saved order against the defaults', () => {
   it('keeps a complete saved order as it is', () => {
-    const o: PanelOrder = { left: ['links', 'identity', 'agents', 'hidden', 'discovered', 'items', 'games', 'create', 'avatars', 'targets', 'scale'], right: ['position', 'viewat', 'proof', 'cloud', 'chain', 'hyperspace', 'view', 'legend', 'controls', 'derezz', 'relays', 'tutorial'] }
+    const o: PanelOrder = { left: ['links', 'identity', 'agents', 'hidden', 'discovered', 'items', 'games', 'create', 'avatars', 'targets', 'scale'], right: ['position', 'viewat', 'proof', 'cloud', 'chain', 'hyperspace', 'view', 'legend', 'modes', 'controls', 'derezz', 'relays', 'tutorial'] }
     expect(mergeOrder(o)).toEqual(o)
   })
 
@@ -131,7 +132,7 @@ describe('mergeOrder: a saved order against the defaults', () => {
     const o = defaultOrder()
     o.right = o.right.filter((id) => id !== 'view' && id !== 'hyperspace')
     o.left.push('hyperspace')
-    expect(mergeOrder(o).right).toEqual(['scale', 'position', 'viewat', 'proof', 'cloud', 'chain', 'view', 'legend', 'controls', 'derezz', 'relays', 'tutorial'])
+    expect(mergeOrder(o).right).toEqual(['scale', 'position', 'viewat', 'proof', 'cloud', 'chain', 'view', 'legend', 'modes', 'controls', 'derezz', 'relays', 'tutorial'])
   })
 
   it('puts a missing panel at the top of its column when nothing above it in the defaults is there', () => {
@@ -191,7 +192,7 @@ describe('a layout saved before the View panel (viewat)', () => {
 
   it('gets the View panel right under Position, and Settings (view) where it was', () => {
     const merged = mergeOrder(before())
-    expect(merged.right).toEqual(['scale', 'position', 'viewat', 'proof', 'cloud', 'chain', 'hyperspace', 'view', 'legend', 'controls', 'derezz', 'relays', 'tutorial'])
+    expect(merged.right).toEqual(['scale', 'position', 'viewat', 'proof', 'cloud', 'chain', 'hyperspace', 'view', 'legend', 'modes', 'controls', 'derezz', 'relays', 'tutorial'])
     // GAMES came later still (a layout saved before it: below).
     expect(merged.left.filter((id) => id !== 'games')).toEqual(before().left)
   })
@@ -199,7 +200,10 @@ describe('a layout saved before the View panel (viewat)', () => {
   it('follows Position wherever it was dragged in the right column, and keeps every other saved place', () => {
     const o = before()
     o.right = ['tutorial', 'relays', 'view', 'scale', 'legend', 'proof', 'cloud', 'chain', 'hyperspace', 'controls', 'derezz', 'position']
-    expect(mergeOrder(o).right).toEqual([...o.right, 'viewat'])
+    // MODES came later still: under the Legend wherever it was dragged.
+    const withModes = [...o.right]
+    withModes.splice(withModes.indexOf('legend') + 1, 0, 'modes')
+    expect(mergeOrder(o).right).toEqual([...withModes, 'viewat'])
     const o2 = before()
     o2.right = ['view', 'position', 'relays', 'scale', 'legend', 'proof', 'cloud', 'chain', 'hyperspace', 'controls', 'derezz']
     expect(mergeOrder(o2).right.slice(0, 3)).toEqual(['view', 'position', 'viewat'])

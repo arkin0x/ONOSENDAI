@@ -221,7 +221,7 @@ describe('the saved panel layout (arkinox, 2026-10-10)', () => {
     const { left, right } = columns()
     expect(left).toEqual(['Brand', 'RelaysPanel', 'IdentityPanel', 'InventoryPanel', 'GamesPanel', 'AgentsPanel', 'AvatarsPanel', 'ShardsPanel', 'DiscoveredPanel', 'TargetsPanel', 'LinksPanel'])
     // TUTORIAL is drawn for everyone since the tutorial went on by default (2026-11-13).
-    expect(right).toEqual(['ScalePanel', 'PositionPanel', 'ViewAtPanel', 'ProofPanel', 'CloudPanel', 'ChainPanel', 'HyperspacePanel', 'ViewPanel', 'Legend', 'Controls', 'DerezzPanel', 'TutorialPanel', 'HiddenPanel'])
+    expect(right).toEqual(['ScalePanel', 'PositionPanel', 'ViewAtPanel', 'ProofPanel', 'CloudPanel', 'ChainPanel', 'HyperspacePanel', 'ViewPanel', 'Legend', 'ModesPanel', 'Controls', 'DerezzPanel', 'TutorialPanel', 'HiddenPanel'])
   })
 
   it('GAMES is drawn for everyone, right under ITEMS, found games or not (owner, 2026-11-13)', () => {

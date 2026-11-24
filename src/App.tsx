@@ -29,6 +29,9 @@ import { DemoCoach } from './hud/DemoCoach'
 import { TutorialCoach } from './hud/TutorialCoach'
 import { useTutorial, watchFirstArrival } from './store/useTutorial'
 import { watchArrivalMode } from './store/arrivalMode'
+import { startModes } from './store/modeOrder'
+import { watchLastRing } from './store/padMode'
+import { watchStartMode } from './store/startMode'
 // The tutorial's staged things and the waits on them (registered on load; stages only while it runs).
 import './tutorial/director'
 // The Earth route's waits: a stop picked, BOARD, RIDE.
@@ -178,6 +181,12 @@ export default function App(): JSX.Element {
   // ?mode=view or ?mode=region on arrival: the mode wins over the first
   // arrival on that load, never over a run already going (store/arrivalMode.ts).
   useEffect(() => watchArrivalMode(), [])
+  // MODES (store/modeOrder.ts): the player's list follows the identity, the
+  // dim mode button remembers the last ring mode, and the app starts in the
+  // list's first mode on a plain load (store/startMode.ts).
+  useEffect(() => { startModes() }, [])
+  useEffect(() => watchLastRing(), [])
+  useEffect(() => watchStartMode(), [])
   // The tutorial toast for a returning player who has not finished it (tutorial/toast.ts).
   useEffect(() => watchTutorialToast(), [])
   // onosendai.tech/tv: Cyberspace TV (store/useTv.ts). Back off /tv turns

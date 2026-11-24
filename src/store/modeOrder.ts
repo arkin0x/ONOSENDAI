@@ -6,22 +6,37 @@
  * always-present Secondary button mode"; and the same day: "also make it so
  * you can toggle MODES off so they aren't part of the rotation").
  *
- * THE ORDER IS THE PAD. The first mode is the one the app starts in. The
- * first mode on after it is the second button: the toggle in RECALL's slot,
- * where WALK has stood since 2026-11-12. The mode button's ring is the first
- * mode and then every other mode that is on, in the list's order. Today's
- * pad is the default list, HOP, WALK, VIEW, BUILD, SCAN, all on: start in
- * HOP, WALK as the second button, and the ring HOP, VIEW, BUILD, SCAN.
+ * THE ORDER IS THE PAD, in two parts (owner, 2026-11-24: "Make the first
+ * position in the panel the toggle mode position, and the second position
+ * the default mode position. then it will make more sense: default cycles
+ * down through the list; toggle slot is separate").
  *
- * OFF is out of the rotation only. A mode switched off leaves the ring and
- * the second button, and stays in the list, dimmed, to be switched back on.
- * Whatever asks for it by name still gets it: B for BUILD, N for SCAN, the
- * tour, a link, PLACE from the workshop, TRY WALK. In a mode that is not in
- * the ring (the second button's mode, or one switched off), the mode button
- * is the way back, dim, as it is in WALK today (store/padMode.ts).
+ * - The first place (TOGGLE_AT) is the TOGGLE MODE slot: the mode on the
+ *   pad's second button, the dim toggle in RECALL's slot, where WALK has
+ *   stood since 2026-11-12. It is its own slot: its mode is never in the
+ *   ring as well. Switched off, there is no second button and the slot is
+ *   RECALL's.
+ * - Every place after it is the ring. The first of those (DEFAULT_AT) is
+ *   the DEFAULT MODE, the one the app starts in, and the mode button goes
+ *   down through it and every other mode on after it, round to the top.
  *
- * GUARDS. The first mode is always on: its switch is disabled, and a mode
- * dragged to the top is switched on. So at least one mode is always on.
+ * Today's pad is the default list, WALK, then HOP, VIEW, BUILD, SCAN, all
+ * on: WALK the toggle, start in HOP, the ring HOP, VIEW, BUILD, SCAN.
+ *
+ * MOVING. Within the ring a mode moves to its new place and the others make
+ * room. Into or out of the toggle slot it trades places: a mode moved into
+ * the slot sends the slot's mode to where it came from, and the slot's mode
+ * moved down trades with the mode at the place it lands on (moveModeTo).
+ *
+ * OFF is out of the rotation only. A mode switched off leaves the ring (or
+ * the toggle slot's button), and stays in the list, dimmed, to be switched
+ * back on. Whatever asks for it by name still gets it: B for BUILD, N for
+ * SCAN, the tour, a link, PLACE from the workshop, TRY WALK. In a mode that
+ * is not in the ring (the toggle's mode, or one switched off), the mode
+ * button is the way back, dim, as it is in WALK today (store/padMode.ts).
+ *
+ * GUARDS. The default mode is always on: its switch is disabled, and a mode
+ * moved to that place is switched on. So the ring always has a mode.
  *
  * WHO GETS IT. The list is the player's own: kept per identity in IndexedDB
  * (owner, 2026-11-19: all local data per npub), `onosendai:modes:<pubkey>`,
@@ -33,9 +48,17 @@
  *
  * A LIST FROM ANOTHER VERSION. A mode the stored list does not know (one
  * added later) joins at its default place, after the nearest mode above it
- * in the default list; a mode this version does not know is dropped; a
- * record that is not a list reads as the default (mergeModes). Adding a mode
- * is one row in MODES, and nothing else here changes.
+ * in the default list's ring, and never in the toggle slot or the default
+ * place;
+ * a mode this version does not know is dropped; a record that is not a list
+ * reads as the default (mergeModes). Adding a mode is one row in MODES, and
+ * nothing else here changes.
+ *
+ * A LIST KEPT BEFORE THE TOGGLE SLOT (record v1, PR #915, 2026-11-24): its
+ * first mode was the one the app started in and the first mode on after it
+ * was the second button. It is read as the same pad (fromV1): that second
+ * button becomes the toggle slot and the first mode the default, so nobody's
+ * pad changes. It is written back in the new form on the next change.
  */
 
 import { useMemo } from 'react'
@@ -56,24 +79,35 @@ export interface ModeInfo {
   id: ModeId
   /** The word on the pad's buttons. */
   word: string
-  /** The key that goes in and out of it by name, wherever it stands in the list. */
+  /** The key that goes into it, wherever it stands in the list. */
   key?: string
+  /** Whether its key opens it switched off too (B and N, by name); H, V and Y follow MODES and do nothing then. */
+  keyWhenOff?: boolean
   /** What it does, in a few words. */
   what: string
 }
 
-/** Every mode, in the default order: today's pad. A new mode is a row here. */
+/** Every mode, in the order a new mode joins the list. A new mode is a row here. */
 export const MODES: readonly ModeInfo[] = [
-  { id: 'hop', word: 'HOP', what: 'Line up a move, COMMIT sends it' },
-  { id: 'walk', word: 'WALK', what: 'First person, every press a step' },
-  // TERRAIN (owner, 2026-11-24: "TERRAIN is a mode like HOP or WALK"): on by default, after WALK.
-  { id: 'terrain', word: 'TERRAIN', key: 'T', what: 'Walk the blocks, mine and place them' },
-  { id: 'view', word: 'VIEW', what: 'Look around, nothing moves' },
-  { id: 'build', word: 'BUILD', key: 'B', what: 'Place things at a build cursor' },
-  { id: 'scan', word: 'SCAN', key: 'N', what: 'Look for hidden things' },
+  { id: 'hop', word: 'HOP', key: 'H', what: 'Line up a move, COMMIT sends it' },
+  { id: 'walk', word: 'WALK', key: 'Y', what: 'First person, every press a step' },
+  // TERRAIN (owner, 2026-11-24: "TERRAIN is a mode like HOP or WALK"): on by default, in the ring after HOP. T opens it
+  // switched off too, as B and N do, except in the teaching list (newcomers, the tour, /demo, TV).
+  { id: 'terrain', word: 'TERRAIN', key: 'T', keyWhenOff: true, what: 'Walk the blocks, mine and place them' },
+  { id: 'view', word: 'VIEW', key: 'V', what: 'Look around, nothing moves' },
+  { id: 'build', word: 'BUILD', key: 'B', keyWhenOff: true, what: 'Place things at a build cursor' },
+  { id: 'scan', word: 'SCAN', key: 'N', keyWhenOff: true, what: 'Look for hidden things' },
 ]
 
-export const DEFAULT_MODE_ORDER: readonly ModeId[] = MODES.map((m) => m.id)
+/** The toggle slot's place in the list, and the default mode's: the first in the ring. */
+export const TOGGLE_AT = 0
+export const DEFAULT_AT = 1
+
+/** The default toggle: WALK, on the second button since 2026-11-12. */
+export const DEFAULT_TOGGLE: ModeId = 'walk'
+
+/** The default list: the toggle slot, then the ring in MODES order. Today's pad. */
+export const DEFAULT_MODE_ORDER: readonly ModeId[] = [DEFAULT_TOGGLE, ...MODES.map((m) => m.id).filter((id) => id !== DEFAULT_TOGGLE)]
 
 export function modeInfo(id: ModeId): ModeInfo {
   return MODES.find((m) => m.id === id) ?? { id, word: id.toUpperCase(), what: '' }
@@ -81,6 +115,7 @@ export function modeInfo(id: ModeId): ModeInfo {
 
 /** The list: every mode in order, and the ones switched off. */
 export interface ModeSettings {
+  /** The toggle slot's mode (TOGGLE_AT), then the ring, the default mode first (DEFAULT_AT). */
   order: readonly ModeId[]
   off: readonly ModeId[]
 }
@@ -96,11 +131,11 @@ export const TEACHING_MODES: ModeSettings = { order: DEFAULT_MODE_ORDER, off: ['
 
 /** What the list makes of the pad. */
 export interface ModeRoles {
-  /** The mode the app starts in: the first in the list. */
+  /** The mode the app starts in: the default mode, the first in the ring. */
   start: ModeId
-  /** The second button's mode: the first mode on after the start, or null with only one on. */
+  /** The second button's mode: the toggle slot's, or null while it is off. */
   second: ModeId | null
-  /** The mode button's ring, in order: the start, then every other mode on but the second. */
+  /** The mode button's ring, in order: the default mode, then every other mode on after it. */
   ring: readonly ModeId[]
 }
 
@@ -108,19 +143,20 @@ function isModeId(v: unknown, known: readonly ModeId[]): v is ModeId {
   return typeof v === 'string' && (known as readonly string[]).includes(v)
 }
 
-/** The first mode always on (the guard): turned on if it was off. */
+/** The default mode always on (the guard): turned on if it was off. */
 function guarded(order: readonly ModeId[], off: readonly ModeId[]): ModeSettings {
-  const first = order[0]
+  const first = order[DEFAULT_AT]
   return { order, off: off.filter((id) => id !== first) }
 }
 
 /**
- * A stored list read against this version's modes (see the header): known
- * modes keep their stored place (the first mention wins), a missing one joins
- * after the nearest mode above it in the default list (or at the top), an
- * unknown one is dropped. Anything that is not a list is the default.
+ * A list read against `defaults`: known modes keep their stored place (the
+ * first mention wins), a missing one joins after the nearest mode above it
+ * in `defaults` (or at the top), but no higher than place `floor` while the
+ * list reaches that far, and never after the mode at place `slot`, which is
+ * not where its neighbours are; an unknown one is dropped.
  */
-export function mergeModes(saved: unknown, defaults: readonly ModeId[] = DEFAULT_MODE_ORDER): ModeSettings {
+function mergeList(saved: unknown, defaults: readonly ModeId[], floor: number, slot: number): { order: ModeId[]; off: ModeId[] } {
   const s = (saved && typeof saved === 'object' ? saved : {}) as { order?: unknown; off?: unknown }
   const order: ModeId[] = []
   if (Array.isArray(s.order)) for (const id of s.order) if (isModeId(id, defaults) && !order.includes(id)) order.push(id)
@@ -129,21 +165,55 @@ export function mergeModes(saved: unknown, defaults: readonly ModeId[] = DEFAULT
     let at = 0
     for (let j = i - 1; j >= 0; j--) {
       const k = order.indexOf(defaults[j])
-      if (k >= 0) { at = k + 1; break }
+      if (k >= 0 && k !== slot) { at = k + 1; break }
     }
-    order.splice(at, 0, id)
+    order.splice(Math.max(at, Math.min(floor, order.length)), 0, id)
   })
   const off: ModeId[] = []
   if (Array.isArray(s.off)) for (const id of s.off) if (isModeId(id, defaults) && !off.includes(id)) off.push(id)
+  return { order, off }
+}
+
+/**
+ * A stored list read against this version's modes (see the header): known
+ * modes keep their stored place, a missing one joins after the nearest mode
+ * above it in the default list, never in the toggle slot or the default
+ * place (so a new mode changes neither), and an unknown one is dropped.
+ * Anything that is not a list is the default.
+ */
+export function mergeModes(saved: unknown, defaults: readonly ModeId[] = DEFAULT_MODE_ORDER): ModeSettings {
+  const { order, off } = mergeList(saved, defaults, DEFAULT_AT + 1, TOGGLE_AT)
   return guarded(order, off)
+}
+
+/** The modes a v1 record could hold, in v1's default order (PR #915). */
+const V1_MODES: readonly ModeId[] = ['hop', 'walk', 'view', 'build', 'scan']
+
+/**
+ * A list kept before the toggle slot (record v1; see the header) as the
+ * same pad: its first mode (always on) was the start, the first mode on
+ * after it the second button. That second button goes to the toggle slot
+ * and the rest keep their order, the start now first in the ring. With only
+ * one mode on there was no second button: the mode after the start goes to
+ * the slot, still off, so there is none now either.
+ */
+export function fromV1(saved: unknown, defaults: readonly ModeId[] = DEFAULT_MODE_ORDER): ModeSettings {
+  // Read against the modes v1 knew, so a mode added since (TERRAIN) never
+  // takes the old second button; mergeModes then adds it by the new rules.
+  const { order, off } = mergeList(saved, V1_MODES.filter((id) => defaults.includes(id)), 0, -1)
+  const start = order[0]
+  const on = (id: ModeId): boolean => id === start || !off.includes(id)
+  const toggle = order.find((id) => id !== start && on(id)) ?? order[1]
+  return mergeModes({ order: [toggle, ...order.filter((id) => id !== toggle)], off }, defaults)
 }
 
 /** What the list makes of the pad (ModeRoles). */
 export function rolesOf(s: ModeSettings): ModeRoles {
-  const on = s.order.filter((id) => !s.off.includes(id))
-  const start = on[0] ?? s.order[0] ?? 'hop'
-  const second = on.find((id) => id !== start) ?? null
-  return { start, second, ring: [start, ...on.filter((id) => id !== start && id !== second)] }
+  const toggle = s.order[TOGGLE_AT]
+  const ring = s.order.slice(DEFAULT_AT).filter((id) => !s.off.includes(id))
+  const start = ring[0] ?? s.order[DEFAULT_AT] ?? 'hop'
+  const second = toggle !== undefined && toggle !== start && !s.off.includes(toggle) ? toggle : null
+  return { start, second, ring: ring.length ? ring : [start] }
 }
 
 /** Whether two lists are the same list. */
@@ -152,28 +222,41 @@ export function sameModes(a: ModeSettings, b: ModeSettings): boolean {
     && a.off.length === b.off.length && a.off.every((id) => b.off.includes(id))
 }
 
-/** `id` moved to place `to` (0 is the top), clamped to the list. The first mode is always on, so one moved to the top is switched on. */
+/**
+ * `id` moved to place `to` (TOGGLE_AT is the top), clamped to the list.
+ * Within the ring the others make room; into or out of the toggle slot the
+ * two modes trade places, so the slot always holds one mode and the rest of
+ * the ring keeps its order. The default mode is always on, so one moved to
+ * that place is switched on.
+ */
 export function moveModeTo(s: ModeSettings, id: ModeId, to: number): ModeSettings {
   const from = s.order.indexOf(id)
   if (from < 0) return s
   const at = Math.max(0, Math.min(s.order.length - 1, to))
   if (at === from) return s
-  const order = s.order.filter((m) => m !== id)
-  order.splice(at, 0, id)
+  let order: ModeId[]
+  if (from === TOGGLE_AT || at === TOGGLE_AT) {
+    order = [...s.order]
+    order[from] = s.order[at]
+    order[at] = id
+  } else {
+    order = s.order.filter((m) => m !== id)
+    order.splice(at, 0, id)
+  }
   return guarded(order, s.off)
 }
 
-/** `id` one place up (-1) or down (+1). */
+/** `id` one place up (-1) or down (+1): the default mode up, or the toggle down, trades the two. */
 export function moveModeBy(s: ModeSettings, id: ModeId, delta: number): ModeSettings {
   return moveModeTo(s, id, s.order.indexOf(id) + delta)
 }
 
-/** Whether `id`'s switch can turn it off: never the first mode, so one is always on. */
+/** Whether `id`'s switch can turn it off: never the default mode, so the ring always has one. */
 export function canSwitchOff(s: ModeSettings, id: ModeId): boolean {
-  return s.order[0] !== id
+  return s.order[DEFAULT_AT] !== id
 }
 
-/** `id` switched on or off; the first mode stays on (canSwitchOff). */
+/** `id` switched on or off; the default mode stays on (canSwitchOff). */
 export function setModeOn(s: ModeSettings, id: ModeId, on: boolean): ModeSettings {
   const isOff = s.off.includes(id)
   if (on === !isOff) return s
@@ -202,14 +285,18 @@ export function nextInRing(s: ModeSettings, current: ModeId): ModeId {
 // ---------- Kept per identity ----------
 
 export const MODES_PREFIX = 'onosendai:modes:'
-const RECORD_VERSION = 1
+/** 2: the toggle slot first (2026-11-24); a later version reads the same way. 1, or no version: the start first (fromV1). */
+const RECORD_VERSION = 2
 
 /** The stored list for `pubkey`, merged against this version's modes; null when there is none (the default applies). */
 export function readModes(pubkey: string): ModeSettings | null {
   let raw: string | null = null
   try { raw = kvGet(MODES_PREFIX + pubkey) } catch { return null }
   if (!raw) return null
-  try { return mergeModes(JSON.parse(raw)) } catch { return null }
+  try {
+    const saved = JSON.parse(raw) as { v?: unknown } | null
+    return saved && typeof saved === 'object' && typeof saved.v === 'number' && saved.v >= RECORD_VERSION ? mergeModes(saved) : fromV1(saved)
+  } catch { return null }
 }
 
 /** Keep `pubkey`'s list; the default list is kept as no record, so a later default reaches it. */

@@ -4,13 +4,15 @@
  *
  * - the pad with the default list is today's: WALK in RECALL's slot, HOP
  *   (MODES) in the commit slot, and in WALK the dim HOP going back;
- * - with WALK first and BUILD second, the commit slot holds WALK lit, and
- *   RECALL's slot BUILD, dim to go in and lit to go back; in BUILD the mode
- *   button is the dim way back to WALK;
- * - the panel lists every mode in the player's order with what its place
- *   makes it, keeps the top mode's switch on, moves a mode with the up and
- *   down buttons, switches one off and back on, and RESET TO DEFAULT puts
- *   today's list back; no em dash in its words, and every row one height.
+ * - with WALK the default mode and BUILD the toggle, the commit slot holds
+ *   WALK lit, and RECALL's slot BUILD, dim to go in and lit to go back; in
+ *   BUILD the mode button is the dim way back to WALK;
+ * - the panel lists the Toggle Mode first, a rule under it, then the ring
+ *   with the Default Mode first (owner, 2026-11-24), keeps the default
+ *   mode's switch on, moves a mode with the up and down buttons (trading
+ *   with the toggle slot across the rule), drags a mode into the toggle
+ *   slot, switches one off and back on, and RESET TO DEFAULT puts today's
+ *   list back; no em dash in its words, and every row one height.
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -63,12 +65,13 @@ vi.mock('zustand', async (importOriginal) => {
 
 import { TouchControls } from '../TouchControls'
 import { ModesPanel, MODES_HINT, dropIndex } from '../ModesPanel'
+import { MODES_PREFIX } from '../../store/modeOrder'
 import { useCyberspace } from '../../store/useCyberspace'
 import { useBuilder } from '../../store/useBuilder'
 import { useScan } from '../../store/useScan'
 import { useWalk } from '../../store/useWalk'
 import { useShards } from '../../store/useShards'
-import { currentPadMode, switchMode } from '../../store/padMode'
+import { currentPadMode, pressSecond, switchMode } from '../../store/padMode'
 import { DEFAULT_MODES, moveModeTo, resetModes, storedModes, updateModes, useModes } from '../../store/modeOrder'
 import { placeSpawn } from '../../store/fixtures/placeSpawn'
 
@@ -106,7 +109,7 @@ const slot = (cls: string): El => {
 }
 const pressPad = (b: El): void => { (b.props.onPointerDown as (e: unknown) => void)({ preventDefault: () => {}, stopPropagation: () => {} }) }
 const panel = (): El[] => drawn(ModesPanel)
-const rows = (): El[] => panel().filter((e) => e.type === 'li')
+const rows = (): El[] => panel().filter((e) => e.type === 'li' && e.props['data-mode'] !== undefined)
 const rowOf = (id: string): El => rows().find((r) => r.props['data-mode'] === id)!
 const inRow = (id: string, cls: string): El => {
   const found: El[] = []
@@ -150,8 +153,8 @@ describe('the pad', () => {
     expect(has(slot('touchops__walk'), 'is-on')).toBe(true)
   })
 
-  it('with WALK first and BUILD second: WALK lit in the commit slot, BUILD in RECALL\'s', () => {
-    updateModes((s) => moveModeTo(moveModeTo(s, 'walk', 0), 'build', 1))
+  it('with WALK the default mode and BUILD the toggle: WALK lit in the commit slot, BUILD in RECALL\'s', () => {
+    updateModes((s) => moveModeTo(moveModeTo(s, 'build', 0), 'walk', 1))
     switchMode('walk')
     const mode = slot('is-walk')
     expect(has(mode, 'is-on')).toBe(true)
@@ -177,43 +180,114 @@ describe('the pad', () => {
   })
 })
 
+describe('the dim mode button in the Toggle Mode names the mode it was on (owner, 2026-11-24)', () => {
+  const ALL = ['hop', 'walk', 'view', 'build', 'scan'] as const
+  const WORD = { hop: 'HOP', walk: 'WALK', view: 'VIEW', build: 'BUILD', scan: 'SCAN' }
+  for (const toggle of ALL) {
+    const ring = ALL.filter((m) => m !== toggle)
+    for (const at of ring) {
+      it(`${WORD[toggle]} toggled from ${WORD[at]}`, () => {
+        updateModes(() => ({ order: [toggle, ...ring], off: [] }))
+        switchMode(at)
+        expect(currentPadMode()).toBe(at)
+        pressSecond()
+        expect(currentPadMode()).toBe(toggle)
+        const titles = pad().filter((x) => x.type === 'button').map((x) => String(x.props.title ?? ''))
+        expect(titles.some((t) => t.endsWith(`go back to ${WORD[at]}`) || t.endsWith(`go back to ${WORD[at]} (X)`)), titles.join(' | ')).toBe(true)
+        expect(titles.some((t) => /go back to HOP/.test(t)) && at !== 'hop', titles.join(' | ')).toBe(false)
+      })
+    }
+  }
+})
+
 describe('the MODES panel', () => {
-  it('lists every mode in order with what its place makes it', () => {
-    expect(rows().map((r) => r.props['data-mode'])).toEqual(['hop', 'walk', 'terrain', 'view', 'build', 'scan'])
+  it('the Toggle Mode first, a rule under it, then the Default Mode and the rest of the ring', () => {
+    expect(rows().map((r) => r.props['data-mode'])).toEqual(['walk', 'hop', 'terrain', 'view', 'build', 'scan'])
+    const items = panel().filter((e) => e.type === 'li')
+    expect(items[1].props.className).toBe('modes__rule')
+    expect(items[1].props['aria-hidden']).toBe(true)
+    expect(items.filter((e) => has(e, 'modes__rule'))).toHaveLength(1)
+    expect(panel().some((e) => e.type === 'hr')).toBe(true)
     const roles = rows().map((r) => words(r.props.children))
-    expect(roles[0]).toContain('Starts in')
-    expect(roles[1]).toContain('Second button')
+    expect(roles[0]).toContain('Toggle Mode')
+    expect(roles[1]).toContain('Default Mode')
     expect(roles[2]).toContain('Mode button')
+    // The owner's words only: no "starts in", no "second button".
+    expect(roles.join(' ')).not.toMatch(/starts in|second button/i)
     // The modes with their own keys print them.
     expect(words(inRow('build', 'modes__key').props.children)).toBe('B')
     expect(words(inRow('scan', 'modes__key').props.children)).toBe('N')
-    expect(words(inRow('walk', 'modes__key').props.children)).toBe('')
+    expect(words(inRow('walk', 'modes__key').props.children)).toBe('Y')
+    expect(words(inRow('hop', 'modes__key').props.children)).toBe('H')
+    expect(words(inRow('view', 'modes__key').props.children)).toBe('V')
     expect(words(inRow('terrain', 'modes__key').props.children)).toBe('T')
     expect(panel().some((e) => words(e.props.children) === MODES_HINT)).toBe(true)
   })
 
-  it('the top mode\'s switch is on and cannot be turned off; the others can', () => {
+  it('the default mode\'s switch is on and cannot be turned off; the toggle\'s can, which leaves no second button', () => {
     expect(inRow('hop', 'modes__switch').props.disabled).toBe(true)
     expect(inRow('hop', 'modes__switch').props.checked).toBe(true)
     expect(inRow('walk', 'modes__switch').props.disabled).toBe(false)
     ;(inRow('walk', 'modes__switch').props.onCheckedChange as (on: boolean) => void)(false)
     expect(storedModes().off).toEqual(['walk'])
-    expect(words(rowOf('walk').props.children)).toContain('Off')
+    expect(words(rowOf('walk').props.children)).toContain('Toggle Mode: off')
     expect(has(rowOf('walk'), 'is-off')).toBe(true)
-    // TERRAIN is the second button now.
-    expect(words(rowOf('terrain').props.children)).toContain('Second button')
+    expect(pad().some((x) => has(x, 'touchops__walk') || has(x, 'touchops__second'))).toBe(false)
     ;(inRow('walk', 'modes__switch').props.onCheckedChange as (on: boolean) => void)(true)
     expect(storedModes()).toEqual(DEFAULT_MODES)
+    ;(inRow('view', 'modes__switch').props.onCheckedChange as (on: boolean) => void)(false)
+    expect(words(rowOf('view').props.children)).toContain('Off')
   })
 
-  it('moves a mode with the up and down buttons, disabled at the ends', () => {
-    expect(inRow('hop', 'modes__up').props.disabled).toBe(true)
+  it('moves a mode with the up and down buttons, across the rule by trading with the toggle, disabled at the ends', () => {
+    expect(inRow('walk', 'modes__up').props.disabled).toBe(true)
     expect(inRow('scan', 'modes__down').props.disabled).toBe(true)
-    ;(inRow('walk', 'modes__up').props.onClick as () => void)()
-    expect(storedModes().order).toEqual(['walk', 'hop', 'terrain', 'view', 'build', 'scan'])
-    expect(words(rowOf('walk').props.children)).toContain('Starts in')
+    ;(inRow('hop', 'modes__up').props.onClick as () => void)()
+    expect(storedModes().order).toEqual(['hop', 'walk', 'terrain', 'view', 'build', 'scan'])
+    expect(words(rowOf('hop').props.children)).toContain('Toggle Mode')
+    expect(words(rowOf('walk').props.children)).toContain('Default Mode')
     ;(inRow('build', 'modes__down').props.onClick as () => void)()
-    expect(storedModes().order).toEqual(['walk', 'hop', 'terrain', 'view', 'scan', 'build'])
+    expect(storedModes().order).toEqual(['hop', 'walk', 'terrain', 'view', 'scan', 'build'])
+  })
+
+  it('a drag into the toggle slot trades the two; each place is worked out from the list as the drag began', () => {
+    // Rows 58px apart, the rule 15px under the first; the list at the top of the screen.
+    const ids = ['walk', 'hop', 'terrain', 'view', 'build', 'scan']
+    const tops = [0, 73, 131, 189, 247, 305]
+    const list = {
+      getBoundingClientRect: () => ({ top: 0 }),
+      setPointerCapture: () => {},
+      querySelectorAll: () => ids.map((id, i) => ({ dataset: { mode: id }, getBoundingClientRect: () => ({ top: tops[i], height: 52 }) })),
+    }
+    // One render's handlers, its list ref pointed at that list.
+    const all = drawn(ModesPanel)
+    const ol = all.find((e) => e.type === 'ol')!
+    const ref = ((ol as unknown as { ref?: { current: unknown } }).ref ?? ol.props.ref) as { current: unknown }
+    ref.current = list
+    const grip = all.find((e) => e.type === 'button' && has(e, 'modes__grip') && String(e.props['aria-label']).startsWith('Move SCAN'))!
+    ;(grip.props.onPointerDown as (e: unknown) => void)({ button: 0, pointerId: 1, preventDefault: () => {} })
+    const moveTo = (clientY: number): void => { (ol.props.onPointerMove as (e: unknown) => void)({ pointerId: 1, clientY }) }
+    // Up over the toggle slot: SCAN and WALK trade.
+    moveTo(10)
+    expect(storedModes().order).toEqual(['scan', 'hop', 'terrain', 'view', 'build', 'walk'])
+    // Down again over the ring: from the list as it began, SCAN slides in the ring, WALK back in its slot.
+    moveTo(140)
+    expect(storedModes().order).toEqual(['walk', 'hop', 'scan', 'terrain', 'view', 'build'])
+    moveTo(10)
+    ;(ol.props.onPointerUp as (e: unknown) => void)({ pointerId: 1 })
+    expect(storedModes().order).toEqual(['scan', 'hop', 'terrain', 'view', 'build', 'walk'])
+    expect(words(rowOf('scan').props.children)).toContain('Toggle Mode')
+    expect(words(rowOf('walk').props.children)).toContain('Mode button')
+    // The Toggle Mode's own row dragged down trades with the mode where it lands.
+    resetModes()
+    const all2 = drawn(ModesPanel)
+    const ol2 = all2.find((e) => e.type === 'ol')!
+    ;(((ol2 as unknown as { ref?: { current: unknown } }).ref ?? ol2.props.ref) as { current: unknown }).current = list
+    const walkGrip = all2.find((e) => e.type === 'button' && has(e, 'modes__grip') && String(e.props['aria-label']).startsWith('Move WALK'))!
+    ;(walkGrip.props.onPointerDown as (e: unknown) => void)({ button: 0, pointerId: 2, preventDefault: () => {} })
+    ;(ol2.props.onPointerMove as (e: unknown) => void)({ pointerId: 2, clientY: 258 })
+    ;(ol2.props.onPointerUp as (e: unknown) => void)({ pointerId: 2 })
+    expect(storedModes().order).toEqual(['view', 'hop', 'terrain', 'walk', 'build', 'scan'])
   })
 
   it('RESET TO DEFAULT puts today\'s list back, and waits while it already is', () => {
@@ -239,5 +313,14 @@ describe('the MODES panel', () => {
     const css = readFileSync(resolve(__dirname, '../../styles.css'), 'utf8')
     expect(css).toMatch(/\.modes__row \{[^}]*height: var\(--modes-row-h\);/)
     expect(css).toMatch(/\.modes__grip \{[^}]*touch-action: none;/)
+  })
+
+  it('a list kept before the toggle slot shows the same pad: its old first the Default Mode, its old second the Toggle Mode', () => {
+    const me = useCyberspace.getState().identity.pubkey
+    localStorage.setItem(MODES_PREFIX + me, JSON.stringify({ v: 1, order: ['walk', 'build', 'hop', 'view', 'scan'], off: [] }))
+    useModes.setState({ pubkey: null })
+    expect(rows().map((r) => r.props['data-mode'])).toEqual(['build', 'walk', 'hop', 'terrain', 'view', 'scan'])
+    expect(words(rowOf('build').props.children)).toContain('Toggle Mode')
+    expect(words(rowOf('walk').props.children)).toContain('Default Mode')
   })
 })

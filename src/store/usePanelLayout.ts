@@ -12,7 +12,7 @@
  * added after the layout was saved) goes to its default column at its default
  * place; an id the app no longer has is dropped.
  *
- * The priority states (BUILD or a free view, a move computing, a cloud job, a ride set)
+ * The priority states (BUILD or a free view, a cloud job, a ride set)
  * are not written here: Hud.tsx lays the leading panel at the top of the left
  * column while the state holds and reads this order, untouched, when it ends.
  */
@@ -34,19 +34,19 @@ export const COLUMNS: readonly Column[] = ['left', 'right']
  * place being looked at, holding VIEW A COORDINATE, RECENT and STARRED PLACES.
  * Its id is not `view` because that id is the Settings panel's, titled View
  * until the same day, and a saved order already holds it there. A saved
- * order from before has no `viewat`, so mergeOrder puts it right under
- * Position, its default place.
+ * order from before has no `viewat`, so mergeOrder puts it at its default
+ * place, right under Scale since 2026-11-24.
  *
  * The left column leads with IDENTITY, then ITEMS right under it (owner,
  * 2026-11-15: "The identity panel should be first (this is the default) and
  * then the items will clearly show up underneath it"), then GAMES, AGENTS,
  * AVATARS, CREATE, the rest after them in their old order (arkinox,
  * 2026-11-11). Only a first visit gets it: a saved order is kept as it was,
- * except the one the tutorial wrote (tutorialWrote, below).
+ * except the one the tutorial wrote (tutorialWrote, below) and the right
+ * column's head and foot of 2026-11-24 (menuOf20261124, below).
  *
- * `tutorial` (feedback 2026-11-11, item 17) is the last panel of all: the
- * foot of the right column, which a phone stacks under the left one, so it
- * is the bottom of the menu either way.
+ * `tutorial` (feedback 2026-11-11, item 17) was the last panel of all until
+ * 2026-11-24, when it went right under MODES (below).
  *
  * `games` (owner, 2026-11-13: "a game panel in the menu UI") sits right
  * under ITEMS. A saved order from before has no `games`, so mergeOrder puts
@@ -54,14 +54,22 @@ export const COLUMNS: readonly Column[] = ['left', 'right']
  * (after the nearest panel above ITEMS there, when ITEMS was dragged away);
  * every other saved place is kept.
  *
- * `modes` (owner, 2026-11-24: a MODES settings panel, hud/ModesPanel.tsx)
- * sits under the Legend, so Settings keeps its place just above the Legend
- * that decodes it (2026-10-09), and MODES stands just above Controls, whose
- * keys follow the mode; a saved order from before gets it there.
+ * The right column leads with MODES, then TUTORIAL, POSITION and SCALE, the
+ * rest in their old order after them, and DEREZZ at the very bottom (owner,
+ * 2026-11-24: "make the MODES panel the top panel on the righthand side of
+ * the menu. Above the Scale & View panel. rename Scale & View to Scale.
+ * Move tutorial right under MODES, put POSITION under TUTORIAL, and SCALE
+ * under POSITION. DEREZZ should be at the very bottom"). The right column is
+ * the foot of the menu on a phone too, where the columns stack, so DEREZZ is
+ * the last panel either way. A layout saved before is moved to it once
+ * (RIGHT_TOP, RIGHT_LAST, menuOf20261124).
+ *
+ * `modes` is the MODES settings panel (hud/ModesPanel.tsx; owner, 2026-11-24).
+ * `tutorial` is the TUTORIAL panel (feedback 2026-11-11, item 17).
  */
 export const DEFAULT_ORDER = {
   left: ['identity', 'items', 'games', 'agents', 'avatars', 'create', 'hidden', 'discovered', 'targets', 'links'],
-  right: ['scale', 'position', 'viewat', 'proof', 'cloud', 'chain', 'hyperspace', 'view', 'legend', 'modes', 'controls', 'derezz', 'relays', 'tutorial'],
+  right: ['modes', 'tutorial', 'position', 'scale', 'viewat', 'proof', 'cloud', 'chain', 'hyperspace', 'view', 'legend', 'controls', 'relays', 'derezz'],
 } as const satisfies Record<Column, readonly string[]>
 
 export type PanelId = (typeof DEFAULT_ORDER)[Column][number]
@@ -158,10 +166,31 @@ export function toggleCollapsed(collapsed: PanelLayout['collapsed'], id: PanelId
 /**
  * The layout's version, written with every save. A layout with none was
  * saved before 2026-11-15, by code whose tutorial could have written ITEMS
- * to the top of the menu (tutorialWrote); one with 2 or more never was.
+ * to the top of the menu (tutorialWrote); one with 2 or more never was. One
+ * before 3 was saved before the right column's new head and foot
+ * (2026-11-24, menuOf20261124).
  */
-export const LAYOUT_VERSION = 2
+export const LAYOUT_VERSION = 3
 const FIXED_IN = 2
+const RIGHT_COLUMN_IN = 3
+
+/** The head of the right column, top down, and its foot (owner, 2026-11-24; see DEFAULT_ORDER). */
+export const RIGHT_TOP: readonly PanelId[] = ['modes', 'tutorial', 'position', 'scale']
+export const RIGHT_LAST: PanelId = 'derezz'
+
+/**
+ * A layout saved before 2026-11-24 moved to the owner's new menu once: MODES,
+ * TUTORIAL, POSITION and SCALE at the head of the right column, DEREZZ at its
+ * foot, wherever they were kept; every other panel keeps its column and its
+ * place among the rest. Folds are the player's, and are kept as they were.
+ */
+export function menuOf20261124(order: PanelOrder): PanelOrder {
+  const moved = (id: PanelId): boolean => RIGHT_TOP.includes(id) || id === RIGHT_LAST
+  return {
+    left: order.left.filter((id) => !moved(id)),
+    right: [...RIGHT_TOP, ...order.right.filter((id) => !moved(id)), RIGHT_LAST],
+  }
+}
 
 /**
  * The left column's default order each day the tutorial's inventory step ran
@@ -240,10 +269,12 @@ export function normalizeLayout(saved: unknown): PanelLayout {
       if (isPanelId(id) && folded === true) collapsed[id] = true
     }
   }
-  const order = mergeOrder(s.order)
+  let order = mergeOrder(s.order)
   // The order the tutorial wrote is the default's, not the player's: the left column goes back to the default.
   const fixed = typeof s.v === 'number' && s.v >= FIXED_IN
   if (!fixed && tutorialWrote(order.left)) order.left = defaultOrder().left
+  // Saved before the right column's new head and foot: moved to them once.
+  if (!(typeof s.v === 'number' && s.v >= RIGHT_COLUMN_IN)) order = menuOf20261124(order)
   return { order, collapsed }
 }
 

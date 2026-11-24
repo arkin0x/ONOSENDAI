@@ -4,21 +4,32 @@
  * where you can drag to reorder the modes. Fully customizable", and "also
  * make it so you can toggle MODES off so they aren't part of the rotation").
  *
+ * Two parts (owner, 2026-11-24: "Make the first position in the panel the
+ * toggle mode position, and the second position the default mode position
+ * ... maybe even have an HR below toggle mode slot"): the TOGGLE MODE slot
+ * on top, the mode on the pad's second button; a rule; then the ring, its
+ * first row the DEFAULT MODE (the one you start in), which the mode button
+ * goes down through. The toggle's mode is not in the ring.
+ *
  * One row per mode (store/modeOrder.ts MODES), in a chamfered frame: the
  * grip, the mode's icon in its pad color, its word, what its place makes it
- * (STARTS IN, SECOND BUTTON, MODE BUTTON, or OFF), its own key where it has
+ * (TOGGLE MODE, DEFAULT MODE, MODE BUTTON, or OFF), its own key where it has
  * one, its switch, and up and down. Every row is the same height and every
- * label has its place kept, so nothing moves but the row being moved.
+ * label has its place kept, so nothing moves but the rows being moved.
  *
  * Moving: drag the grip, with a finger or a mouse. The pointer is held by
- * the list, which never moves, not by the grip, whose row moves under it as
- * it passes others (Hud.tsx does the same for the menu's panels). Without
- * dragging: the up and down buttons, or ArrowUp and ArrowDown on a focused
- * grip, a place at a time.
+ * the list, which never moves, not by the grip, whose row moves under it.
+ * Each place is worked out from the list as it was when the drag began and
+ * the rows' places then, so a trade with the toggle slot never feeds back
+ * into the drag. Within the ring a row slides to its place; into the toggle
+ * slot, or the toggle's mode down into the ring, two modes trade places
+ * (moveModeTo). Without dragging: the up and down buttons, or ArrowUp and
+ * ArrowDown on a focused grip, a place at a time.
  *
- * The top mode is always on (its switch is disabled, and a mode moved to
- * the top is switched on), so at least one is. RESET TO DEFAULT puts
- * today's pad back: HOP, WALK, VIEW, BUILD, SCAN, all on. Nothing here
+ * The Default Mode is always on (its switch is disabled, and a mode moved
+ * to that place is switched on). The toggle's switch off leaves no second
+ * button, and RECALL has the slot. RESET TO DEFAULT puts today's pad back:
+ * WALK the toggle, then HOP, VIEW, BUILD, SCAN, all on. Nothing here
  * deletes anything.
  *
  * Kept for the identity on screen, in IndexedDB. Not part of the newcomer
@@ -30,8 +41,8 @@ import { Blocks, ChevronDown, ChevronUp, Crosshair, Eye, Footprints, GripVertica
 import { Switch } from './ui/Switch'
 import { Explanation } from './Explanation'
 import {
-  canSwitchOff, DEFAULT_MODES, modeInfo, moveModeBy, moveModeTo, resetModes, rolesOf, sameModes, setModeOn,
-  updateModes, useModes, useStoredModes, type ModeId, type ModeRoles, type ModeSettings,
+  canSwitchOff, DEFAULT_AT, DEFAULT_MODES, modeInfo, moveModeBy, moveModeTo, resetModes, sameModes, setModeOn,
+  TOGGLE_AT, updateModes, useModes, useStoredModes, type ModeId, type ModeSettings,
 } from '../store/modeOrder'
 import { useTutorial } from '../store/useTutorial'
 
@@ -45,12 +56,18 @@ export const MODE_ICON: Record<ModeId, LucideIcon> = {
   scan: ScanSearch,
 }
 
-/** What a row's place makes its mode, in the row's second line. */
-export function roleLabel(s: ModeSettings, roles: ModeRoles, id: ModeId): string {
-  if (s.order[0] === id) return 'Starts in'
+/** What a row's place makes its mode, in the row's second line (the owner's words: "Toggle Mode", "Default Mode"). */
+export function roleLabel(s: ModeSettings, id: ModeId): string {
+  if (s.order[TOGGLE_AT] === id) return s.off.includes(id) ? 'Toggle Mode: off' : 'Toggle Mode'
+  if (s.order[DEFAULT_AT] === id) return 'Default Mode'
   if (s.off.includes(id)) return 'Off'
-  if (roles.second === id) return 'Second button'
   return 'Mode button'
+}
+
+/** A row's place, for a screen reader: the toggle slot, or its place in the ring ("2 of 4"). */
+export function placeWords(s: ModeSettings, id: ModeId): string {
+  const i = s.order.indexOf(id)
+  return i === TOGGLE_AT ? 'Toggle Mode' : `${i - DEFAULT_AT + 1} of ${s.order.length - DEFAULT_AT}`
 }
 
 /** Where a row lifted at `clientY` lands among the rows of `list`: before the first other row whose middle is below it. */
@@ -63,14 +80,14 @@ export function dropIndex(rows: ReadonlyArray<{ id: string; top: number; height:
   return at
 }
 
-export const MODES_HINT = 'The top mode is always on.'
+export const MODES_HINT = 'The Default Mode is always on.'
 
 export function ModesPanel(): JSX.Element {
   const s = useStoredModes()
-  const roles = rolesOf(s)
   const touring = useTutorial((t) => t.active)
   const listRef = useRef<HTMLOListElement>(null)
-  const drag = useRef<{ id: ModeId; pointerId: number } | null>(null)
+  // The list and the rows' places (from the list's top) as the drag began.
+  const drag = useRef<{ id: ModeId; pointerId: number; from: ModeSettings; rows: Array<{ id: string; top: number; height: number }> } | null>(null)
   const [lifting, setLifting] = useState<ModeId | null>(null)
   // A row moved by a button or a key keeps the focus on what moved it.
   const refocus = useRef<{ id: ModeId; part: 'up' | 'down' | 'grip' } | null>(null)
@@ -86,11 +103,10 @@ export function ModesPanel(): JSX.Element {
     el?.focus()
   })
 
-  // What a move did, for a screen reader: "WALK: 1 of 5".
+  // What a move did, for a screen reader: "WALK: Toggle Mode", "HOP: 1 of 4".
   const [said, setSaid] = useState('')
   const announce = (id: ModeId): void => {
-    const s2 = useModes.getState().saved ?? DEFAULT_MODES
-    setSaid(`${modeInfo(id).word}: ${s2.order.indexOf(id) + 1} of ${s2.order.length}`)
+    setSaid(`${modeInfo(id).word}: ${placeWords(useModes.getState().saved ?? DEFAULT_MODES, id)}`)
   }
   const move = (id: ModeId, delta: number, part: 'up' | 'down' | 'grip'): void => {
     refocus.current = { id, part }
@@ -103,19 +119,21 @@ export function ModesPanel(): JSX.Element {
     if (!list || drag.current || e.button !== 0) return
     try { list.setPointerCapture(e.pointerId) } catch { return }
     e.preventDefault()
-    drag.current = { id, pointerId: e.pointerId }
+    const top = list.getBoundingClientRect().top
+    const rows = [...list.querySelectorAll<HTMLElement>(':scope > [data-mode]')].map((el) => {
+      const r = el.getBoundingClientRect()
+      return { id: el.dataset.mode as string, top: r.top - top, height: r.height }
+    })
+    drag.current = { id, pointerId: e.pointerId, from: s, rows }
     setLifting(id)
   }
   const over = (e: ReactPointerEvent<HTMLOListElement>): void => {
     const d = drag.current
     const list = listRef.current
     if (!d || e.pointerId !== d.pointerId || !list) return
-    const rows = [...list.querySelectorAll<HTMLElement>(':scope > [data-mode]')].map((el) => {
-      const r = el.getBoundingClientRect()
-      return { id: el.dataset.mode as string, top: r.top, height: r.height }
-    })
-    const to = dropIndex(rows, d.id, e.clientY)
-    updateModes((cur) => moveModeTo(cur, d.id, to))
+    const to = dropIndex(d.rows, d.id, e.clientY - list.getBoundingClientRect().top)
+    const next = moveModeTo(d.from, d.id, to)
+    updateModes(() => next)
   }
   // Up, cancel and a lost capture all end it; each place was kept as it was reached.
   const drop = (): void => {
@@ -140,30 +158,30 @@ export function ModesPanel(): JSX.Element {
       <ol
         ref={listRef}
         className={`modes__list${lifting ? ' is-dragging' : ''}`}
-        aria-label="Modes, in order"
+        aria-label="Modes: the Toggle Mode, then the Default Mode and the rest in turn"
         onPointerMove={over}
         onPointerUp={drop}
         onPointerCancel={drop}
         onLostPointerCapture={drop}
       >
-        {s.order.map((id, i) => {
+        {s.order.flatMap((id, i) => {
           const info = modeInfo(id)
           const Icon = MODE_ICON[id] ?? Crosshair
           const off = s.off.includes(id)
-          const role = roleLabel(s, roles, id)
+          const role = roleLabel(s, id)
           const lockedOn = !canSwitchOff(s, id)
           const switchId = `modes-switch-${id}`
-          return (
+          const row = (
             <li
               key={id}
               data-mode={id}
-              className={`modes__row is-${id}${off ? ' is-off' : ''}${i === 0 ? ' is-start' : ''}${roles.second === id ? ' is-second' : ''}${lifting === id ? ' is-lifting' : ''}`}
+              className={`modes__row is-${id}${off ? ' is-off' : ''}${i === DEFAULT_AT ? ' is-start' : ''}${i === TOGGLE_AT ? ' is-second' : ''}${lifting === id ? ' is-lifting' : ''}`}
             >
               <button
                 type="button"
                 className="modes__grip"
                 title={`Drag to move ${info.word}, or use the arrow keys`}
-                aria-label={`Move ${info.word}, ${i + 1} of ${s.order.length}: drag, or press the up and down arrow keys`}
+                aria-label={`Move ${info.word}, ${placeWords(s, id)}: drag, or press the up and down arrow keys`}
                 onPointerDown={(e) => grab(id, e)}
                 onKeyDown={(e) => gripKey(id, e)}
               >
@@ -177,14 +195,16 @@ export function ModesPanel(): JSX.Element {
                 <span className="modes__role">{role}</span>
               </label>
               <span className="modes__key" aria-hidden={!info.key}>
-                {info.key && <kbd title={`${info.key} opens ${info.word} wherever it is in the list`}>{info.key}</kbd>}
+                {info.key && <kbd title={info.keyWhenOff ? `${info.key} opens ${info.word} wherever it is in the list, on or off` : `${info.key} opens ${info.word} wherever it is in the list, while it is on`}>{info.key}</kbd>}
               </span>
               <Switch
                 id={switchId}
                 className="modes__switch"
                 checked={!off}
                 disabled={lockedOn}
-                title={lockedOn ? 'The mode you start in is always on' : off ? `Turn ${info.word} on` : `Turn ${info.word} off: out of the turns${info.key ? `, still opens with ${info.key}` : ''}`}
+                title={lockedOn ? 'The Default Mode is always on'
+                  : i === TOGGLE_AT ? (off ? `Turn ${info.word} on: back on the pad as the Toggle Mode` : `Turn ${info.word} off: no Toggle Mode on the pad${info.keyWhenOff ? `, still opens with ${info.key}` : ''}`)
+                  : off ? `Turn ${info.word} on` : `Turn ${info.word} off: out of the turns${info.keyWhenOff ? `, still opens with ${info.key}` : ''}`}
                 aria-label={info.word}
                 onCheckedChange={(on) => updateModes((cur) => setModeOn(cur, id, on))}
               />
@@ -198,6 +218,8 @@ export function ModesPanel(): JSX.Element {
               </span>
             </li>
           )
+          // The rule under the toggle slot: the slot is its own, the ring below it.
+          return i === TOGGLE_AT ? [row, <li key="rule" className="modes__rule" role="presentation" aria-hidden><hr /></li>] : [row]
         })}
       </ol>
       <span className="modes__said" aria-live="polite">{said}</span>
@@ -206,12 +228,16 @@ export function ModesPanel(): JSX.Element {
         <span className="modes__reset-in"><RotateCcw size={14} strokeWidth={2.25} aria-hidden />RESET TO DEFAULT</span>
       </button>
       <Explanation>
-        The top mode is the one you start in. The next mode that is on is the
-        second button, beside the mode button, where WALK is at first. The
-        rest take turns on the mode button, in this order. A mode turned off
-        leaves the turns but still opens by its key (B for BUILD, N for SCAN),
-        from the tutorial and from links. Drag a grip to move a mode, or use
-        the arrows. Kept for this identity on this device.
+        The Toggle Mode, above the line, has its own button beside the mode
+        button, where WALK is at first: press it to go in and again to come
+        back. Below the line, the Default Mode is the one you start in, and
+        the mode button goes down through it and the rest in this order. Drag
+        a mode into the Toggle Mode to trade the two. A mode turned off leaves
+        the turns but still opens by its key (B for BUILD, N for SCAN), from
+        the tutorial and from links; H, V and Y (HOP, VIEW, WALK) do nothing
+        for a mode turned off. The Toggle Mode turned off leaves its button
+        off the pad. Drag a grip to move a mode, or use the arrows. Kept
+        for this identity on this device.
       </Explanation>
     </section>
   )

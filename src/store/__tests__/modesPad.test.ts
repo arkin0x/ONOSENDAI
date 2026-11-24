@@ -3,12 +3,12 @@
  * store/padMode.ts, store/startMode.ts; owner, 2026-11-24):
  *
  * - the mode button goes round the player's ring, the second button is
- *   whichever mode the list puts second, and both still work as WALK's
- *   toggle always did: in, and back to where it was pressed from;
+ *   whichever mode the list puts in the toggle slot, and both still work as
+ *   WALK's toggle always did: in, and back to where it was pressed from;
  * - a mode switched off is out of the ring, and still opens when something
  *   asks for it by name (B, N, TRY WALK's enterWalk, ?mode=view, a switch
  *   by name), with the mode button the way back;
- * - the app starts in the list's first mode: WALK at your head with the
+ * - the app starts in the list's default mode: WALK at your head with the
  *   cursor on you, VIEW at your avatar; never over what the player started,
  *   never in the newcomer view, a tour run or TV;
  * - the newcomer view keeps the default pad whatever the list says.
@@ -57,8 +57,8 @@ import { useWalk } from '../useWalk'
 import { useScan } from '../useScan'
 import { useTutorial } from '../useTutorial'
 import { useTv } from '../useTv'
-import { currentPadMode, cycleMode, enterWalk, goBack, pressSecond, switchMode, watchLastRing } from '../padMode'
-import { DEFAULT_MODES, modeRoles, moveModeTo, resetModes, setModeOn, updateModes, useModes, type ModeId, type ModeSettings } from '../modeOrder'
+import { backOf, currentPadMode, cycleMode, enterWalk, goBack, pressSecond, switchMode, watchLastRing } from '../padMode'
+import { modeRoles, resetModes, setModeOn, updateModes, useModes, type ModeId, type ModeSettings } from '../modeOrder'
 import { applyStartMode, headSettled, untouchedStart, watchStartMode, worldSettled } from '../startMode'
 import { stopSpectating } from '../../lib/spectator'
 import { applyArrivalMode } from '../arrivalMode'
@@ -69,12 +69,11 @@ import { placeSpawn } from '../fixtures/placeSpawn'
 const S = () => useCyberspace.getState()
 const B = () => useBuilder.getState()
 
-/** Keep a list for the identity on screen. TERRAIN, on by default, is off unless the list names it (these lists predate it). */
+/** Keep a list for the identity on screen: the toggle slot's mode, then the ring, the default mode first. */
 function setList(order: ModeId[], off: ModeId[] = []): void {
   updateModes((): ModeSettings => {
-    let s: ModeSettings = { order: DEFAULT_MODES.order, off: [] }
-    order.forEach((id, i) => { s = moveModeTo(s, id, i) })
-    for (const id of order.includes('terrain') ? off : [...off, 'terrain' as ModeId]) s = setModeOn(s, id, false)
+    let s: ModeSettings = { order, off: [] }
+    for (const id of off) s = setModeOn(s, id, false)
     return s
   })
 }
@@ -102,8 +101,8 @@ beforeEach(async () => {
   expect(currentPadMode()).toBe('hop')
 })
 
-describe('the owner\'s example: WALK first, BUILD the second button', () => {
-  beforeEach(() => setList(['walk', 'build', 'hop', 'view', 'scan']))
+describe('the owner\'s example: WALK the default mode, BUILD the toggle', () => {
+  beforeEach(() => setList(['build', 'walk', 'hop', 'view', 'scan']))
 
   it('the mode button goes WALK, HOP, VIEW, SCAN and back to WALK', () => {
     expect(modeRoles()).toEqual({ start: 'walk', second: 'build', ring: ['walk', 'hop', 'view', 'scan'] })
@@ -160,7 +159,7 @@ describe('the owner\'s example: WALK first, BUILD the second button', () => {
 
 describe('a mode switched off', () => {
   it('leaves the ring', () => {
-    setList(['hop', 'walk', 'view', 'build', 'scan'], ['view'])
+    setList(['walk', 'hop', 'view', 'build', 'scan'], ['view'])
     cycleMode()
     expect(currentPadMode()).toBe('build')
     cycleMode()
@@ -170,7 +169,7 @@ describe('a mode switched off', () => {
   })
 
   it('still opens by its key and by name, and the mode button goes back to the last ring mode', () => {
-    setList(['hop', 'walk', 'view', 'build', 'scan'], ['build', 'scan'])
+    setList(['walk', 'hop', 'view', 'build', 'scan'], ['build', 'scan'])
     expect(modeRoles().ring).toEqual(['hop', 'view'])
     cycleMode()
     expect(currentPadMode()).toBe('view')
@@ -190,7 +189,7 @@ describe('a mode switched off', () => {
   })
 
   it('WALK off: TRY WALK still walks, and leaving goes back where it came from', () => {
-    setList(['hop', 'walk', 'view', 'build', 'scan'], ['walk'])
+    setList(['view', 'hop', 'walk', 'build', 'scan'], ['walk'])
     expect(modeRoles().second).toBe('view')
     cycleMode()
     expect(currentPadMode()).toBe('build')
@@ -201,18 +200,19 @@ describe('a mode switched off', () => {
   })
 
   it('VIEW off: ?mode=view still opens VIEW', () => {
-    setList(['hop', 'walk', 'view', 'build', 'scan'], ['view'])
+    setList(['walk', 'hop', 'view', 'build', 'scan'], ['view'])
     expect(applyArrivalMode('view')).toBe(true)
     expect(currentPadMode()).toBe('view')
   })
 
-  it('the second button off: the next mode on is the second button; one mode on: none', () => {
-    setList(['hop', 'walk', 'view', 'build', 'scan'], ['walk'])
-    pressSecond()
-    expect(currentPadMode()).toBe('view')
+  it('the toggle off: no second button, and the ring as it was; the default mode alone on: none either', () => {
+    setList(['walk', 'hop', 'view', 'build', 'scan'], ['walk'])
+    expect(modeRoles()).toEqual({ start: 'hop', second: null, ring: ['hop', 'view', 'build', 'scan'] })
     pressSecond()
     expect(currentPadMode()).toBe('hop')
-    setList(['hop', 'walk', 'view', 'build', 'scan'], ['walk', 'view', 'build', 'scan'])
+    cycleMode()
+    expect(currentPadMode()).toBe('view')
+    setList(['walk', 'hop', 'view', 'build', 'scan'], ['walk', 'view', 'build', 'scan'])
     expect(modeRoles()).toEqual({ start: 'hop', second: null, ring: ['hop'] })
     pressSecond()
     cycleMode()
@@ -221,13 +221,13 @@ describe('a mode switched off', () => {
 })
 
 describe('the mode the app starts in', () => {
-  it('HOP first (the default) does nothing', () => {
+  it('HOP the default mode (the default list) does nothing', () => {
     expect(applyStartMode()).toBe(false)
     expect(currentPadMode()).toBe('hop')
   })
 
-  it('WALK first starts in WALK at your head, the cursor on you, the walk fresh', () => {
-    setList(['walk', 'hop', 'view', 'build', 'scan'])
+  it('WALK the default mode starts in WALK at your head, the cursor on you, the walk fresh', () => {
+    setList(['hop', 'walk', 'view', 'build', 'scan'])
     expect(applyStartMode()).toBe(true)
     expect(S().walking).toBe(true)
     expect(S().atHead()).toBe(true)
@@ -243,8 +243,8 @@ describe('the mode the app starts in', () => {
     expect(S().cursor).not.toEqual(before)
   })
 
-  it('WALK first under GRAVITY: no fall, no hop signed, gravity left on, until the first press', () => {
-    setList(['walk', 'hop', 'view', 'build', 'scan'])
+  it('WALK the default mode under GRAVITY: no fall, no hop signed, gravity left on, until the first press', () => {
+    setList(['hop', 'walk', 'view', 'build', 'scan'])
     useWalk.getState().setGravity(true)
     // Nothing under you at all: a WALK entered by hand would fall or switch gravity off.
     const events = S().events.length
@@ -269,8 +269,8 @@ describe('the mode the app starts in', () => {
     useCyberspace.setState({ selfCheck: { pubkey: me, status: 'none' } as never })
   })
 
-  it('VIEW first starts in VIEW at your avatar, once the saved chain is in', async () => {
-    setList(['view', 'hop', 'walk', 'build', 'scan'])
+  it('VIEW the default mode starts in VIEW at your avatar, once the saved chain is in', async () => {
+    setList(['hop', 'view', 'walk', 'build', 'scan'])
     const stop = watchStartMode()
     await new Promise((r) => setTimeout(r, 0))
     await new Promise((r) => setTimeout(r, 0))
@@ -280,7 +280,7 @@ describe('the mode the app starts in', () => {
   })
 
   it('never over what the player started: a cursor moved, a mode entered', () => {
-    setList(['walk', 'hop', 'view', 'build', 'scan'])
+    setList(['hop', 'walk', 'view', 'build', 'scan'])
     S().moveCursor({ axis: 'x', dir: 1 })
     expect(untouchedStart()).toBe(false)
     expect(applyStartMode()).toBe(false)
@@ -292,7 +292,7 @@ describe('the mode the app starts in', () => {
   })
 
   it('not in the newcomer view, a tour run or TV', () => {
-    setList(['walk', 'hop', 'view', 'build', 'scan'])
+    setList(['hop', 'walk', 'view', 'build', 'scan'])
     useNewcomer.setState({ record: { stage: 'newcomer', seen: [] } })
     expect(applyStartMode()).toBe(false)
     useNewcomer.setState({ record: { stage: 'graduated', seen: [] } })
@@ -328,8 +328,8 @@ describe('the mode the app starts in', () => {
 
 describe('never stuck', () => {
   it('the ring passes over a mode that will not open here (WALK in hyperspace transit)', () => {
-    // HOP second, so WALK is in the ring after VIEW.
-    setList(['view', 'hop', 'walk', 'build', 'scan'])
+    // HOP the toggle, so WALK is in the ring after VIEW.
+    setList(['hop', 'view', 'walk', 'build', 'scan'])
     expect(modeRoles().ring).toEqual(['view', 'walk', 'build', 'scan'])
     S().viewHere()
     expect(currentPadMode()).toBe('view')
@@ -344,7 +344,7 @@ describe('never stuck', () => {
   })
 
   it('the second button\'s way back is forgotten once its mode is left another way, and never names a mode switched off', () => {
-    setList(['hop', 'scan', 'view', 'build', 'walk'])
+    setList(['scan', 'hop', 'view', 'build', 'walk'])
     expect(modeRoles().second).toBe('scan')
     B().enter('build')
     pressSecond()
@@ -353,7 +353,7 @@ describe('never stuck', () => {
     // N out of SCAN: the way back is gone.
     useScan.getState().exit()
     expect(useModes.getState().back).toBeNull()
-    // Into SCAN by N from VIEW, then VIEW switched off: the way back is the first mode.
+    // Into SCAN by N from VIEW, then VIEW switched off: the way back is the default mode.
     switchMode('view')
     useScan.getState().enter()
     updateModes((s) => setModeOn(s, 'view', false))
@@ -362,9 +362,39 @@ describe('never stuck', () => {
   })
 })
 
+describe('the toggle never moves the ring (owner, 2026-11-24: "the main mode button turns to hop even when it wasnt hop before. it should remain what it was before")', () => {
+  const ALL: ModeId[] = ['hop', 'walk', 'view', 'build', 'scan']
+  for (const toggle of ALL) {
+    const ring = ALL.filter((m) => m !== toggle)
+    ring.forEach((at, i) => {
+      it(`${toggle.toUpperCase()} in the toggle slot, the ring on ${at.toUpperCase()}: in, and back to ${at.toUpperCase()}, the ring where it was`, () => {
+        setList([toggle, ...ring])
+        // Round the ring to its place by the mode button, as a player gets there.
+        if (currentPadMode() !== ring[0]) switchMode(ring[0])
+        for (let k = 0; k < i; k++) cycleMode()
+        expect(currentPadMode()).toBe(at)
+        pressSecond()
+        expect(currentPadMode()).toBe(toggle)
+        // The dim mode button names the mode it was on (WALK keeps its own way back).
+        expect(toggle === 'walk' ? useWalk.getState().from : backOf()).toBe(at)
+        pressSecond()
+        expect(currentPadMode()).toBe(at)
+        // In, and out by the dim mode button instead: the same.
+        pressSecond()
+        expect(currentPadMode()).toBe(toggle)
+        cycleMode()
+        expect(currentPadMode()).toBe(at)
+        // The ring goes on from where it was.
+        cycleMode()
+        expect(currentPadMode()).toBe(ring[(i + 1) % ring.length])
+      })
+    })
+  }
+})
+
 describe('the newcomer view', () => {
   it('keeps the default ring and WALK as the second button, whatever the list says', () => {
-    setList(['walk', 'build', 'scan', 'view', 'hop'], ['view'])
+    setList(['build', 'walk', 'scan', 'view', 'hop'], ['view'])
     useNewcomer.setState({ record: { stage: 'newcomer', seen: [] } })
     expect(modeRoles()).toEqual({ start: 'hop', second: 'walk', ring: ['hop', 'view', 'build', 'scan'] })
     for (const mode of ['view', 'build', 'scan', 'hop'] as const) {

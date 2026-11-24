@@ -66,6 +66,7 @@ import { viewingLabel } from '../../hud/FocusBar'
 import { spectate, stopSpectating } from '../../lib/spectator'
 import { leavePlanting } from '../../tutorial/director'
 import { placeSpawn } from '../fixtures/placeSpawn'
+import type { Position } from '../../lib/space'
 
 const S = () => useCyberspace.getState()
 const B = () => useBuilder.getState()
@@ -99,8 +100,13 @@ function buildAway(): void {
   expect(S().atHead()).toBe(false)
 }
 
-/** Standard HOP at your head, at HOP's zoom from before BUILD, with nothing of BUILD's left behind. */
-function expectHop(scaleExp = HOP_ZOOM): void {
+/**
+ * Standard HOP at your head, at HOP's zoom from before BUILD, with nothing of
+ * BUILD's left behind. `kept`: a switch of mode (B, the ring) leaves the
+ * build cursor where it was, as HOP's cursor (owner, 2026-11-24); EXIT, Esc
+ * and the rest bring it home.
+ */
+function expectHop(scaleExp = HOP_ZOOM, kept?: Position): void {
   const s = S()
   expect(B().active).toBe(false)
   expect(currentPadMode()).toBe('hop')
@@ -109,9 +115,9 @@ function expectHop(scaleExp = HOP_ZOOM): void {
   expect(s.viewing()).toBe(false)
   // So no VIEWING bar with a RETURN TO AVATAR (FocusBar).
   expect(viewingLabel(s.focus, s.cursor, s.anchorPlane)).toBeNull()
-  // The cursor and the camera home at your head, in your plane: COMMIT's controls are back.
+  // The camera home at your head, in your plane: COMMIT's controls are back.
   expect(s.atHead()).toBe(true)
-  expect(s.cursor).toEqual(s.position)
+  expect(s.cursor).toEqual(kept ?? s.position)
   expect(s.anchor).toEqual(s.position)
   expect(s.anchorPlane).toBe(s.plane)
   expect(s.scaleExp).toBe(scaleExp)
@@ -150,16 +156,18 @@ describe('every way out of BUILD goes back to HOP', () => {
     expectHop()
   })
 
-  it('B, and the Stash panel BUILD (toggle)', () => {
+  it('B, and the Stash panel BUILD (toggle): a switch of mode, so the cursor stays where it was', () => {
     buildAway()
+    const at = { ...S().cursor }
     B().toggle()
-    expectHop()
+    expectHop(HOP_ZOOM, at)
   })
 
-  it('the ring’s way home (buildToHop), as WALK uses it', () => {
+  it('the ring’s way home (buildToHop), as WALK uses it: the cursor stays where it was', () => {
     buildAway()
+    const at = { ...S().cursor }
     buildToHop()
-    expectHop()
+    expectHop(HOP_ZOOM, at)
   })
 
   it('EXIT with a copy lined up after a placement stands the copy down and goes to HOP', () => {

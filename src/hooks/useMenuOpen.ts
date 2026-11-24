@@ -53,8 +53,31 @@ export function setMenuOpen(open: boolean): void {
   external?.(open)
 }
 
-/** Whether the mounted menu is open, mirrored for code outside React (the tutorial's build steps read it). */
-export const useMenuIsOpen = create<{ open: boolean }>(() => ({ open: false }))
+/**
+ * Whether the mounted menu is open, mirrored for code outside React (the
+ * tutorial's build steps read it), and whether the hamburger can open it now
+ * (App: not while spectating, nor in the newcomer view before the tour shows
+ * the menu), which M follows.
+ */
+export const useMenuIsOpen = create<{ open: boolean; toggleable: boolean }>(() => ({ open: false, toggleable: true }))
+
+/**
+ * M: the menu open or shut, as the hamburger does (owner, 2026-11-24).
+ * Opening it lets go of a captured mouse (TERRAIN's look on a desktop), so
+ * the menu can be used at once; TERRAIN's own watch (terrain/TerrainView.tsx)
+ * would let go within a beat anyway, and nothing here captures it again:
+ * the next click on the scene does. Nothing happens with no menu mounted.
+ */
+export function toggleMenuOpen(): void {
+  if (!external || !useMenuIsOpen.getState().toggleable) return
+  // A dialog over everything keeps the keys: the menu behind it stays as it is.
+  if (typeof document !== 'undefined' && document.querySelector?.('[aria-modal="true"]')) return
+  const opening = !useMenuIsOpen.getState().open
+  if (opening) {
+    try { if (typeof document !== 'undefined' && document.pointerLockElement) document.exitPointerLock() } catch { /* nothing captured */ }
+  }
+  external((open) => !open)
+}
 
 /** useState for the menu's open state, starting where it was last left and saving every change. */
 export function useMenuOpen(defaultOpen: boolean): [boolean, Dispatch<SetStateAction<boolean>>] {

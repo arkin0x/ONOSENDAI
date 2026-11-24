@@ -85,16 +85,18 @@ describe('the tutorial\'s front panel', () => {
     expect(left.filter((n) => n === 'HyperspacePanel')).toHaveLength(1)
   })
 
-  it('outranks a free view and a move under way, and is not doubled by a destination set', () => {
+  it('outranks a free view, leaves a move under way in its own place, and is not doubled by a destination set', () => {
     useCyberspace.getState().viewAt({ x: 1n << 84n, y: 1n << 84n, z: 1n << 84n }, 0, 'EARTH', 52, { fit: true })
     useHyperspace.setState({ destination: 840000 })
     useCyberspace.setState({ proof: { ...useCyberspace.getState().proof, status: 'computing' } })
     try {
-      // Without it, the free view leads and the ride falls in behind.
-      expect(columns().left.slice(0, 4)).toEqual(['Brand', 'ViewAtPanel', 'ProofPanel', 'HyperspacePanel'])
+      // Without it, the free view leads and the ride falls in behind; the proof panel stays put (owner, 2026-11-24).
+      expect(columns().left.slice(0, 3)).toEqual(['Brand', 'ViewAtPanel', 'HyperspacePanel'])
+      expect(columns().left).not.toContain('ProofPanel')
       usePanelLayout.getState().setFront('hyperspace')
       const { left } = columns()
-      expect(left.slice(0, 4)).toEqual(['Brand', 'HyperspacePanel', 'ViewAtPanel', 'ProofPanel'])
+      expect(left.slice(0, 3)).toEqual(['Brand', 'HyperspacePanel', 'ViewAtPanel'])
+      expect(left).not.toContain('ProofPanel')
       expect(left.filter((n) => n === 'HyperspacePanel')).toHaveLength(1)
     } finally {
       useCyberspace.setState({ proof: { ...useCyberspace.getState().proof, status: 'idle' } })

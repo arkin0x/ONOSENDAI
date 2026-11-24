@@ -50,6 +50,7 @@ vi.mock('../../lib/chains', async (importOriginal) => ({
 }))
 
 import { samePosition, useCyberspace } from '../useCyberspace'
+import { resetModes, setModeOn, updateModes } from '../modeOrder'
 import { useBuilder } from '../useBuilder'
 import { useShards } from '../useShards'
 import { useWalk } from '../useWalk'
@@ -97,6 +98,9 @@ beforeEach(async () => {
   await placeSpawn()
   S().cancel()
   useCyberspace.setState({ scaleExp: 2 })
+  // The ring as the tour teaches it (the teaching list has TERRAIN off): HOP, VIEW, BUILD, SCAN.
+  resetModes()
+  updateModes((m) => setModeOn(m, 'terrain', false))
   expect(currentPadMode()).toBe('hop')
 })
 

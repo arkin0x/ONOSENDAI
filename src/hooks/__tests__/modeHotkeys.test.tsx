@@ -173,6 +173,7 @@ describe('H, V, Y', () => {
     press('KeyY')
     expect(currentPadMode()).toBe('walk')
     press('KeyH')
+    expect(currentPadMode()).toBe('hop')
     press('KeyB')
     expect(currentPadMode()).toBe('build')
     press('KeyH')

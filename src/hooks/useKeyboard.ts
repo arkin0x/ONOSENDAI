@@ -257,8 +257,9 @@ export function useKeyboard(): void {
         return
       }
 
-      // H, V, Y: straight into HOP, VIEW or WALK (owner, 2026-11-24), as
-      // MODES allows (store/padMode.ts hotkeyMode). A held key goes once.
+      // H, V, Y: straight into HOP, VIEW or WALK (owner, 2026-11-24), turned
+      // off in MODES or not, as B and N go (store/padMode.ts hotkeyMode,
+      // modeKeyAllowed). A held key goes once.
       const hotkey = MODE_HOTKEYS[event.code]
       if (hotkey && !event.shiftKey) {
         event.preventDefault()

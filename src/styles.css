@@ -8797,10 +8797,10 @@ select.avatars__input option:checked {
  * the screen fades to nothing rather than stopping at an edge. */
 .chatdock__chip {
   position: fixed;
-  /* Level with the CONTROLS chip, which sits at the same 14px. */
-  bottom: 14px;
-  left: 50%;
-  transform: translateX(-50%);
+  /* Just right of the round menu button, level with its middle, in every mode (owner, 2026-11-24: "let's move the
+     chat panel just right of the menu button"); the menu button's own corner carries the safe-area insets. */
+  bottom: calc(var(--menu-bottom) + (var(--menu-size) - 29px) / 2);
+  left: calc(var(--menu-left) + var(--menu-size) + var(--routeov-gap));
   z-index: 101;
   display: inline-flex;
   align-items: center;
@@ -13507,6 +13507,7 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
 .hamburger-menu,
 .hosaka-pulse,
 .flyorbs,
+.chatdock__chip,
 .touchpad--mode-walk,
 .routeov,
 .deploybar {
@@ -13523,7 +13524,6 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
   translate: calc(-1 * var(--hud-shift-r)) 0;
 }
 .chatdock,
-.chatdock__chip,
 .starname {
   translate: var(--hud-skew) 0;
 }
@@ -14046,10 +14046,12 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
 @media (min-width: 700px) {
   .terrainview { --terrain-slot: 40px; }
 }
-/* Wide or short screens have room along the bottom, between the walk pad and WALK's right column, over CHAT. */
+/* Wide or short screens have room along the very bottom, centred, between CHAT (right of the menu button) and WALK's commit block
+   (owner, 2026-11-24: "move the hot bar down to the bottom of the screen"). A phone held upright has not: there the bar stays
+   just over the walk pad and the LOOK ball. */
 @media (min-width: 700px), (max-height: 520px) {
-  .terrainview .terrain-hotbar { bottom: calc(max(14px, env(safe-area-inset-bottom)) + 44px); }
-  .terrainview .terrain-hint { bottom: calc(max(14px, env(safe-area-inset-bottom)) + 52px + var(--terrain-slot)); }
+  .terrainview .terrain-hotbar { bottom: max(14px, calc(env(safe-area-inset-bottom, 0px) + 6px)); }
+  .terrainview .terrain-hint { bottom: calc(max(14px, calc(env(safe-area-inset-bottom, 0px) + 6px)) + 8px + var(--terrain-slot)); }
 }
 @media (max-height: 520px) {
   .terrainview { --terrain-slot: 30px; }

@@ -187,14 +187,15 @@ export interface PadKey {
  * Each key holds its direction while pressed (store/walkHold.ts).
  */
 export function walkPad(gravity: boolean, move: (name: MoveName) => () => void): PadKey[] {
-  const key = (name: MoveName): Pick<PadKey, 'act' | 'hold'> => ({ act: move(name), hold: walkHeldDir(name) })
+  // JUMP and DOWN are Space and C: up and down as you see the world, not tipped by LOOK (lib/walkKeys.ts).
+  const key = (name: MoveName, view = false): Pick<PadKey, 'act' | 'hold'> => ({ act: move(name), hold: walkHeldDir(name, view) })
   return [
     { cell: 'forward', glyph: <ForwardArrow3D size={26} />, sub: 'FORWARD', title: 'Forward (W)', keyHint: 'W', ...key('away') },
     { cell: 'left', glyph: '◀', title: 'Left (A)', keyHint: 'A', ...key('left') },
     { cell: 'backward', glyph: <ReverseArrow3D size={20} />, sub: 'BACK', title: 'Backward (S)', keyHint: 'S', ...key('toward') },
     { cell: 'right', glyph: '▶', title: 'Right (D)', keyHint: 'D', ...key('right') },
-    { cell: 'jump', glyph: 'JUMP', title: gravity ? 'Jump (Space or R). Press again in the air to double jump.' : 'Jump: up one cell (Space or R)', keyHint: 'SPACE', ...key('up'), side: true },
-    { cell: 'down', glyph: '▼', title: gravity ? 'Down: hold to absorb a bounce (C or F)' : 'Down one cell (C or F)', keyHint: 'C', ...key('down'), side: true },
+    { cell: 'jump', glyph: 'JUMP', title: gravity ? 'Jump (Space or R). Press again in the air to double jump.' : 'Jump: up one cell (Space)', keyHint: 'SPACE', ...key('up', true), side: true },
+    { cell: 'down', glyph: '▼', title: gravity ? 'Down: hold to absorb a bounce (C or F)' : 'Down one cell (C)', keyHint: 'C', ...key('down', true), side: true },
   ]
 }
 

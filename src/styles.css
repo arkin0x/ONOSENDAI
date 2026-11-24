@@ -14675,3 +14675,22 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
 .terrain-hotbar,
 .terrain-hint { translate: var(--hud-skew) 0; }
 :root[data-hud-slide] :is(.terrain-tools, .terrain-hotbar, .terrain-hint) { transition: var(--hud-slide); }
+
+/* TERRAIN on a phone held upright (owner, 2026-11-24: "On portrait, put the hot bar just below the left back right survey
+   down jump buttons"): from the bottom, the bottom row (menu, CHAT, the commit block), then the hotbar across the screen,
+   then WALK's pad cluster, lifted by the hotbar's row and nothing else. WALK, with no hotbar, stays exactly as it is. */
+@media (max-width: 699px) and (min-height: 521px) {
+  .app:has(.terrainview) {
+    /* Ten slots and their gaps between the 16px gutters, never more than 32px a slot. */
+    --terrain-row-slot: min(32px, calc((100vw - 32px - 27px) / 10));
+    --terrain-lift: calc(var(--terrain-row-slot) + 8px);
+    --walkside-bottom: calc(92px + var(--terrain-lift));
+  }
+  .app:has(.terrainview):has(.touchpad.is-lifted) { --walkside-bottom: calc(116px + var(--terrain-lift)); }
+  .app:has(.terrainview) .touchpad { bottom: calc(92px + var(--terrain-lift)); }
+  .app:has(.terrainview) .touchpad.is-lifted { bottom: calc(116px + var(--terrain-lift)); }
+  .terrainview { --terrain-slot: var(--terrain-row-slot); }
+  /* The hotbar 4px under the lifted row, the row's own gap, where the row stood. */
+  .terrainview .terrain-hotbar { bottom: calc(var(--walkside-bottom) - var(--terrain-lift) + 4px); }
+  .terrainview .terrain-hint { bottom: calc(var(--terrain-orb-bottom) + var(--terrain-orb) + 10px); }
+}

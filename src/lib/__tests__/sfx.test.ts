@@ -2,10 +2,11 @@
  * sfx.test.ts: the sound effects' one door (lib/sfx.ts; arkinox, 2026-11-24).
  * The bounce is a short synthesised boing through the one audio context,
  * under 0.4 s and as quiet as the message chime; a harder bounce is a little
- * deeper. It is kept quiet by MUTE ALL, a hidden page, TV's broadcast and TV
- * being on, and a second play within SFX_GAP_MS. While the browser holds
- * sound back it asks for sound and plays only if it is let out at once. The
- * audio context is a recording fake; nothing plays.
+ * deeper. It is kept quiet by Settings' Sound effects switched off (per
+ * identity), MUTE ALL, a hidden page, TV's broadcast and TV being on, and a
+ * second play within SFX_GAP_MS. While the browser holds sound back it asks
+ * for sound and plays only if it is let out at once. The audio context is a
+ * recording fake; nothing plays.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -16,6 +17,8 @@ import { DEFAULT_BOUNCE, SFX_GAP_MS, resetSfx, sfx, sfxAllowed } from '../sfx'
 import { setBroadcastForTest } from '../tv/broadcast'
 import { setTvOn } from '../../store/tvOn'
 import { useSoundMutes } from '../../store/useSoundMutes'
+import { forgetSfxSwitch, setSfxOn } from '../../store/sfxSwitch'
+import { useCyberspace } from '../../store/useCyberspace'
 
 interface Voice { type: string; freqs: number[]; start?: number; stop?: number }
 
@@ -64,6 +67,7 @@ beforeEach(() => {
   setBroadcastForTest(false)
   setTvOn(false)
   useSoundMutes.setState({ master: false })
+  forgetSfxSwitch()
 })
 
 afterEach(() => {
@@ -104,6 +108,35 @@ describe('the bounce', () => {
 })
 
 describe('what keeps it quiet', () => {
+  it('Sound effects off in Settings, for this identity only', () => {
+    const me = useCyberspace.getState().identity
+    setSfxOn(false)
+    try {
+      expect(sfxAllowed()).toBe(false)
+      expect(sfx.play('bounce', 0, 1000)).toBe(false)
+      expect(fake.voices).toHaveLength(0)
+      useCyberspace.setState({ identity: { pubkey: 'd4'.repeat(32), npub: 'npub-other' } })
+      expect(sfx.play('bounce', 0, 2000)).toBe(true)
+      expect(fake.voices).toHaveLength(3)
+    } finally {
+      useCyberspace.setState({ identity: me })
+      setSfxOn(true)
+    }
+    expect(sfx.play('bounce', 0, 3000)).toBe(true)
+  })
+
+  it('Sound effects turned off where storage refuses the write: still off for this page', () => {
+    vi.stubGlobal('localStorage', { getItem: () => null, setItem: () => { throw new Error('full') }, removeItem: () => undefined })
+    setSfxOn(false)
+    try {
+      expect(sfxAllowed()).toBe(false)
+      expect(sfx.play('bounce', 0, 1000)).toBe(false)
+    } finally {
+      setSfxOn(true)
+    }
+    expect(sfxAllowed()).toBe(true)
+  })
+
   it('MUTE ALL', () => {
     useSoundMutes.setState({ master: true })
     expect(sfxAllowed()).toBe(false)

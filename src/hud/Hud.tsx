@@ -510,7 +510,7 @@ function ScalePanel(): JSX.Element {
  * Shared keys (H, V, Y, M, Tab, Esc, P, L, the chain explorer) sit under every mode.
  */
 const SHARED_ROWS: Array<[string, string]> = [
-  ['H / V / Y', 'HOP / VIEW / WALK (a mode turned off in MODES: nothing)'],
+  ['H / V / Y', 'HOP / VIEW / WALK (turned off in MODES too)'],
   ['M', 'menu open / closed'],
   ['Tab', 'previous view'],
   ['C', 'canonical view (facing the black sun)'],

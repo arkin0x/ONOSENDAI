@@ -81,7 +81,7 @@ import { ChainStatusStrip, useChainStatus } from './ChainStatus'
 import { moveUnderWay } from '../lib/buildCursor'
 import { useWalk } from '../store/useWalk'
 import { onAvatar, useBuilder } from '../store/useBuilder'
-import { buildHeld, cycleMode, goBack, leaveWalk, padMode, pressSecond, recall, type PadMode } from '../store/padMode'
+import { buildHeld, commitSettling, cycleMode, goBack, leaveWalk, padMode, pressSecond, recall, type PadMode } from '../store/padMode'
 import { DEFAULT_MODES, modeInfo, nextInRing, useEffectiveModes, useModeRoles, useModes } from '../store/modeOrder'
 import { useCover } from '../hooks/useCover'
 import { ForwardArrow3D, ReverseArrow3D } from './ui/FlyArrows'
@@ -629,6 +629,9 @@ export function TouchControls(): JSX.Element {
           {...noCallout}
           onPointerDown={(e) => {
             e.preventDefault(); e.stopPropagation()
+            // Just switched into HOP with the cursor kept off your avatar: a
+            // second tap meant for the mode button is not a commit (padMode commitSettling).
+            if (!deploying && commitSettling()) return
             if (deploying) void useShards.getState().deploy()
             else if (offload && next && useOffer.getState().requestedFor !== next.cursorKey) useOffer.getState().request(next.cursorKey)
             else useCyberspace.getState().commit()

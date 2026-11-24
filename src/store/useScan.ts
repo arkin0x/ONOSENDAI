@@ -106,8 +106,12 @@ export interface ScanState {
   confirm: ScanConfirm | null
   /** SCAN at the cursor's view, or where you are looking: from HOP, VIEW, or BUILD's cursor. */
   enter: () => void
-  /** SCAN off. The view goes with it unless `keepView`. A scan under way keeps running. */
-  exit: (keepView?: boolean) => void
+  /**
+   * SCAN off. The view goes with it unless `keepView`; with `keepCursor` (a
+   * switch into HOP: the pad, N) the cursor stays where it is as HOP's
+   * (useCyberspace `clearFocus`). A scan under way keeps running.
+   */
+  exit: (keepView?: boolean, keepCursor?: boolean) => void
   setHeight: (height: number) => void
   stepHeight: (delta: number) => void
   /**
@@ -305,12 +309,12 @@ export const useScan = create<ScanState>((set, get) => ({
     set({ active: true, confirm: null, height: get().job ? get().height : clampScanHeight(get().height, currentScanRange()) })
   },
 
-  exit: (keepView = false) => {
+  exit: (keepView = false, keepCursor = false) => {
     if (!get().active) return
     set({ active: false, confirm: null })
     if (keepView) return
     const cs = useCyberspace.getState()
-    if (cs.focus?.drive) cs.clearFocus(true)
+    if (cs.focus?.drive) cs.clearFocus(true, keepCursor)
   },
 
   setHeight: (height) => {

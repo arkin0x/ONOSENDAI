@@ -111,6 +111,8 @@ beforeEach(async () => {
   resetModes()
   useModes.setState({ back: null, lastRing: null })
   stopRing = watchLastRing()
+  localStorage.removeItem('onosendai:menu-open')
+  useMenuIsOpen.setState({ open: false, toggleable: true })
   mounted = await mount(createElement(() => { Keys(); Menu(); return null }))
 })
 
@@ -200,6 +202,50 @@ describe('H, V, Y', () => {
     expect(currentPadMode()).toBe('hop')
   })
 
+  it('go into VIEW or WALK only at rest, as the pad offers them: not with a hop lined up, a proof computing or a placement pending', () => {
+    S().moveCursor({ axis: 'x', dir: 1 })
+    press('KeyY')
+    press('KeyV')
+    expect(currentPadMode()).toBe('hop')
+    S().cancel()
+    useCyberspace.setState({ proof: { ...S().proof, status: 'computing' } })
+    try {
+      press('KeyY')
+      press('KeyV')
+      expect(currentPadMode()).toBe('hop')
+    } finally { useCyberspace.setState({ proof: { ...S().proof, status: 'idle' } }) }
+    useShards.setState({ pending: {} as never })
+    try {
+      press('KeyY')
+      press('KeyV')
+      expect(currentPadMode()).not.toBe('walk')
+      expect(currentPadMode()).not.toBe('view')
+    } finally { useShards.setState({ pending: null }); useBuilder.getState().exit() }
+    press('KeyH')
+    press('KeyY')
+    expect(currentPadMode()).toBe('walk')
+  })
+
+  it('out of WALK with steps still to prove: the first press stops them, the second leaves, as X does', () => {
+    press('KeyY')
+    expect(currentPadMode()).toBe('walk')
+    useWalk.setState({ behind: 2 })
+    const stop = vi.spyOn(useWalk.getState(), 'stop').mockImplementation(() => { useWalk.setState({ behind: 0 }) })
+    try {
+      press('KeyH')
+      expect(stop).toHaveBeenCalledTimes(1)
+      expect(currentPadMode()).toBe('walk')
+      press('KeyH')
+      expect(currentPadMode()).toBe('hop')
+    } finally { stop.mockRestore() }
+  })
+
+  it('a focused select or an editable element keeps its letters', () => {
+    press('KeyV', { tagName: 'SELECT', closest: () => null })
+    press('KeyV', { tagName: 'DIV', isContentEditable: true, closest: () => null })
+    expect(currentPadMode()).toBe('hop')
+  })
+
   it('in the workshop are the bench\'s, not ours', () => {
     useWorkshop.setState({ open: true })
     press('KeyV')
@@ -241,6 +287,23 @@ describe('M', () => {
     expect(useMenuIsOpen.getState().open).toBe(false)
     expect(locked).toBeNull()
     expect(exitPointerLock).toHaveBeenCalledTimes(1)
+  })
+
+  it('does nothing where the hamburger cannot (spectating, the newcomer view before the menu is shown), or over a dialog', async () => {
+    useMenuIsOpen.setState({ toggleable: false })
+    press('KeyM')
+    await settled()
+    expect(useMenuIsOpen.getState().open).toBe(false)
+    useMenuIsOpen.setState({ toggleable: true })
+    const doc = document as unknown as { querySelector?: (s: string) => unknown }
+    doc.querySelector = (sel: string) => (sel === '[aria-modal="true"]' ? {} : null)
+    press('KeyM')
+    await settled()
+    expect(useMenuIsOpen.getState().open).toBe(false)
+    delete doc.querySelector
+    press('KeyM')
+    await settled()
+    expect(useMenuIsOpen.getState().open).toBe(true)
   })
 
   it('is a field\'s letter while typing, and not ours over the workshop', async () => {

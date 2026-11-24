@@ -345,14 +345,6 @@ export function watchLastRing(): () => void {
 }
 
 /**
- * WALK from the pad (arkinox, 2026-11-12), from HOP, VIEW, BUILD or SCAN, kept as
- * the mode to go back to. WALK is first person at your head, so VIEW's view
- * ends (useWalk `enter`) and BUILD ends as the ring ends it (buildToHop).
- * Nothing while a deploy is lined up in BUILD, which is PLACE's or CANCEL's
- * to settle (buildHeld), nor off your own head (spectating, in history, in
- * hyperspace transit), where there is no head to walk from.
- */
-/**
  * The keys that go straight to a mode (owner, 2026-11-24: "H = HOP, V = VIEW,
  * Y = WALK"), beside B (BUILD) and N (SCAN). By event code, so a keyboard
  * layout's letters do not move them.
@@ -367,16 +359,42 @@ export const MODE_HOTKEYS: Readonly<Record<string, ModeId>> = { KeyH: 'hop', Key
  * WALK goes in the pad's way (enterWalk, which keeps where it came from),
  * the others through switchMode, so the ring and the toggle slot are moved
  * no more than B or N moves them: the dim way back is what watchLastRing
- * kept. True when the pad is in that mode after.
+ * kept. Into VIEW or WALK only at rest, as the pad offers them and N goes;
+ * out of WALK with steps still to prove, the first press stops them and the
+ * second leaves, as X does. True when the pad is in that mode after.
  */
 export function hotkeyMode(to: ModeId): boolean {
   if (effectiveModes().off.includes(to)) return false
-  if (currentPadMode() === to) return true
+  const cur = currentPadMode()
+  if (cur === to) return true
+  const cs = useCyberspace.getState()
+  // Out of WALK as X leaves it: steps still to prove (or a fall in the air)
+  // are stopped by the first press, and the second leaves; a slip of a key
+  // never drops a walk's unproved steps.
+  if (cur === 'walk') {
+    const walk = useWalk.getState()
+    if (walk.behind > 0 || walk.open !== null || walk.falling || cs.proof.status === 'computing') { walk.stop(); return false }
+  }
+  // Into a mode other than HOP only at rest, as the pad offers it and N goes:
+  // nothing being placed, no proof computing, and from HOP nothing lined up
+  // and the cursor on your avatar. HOP itself is always the way back.
+  if (to !== 'hop') {
+    if (useShards.getState().pending || cs.proof.status === 'computing') return false
+    if (cur === 'hop' && !(cs.atHead() && cs.plan === null && samePosition(cs.cursor, cs.position))) return false
+  }
   if (to === 'walk') enterWalk()
   else switchMode(to)
   return currentPadMode() === to
 }
 
+/**
+ * WALK from the pad (arkinox, 2026-11-12), from HOP, VIEW, BUILD or SCAN, kept as
+ * the mode to go back to. WALK is first person at your head, so VIEW's view
+ * ends (useWalk `enter`) and BUILD ends as the ring ends it (buildToHop).
+ * Nothing while a deploy is lined up in BUILD, which is PLACE's or CANCEL's
+ * to settle (buildHeld), nor off your own head (spectating, in history, in
+ * hyperspace transit), where there is no head to walk from.
+ */
 export function enterWalk(opts?: { noFall?: boolean }): void {
   const from = currentPadMode()
   if (from === 'walk') return

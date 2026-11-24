@@ -198,7 +198,7 @@ export function useKeyboard(): void {
       if (useTv.getState().on) return
       // Typing into a field, or building on the bench: not ours.
       const tag = (event.target as HTMLElement | null)?.tagName
-      if (tag === 'INPUT' || tag === 'TEXTAREA') return
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (event.target as HTMLElement | null)?.isContentEditable) return
       // WALK's keys first, so Space and the letters it takes over never reach
       // their HOP meanings below.
       if (walkKeyDown(event)) return

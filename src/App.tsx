@@ -97,7 +97,7 @@ import { setMenuCovering, useKeyboard } from './hooks/useKeyboard'
 import { useEscape, useModalUp } from './hooks/useEscape'
 import { useProofListener } from './hooks/useProofListener'
 import { useIsMobile } from './hooks/useIsMobile'
-import { useMenuOpen } from './hooks/useMenuOpen'
+import { useMenuIsOpen, useMenuOpen } from './hooks/useMenuOpen'
 import { armMenuSlide } from './hooks/useMenuInset'
 import { useTargets } from './hooks/useTargets'
 import { startCalibration } from './lib/calibration'
@@ -258,6 +258,9 @@ export default function App(): JSX.Element {
   const veil = useRevealClass()
   const shows = (id: Parameters<typeof veil>[0]): boolean => veil(id) !== ' nc-veiled'
   const showPanels = panelsOpen && !spectating && shows('menu')
+  // M opens and shuts the menu only where the hamburger can (hooks/useMenuOpen.ts toggleMenuOpen).
+  const menuToggleable = !spectating && shows('menu')
+  useEffect(() => { useMenuIsOpen.setState({ toggleable: menuToggleable }) }, [menuToggleable])
 
   // Reading a hidden thing owns the screen: the top-aligned modal sits where
   // the instrument stack lives, so the stack stands aside and the hamburger

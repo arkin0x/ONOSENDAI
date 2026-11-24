@@ -314,8 +314,9 @@ export function TouchControls(): JSX.Element {
   // A slot's word, with its key printed under it in the newcomer view; outside it the word alone, as it always was.
   const withKey = (word: string, key: string): ReactNode => (plain ? <>{word}<span className="touchops__keyhint" aria-hidden>{key}</span></> : word)
   // A mode's own key (store/modeOrder.ts MODES: H, Y, V, B, N) in the corner
-  // of a button that goes to it: `data-key`, drawn by styles.css with a mouse
-  // only, so it is no part of the button's words.
+  // of a button that goes to it (the dim way back and the Toggle Mode, not
+  // the lit ring button, which goes on to the next mode): `data-key`, drawn
+  // by styles.css with a mouse only, so it is no part of the button's words.
   const modeKey = (m: PadMode): { 'data-key'?: string } => { const k = modeInfo(m).key; return k ? { 'data-key': k } : {} }
   const opsUp = home || viewing || (building && !spectating)
 
@@ -447,7 +448,7 @@ export function TouchControls(): JSX.Element {
         title={title}
         {...noCallout}
         onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); if (wait) return; if (on) cycleMode(); else goBack() }}
-        {...modeKey(m)}
+        {...(on ? {} : modeKey(m))}
       >{m === roles.start ? <>{say(MODE_WORD[m], plain)}<span className="touchops__sub">(MODES)</span></> : say(MODE_WORD[m], plain)}</button>
     )
   }

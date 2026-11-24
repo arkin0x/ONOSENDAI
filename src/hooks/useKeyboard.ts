@@ -7,7 +7,8 @@
  * until Space commits the hop.
  *
  * WALK has its own keys, first-person style (lib/walkKeys.ts): W forward,
- * S back, A and D sideways, Space or R up, C or F down, every press a step;
+ * S back, A and D sideways, Space or R up, C or F down, every press a step
+ * (Space and C up and down as you see the world, R and F by where you look);
  * W or S with A or D held steps diagonally, 45 degrees to that side. A held
  * key walks from the press on (store/walkHold.ts): the keyboard's own
  * repeats, which came after a pause, are ignored. They are answered before anything else, so in WALK Space never
@@ -31,7 +32,7 @@ import { moveDirection, type MoveName } from '../lib/moves'
 import type { RotateDirection } from '../lib/space'
 import { stepBuild } from '../store/buildStep'
 import { useWalk } from '../store/useWalk'
-import { walkHeldDir, walkMove } from '../lib/walkKeys'
+import { viewVerticalKey, walkHeldDir, walkMove } from '../lib/walkKeys'
 import { holdEnd, holdReleaseAll, holdStart } from '../store/walkHold'
 import { addWalkInputCloser, setWalkMenuCovering, walkMenuCovering } from '../store/walkInput'
 import { canFly, useViewFly } from '../lib/viewFly'
@@ -98,7 +99,8 @@ export function walkKeyDown(event: Pick<KeyboardEvent, 'code' | 'ctrlKey' | 'shi
     // Held, the key walks from the press on (store/walkHold.ts), so the
     // keyboard's repeats, which begin after a pause, add nothing. With the
     // input closed (a modal up) the key is still WALK's, and holds nothing.
-    if (!event.repeat) holdStart(`key:${event.code}`, walkHeldDir(step))
+    // Space and C go up and down as you see the world, R and F by the camera (lib/walkKeys.ts).
+    if (!event.repeat) holdStart(`key:${event.code}`, walkHeldDir(step, viewVerticalKey(event.code)))
     return true
   }
   // Space is WALK's up even when it is not a step (a modifier held):

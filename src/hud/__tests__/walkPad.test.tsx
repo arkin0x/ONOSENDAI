@@ -88,6 +88,7 @@ import { viewEarth } from '../HyperspacePanel'
 import { placeSpawn } from '../../store/fixtures/placeSpawn'
 import { spectate, stopSpectating } from '../../lib/spectator'
 import { generateSecretKey, getPublicKey } from 'nostr-tools/pure'
+import { useTutorialSwitch } from '../../tutorial/gate'
 
 const S = () => useCyberspace.getState()
 
@@ -139,6 +140,22 @@ beforeEach(async () => {
 })
 
 describe('the WALK pad', () => {
+  it('GRAVITY wears its key, Z, as FORWARD wears W and JUMP SPACE, with the tour on or off (arkinox, 2026-11-24: "we need a key hint for the gravity button")', () => {
+    useWalk.getState().enter()
+    const was = useTutorialSwitch.getState().value
+    try {
+      for (const value of [false, true]) {
+        useTutorialSwitch.setState({ value })
+        const gravity = find('touchpad__key--gravity')
+        expect(gravity.props.title).toBe('Gravity (Z)')
+        const kids = gravity.props.children as ReactNode[]
+        expect(Array.isArray(kids) && kids.some((k) => isValidElement(k) && (k as Btn).props.className === 'touchpad__keyhint' && (k as Btn).props.children === 'Z'), `tour ${value ? 'on' : 'off'}`).toBe(true)
+      }
+    } finally {
+      useTutorialSwitch.setState({ value: was })
+    }
+  })
+
   it('has FORWARD, BACKWARD, the sides, JUMP and DOWN, and no scale keys or readout', () => {
     useWalk.getState().enter()
     expect(cells()).toEqual(['gravity', 'forward', 'left', 'backward', 'right', 'jump', 'down'])
@@ -220,7 +237,7 @@ describe('the WALK pad', () => {
     expect(find('touchpad__key--jump').props.title).toBe('Jump (Space or R). Press again in the air to double jump.')
     useWalk.getState().setGravity(false)
     expect(find('touchpad__key--down').props.disabled).toBeFalsy()
-    expect(find('touchpad__key--down').props.title).toBe('Down one cell (C or F)')
+    expect(find('touchpad__key--down').props.title).toBe('Down one cell (C)')
   })
 })
 

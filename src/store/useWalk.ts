@@ -135,6 +135,7 @@ import { create } from 'zustand'
 import { estimateHopCost } from 'cyberspace-core'
 import { HOP_AXIS_BUDGET_MS, projectCantorMs, recommendedHopHeight, useCalibration } from '../lib/calibration'
 import { moveDirection, type MoveName } from '../lib/moves'
+import { verticalAlong } from '../lib/walkKeys'
 import { clampAxis, stepFor, type AxisDirection, type AxisName, type Position } from '../lib/space'
 import { WORLD_DOWN, atHeight, heightOf, raised, sameDir, upOf, viewDown } from '../lib/walkDown'
 import { MAX_COMPUTE_HEIGHT, checkWalkLanes, dropWalkLanes, samePosition, setWalkLaneHooks, useCyberspace } from './useCyberspace'
@@ -307,9 +308,11 @@ export interface WalkState {
    * A direction press: one step that way, shown at once, added to the open
    * segment or starting one. Forward and backward go the way you face,
    * diagonally or sliding along a wall (lib/walkSlide.ts); `strafe` is a
-   * side key held with them (+1 right, -1 left).
+   * side key held with them (+1 right, -1 left). Up and down with gravity
+   * off go along the view's up when `view` (Space, C, the pad's JUMP and
+   * DOWN), else the camera's own (R, F): lib/walkKeys.ts verticalAlong.
    */
-  press: (name: MoveName, strafe?: -1 | 0 | 1) => void
+  press: (name: MoveName, strafe?: -1 | 0 | 1, view?: boolean) => void
   /**
    * (F) JUMP freshly pressed (store/walkHold.ts holdStart, the keyboard's or
    * the pad's): in the air, the double jump, once per time in the air. A held
@@ -411,14 +414,15 @@ export const useWalk = create<WalkState>((set, get) => ({
     if (message) useToast.getState().show({ label: 'WALK STOPPED', meta: message, mark: 'walk', ms: BRIEF_TOAST_MS * 2 })
   },
 
-  press: (name, strafe = 0) => {
+  press: (name, strafe = 0, view = false) => {
     const cs = useCyberspace.getState()
     if (!cs.walking || !cs.atHead()) return
     // A press waiting for walls on their way (waitedForWalls) goes first; a
     // held key's repeats meanwhile are not stacked behind it.
     if (againWhenBuilt) return
     const axes = cs.screenAxes ?? cs.axes()
-    const dir = moveDirection(axes, name)
+    // Space and C go along the view's up, R and F the camera's (lib/walkKeys.ts).
+    const dir = name === 'up' || name === 'down' ? verticalAlong(name, view, axes, down) : moveDirection(axes, name)
     const gravity = get().gravity
     // Under gravity, down is the axis nearest the screen's down (lib/walkDown.ts).
     const g = gravity ? down : WORLD_DOWN
@@ -458,7 +462,7 @@ export const useWalk = create<WalkState>((set, get) => ({
     // Under gravity a diagonal ends where it walks off a floor, and a slide is taken only onto one (lib/walkSlide.ts).
     const stands = gravity ? (at: Position): boolean => standing(at, items, true, g) : undefined
     const move = planWalkMove(from, heading ?? { main: dir, side: null, lean: null }, length, stepAlong, { stands, down: g })
-    if (waitedForWalls(() => get().press(name, strafe))) return
+    if (waitedForWalls(() => get().press(name, strafe, view))) return
     if (move.by) wallChip(move.by)
     if (!move.along || samePosition(move.to, from)) return
     const next: Position = { ...move.to }

@@ -53,7 +53,7 @@ import { regionAtOriginalSize, useRegion } from './useRegion'
 import { landFly } from '../lib/viewFly'
 import { buildPlane, placedCursor } from '../lib/buildCursor'
 import { SCAN_FOCUS_LABEL, scanBuying, useScan } from './useScan'
-import { effectiveModes, modeRoles, nextInRing, useModes, type ModeId } from './modeOrder'
+import { customModesApply, effectiveModes, modeRoles, nextInRing, useModes, type ModeId } from './modeOrder'
 
 export type PadMode = 'hop' | 'view' | 'walk' | 'build' | 'scan'
 
@@ -352,10 +352,20 @@ export function watchLastRing(): () => void {
 export const MODE_HOTKEYS: Readonly<Record<string, ModeId>> = { KeyH: 'hop', KeyV: 'view', KeyY: 'walk' }
 
 /**
- * H, V or Y: straight into that mode. They follow MODES: a mode switched off
- * in the list the pad follows now (effectiveModes: the default list in the
- * newcomer view, a tour run and /demo; TV hears no keys at all) does nothing,
- * unlike B and N, which open their mode by name. In it already: nothing.
+ * Whether a key may open `to` by name now. A mode the player switched off in
+ * MODES is only out of the turns (owner, 2026-11-24: "so they aren't part of
+ * the rotation"), so its key still opens it, as B and N always have. Only
+ * where the player's list does not apply (the newcomer view, a tour run,
+ * /demo) does the list taught there decide: a mode off in it is not yet
+ * allowed. TV hears no keys at all.
+ */
+export function modeKeyAllowed(to: ModeId): boolean {
+  return customModesApply() || !effectiveModes().off.includes(to)
+}
+
+/**
+ * H, V or Y: straight into that mode, switched off in MODES or not, as B and
+ * N go (modeKeyAllowed). In it already: nothing.
  * WALK goes in the pad's way (enterWalk, which keeps where it came from),
  * the others through switchMode, so the ring and the toggle slot are moved
  * no more than B or N moves them: the dim way back is what watchLastRing
@@ -364,7 +374,7 @@ export const MODE_HOTKEYS: Readonly<Record<string, ModeId>> = { KeyH: 'hop', Key
  * second leaves, as X does. True when the pad is in that mode after.
  */
 export function hotkeyMode(to: ModeId): boolean {
-  if (effectiveModes().off.includes(to)) return false
+  if (!modeKeyAllowed(to)) return false
   const cur = currentPadMode()
   if (cur === to) return true
   const cs = useCyberspace.getState()

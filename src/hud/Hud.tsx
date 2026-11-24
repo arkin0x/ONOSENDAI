@@ -507,13 +507,15 @@ function ScalePanel(): JSX.Element {
  * The keys for the mode the pad is in (arkinox, 2026-11-11: the Controls panel
  * always showed HOP's; it shows the current mode's now). HOP lines up a move,
  * VIEW is a free look that flies, WALK is first person, BUILD places things.
- * Shared keys (Tab, Esc, P, H, the chain explorer) sit under every mode.
+ * Shared keys (H, V, Y, M, Tab, Esc, P, L, the chain explorer) sit under every mode.
  */
 const SHARED_ROWS: Array<[string, string]> = [
+  ['H / V / Y', 'HOP / VIEW / WALK (a mode turned off in MODES: nothing)'],
+  ['M', 'menu open / closed'],
   ['Tab', 'previous view'],
   ['C', 'canonical view (facing the black sun)'],
   ['P', 'toggle plane'],
-  ['H', 'hyperspace line scrubber'],
+  ['L', 'hyperspace line scrubber'],
   ['[ / ]', 'chain explorer: back / forward one action'],
   ['Home / End', 'chain explorer: spawn / live head'],
   ['Esc', 'close: dialog, then menu, then the latest chip'],

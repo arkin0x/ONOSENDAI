@@ -313,6 +313,10 @@ export function TouchControls(): JSX.Element {
   const veil = useRevealClass()
   // A slot's word, with its key printed under it in the newcomer view; outside it the word alone, as it always was.
   const withKey = (word: string, key: string): ReactNode => (plain ? <>{word}<span className="touchops__keyhint" aria-hidden>{key}</span></> : word)
+  // A mode's own key (store/modeOrder.ts MODES: H, Y, V, B, N) in the corner
+  // of a button that goes to it: `data-key`, drawn by styles.css with a mouse
+  // only, so it is no part of the button's words.
+  const modeKey = (m: PadMode): { 'data-key'?: string } => { const k = modeInfo(m).key; return k ? { 'data-key': k } : {} }
   const opsUp = home || viewing || (building && !spectating)
 
   const computing = proof.status === 'computing'
@@ -443,6 +447,7 @@ export function TouchControls(): JSX.Element {
         title={title}
         {...noCallout}
         onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); if (wait) return; if (on) cycleMode(); else goBack() }}
+        {...modeKey(m)}
       >{m === roles.start ? <>{say(MODE_WORD[m], plain)}<span className="touchops__sub">(MODES)</span></> : say(MODE_WORD[m], plain)}</button>
     )
   }
@@ -566,6 +571,7 @@ export function TouchControls(): JSX.Element {
             disabled={walkHeld}
             {...noCallout}
             onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); if (walkHeld) return; pressSecond() }}
+            {...modeKey('walk')}
           >WALK</button>
         ) : walkSlot && second !== null ? (
           // Another mode as the second button (MODES): the same slot, dim to
@@ -581,6 +587,7 @@ export function TouchControls(): JSX.Element {
             disabled={walkHeld}
             {...noCallout}
             onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); if (walkHeld) return; pressSecond() }}
+            {...modeKey(second)}
           >{say(MODE_WORD[second], plain)}</button>
         ) : <button
           key="cancel"

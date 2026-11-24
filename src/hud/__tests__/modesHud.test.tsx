@@ -217,7 +217,9 @@ describe('the MODES panel', () => {
     // The modes with their own keys print them.
     expect(words(inRow('build', 'modes__key').props.children)).toBe('B')
     expect(words(inRow('scan', 'modes__key').props.children)).toBe('N')
-    expect(words(inRow('walk', 'modes__key').props.children)).toBe('')
+    expect(words(inRow('walk', 'modes__key').props.children)).toBe('Y')
+    expect(words(inRow('hop', 'modes__key').props.children)).toBe('H')
+    expect(words(inRow('view', 'modes__key').props.children)).toBe('V')
     expect(panel().some((e) => words(e.props.children) === MODES_HINT)).toBe(true)
   })
 

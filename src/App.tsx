@@ -559,7 +559,11 @@ export default function App(): JSX.Element {
         disabled={spectating}
         aria-expanded={showPanels}
         aria-label={spectating ? 'Panels locked while spectating' : panelsOpen ? 'Hide panels' : 'Show panels'}
+        aria-keyshortcuts="M"
+        title={panelsOpen ? 'Hide panels (M)' : 'Show panels (M)'}
       >
+        {/* M opens and shuts it (hooks/useKeyboard.ts), shown with a mouse only (styles.css). */}
+        <kbd className="hamburger-key" aria-hidden>M</kbd>
         <span className={`hamburger-icon ${panelsOpen ? 'hamburger-icon--open' : ''}`}>
           <span></span>
           <span></span>

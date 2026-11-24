@@ -79,19 +79,21 @@ export interface ModeInfo {
   id: ModeId
   /** The word on the pad's buttons. */
   word: string
-  /** The key that goes in and out of it by name, wherever it stands in the list. */
+  /** The key that goes into it, wherever it stands in the list. */
   key?: string
+  /** Whether its key opens it switched off too (B and N, by name); H, V and Y follow MODES and do nothing then. */
+  keyWhenOff?: boolean
   /** What it does, in a few words. */
   what: string
 }
 
 /** Every mode, in the order a new mode joins the list. A new mode is a row here. */
 export const MODES: readonly ModeInfo[] = [
-  { id: 'hop', word: 'HOP', what: 'Line up a move, COMMIT sends it' },
-  { id: 'walk', word: 'WALK', what: 'First person, every press a step' },
-  { id: 'view', word: 'VIEW', what: 'Look around, nothing moves' },
-  { id: 'build', word: 'BUILD', key: 'B', what: 'Place things at a build cursor' },
-  { id: 'scan', word: 'SCAN', key: 'N', what: 'Look for hidden things' },
+  { id: 'hop', word: 'HOP', key: 'H', what: 'Line up a move, COMMIT sends it' },
+  { id: 'walk', word: 'WALK', key: 'Y', what: 'First person, every press a step' },
+  { id: 'view', word: 'VIEW', key: 'V', what: 'Look around, nothing moves' },
+  { id: 'build', word: 'BUILD', key: 'B', keyWhenOff: true, what: 'Place things at a build cursor' },
+  { id: 'scan', word: 'SCAN', key: 'N', keyWhenOff: true, what: 'Look for hidden things' },
 ]
 
 /** The toggle slot's place in the list, and the default mode's: the first in the ring. */

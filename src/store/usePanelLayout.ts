@@ -34,15 +34,16 @@ export const COLUMNS: readonly Column[] = ['left', 'right']
  * place being looked at, holding VIEW A COORDINATE, RECENT and STARRED PLACES.
  * Its id is not `view` because that id is the Settings panel's, titled View
  * until the same day, and a saved order already holds it there. A saved
- * order from before has no `viewat`, so mergeOrder puts it right under
- * Position, its default place.
+ * order from before has no `viewat`, so mergeOrder puts it at its default
+ * place, right under Scale since 2026-11-24.
  *
  * The left column leads with IDENTITY, then ITEMS right under it (owner,
  * 2026-11-15: "The identity panel should be first (this is the default) and
  * then the items will clearly show up underneath it"), then GAMES, AGENTS,
  * AVATARS, CREATE, the rest after them in their old order (arkinox,
  * 2026-11-11). Only a first visit gets it: a saved order is kept as it was,
- * except the one the tutorial wrote (tutorialWrote, below).
+ * except the one the tutorial wrote (tutorialWrote, below) and the right
+ * column's head and foot of 2026-11-24 (menuOf20261124, below).
  *
  * `tutorial` (feedback 2026-11-11, item 17) was the last panel of all until
  * 2026-11-24, when it went right under MODES (below).

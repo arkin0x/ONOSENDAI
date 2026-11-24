@@ -194,7 +194,7 @@ export function ModesPanel(): JSX.Element {
                 <span className="modes__role">{role}</span>
               </label>
               <span className="modes__key" aria-hidden={!info.key}>
-                {info.key && <kbd title={`${info.key} opens ${info.word} wherever it is in the list`}>{info.key}</kbd>}
+                {info.key && <kbd title={info.keyWhenOff ? `${info.key} opens ${info.word} wherever it is in the list, on or off` : `${info.key} opens ${info.word} wherever it is in the list, while it is on`}>{info.key}</kbd>}
               </span>
               <Switch
                 id={switchId}
@@ -202,8 +202,8 @@ export function ModesPanel(): JSX.Element {
                 checked={!off}
                 disabled={lockedOn}
                 title={lockedOn ? 'The Default Mode is always on'
-                  : i === TOGGLE_AT ? (off ? `Turn ${info.word} on: back on the pad as the Toggle Mode` : `Turn ${info.word} off: no Toggle Mode on the pad${info.key ? `, still opens with ${info.key}` : ''}`)
-                  : off ? `Turn ${info.word} on` : `Turn ${info.word} off: out of the turns${info.key ? `, still opens with ${info.key}` : ''}`}
+                  : i === TOGGLE_AT ? (off ? `Turn ${info.word} on: back on the pad as the Toggle Mode` : `Turn ${info.word} off: no Toggle Mode on the pad${info.keyWhenOff ? `, still opens with ${info.key}` : ''}`)
+                  : off ? `Turn ${info.word} on` : `Turn ${info.word} off: out of the turns${info.keyWhenOff ? `, still opens with ${info.key}` : ''}`}
                 aria-label={info.word}
                 onCheckedChange={(on) => updateModes((cur) => setModeOn(cur, id, on))}
               />
@@ -233,8 +233,9 @@ export function ModesPanel(): JSX.Element {
         the mode button goes down through it and the rest in this order. Drag
         a mode into the Toggle Mode to trade the two. A mode turned off leaves
         the turns but still opens by its key (B for BUILD, N for SCAN), from
-        the tutorial and from links; the Toggle Mode turned off leaves its
-        button off the pad. Drag a grip to move a mode, or use the arrows. Kept
+        the tutorial and from links; H, V and Y (HOP, VIEW, WALK) do nothing
+        for a mode turned off. The Toggle Mode turned off leaves its button
+        off the pad. Drag a grip to move a mode, or use the arrows. Kept
         for this identity on this device.
       </Explanation>
     </section>

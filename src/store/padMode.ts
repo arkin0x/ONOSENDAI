@@ -352,6 +352,31 @@ export function watchLastRing(): () => void {
  * to settle (buildHeld), nor off your own head (spectating, in history, in
  * hyperspace transit), where there is no head to walk from.
  */
+/**
+ * The keys that go straight to a mode (owner, 2026-11-24: "H = HOP, V = VIEW,
+ * Y = WALK"), beside B (BUILD) and N (SCAN). By event code, so a keyboard
+ * layout's letters do not move them.
+ */
+export const MODE_HOTKEYS: Readonly<Record<string, ModeId>> = { KeyH: 'hop', KeyV: 'view', KeyY: 'walk' }
+
+/**
+ * H, V or Y: straight into that mode. They follow MODES: a mode switched off
+ * in the list the pad follows now (effectiveModes: the default list in the
+ * newcomer view, a tour run and /demo; TV hears no keys at all) does nothing,
+ * unlike B and N, which open their mode by name. In it already: nothing.
+ * WALK goes in the pad's way (enterWalk, which keeps where it came from),
+ * the others through switchMode, so the ring and the toggle slot are moved
+ * no more than B or N moves them: the dim way back is what watchLastRing
+ * kept. True when the pad is in that mode after.
+ */
+export function hotkeyMode(to: ModeId): boolean {
+  if (effectiveModes().off.includes(to)) return false
+  if (currentPadMode() === to) return true
+  if (to === 'walk') enterWalk()
+  else switchMode(to)
+  return currentPadMode() === to
+}
+
 export function enterWalk(opts?: { noFall?: boolean }): void {
   const from = currentPadMode()
   if (from === 'walk') return

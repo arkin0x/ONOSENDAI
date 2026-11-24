@@ -5354,6 +5354,24 @@ select.avatars__input option:checked {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
 }
 
+/* Its key (M), small under the lines, with a mouse only: a phone has no M. */
+.hamburger-key { display: none; }
+@media (hover: hover) and (pointer: fine) {
+  .hamburger-key {
+    display: block;
+    position: absolute;
+    left: 50%;
+    bottom: 3px;
+    transform: translateX(-50%);
+    font-size: 7px;
+    line-height: 1;
+    padding: 1px 3px;
+    color: #fff;
+    opacity: 0.75;
+    pointer-events: none;
+  }
+}
+
 .hamburger-menu:hover {
   background: rgba(6, 14, 22, 0.95);
   transform: scale(1.05);
@@ -13657,6 +13675,22 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
 /* The commit slot's key hints in the newcomer view: SPACE under GO, X under
  * BACK TO ME, as the pad prints its keys (.touchpad__keyhint). */
 .touchops__cancel, .touchops__commit { position: relative; }
+/* A mode's own key in the corner of a button that goes to it (H, Y, V, B, N; its data-key), with a mouse only. */
+@media (hover: hover) and (pointer: fine) {
+  .touchops__cancel[data-key]::after,
+  .touchops__commit[data-key]::after {
+    content: attr(data-key);
+    position: absolute;
+    top: 3px;
+    right: 4px;
+    font-size: 8px;
+    line-height: 1;
+    padding: 1px 3px;
+    color: #fff;
+    opacity: 0.7;
+    pointer-events: none;
+  }
+}
 .touchops__keyhint {
   position: absolute;
   left: 0;
@@ -14083,7 +14117,7 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
 .modes__row.is-view { --mode-color: var(--warn, #ffb020); --mode-rgb: 255, 176, 32; }
 .modes__row.is-build { --mode-color: var(--build, #f2f7ff); --mode-rgb: 242, 247, 255; }
 .modes__row.is-scan { --mode-color: var(--scan, #a98bff); --mode-rgb: var(--scan-rgb, 169, 139, 255); }
-/* The two places with a job of their own: the Default Mode and the Toggle Mode wear a brighter edge. */
+/* The two places with a job of their own: the start and the second button wear a brighter edge. */
 .modes__row.is-start,
 .modes__row.is-second { --cham-line: rgba(var(--mode-rgb), 0.55); }
 .modes__row.is-lifting {

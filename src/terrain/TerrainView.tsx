@@ -69,11 +69,13 @@ function Swatch({ id, size = 22 }: { id: number; size?: number }): JSX.Element {
 /**
  * The chosen block, carried (owner, 2026-11-24: "whatever item you have
  * selected, can we carry a small tilted version of it on the lower right side
- * of the screen?"): a small cube of its own tiles, tilted, drawn in the HUD
- * over the scene (CSS 3D, so it never clips into the world and never blooms),
- * just above the LOOK ball (left of it on a short screen). It sways while a
- * walk is under way and dips when a block is mined or placed. Hidden with an
- * empty slot or none left.
+ * of the screen?", and "the block is meant to be in the bottom right of the
+ * whole screen under all ui elements. make it a little bigger too like we're
+ * holding it"): a cube of its own tiles, tilted as if held in the right
+ * hand, partly off the bottom right corner of the screen, under every
+ * control and the menu, never taking a tap. CSS 3D, so it never clips into
+ * the world and never blooms. It sways while a walk is under way and dips
+ * when a block is mined or placed. Hidden with an empty slot or none left.
  */
 function HeldBlock(): JSX.Element | null {
   const inv = useTerrain((s) => s.inventory)
@@ -231,9 +233,9 @@ function useSurveyTarget(): string | null {
   return target
 }
 
-export function TerrainView(): JSX.Element | null {
+export function TerrainView({ covered = false }: { covered?: boolean }): JSX.Element | null {
   const active = useTerrain((s) => s.active)
-  return active ? <TerrainScreen /> : null
+  return active ? <><HeldBlock /><TerrainScreen covered={covered} /></> : null
 }
 
 /** A press held longer than this is not a tap: it does not mine. */
@@ -434,7 +436,7 @@ export function terrainKeys(on: EventTarget): () => void {
   }
 }
 
-function TerrainScreen(): JSX.Element {
+function TerrainScreen({ covered }: { covered: boolean }): JSX.Element {
   const message = useTerrain((s) => s.message)
   const hint = useTerrain((s) => s.hint)
   const loading = useTerrain((s) => s.loading)
@@ -458,7 +460,7 @@ function TerrainScreen(): JSX.Element {
   useEffect(() => terrainWheel(window), [])
 
   return (
-    <div className="terrainview" role="group" aria-label="TERRAIN: block tools">
+    <div className={`terrainview${covered ? ' is-covered' : ''}`} role="group" aria-label="TERRAIN: block tools" aria-hidden={covered || undefined}>
       <span className="terrain-crosshair" aria-hidden />
 
       {/* What just happened (a refusal, a survey), under the cross, in a slot of its own: up to two lines, nothing moves. */}
@@ -500,7 +502,6 @@ function TerrainScreen(): JSX.Element {
         </span>
       </div>
 
-      <HeldBlock />
       <Hotbar />
       <InventorySheet />
     </div>

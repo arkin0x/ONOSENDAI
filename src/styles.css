@@ -14736,8 +14736,7 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
   .terrainview { --terrain-slot: var(--terrain-row-slot); }
   /* The hotbar 4px under the lifted row, the row's own gap, where the row stood. */
   .terrainview .terrain-hotbar { bottom: calc(var(--walkside-bottom) - var(--terrain-lift) + 4px); }
-  /* Over the carried block, which stands over the LOOK ball. */
-  .terrainview .terrain-hint { bottom: calc(var(--terrain-orb-bottom) + var(--terrain-orb) + 80px); }
+  .terrainview .terrain-hint { bottom: calc(var(--terrain-orb-bottom) + var(--terrain-orb) + 10px); }
 }
 
 /* The chosen hotbar slot, clearly green (owner, 2026-11-24: "can the selected item be more green - the bg doesnt quite
@@ -14746,44 +14745,39 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
 .terrain-slot.is-on::before { background: linear-gradient(rgba(124, 255, 196, 0.36), rgba(124, 255, 196, 0.36)), var(--terrain-fill); }
 .terrain-slot.is-on .terrain-slot__num { color: var(--terrain); opacity: 1; font-weight: 700; }
 
-/* The chosen block, carried (terrain/TerrainView.tsx HeldBlock): a small tilted cube of its tiles just above the LOOK
-   ball, in the HUD, so it never clips into the world and never blooms. Left of the ball on a short screen, where the
-   compass stands above it. */
+/* The chosen block, carried (terrain/TerrainView.tsx HeldBlock): a tilted cube of its tiles, held in the right hand,
+   partly off the bottom right corner of the screen, under every control and the menu. */
 .terrain-held {
-  --held: 52px;
+  /* Under everything: the scene's own markers' layer (.targets, z-index 0), below the menu (.hud, 1) and every control. */
+  /* In the bottom right, partly off the bottom, its right side behind WALK's right column (the commit block covers the
+     very corner), so the hand's block still shows past the controls drawn over it. */
+  --held: 132px;
   position: fixed;
-  right: calc(var(--controls-right) + (var(--terrain-orb) - var(--held)) / 2);
-  bottom: calc(var(--terrain-orb-bottom) + var(--terrain-orb) + 18px);
+  right: calc(var(--controls-right) + 60px);
+  bottom: calc(var(--held) * -0.2);
+  z-index: 0;
   width: var(--held);
   height: var(--held);
-  perspective: 260px;
+  perspective: 320px;
   pointer-events: none;
-  translate: calc(-1 * var(--hud-shift-r)) 0;
-}
-@media (max-height: 520px) {
-  .terrain-held {
-    --held: 44px;
-    right: calc(var(--controls-right) + var(--terrain-orb) + 16px);
-    bottom: calc(var(--terrain-orb-bottom) + (var(--terrain-orb) - var(--held)) / 2);
-  }
 }
 @media (min-width: 1101px) {
-  .terrain-held { --held: 64px; }
+  .terrain-held { --held: 180px; }
 }
 .terrain-held__dip { width: 100%; height: 100%; transform-style: preserve-3d; }
 .terrain-held__dip.is-dipping { animation: terrain-held-dip 220ms ease-out; }
-@keyframes terrain-held-dip { 40% { transform: translateY(8px) rotate(6deg); } }
+@keyframes terrain-held-dip { 40% { transform: translateY(14px) rotate(-8deg); } }
 .terrain-held__cube {
   position: relative;
   width: 100%;
   height: 100%;
   transform-style: preserve-3d;
-  transform: rotateX(-24deg) rotateY(-38deg) rotateZ(-4deg);
+  transform: rotateX(-20deg) rotateY(-36deg) rotateZ(12deg);
 }
 .terrain-held.is-walking .terrain-held__cube { animation: terrain-held-sway 900ms ease-in-out infinite alternate; }
 @keyframes terrain-held-sway {
-  from { transform: translate(-2px, 0) rotateX(-24deg) rotateY(-38deg) rotateZ(-4deg); }
-  to { transform: translate(2px, -3px) rotateX(-22deg) rotateY(-34deg) rotateZ(-2deg); }
+  from { transform: translate(-3px, 0) rotateX(-20deg) rotateY(-36deg) rotateZ(12deg); }
+  to { transform: translate(3px, -5px) rotateX(-18deg) rotateY(-32deg) rotateZ(14deg); }
 }
 @media (prefers-reduced-motion: reduce) {
   .terrain-held.is-walking .terrain-held__cube,
@@ -14803,3 +14797,6 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
 .terrain-held__face--left { transform: rotateY(-90deg) translateZ(calc(var(--held) / 2)); filter: brightness(0.7); }
 .terrain-held__face--top { transform: rotateX(90deg) translateZ(calc(var(--held) / 2)); }
 .terrain-held__face--bottom { transform: rotateX(-90deg) translateZ(calc(var(--held) / 2)); filter: brightness(0.5); }
+
+/* Under the open menu on a phone TERRAIN's controls go, as WALK's pad does (App crowded). */
+.terrainview.is-covered { visibility: hidden; }

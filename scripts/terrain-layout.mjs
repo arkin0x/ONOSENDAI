@@ -33,14 +33,16 @@ const BOXES = {
   jump: '.walkside',
   look: '.orbsquare',
   commit: '.touchops',
-  held: '.terrain-held',
   hint: '.terrain-hint__box',
 }
+/** TERRAIN's own HUD: with the menu open none may stand over its columns (hidden under it on a phone, as WALK's pad is). */
+const TERRAIN = { hotbar: '.terrain-hotbar', survey: '.terrain-act--survey', place: '.terrain-act--place', hint: '.terrain-hint__box', cross: '.terrain-crosshair' }
+// The carried block (.terrain-held) is under everything by design, menu included, so it is not measured.
 
 const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] })
 let bad = 0
 for (const size of SIZES) {
-  for (const menu of size.w >= 1101 ? [false, true] : [false]) {
+  for (const menu of [false, true]) {
     const ctx = await browser.newContext(size.touch ? { viewport: { width: size.w, height: size.h }, isMobile: true, hasTouch: true } : { viewport: { width: size.w, height: size.h } })
     await ctx.route((u) => !/^https?:\/\/(localhost|127\.0\.0\.1)/.test(u.toString()), (r) => r.abort())
     await ctx.routeWebSocket(/.*/, (ws) => { ws.onMessage((raw) => { let m; try { m = JSON.parse(String(raw)) } catch { return } if (m[0] === 'REQ') ws.send(JSON.stringify(['EOSE', m[1]])); else if (m[0] === 'EVENT') ws.send(JSON.stringify(['OK', m[1].id, true, ''])) }) })
@@ -56,14 +58,25 @@ for (const size of SIZES) {
     await page.evaluate(async () => { const m = await import('/src/store/useTerrain.ts'); const inv = m.useTerrain.getState().inventory; m.useTerrain.setState({ inventory: { ...inv, hotbar: [8, ...inv.hotbar.slice(1)], counts: { ...inv.counts, 8: 5 }, slot: 0 } }) })
     await page.waitForTimeout(500)
     if (menu) { await page.evaluate(() => document.querySelector('.hamburger-menu')?.click()); await page.waitForTimeout(1500) }
-    const rects = await page.evaluate((boxes) => Object.fromEntries(Object.entries(boxes).map(([k, sel]) => {
+    const box = (boxes) => Object.fromEntries(Object.entries(boxes).map(([k, sel]) => {
       const e = document.querySelector(sel)
-      if (!e) return [k, null]
+      if (!e || getComputedStyle(e).visibility === 'hidden') return [k, null]
       const r = e.getBoundingClientRect()
       return [k, r.width > 0 && r.height > 0 ? { l: r.left, t: r.top, r: r.right, b: r.bottom } : null]
-    })), BOXES)
+    }))
+    const rects = await page.evaluate(`(${box.toString()})(${JSON.stringify(BOXES)})`)
+    const label0 = `${size.name}${menu ? ', menu open' : ''}`
+    if (menu) {
+      // With the menu open: no TERRAIN control over a column of the menu.
+      const mine = await page.evaluate(`(${box.toString()})(${JSON.stringify(TERRAIN)})`)
+      const cols = await page.evaluate(() => [...document.querySelectorAll('.hud__col')].map((e) => e.getBoundingClientRect()).filter((r) => r.width > 0 && r.height > 0).map((r) => ({ l: r.left, t: r.top, r: r.right, b: r.bottom })))
+      const over = []
+      for (const [k, a] of Object.entries(mine)) for (const b of cols) if (a && a.l < b.r && b.l < a.r && a.t < b.b && b.t < a.b) over.push(k)
+      if (over.length) { bad++; console.log(`${label0}: TERRAIN over the menu: ${[...new Set(over)].join(', ')}`) }
+      else console.log(`${label0}: nothing of TERRAIN's over the menu`)
+    }
     const label = `${size.name}${menu ? ', menu open' : ''}`
-    const missing = ['hotbar', 'place', 'pad', 'menu'].filter((k) => !rects[k])
+    const missing = (menu && size.w < 1101 ? ['menu'] : ['hotbar', 'place', 'pad', 'menu']).filter((k) => !rects[k])
     if (missing.length) { bad++; console.log(`${label}: missing ${missing.join(', ')}`) }
     const keys = Object.keys(rects).filter((k) => rects[k])
     const hits = []

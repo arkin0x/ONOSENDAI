@@ -14306,18 +14306,22 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
   .terrainview { --terrain-orb: 88px; }
 }
 .terrain-tools {
+  /* Just right of WALK's walk pad (owner, 2026-11-24: "just to the right of the forward/right buttons"):
+     PLACE level with FORWARD (the pad's 54px row), SURVEY's slot level with the row under it (38px),
+     the pad's 4px gap between, the pad's own bottom. The right column, which the menu opens over, stays clear. */
   position: fixed;
-  right: calc(var(--controls-right) + var(--terrain-orb) + 8px);
-  bottom: var(--terrain-orb-bottom);
+  left: calc(var(--walkpad-left) + var(--walkside-width) + 8px);
+  bottom: var(--walkside-bottom);
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
   pointer-events: auto;
 }
-.terrain-tools__slot { display: block; height: 34px; }
+.terrain-tools__slot { display: block; height: 38px; }
 .terrain-act {
-  width: 92px;
-  height: 34px;
+  position: relative;
+  width: 86px;
+  height: 38px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -14330,6 +14334,27 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
   touch-action: none;
   cursor: pointer;
 }
+.terrain-act--place { height: 54px; }
+/* SURVEY's hold: a bar fills under the label over the 5 seconds (terrain/surveyHold.ts), and empties when let go. */
+.terrain-act__bar {
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  bottom: 4px;
+  height: 3px;
+  background: rgba(124, 255, 196, 0.18);
+  overflow: hidden;
+}
+.terrain-act__bar::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform-origin: left center;
+  transform: scaleX(0);
+  background: var(--terrain);
+}
+.terrain-act--survey.is-holding .terrain-act__bar::after { animation: terrain-hold 5s linear forwards; }
+@keyframes terrain-hold { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 .terrain-act--survey { --terrain-line: var(--terrain); color: var(--terrain); }
 .terrain-act:active::before { background: rgba(124, 255, 196, 0.22); }
 .terrain-act .terrain-key { margin-left: 2px; }
@@ -14446,6 +14471,7 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
 .modes__row.is-view { --mode-color: var(--warn, #ffb020); --mode-rgb: 255, 176, 32; }
 .modes__row.is-build { --mode-color: var(--build, #f2f7ff); --mode-rgb: 242, 247, 255; }
 .modes__row.is-scan { --mode-color: var(--scan, #a98bff); --mode-rgb: var(--scan-rgb, 169, 139, 255); }
+.modes__row.is-terrain { --mode-color: var(--terrain-mode, #7cffc4); --mode-rgb: var(--terrain-mode-rgb, 124, 255, 196); }
 /* The two places with a job of their own: the start and the second button wear a brighter edge. */
 .modes__row.is-start,
 .modes__row.is-second { --cham-line: rgba(var(--mode-rgb), 0.55); }
@@ -14596,6 +14622,7 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
 .touchops .touchops__cancel.touchops__second.is-view { --second: var(--warn, #ffb020); --second-rgb: 255, 176, 32; }
 .touchops .touchops__cancel.touchops__second.is-build { --second: var(--build, #f2f7ff); --second-rgb: 242, 247, 255; }
 .touchops .touchops__cancel.touchops__second.is-scan { --second: var(--scan, #a98bff); --second-rgb: var(--scan-rgb, 169, 139, 255); }
+.touchops .touchops__cancel.touchops__second.is-terrain { --second: var(--terrain-mode); --second-rgb: var(--terrain-mode-rgb); }
 .touchops .touchops__cancel.touchops__second.is-dim {
   color: var(--second);
   border-color: rgba(var(--second-rgb), 0.42);
@@ -14611,3 +14638,38 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
   .touchops__commit.is-walk,
   .touchops .touchops__cancel.touchops__second { transition: none; }
 }
+
+/* ---------- TERRAIN's colour (owner, 2026-11-24: "Terrain mode needs a color. Make it green like the terrain UI elements") ----------
+ * The mint of TERRAIN's own lines, as HOP is blue, VIEW yellow, WALK red, BUILD white and SCAN purple: the mode
+ * button (dim and lit), the second button, the MODES row and its swatch, and WALK's pad while it walks for TERRAIN. */
+:root {
+  --terrain-mode: #7cffc4;
+  --terrain-mode-rgb: 124, 255, 196;
+}
+.touchops__commit.is-terrain { transition: color 400ms ease, background-color 400ms ease, border-color 400ms ease, box-shadow 400ms ease; }
+@media (prefers-reduced-motion: reduce) { .touchops__commit.is-terrain { transition: none; } }
+.touchops__commit.is-terrain:not(.is-on) { color: var(--terrain-mode); border-color: rgba(var(--terrain-mode-rgb), 0.45); }
+.touchops__commit.is-terrain.is-on {
+  color: #05070d;
+  background: var(--terrain-mode);
+  border-color: var(--terrain-mode);
+  font-weight: 700;
+}
+.touchpad--terrain .touchpad__key:not(:active),
+.app:has(.touchpad--terrain) .walkside .touchpad__key:not(:active),
+.touchops--terrain .touchops__cancel:not(:active) {
+  background-image: linear-gradient(rgba(var(--terrain-mode-rgb), 0.14), rgba(var(--terrain-mode-rgb), 0.14));
+  border-color: rgba(var(--terrain-mode-rgb), 0.42);
+}
+.touchpad--terrain .touchpad__key:active,
+.app:has(.touchpad--terrain) .walkside .touchpad__key:active {
+  background: rgba(var(--terrain-mode-rgb), 0.3);
+  border-color: var(--terrain-mode);
+}
+
+/* TERRAIN's controls move with the HUD while the menu is open on a wide screen (see "The HUD's edges and the open
+   menu"): PLACE and SURVEY with the walk pad they stand beside, the hotbar and the hint with the middle, as the chat does. */
+.terrain-tools { translate: var(--hud-shift-l) 0; }
+.terrain-hotbar,
+.terrain-hint { translate: var(--hud-skew) 0; }
+:root[data-hud-slide] :is(.terrain-tools, .terrain-hotbar, .terrain-hint) { transition: var(--hud-slide); }

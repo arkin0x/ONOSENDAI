@@ -470,7 +470,7 @@ export function TouchControls(): JSX.Element {
 
   return (
     <>
-      <div ref={padRef} className={`touchpad touchpad--mode-${mode}${atHead ? '' : ' touchpad--scale'}${opsUp && chainStatus ? ' is-lifted' : ''}`} role="group" aria-label={walking ? 'Walk' : 'Move cursor and change scale'}>
+      <div ref={padRef} className={`touchpad touchpad--mode-${mode}${terrainOn ? ' touchpad--terrain' : ''}${atHead ? '' : ' touchpad--scale'}${opsUp && chainStatus ? ' is-lifted' : ''}`} role="group" aria-label={walking ? 'Walk' : 'Move cursor and change scale'}>
         {/* The purple cube: the scale key taken to its end, 2^84, in one press.
             It changes the scale and nothing else, so whatever you are looking
             at stays what you are looking at, only seen from the top of the
@@ -550,7 +550,7 @@ export function TouchControls(): JSX.Element {
         </div>
       )}
 
-      {opsUp && <div ref={opsRef} className={`touchops touchops--mode-${mode}${chainStatus ? ' touchops--status' : ''}${plain ? ' touchops--plain' : ''}`}>
+      {opsUp && <div ref={opsRef} className={`touchops touchops--mode-${mode}${terrainOn ? ' touchops--terrain' : ''}${chainStatus ? ' touchops--status' : ''}${plain ? ' touchops--plain' : ''}`}>
         {/* RECALL is RESET while a grown region is up (store/useRegion.ts): it
             returns the region to the size it had when region mode started.
             With the cursor on your avatar the slot is WALK, dim, and lit in

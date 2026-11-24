@@ -21,6 +21,8 @@ import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
 import { Backpack, Box, Radar } from 'lucide-react'
 import { HINT_DONE, headNow, offsetOf, surveyTarget as targetNow, terrainSession, useTerrain } from '../store/useTerrain'
 import { terrainCursor } from '../scene/TerrainLayer'
+import { cancelSurveyHold, startSurveyHold, useSurveyHold } from './surveyHold'
+import { walkLookBy } from '../lib/walkLook'
 import { topEscape } from '../hooks/useEscape'
 import { leaveTerrain } from '../store/padMode'
 import { resetTerrainInput, slotKey, terrainInput } from './terrainInput'
@@ -124,14 +126,14 @@ function InventorySheet(): JSX.Element | null {
               ))}
             </div>
           )}
-        <p className="terrain-sheet__foot">{waiting > 0 ? `${waiting} ${waiting === 1 ? 'change' : 'changes'} kept on this device. Nothing is published yet.` : 'Your changes are kept on this device. Nothing is published yet.'}</p>
+        <p className="terrain-sheet__foot">{waiting > 0 ? `${waiting} ${waiting === 1 ? 'change' : 'changes'} saved on this device. Sharing them with other players comes later.` : 'Your changes are saved on this device. Sharing them with other players comes later.'}</p>
         <dl className="terrain-sheet__keys">
           <div><dt><Key>W A S D</Key></dt><dd>walk</dd></div>
           <div><dt><Key>SPACE</Key></dt><dd>jump</dd></div>
           <div><dt><Key>TAP</Key> <Key>CLICK</Key></dt><dd>mine</dd></div>
-          <div><dt><Key>LONG PRESS</Key> <Key>RIGHT CLICK</Key></dt><dd>place</dd></div>
+          <div><dt><Key>PLACE</Key> <Key>E</Key> <Key>RIGHT CLICK</Key></dt><dd>place</dd></div>
           <div><dt><Key>1 to 9</Key></dt><dd>choose a block</dd></div>
-          <div><dt><Key>G</Key></dt><dd>survey</dd></div>
+          <div><dt><Key>HOLD SURVEY</Key> <Key>HOLD G</Key></dt><dd>survey</dd></div>
           <div><dt><Key>T</Key></dt><dd>leave TERRAIN</dd></div>
         </dl>
       </div>
@@ -173,6 +175,81 @@ function onScene(e: Event): HTMLCanvasElement | null {
 }
 
 /**
+ * The mouse captured for looking (owner, 2026-11-24: "Can we capture the
+ * mouse when we enter terrain mode for proper mouse looking?"): on a desktop
+ * pointer only, never on touch. Entering TERRAIN asks for the lock on the
+ * scene's canvas; Esc frees it (the browser does that); a click on the scene
+ * takes it again; leaving TERRAIN, the bag, or a menu or panel opening frees
+ * it. A refused lock is no harm: the mouse drags to look as in WALK.
+ */
+let lockWanted = false
+/** When the lock last went away, for Esc: the press that freed the mouse does not also leave TERRAIN. */
+let lockLostAt = -Infinity
+let hinted = false
+
+/** Whether this device's pointer is a mouse that can be captured. */
+export function canLockMouse(): boolean {
+  if (typeof window === 'undefined' || typeof document === 'undefined') return false
+  if (!('requestPointerLock' in Element.prototype)) return false
+  return window.matchMedia?.('(pointer: fine) and (hover: hover)').matches === true
+}
+
+/** Whether the mouse is captured by the scene now. */
+export function mouseLocked(): boolean {
+  const el = typeof document !== 'undefined' ? document.pointerLockElement : null
+  return !!el && el.tagName === 'CANVAS'
+}
+
+/** The scene's canvas: the largest that is not a control's own (the compass, the LOOK ball, the workshop, a card's shard). */
+function sceneCanvas(): HTMLCanvasElement | null {
+  let best: HTMLCanvasElement | null = null, area = 0
+  for (const c of Array.from(document.querySelectorAll('canvas'))) {
+    if (c.closest('.compass-3d, .benchorb, .orbsquare, .workshop, .thumbstage, .shardspin, .modal')) continue
+    const r = c.getBoundingClientRect()
+    if (r.width * r.height > area) { area = r.width * r.height; best = c }
+  }
+  return best
+}
+
+function lockMouse(canvas: HTMLCanvasElement | null = sceneCanvas()): void {
+  if (!canvas || mouseLocked()) return
+  try {
+    const asked = canvas.requestPointerLock() as unknown
+    if (asked && typeof (asked as Promise<void>).catch === 'function') (asked as Promise<void>).catch(() => { /* refused: the mouse drags to look */ })
+  } catch { /* refused */ }
+}
+
+/** True when an Esc now is the one that just freed the mouse (TERRAIN stays). */
+export function escFreedMouse(now: number = performance.now()): boolean {
+  return now - lockLostAt < 400
+}
+
+/** Capture the mouse for TERRAIN's visit; returns what lets it go. */
+export function terrainMouseLock(): () => void {
+  if (!canLockMouse()) return () => {}
+  lockWanted = true
+  const change = (): void => {
+    if (mouseLocked()) {
+      if (!hinted) { hinted = true; useTerrain.getState().say('Esc to free the mouse') }
+    } else lockLostAt = performance.now()
+  }
+  document.addEventListener('pointerlockchange', change)
+  document.addEventListener('pointerlockerror', change)
+  lockMouse()
+  // A menu, a panel or the bag opening frees the mouse, so it can use them.
+  const watch = window.setInterval(() => {
+    if (mouseLocked() && (topEscape() !== null || useTerrain.getState().sheet || document.querySelector('[aria-modal="true"]'))) document.exitPointerLock()
+  }, 200)
+  return () => {
+    lockWanted = false
+    window.clearInterval(watch)
+    document.removeEventListener('pointerlockchange', change)
+    document.removeEventListener('pointerlockerror', change)
+    if (mouseLocked()) document.exitPointerLock()
+  }
+}
+
+/**
  * The scene's pointer in TERRAIN, heard on `on` (the window, in capture)
  * alongside WALK's, which still looks on a drag: a tap or a click mines at
  * the point, the mouse's second button places, the mouse resting aims the
@@ -190,12 +267,22 @@ export function terrainPointer(on: EventTarget): () => void {
     const e = ev as PointerEvent
     const c = onScene(e)
     if (!c || useTerrain.getState().sheet) return
+    // The mouse captured (terrainMouseLock): a click mines and a right click places at the cross.
+    if (e.pointerType === 'mouse' && mouseLocked()) {
+      if (e.button === 0) terrainInput.action = { kind: 'mine', at: null }
+      else if (e.button === 2) terrainInput.action = { kind: 'place', at: null }
+      return
+    }
+    // Freed with Esc: a click on the scene captures the mouse again, and does nothing else.
+    if (e.pointerType === 'mouse' && e.button === 0 && lockWanted) { lockMouse(c); return }
     if (e.pointerType === 'mouse' && e.button === 2) { terrainInput.action = { kind: 'place', at: ndc(c, e.clientX, e.clientY) }; return }
     if (e.pointerType === 'mouse' && e.button !== 0) return
     press = { id: e.pointerId, x: e.clientX, y: e.clientY, moved: 0, t: performance.now(), canvas: c }
   }
   const move = (ev: Event): void => {
     const e = ev as PointerEvent
+    // Captured, the mouse looks, as a drag does in WALK, and the cross aims.
+    if (e.pointerType === 'mouse' && mouseLocked()) { walkLookBy(e.movementX ?? 0, e.movementY ?? 0); terrainInput.hover = null; return }
     const c = onScene(e)
     if (e.pointerType === 'mouse') terrainInput.hover = c ? ndc(c, e.clientX, e.clientY) : null
     if (!press || press.id !== e.pointerId) return
@@ -225,6 +312,56 @@ export function terrainPointer(on: EventTarget): () => void {
   }
 }
 
+/** Survey the chunk SURVEY offers now (the one you stand in, else the one ahead), or say there is none. */
+export function surveyNow(): void {
+  const key = surveyTarget()
+  if (key) void useTerrain.getState().survey(key)
+  else useTerrain.getState().say('Everything here is surveyed.')
+}
+
+/** Start the 5 second hold that surveys when it completes (surveyHold.ts). */
+export function holdSurvey(): void {
+  startSurveyHold(surveyNow)
+}
+
+/**
+ * TERRAIN's own keys, heard on `on` (the window, in capture) ahead of the rest:
+ * the tools, T and Esc; G is a hold (surveyHold.ts), its repeats ignored and its
+ * release before the end a cancel. Returns what stops them.
+ */
+export function terrainKeys(on: EventTarget): () => void {
+  const down = (ev: Event): void => {
+    const e = ev as KeyboardEvent
+    if (e.metaKey || e.ctrlKey || e.altKey) return
+    const target = e.target as HTMLElement | null
+    if (target?.closest?.('input, textarea, [contenteditable="true"]')) return
+    const st = useTerrain.getState()
+    const take = (): void => { e.preventDefault(); e.stopImmediatePropagation() }
+    if (e.code === 'Escape') { if (mouseLocked() || escFreedMouse()) { take(); return } if (st.sheet) { take(); st.setSheet(false) } else if (topEscape() === null && !document.querySelector('[aria-modal="true"]')) { take(); leaveTerrain() } return }
+    if (e.code === 'KeyT') { take(); if (!e.repeat) leaveTerrain(); return }
+    if (e.code === 'KeyI') { take(); if (!e.repeat) st.setSheet(!st.sheet); return }
+    if (st.sheet) return
+    const slot = slotKey(e.code)
+    if (slot !== null) { take(); st.selectSlot(slot); return }
+    if (e.code === 'KeyG') { take(); if (!e.repeat) holdSurvey(); return }
+    if (e.code === 'KeyQ') { take(); if (!e.repeat) terrainInput.action = { kind: 'mine', at: null }; return }
+    if (e.code === 'KeyE') { take(); if (!e.repeat) terrainInput.action = { kind: 'place', at: null } }
+  }
+  // G held: letting it up before the bar fills cancels the survey.
+  const up = (ev: Event): void => { if ((ev as KeyboardEvent).code === 'KeyG') cancelSurveyHold() }
+  const blur = (): void => cancelSurveyHold()
+  on.addEventListener('keydown', down, true)
+  on.addEventListener('keyup', up, true)
+  const win = typeof window !== 'undefined' ? window : null
+  win?.addEventListener('blur', blur)
+  return () => {
+    on.removeEventListener('keydown', down, true)
+    on.removeEventListener('keyup', up, true)
+    win?.removeEventListener('blur', blur)
+    cancelSurveyHold()
+  }
+}
+
 function TerrainScreen(): JSX.Element {
   const message = useTerrain((s) => s.message)
   const hint = useTerrain((s) => s.hint)
@@ -238,36 +375,14 @@ function TerrainScreen(): JSX.Element {
   // A fresh cursor at every visit.
   useEffect(() => { resetTerrainInput() }, [])
 
-  const doSurvey = (): void => {
-    const key = surveyTarget()
-    if (key) void useTerrain.getState().survey(key)
-    else useTerrain.getState().say('Everything here is surveyed.')
-  }
+  const holding = useSurveyHold((s) => s.since !== null)
 
   // TERRAIN's own keys, ahead of the rest (capture): the tools, T and Esc. WALK's keys go on to WALK (hooks/useKeyboard.ts).
-  useEffect(() => {
-    const down = (e: KeyboardEvent): void => {
-      if (e.metaKey || e.ctrlKey || e.altKey) return
-      const target = e.target as HTMLElement | null
-      if (target?.closest?.('input, textarea, [contenteditable="true"]')) return
-      const st = useTerrain.getState()
-      const take = (): void => { e.preventDefault(); e.stopImmediatePropagation() }
-      if (e.code === 'Escape') { if (st.sheet) { take(); st.setSheet(false) } else if (topEscape() === null && !document.querySelector('[aria-modal="true"]')) { take(); leaveTerrain() } return }
-      if (e.code === 'KeyT') { take(); if (!e.repeat) leaveTerrain(); return }
-      if (e.code === 'KeyI') { take(); if (!e.repeat) st.setSheet(!st.sheet); return }
-      if (st.sheet) return
-      const slot = slotKey(e.code)
-      if (slot !== null) { take(); st.selectSlot(slot); return }
-      if (e.code === 'KeyG') { take(); if (!e.repeat) doSurvey(); return }
-      if (e.code === 'KeyQ') { take(); if (!e.repeat) terrainInput.action = { kind: 'mine', at: null }; return }
-      if (e.code === 'KeyE') { take(); if (!e.repeat) terrainInput.action = { kind: 'place', at: null } }
-    }
-    window.addEventListener('keydown', down, true)
-    return () => window.removeEventListener('keydown', down, true)
-  }, [])
+  useEffect(() => terrainKeys(window), [])
 
-  // The scene's pointer, heard alongside WALK's (which still looks on a drag).
+  // The scene's pointer, heard alongside WALK's (which still looks on a drag), and the mouse captured on a desktop.
   useEffect(() => terrainPointer(window), [])
+  useEffect(() => terrainMouseLock(), [])
 
   return (
     <div className="terrainview" role="group" aria-label="TERRAIN: block tools">
@@ -283,16 +398,33 @@ function TerrainScreen(): JSX.Element {
         )}
       </div>
 
-      {/* PLACE, and SURVEY while one is offered: a column beside WALK's LOOK ball, in WALK's layout. Mining is a tap on the scene. */}
+      {/* PLACE beside FORWARD, and SURVEY (a hold) beside the row under it, while one is offered: just right of WALK's
+          walk pad (owner, 2026-11-24), clear of the right column the menu opens over. Mining is a tap on the scene. */}
       <div className="terrain-tools" aria-label="Place and survey">
+        <button className="terrain-act terrain-act--place" {...noCallout} onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); terrainInput.action = { kind: 'place', at: null } }} title="Place the chosen block on the face at the cross (E, or right click)" aria-label="Place (E)"><Box size={15} strokeWidth={2.25} aria-hidden />PLACE<Key>E</Key></button>
         <span className="terrain-tools__slot">
-          {(target || surveying) && (
-            <button className="terrain-act terrain-act--survey" disabled={surveying} {...noCallout} onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); if (!surveying) doSurvey() }} title="Fill this chunk with the ground everyone computes the same (G)" aria-label="Survey (G)">
-              <Radar size={15} strokeWidth={2.25} aria-hidden />{surveying ? '...' : 'SURVEY'}<Key>G</Key>
+          {(target || surveying || holding) && (
+            <button
+              className={`terrain-act terrain-act--survey${holding ? ' is-holding' : ''}`}
+              disabled={surveying}
+              {...noCallout}
+              onPointerDown={(e) => {
+                e.preventDefault(); e.stopPropagation()
+                // Let go of the implicit capture, so a finger sliding off the button leaves it and cancels.
+                try { e.currentTarget.releasePointerCapture(e.pointerId) } catch { /* not captured */ }
+                if (!surveying) holdSurvey()
+              }}
+              onPointerUp={cancelSurveyHold}
+              onPointerLeave={cancelSurveyHold}
+              onPointerCancel={cancelSurveyHold}
+              title="Hold to fill this chunk with the ground everyone computes the same (hold G)"
+              aria-label="Hold to survey (hold G)"
+            >
+              <Radar size={15} strokeWidth={2.25} aria-hidden />{surveying ? '...' : holding ? 'Surveying' : 'SURVEY'}<Key>G</Key>
+              <span className="terrain-act__bar" aria-hidden />
             </button>
           )}
         </span>
-        <button className="terrain-act" {...noCallout} onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); terrainInput.action = { kind: 'place', at: null } }} title="Place the chosen block on the face at the cross (E, or right click)" aria-label="Place (E)"><Box size={15} strokeWidth={2.25} aria-hidden />PLACE<Key>E</Key></button>
       </div>
 
       <Hotbar />

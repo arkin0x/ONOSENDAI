@@ -46,7 +46,8 @@ import { terrainInput } from '../terrain/terrainInput'
 import { makeTerrainMaterial } from '../terrain/terrainMaterial'
 import { NO_BLOOM_BLEND } from './shardFaces'
 import { alignedOrigin } from '../store/useCyberspace'
-import type { ViewAxes } from '../lib/space'
+import type { Position, ViewAxes } from '../lib/space'
+import { committedAnchor, committedScale } from '../lib/renderFrame'
 
 /** Chunks meshing at once. */
 const MESH_IN_FLIGHT = 2
@@ -63,10 +64,15 @@ export const terrainCursor: { hit: RayHit | null } = { hit: null }
  * against the anchor's aligned origin (lib/space.ts cellOffset), through the
  * view's axes. `shift` moves the frame's origin by whole gibsons first (a
  * chunk's corner).
+ *
+ * Against the anchor the scene was last committed with (lib/renderFrame.ts),
+ * as the camera and every shard are: the store's anchor moves when a step
+ * settles, a commit before the scene does, and blocks placed against it
+ * jumped for a frame at every settle while the rest of the world stayed
+ * (owner, 2026-11-24: "the whole world of blocks just shifted for a frame or two").
  */
-export function fieldMatrix(s: TerrainSession, axes: ViewAxes, scaleExp: number, out: Matrix4, shift: readonly [number, number, number] = [0, 0, 0]): Matrix4 {
-  const cs = useCyberspace.getState()
-  const origin = alignedOrigin(cs.anchor, scaleExp)
+export function fieldMatrix(s: Pick<TerrainSession, 'world'>, axes: ViewAxes, scaleExp: number, out: Matrix4, shift: readonly [number, number, number] = [0, 0, 0]): Matrix4 {
+  const origin = alignedOrigin(drawnAnchor(), scaleExp)
   const k = 1 / 2 ** scaleExp
   const cols = [new Vector3(), new Vector3(), new Vector3()]
   const t = [0, 0, 0]
@@ -80,6 +86,16 @@ export function fieldMatrix(s: TerrainSession, axes: ViewAxes, scaleExp: number,
   out.makeBasis(cols[0], cols[1], cols[2])
   out.setPosition(t[0], t[1], t[2])
   return out
+}
+
+/** The anchor the scene on screen is drawn against: the committed one, the store's before the first commit. */
+export function drawnAnchor(): Position {
+  return committedAnchor() ?? useCyberspace.getState().anchor
+}
+
+/** The zoom the scene on screen is drawn at, likewise. */
+export function drawnScale(): number {
+  return committedScale() ?? useCyberspace.getState().scaleExp
 }
 
 /** The borders a chunk's mesh reads from its neighbours (mesh.ts Borders). */
@@ -119,13 +135,14 @@ function Chunks({ axes }: { axes: ViewAxes }): JSX.Element {
       seen.current = -1
       placedFor.current = ''
     }
-    const show = !!s && s.plane === cs.plane && cs.scaleExp <= MAX_SCALE
+    const zoom = drawnScale()
+    const show = !!s && s.plane === cs.plane && zoom <= MAX_SCALE
     g.visible = show
     if (!s || !show) return
-    made.setView(2 ** -cs.scaleExp, useLayers.getState().glow)
-    // Placed again when the anchor, the zoom or the axes change.
-    const a = cs.anchor
-    const place = `${a.x},${a.y},${a.z}|${cs.scaleExp}|${axes.right.axis}${axes.right.dir}${axes.up.axis}${axes.up.dir}${axes.out.axis}${axes.out.dir}`
+    made.setView(2 ** -zoom, useLayers.getState().glow)
+    // Placed again when the drawn anchor, the zoom or the axes change.
+    const a = drawnAnchor()
+    const place = `${a.x},${a.y},${a.z}|${zoom}|${axes.right.axis}${axes.right.dir}${axes.up.axis}${axes.up.dir}${axes.out.axis}${axes.out.dir}`
     const replace = place !== placedFor.current
     placedFor.current = place
     // Chunks let go: their meshes go.
@@ -134,7 +151,7 @@ function Chunks({ axes }: { axes: ViewAxes }): JSX.Element {
       for (const m of ms) { g.remove(m); m.geometry.dispose() }
       meshes.current.delete(slot)
     }
-    if (replace) for (const [slot, ms] of meshes.current) for (const m of ms) { fieldMatrix(s, axes, cs.scaleExp, m.matrix, [32 * slot.off[0], 32 * slot.off[1], 32 * slot.off[2]]); m.matrixWorldNeedsUpdate = true }
+    if (replace) for (const [slot, ms] of meshes.current) for (const m of ms) { fieldMatrix(s, axes, zoom, m.matrix, [32 * slot.off[0], 32 * slot.off[1], 32 * slot.off[2]]); m.matrixWorldNeedsUpdate = true }
     if (s.version === seen.current && inFlight.current.size === 0) return
     seen.current = s.version
     for (const slot of s.world.slots) {
@@ -163,7 +180,7 @@ function Chunks({ axes }: { axes: ViewAxes }): JSX.Element {
           const mesh = new Mesh(geo, material)
           mesh.matrixAutoUpdate = false
           mesh.renderOrder = order
-          fieldMatrix(s, axes, useCyberspace.getState().scaleExp, mesh.matrix, [32 * slot.off[0], 32 * slot.off[1], 32 * slot.off[2]])
+          fieldMatrix(s, axes, drawnScale(), mesh.matrix, [32 * slot.off[0], 32 * slot.off[1], 32 * slot.off[2]])
           mesh.name = `terrain-chunk-${slot.key}${order ? '-clear' : ''}`
           g.add(mesh)
           made2.push(mesh)
@@ -208,7 +225,7 @@ function Marks({ axes }: { axes: ViewAxes }): JSX.Element {
     const on = !!s && st.active && s.plane === cs.plane
     f.visible = on
     if (!s || !on) { terrainCursor.hit = null; return }
-    fieldMatrix(s, axes, cs.scaleExp, f.matrix)
+    fieldMatrix(s, axes, drawnScale(), f.matrix)
     f.matrixWorldNeedsUpdate = true
     // The cross, the mouse or a tap, cast into the blocks: in the field's frame, where a cell d is centred on d + 0.5.
     inverse.copy(f.matrix).invert()

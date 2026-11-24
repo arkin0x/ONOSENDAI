@@ -155,3 +155,56 @@ describe('the update check', () => {
     expect(notice()).toBeNull()
   })
 })
+
+describe('the last check, kept on the device (the owner, 2026-11-24: MY AGENTS empty for minutes)', () => {
+  /** Relays that never answer, and a device that kept `kept`. */
+  function silent(kept: unknown, keep = vi.fn()): CheckDeps {
+    return { releasePubkey: RELEASE, ask: () => new Promise(() => undefined), openDb: openDbOnce, nowS: () => now, readKept: async () => kept, keep }
+  }
+
+  it('stands for the first check at once, with its notice, while the relays are still asked', async () => {
+    const seen = { latest: { id: 'd'.repeat(64), created_at: 1, version: '0.3.0', minSafe: '0.2.0', security: true }, minSafe: '0.2.0', security: '0.3.0' }
+    void checkAgentUpdates(ME, [AGENT], silent({ releasePubkey: RELEASE, seen, versions: { [AGENT]: { version: '0.1.0', at: now - 50 } } }))
+    await vi.waitFor(() => { expect(useAgentUpdatesState.getState().checked).toBe(true) })
+    expect(notice()).toMatchObject({ level: 'must', latest: '0.3.0', running: '0.1.0' })
+  })
+
+  it('not when it does not know every agent on the list', async () => {
+    const seen = { latest: null, minSafe: null, security: null }
+    const readKept = vi.fn(async () => ({ releasePubkey: RELEASE, seen, versions: {} }))
+    void checkAgentUpdates(ME, [AGENT], { ...silent(null), readKept })
+    await vi.waitFor(() => { expect(readKept).toHaveBeenCalled() })
+    await new Promise((r) => setTimeout(r, 30))
+    expect(useAgentUpdatesState.getState()).toMatchObject({ me: ME, checked: false })
+  })
+
+  it('not when it was kept under another release key', async () => {
+    const seen = { latest: null, minSafe: null, security: null }
+    const readKept = vi.fn(async () => ({ releasePubkey: 'f'.repeat(64), seen, versions: { [AGENT]: null } }))
+    void checkAgentUpdates(ME, [AGENT], { ...silent(null), readKept })
+    await vi.waitFor(() => { expect(readKept).toHaveBeenCalled() })
+    await new Promise((r) => setTimeout(r, 30))
+    expect(useAgentUpdatesState.getState()).toMatchObject({ me: ME, checked: false })
+  })
+
+  it('a notice dismissed with I\'VE UPDATED stays hidden while the kept check stands in', async () => {
+    const seen = { latest: { id: 'd'.repeat(64), created_at: 1, version: '0.3.0', minSafe: '0.2.0', security: true }, minSafe: '0.2.0', security: '0.3.0' }
+    const versions = { [AGENT]: { version: '0.1.0', at: now - 50 } }
+    // A first check shows the notice, and I'VE UPDATED is kept in IndexedDB.
+    void checkAgentUpdates(ME, [AGENT], silent({ releasePubkey: RELEASE, seen, versions }))
+    await vi.waitFor(() => { expect(notice()).not.toBeNull() })
+    await dismissAgentUpdate(ME, AGENT, silent(null))
+    expect(notice()).toBeNull()
+    // The next visit: a fresh state, the kept check stands in, and the dismissal with it.
+    useAgentUpdatesState.setState({ me: '', checked: false, seen: { latest: null, minSafe: null, security: null }, versions: {}, dismissed: {} })
+    void checkAgentUpdates(ME, [AGENT], silent({ releasePubkey: RELEASE, seen, versions }))
+    await vi.waitFor(() => { expect(useAgentUpdatesState.getState().checked).toBe(true) })
+    expect(notice()).toBeNull()
+  })
+
+  it('a finished check is kept for next time, per identity', async () => {
+    const keep = vi.fn()
+    await checkAgentUpdates(ME, [AGENT], { ...relays([release('0.3.0', '0.2.0')], [hop('0.1.0', now - 50)]), readKept: async () => undefined, keep })
+    expect(keep).toHaveBeenCalledWith(ME, expect.objectContaining({ releasePubkey: RELEASE, versions: { [AGENT]: { version: '0.1.0', at: now - 50 } } }))
+  })
+})

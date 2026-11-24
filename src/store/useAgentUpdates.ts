@@ -17,7 +17,11 @@
  * version; then the notice is back, saying the version it is still on.
  *
  * The panel draws MY AGENTS once the first check for this identity is done,
- * so a notice never pushes the rows down after they are on screen.
+ * so a notice never pushes the rows down after they are on screen. The last
+ * check's answer is kept on the device per identity (lib/deviceCache,
+ * IndexedDB) and counts as that first check while the relays are asked
+ * again, when it covers every agent on the list: the rows of a known agent,
+ * and its notice, are drawn at once on every visit (the owner, 2026-11-24).
  */
 
 import { useEffect } from 'react'
@@ -31,6 +35,7 @@ import {
 } from '../lib/mcpUpdates'
 import { openAgentUpdateDb, putDismissal, putSeenMarks, readDismissals, readSeenMarks } from '../lib/agentUpdateDb'
 import { askEach, relaySet } from '../lib/relay'
+import { readCached, writeCachedSoon } from '../lib/deviceCache'
 
 /** A short wait: the releases and the agents' newest events are a handful of events. */
 const WAIT_MS = 4000
@@ -57,6 +62,23 @@ export interface CheckDeps {
   ask: (relays: string[], filter: Filter, onEvent: (ev: NostrEvent) => void) => Promise<unknown>
   openDb: () => Promise<IDBDatabase>
   nowS: () => number
+  /** The last check's answer kept on the device for this identity, and keeping the new one. Left out (as by the tests), nothing is kept. */
+  readKept?: (me: string) => Promise<unknown>
+  keep?: (me: string, kept: KeptCheck) => void
+}
+
+/** A check's answer as the device keeps it, per identity: what was seen, under which release key, and each agent's version. */
+export interface KeptCheck { releasePubkey: string; seen: Seen; versions: Record<string, AgentVersion | null> }
+
+/** Where the last check for this identity is kept (lib/deviceCache). */
+export const agentUpdatesCacheKey = (me: string): string => `agentUpdates:${me}`
+
+/** The kept check, when it is one for this release key and knows every agent of `agents`; else null. */
+export function keptCheckFor(value: unknown, releasePubkey: string, agents: string[]): KeptCheck | null {
+  const k = value as Partial<KeptCheck> | null | undefined
+  if (!k || k.releasePubkey !== releasePubkey || !k.seen || typeof k.versions !== 'object' || k.versions === null) return null
+  if (!agents.every((a) => Object.prototype.hasOwnProperty.call(k.versions, a))) return null
+  return k as KeptCheck
 }
 
 /** The app's: built once, so the one database connection below is opened once. */
@@ -65,6 +87,8 @@ const DEFAULT_DEPS: CheckDeps = {
   ask: (relays, filter, onEvent) => askEach(relays, filter, onEvent, { maxWait: WAIT_MS, skipDead: true }),
   openDb: () => openAgentUpdateDb(),
   nowS: () => Math.floor(Date.now() / 1000),
+  readKept: (me) => readCached(agentUpdatesCacheKey(me)),
+  keep: (me, kept) => writeCachedSoon(agentUpdatesCacheKey(me), kept),
 }
 
 /** One connection per openDb (the app has one); a failed open is null, and the notices live in memory for the session. */
@@ -83,12 +107,32 @@ function database(deps: CheckDeps): Promise<IDBDatabase | null> {
 
 /** Bumped on every check, so an answer that arrives after a newer check is dropped. */
 let asking = 0
+/**
+ * The seen marks a kept check put on screen: only a stand-in, never the base
+ * a check folds into, so a latest release is raised only by what this session
+ * saw (a withdrawn release does not stay the newest on this device forever).
+ */
+let primedSeen: Seen | null = null
 
 /** Check the releases and these agents' versions for `me`. Resolves when the state is set. */
 export async function checkAgentUpdates(me: string, agents: string[], deps: CheckDeps = DEFAULT_DEPS): Promise<void> {
   const mine = ++asking
   const prior = useAgentUpdatesState.getState()
   if (prior.me !== me) useAgentUpdatesState.setState({ me, checked: false, seen: NOTHING_SEEN, versions: {}, dismissed: {} })
+  // The last check kept on the device stands for the first one while the relays are asked.
+  if (deps.readKept && HEX.test(me) && !useAgentUpdatesState.getState().checked) {
+    // With the I'VE UPDATED dismissals, so a dismissed notice does not come back for a moment.
+    const dismissals = database(deps).then((store) => (store ? readDismissals(store, me) : {})).catch(() => ({}))
+    void Promise.all([deps.readKept(me), dismissals]).then(([value, dismissed]) => {
+      const kept = keptCheckFor(value, deps.releasePubkey, agents)
+      const now = useAgentUpdatesState.getState()
+      if (!kept || mine !== asking || now.me !== me || now.checked) return
+      const versions: Record<string, AgentVersion | null> = {}
+      for (const a of agents) versions[a] = kept.versions[a] ?? null
+      primedSeen = kept.seen
+      useAgentUpdatesState.setState({ checked: true, seen: kept.seen, versions, dismissed: { ...dismissed, ...now.dismissed } })
+    }, () => undefined)
+  }
   try {
     await check(me, agents, deps, mine)
   } finally {
@@ -103,7 +147,7 @@ async function check(me: string, agents: string[], deps: CheckDeps, mine: number
   const heard: Record<string, NostrEvent[]> = {}
   const cyberspace = relaySet()
   const agentRelays = [...new Set([...cyberspace, ...GENERAL_RELAYS])]
-  // IndexedDB opens while the relays are asked, never before them.
+  // IndexedDB opens while the relays are asked (only the kept check's stand-in, above, may open it first).
   const opening = database(deps)
   const keptMarks = opening.then((store) => (store ? readSeenMarks(store, me, deps.releasePubkey) : null)).catch(() => null)
     .then((m) => m ?? { minSafe: null, security: null })
@@ -120,7 +164,7 @@ async function check(me: string, agents: string[], deps: CheckDeps, mine: number
   const nowS = deps.nowS()
   const now = useAgentUpdatesState.getState()
   // What this identity saw before (this session and stored) is never lowered.
-  const base: Seen = now.me === me ? now.seen : NOTHING_SEEN
+  const base: Seen = now.me === me && now.seen !== primedSeen ? now.seen : NOTHING_SEEN
   const folded = foldReleases(base, releases, deps.releasePubkey, nowS)
   const seen: Seen = {
     latest: folded.latest,
@@ -132,6 +176,7 @@ async function check(me: string, agents: string[], deps: CheckDeps, mine: number
   }
   const versions: Record<string, AgentVersion | null> = {}
   for (const a of Object.keys(heard)) versions[a] = agentVersionOf(heard[a], a, nowS)
+  deps.keep?.(me, { releasePubkey: deps.releasePubkey, seen, versions })
   useAgentUpdatesState.setState({
     me, checked: true, seen, versions,
     // A dismissal made while this check ran stays.

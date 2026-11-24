@@ -6,7 +6,9 @@
  * - The line itself: its words, the absolute link, a new tab, no em dash.
  * - Mounted at each pay point that has no test of its own to carry it: the
  *   Offload Estimate's PAY, the invoice, the compute top-up's GET INVOICE
- *   and the HOSAKA offer card. RIDE VIA HOSAKA (hyperspaceRideChoice), the
+ *   and the HOSAKA offer card; and AUTO, once, under its budget in the Cloud
+ *   compute panel (the offer card's own line already sits beside its AUTO
+ *   and budget). RIDE VIA HOSAKA (hyperspaceRideChoice), the
  *   HOSAKA scan (scanMode), the deploy bar's ask (deployBarIdle) and SEAL A
  *   CHEST's ask (chestItemChoice) are checked beside their own tests.
  * No network: the relay is a mock and HOSAKA is never asked.
@@ -49,6 +51,7 @@ import { renderToString } from 'react-dom/server'
 import { mount, textOf, type Host, type Mounted } from '../../test/elementRoot'
 import { useCyberspace } from '../../store/useCyberspace'
 import { useOffer } from '../../store/useOffer'
+import { useCalibration } from '../../lib/calibration'
 import { PAY_TERMS_URL, PayTerms } from '../ui/PayTerms'
 import { CloudApproval, InvoiceModal } from '../InvoiceModal'
 import { CloudPanel } from '../CloudPanel'
@@ -73,6 +76,7 @@ function expectOneLine(m: Mounted): void {
   expect(String(found[0].link?.props.rel)).toContain('noopener')
 }
 
+const LIMITS = { max_hop_height: 30, max_sidestep_height: 31, hop_min_msats: 1000, deposit_min_msats: 1000, deposit_max_msats: 10_000_000, invoice_ttl_seconds: 600, hop_proof_version: 2 }
 const INVOICE = { depositId: 'd1', paymentHash: 'ab'.repeat(32), amountMsats: 21_000, bolt11: 'lnbc210n1test', expiresAt: Math.floor(Date.now() / 1000) + 600 }
 const QUOTE = { costMsats: 21_000, maxHeight: 24, action: 'hop', estTime: '~2 min' }
 
@@ -128,22 +132,51 @@ describe('at each pay point', () => {
     await m.unmount()
   })
 
+  it('AUTO: once, under the budget, where the player agrees to spending without being asked; not in ASK or OFF', async () => {
+    // HOSAKA's caps already known, so switching modes asks HOSAKA nothing.
+    useCyberspace.setState({ cloud: { ...C().cloud, limits: LIMITS }, cloudPrefs: { ...C().cloudPrefs, mode: 'ask' } })
+    const m = await mount(<CloudPanel />)
+    expect(terms(m)).toHaveLength(0)
+    await m.press(/^AUTO$/)
+    expect(C().cloudPrefs.mode).toBe('auto')
+    expect(m.all().some((h) => h.props['aria-label'] === 'Auto-approve budget in sats')).toBe(true)
+    expectOneLine(m)
+    expect(m.all().find((h) => String(h.props.className).includes('payterms'))?.props.className).toContain('cloud__budget-terms')
+    await m.press(/^OFF$/)
+    expect(terms(m)).toHaveLength(0)
+    await m.unmount()
+  })
+
   it('the HOSAKA offer card: under its buttons', async () => {
     // A boundary at 2^25 on the way: past this machine's default sidestep, so the move has a verdict.
     const far = { x: 1n << 25n, y: 0n, z: 0n }
     useCyberspace.setState({ position: { x: 0n, y: 0n, z: 0n }, cursor: far, plane: 0, exploreIndex: null, spectate: null, focus: null, transit: null, cloudPrefs: { ...C().cloudPrefs, mode: 'ask' } })
     useOffer.setState({ requestedFor: null, dismissedFor: null })
     // HOSAKA's caps are never fetched: the card asks for them through this.
-    useCyberspace.setState({ resumeCloudJob: async () => undefined })
+    useCyberspace.setState({ resumeCloudJob: async () => undefined, cloud: { ...C().cloud, limits: LIMITS } })
     const m = await mount(<HosakaOffer />)
     await act(async () => { useOffer.getState().request(`${far.x}:${far.y}:${far.z}:0`) })
     expect(m.says('NOT NOW')).toBe(true)
     expectOneLine(m)
+    // AUTO and its budget are on this card: its one line covers them, never a second.
+    await act(async () => { useCyberspace.setState({ cloudPrefs: { ...C().cloudPrefs, mode: 'auto' } }) })
+    expect(m.all().some((h) => h.props['aria-label'] === 'Auto-pay budget in sats')).toBe(true)
+    expectOneLine(m)
+    // A move no one computes: nothing to buy here, but AUTO's switch and budget still are, so AUTO keeps the line and ASK does not.
+    const beyond = { x: 1n << 40n, y: 0n, z: 0n } // a 2^41 wall, past HOSAKA's 2^31 sidestep
+    // This machine's benchmark as a modest one, so nothing but HOSAKA could cross it, and HOSAKA cannot.
+    const bench = useCalibration.getState()
+    await act(async () => { useCalibration.setState({ hopHeight: 17, sidestepHeight: 24 }); useCyberspace.setState({ cursor: beyond }); useOffer.getState().request(`${beyond.x}:${beyond.y}:${beyond.z}:0`) })
+    expect(m.says('IMPOSSIBLE')).toBe(true)
+    expectOneLine(m)
+    await act(async () => { useCyberspace.setState({ cloudPrefs: { ...C().cloudPrefs, mode: 'ask' } }) })
+    expect(terms(m)).toHaveLength(0)
     // With the cloud off nothing can be paid from the card, so no line.
     await act(async () => { useCyberspace.setState({ cloudPrefs: { ...C().cloudPrefs, mode: 'off' } }) })
     expect(m.says('CLOUD IS OFF')).toBe(true)
     expect(terms(m)).toHaveLength(0)
     await m.unmount()
+    useCalibration.setState({ hopHeight: bench.hopHeight, sidestepHeight: bench.sidestepHeight })
     useOffer.setState({ requestedFor: null, dismissedFor: null })
   })
 })

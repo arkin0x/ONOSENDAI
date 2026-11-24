@@ -145,23 +145,29 @@ export function CloudPanel(): JSX.Element {
         ))}
       </div>
 
+      {/* AUTO is the consent to spend without being asked, so its terms are
+          here, once, with the budget (coordinator ruling, 2026-11-23), not on
+          each button that later spends from the balance. */}
       {prefs.mode === 'auto' && (
-        <label className="cloud__budget">
-          <span className="login__label">Auto-approve up to (sats, 0 asks every time)</span>
-          <input
-            className="avatars__input login__input"
-            type="number"
-            min={0}
-            step={1}
-            inputMode="numeric"
-            value={prefs.autoMaxSats}
-            onChange={(e) => {
-              const n = Math.floor(Number(e.target.value))
-              if (Number.isFinite(n) && n >= 0) store().setCloudPrefs({ autoMaxSats: n })
-            }}
-            aria-label="Auto-approve budget in sats"
-          />
-        </label>
+        <>
+          <label className="cloud__budget">
+            <span className="login__label">Auto-approve up to (sats, 0 asks every time)</span>
+            <input
+              className="avatars__input login__input"
+              type="number"
+              min={0}
+              step={1}
+              inputMode="numeric"
+              value={prefs.autoMaxSats}
+              onChange={(e) => {
+                const n = Math.floor(Number(e.target.value))
+                if (Number.isFinite(n) && n >= 0) store().setCloudPrefs({ autoMaxSats: n })
+              }}
+              aria-label="Auto-approve budget in sats"
+            />
+          </label>
+          <PayTerms className="cloud__budget-terms" />
+        </>
       )}
 
       <hr className="cloud__rule" />

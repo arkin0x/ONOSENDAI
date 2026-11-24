@@ -133,8 +133,10 @@ export function HosakaOffer({ hidden = false }: { hidden?: boolean }): JSX.Eleme
           </button>
         </div>
         )}
-        {/* Wherever this card can lead to paying HOSAKA: not for a move no one computes, nor with the cloud off. */}
-        {verdict.tier !== 'impossible' && prefs.mode !== 'off' && <PayTerms />}
+        {/* Wherever this card can lead to paying HOSAKA: not for a move no one
+            computes, nor with the cloud off; and always in AUTO, whose switch
+            and budget are on this card and spend later without asking. */}
+        {prefs.mode !== 'off' && (verdict.tier !== 'impossible' || prefs.mode === 'auto') && <PayTerms />}
         <p className="offer__note">HOSAKA necessarily learns the cantor roots of the moves it computes. Every result is verified locally before you sign it.</p>
       </div>
     </aside>

@@ -14,8 +14,9 @@
  * has MUTE ALL at its top right. A track muted here plays on silent, so it
  * still raises this pill and stays listed, dimmed; its switch is kept on this
  * device by its lineage id (store/useSoundMutes), so it is still muted when
- * you come back to it. MUTE ALL is over hidden audio only, never TV (RULED
- * 2026-11-03), and leaves each track's own switch as it was. TV's row
+ * you come back to it. MUTE ALL is over hidden audio and the game's sound
+ * effects (lib/sfx.ts), never TV (RULED 2026-11-03), and leaves each track's
+ * own switch as it was. TV's row
  * speaker is TV's own mute, as a tap on the row is.
  *
  * TAP FOR SOUND stands in the same place while the browser holds sound back

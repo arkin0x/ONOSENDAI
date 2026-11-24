@@ -567,8 +567,9 @@ const MODE_ROWS: Record<'hop' | 'view' | 'walk' | 'build' | 'scan', { title: str
       ['X', 'recall the build cursor to your avatar'],
       ['B', 'leave build mode'],
       ['N', 'scan mode, where the build cursor is'],
+      ['T', 'TERRAIN: mine and place blocks near your avatar'],
     ],
-    hint: 'BUILD places things at a build cursor and never moves you. The movement keys and zoom move that cursor; , and . change the step it places at; Space places. X, or RECALL on the pad, brings the build cursor home and BUILD stays; B leaves.',
+    hint: 'BUILD places things at a build cursor and never moves you. The movement keys and zoom move that cursor; , and . change the step it places at; Space places. X, or RECALL on the pad, brings the build cursor home and BUILD stays; B leaves. T opens TERRAIN, where you walk, mine and place blocks near your avatar; T or Esc comes back.',
   },
   scan: {
     title: 'Controls · SCAN',

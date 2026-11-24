@@ -38,6 +38,7 @@ import { canFly, useViewFly } from '../lib/viewFly'
 import { useRegion } from '../store/useRegion'
 import { buildToScan, leaveWalk, scanToHop, viewToAvatar } from '../store/padMode'
 import { scanBuying, scanSpace, useScan } from '../store/useScan'
+import { enterTerrain, useTerrain } from '../store/useTerrain'
 
 // Cyberspace TV is watching only: WALK's input is closed while it is on (store/walkInput.ts).
 addWalkInputCloser(() => useTv.getState().on)
@@ -183,6 +184,8 @@ export function useKeyboard(): void {
       // line's mention list) says so with preventDefault, and keeps it.
       // In a game nothing of cyberspace's is on screen, so Escape closes none of it out of sight.
       if (useGame.getState().session) return
+      // TERRAIN answers its own keys, Escape among them (terrain/TerrainView.tsx).
+      if (useTerrain.getState().active) return
       if (escapeKey(event)) return
       // A key that needs its password (hud/KeyLock.tsx): no key moves or
       // commits behind the gate, to be signed all at once when it opens.
@@ -240,6 +243,13 @@ export function useKeyboard(): void {
       if (event.code === 'KeyB') {
         event.preventDefault()
         useBuilder.getState().toggle()
+        return
+      }
+
+      // T: TERRAIN, from BUILD (store/useTerrain.ts enterTerrain), a tool of build mode.
+      if (event.code === 'KeyT' && building) {
+        event.preventDefault()
+        if (!event.repeat) enterTerrain()
         return
       }
 

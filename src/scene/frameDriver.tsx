@@ -25,6 +25,7 @@ import { useOpenCeremony } from '../store/useOpenCeremony'
 import { useShards } from '../store/useShards'
 import { useTv } from '../store/useTv'
 import { useGame } from '../store/useGame'
+import { useTerrain } from '../store/useTerrain'
 import { useWorkshop } from '../store/useWorkshop'
 import { flyDir, useViewFly } from '../lib/viewFly'
 
@@ -61,7 +62,9 @@ export function FrameDriver(): null {
   // A game on screen (game/GameView.tsx) covers it the same way, with a canvas of its own.
   const benchOpen = useWorkshop((s) => s.open)
   const playing = useGame((s) => s.session !== null)
-  const covered = benchOpen || playing
+  // TERRAIN (terrain/TerrainView.tsx) is the same: full screen, a canvas of its own.
+  const building = useTerrain((s) => s.active)
+  const covered = benchOpen || playing || building
   // Across a pause: the time the scene has seen.
   const elapsed = useRef(0)
   useEffect(() => {

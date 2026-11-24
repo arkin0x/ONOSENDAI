@@ -8,9 +8,10 @@
  * a canvas under the .hud, the two columns of panels over it, and a real
  * wheel from the mouse. The canvas counts the wheels and presses it hears,
  * as OrbitControls' zoom and the scene's taps would. Three layouts: beside
- * the scene on a desktop (each column scrolls itself), a narrow desktop
- * window (the columns stack and the .hud scrolls), and a phone with the menu
- * open (.hud--menu). Nothing is fetched: the page is set from a string.
+ * the scene on a desktop (each column scrolls itself), a window exactly
+ * 1100px wide (the stylesheet stacks the columns and the .hud scrolls, while
+ * useIsMobile, below 1100, still calls it a desktop and gives no .hud--menu),
+ * and a phone with the menu open (.hud--menu). Nothing is fetched: the page is set from a string.
  *
  * Skipped, saying so, where Playwright's Chromium is not installed (set
  * PLAYWRIGHT_BROWSERS_PATH to where it is).
@@ -47,7 +48,7 @@ function page(menu: boolean): string {
 
 const LAYOUTS = [
   { name: 'beside the scene on a desktop', viewport: { width: 1600, height: 900 }, menu: false, scroller: 'left', scene: true },
-  { name: 'stacked in a narrow desktop window', viewport: { width: 1000, height: 800 }, menu: false, scroller: 'hud', scene: false },
+  { name: 'stacked on a desktop exactly 1100px wide', viewport: { width: 1100, height: 800 }, menu: false, scroller: 'hud', scene: false },
   { name: 'open on a phone', viewport: { width: 390, height: 844 }, menu: true, scroller: 'hud', scene: false },
 ] as const
 

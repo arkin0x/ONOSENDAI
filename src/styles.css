@@ -5261,9 +5261,9 @@ select.avatars__input option:checked {
  * While the mobile menu is open the HUD is the scroll container, so it has to
  * receive events across its whole area: .hud is pointer-events: none by
  * default and only .panel opts back in, which left the gaps between panels
- * unable to scroll. Scoped to the open menu rather than the 900px media query,
- * because useIsMobile switches at 768px and a blanket rule would make the HUD
- * swallow grid clicks on desktop windows between the two widths.
+ * unable to scroll. Scoped to the open menu rather than the narrow media
+ * query, so a desktop's .hud never covers the scene: a desktop's menu column
+ * takes the pointer itself (.hud__col), and only as far as its panels reach.
  */
 .hud--menu {
   pointer-events: auto;

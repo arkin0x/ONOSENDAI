@@ -7,6 +7,8 @@
  *     moves or edits it;
  *   - MUTE ALL, over every hidden audio track, which leaves each track's own
  *     switch as it was: unmuting it gives back the tracks muted one by one.
+ *     It silences the game's sound effects too, WALK's bounce among them
+ *     (lib/sfx.ts, 2026-11-24).
  * Neither touches Cyberspace TV's music (RULED 2026-11-03), which keeps its
  * own mute (store/useTvMusic).
  *

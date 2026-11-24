@@ -979,7 +979,7 @@ function padLaunch(at: Position, rose: boolean, items: WallItem[]): void {
   if (fall) {
     fall.launch = { ...at }
     // The bounce's sound (lib/sfx.ts): the default bounce until DECK-0003 SFX.
-    sfx.play('bounce', bounceStrength(h))
+    sfx.play('bounce', bounceStrength(Math.min(h, Number(rise))))
   }
 }
 
@@ -1123,7 +1123,7 @@ function bounceOff(f: Fall, now: number): boolean {
   syncFall(f)
   walkFall.offset = Math.min(arcHeight(v0, Math.max(0, (now - t0) / 1000)), f.topN) - f.base
   // The bounce's sound (lib/sfx.ts): the default bounce until DECK-0003 SFX.
-  sfx.play('bounce', bounceStrength(h))
+  sfx.play('bounce', bounceStrength(Math.min(h, Number(rise))))
   // In place the cursor is already here: a bounce in place touches no store.
   if (!samePosition(useCyberspace.getState().cursor, final)) useCyberspace.setState({ cursor: { ...final } })
   if (hops.length > 0) {

@@ -6,9 +6,9 @@
  * `bounce` each time your walker is launched off a pad, and never when it
  * is not: one at a landing's bounce, one more each bounce after, one at a
  * step up onto a pad and a walk onto a springboard, step WALK and fluid walk
- * alike, on the tutorial's own trampoline as sealed in the course, and none
- * when Down absorbs it or on a plain floor. On TV's broadcast the bounce
- * still happens and sounds nothing. The audio context is a recording fake.
+ * alike, on the tutorial's own trampoline from its own piece, and none
+ * when Down absorbs it or on a plain floor. Under MUTE ALL and on TV's
+ * broadcast the bounce still happens and sounds nothing. The audio context is a recording fake.
  */
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
 
@@ -71,6 +71,7 @@ import { useCalibration } from '../../lib/calibration'
 import { withConstrain, type Constrain } from '../../lib/walkConstrain'
 import { bounceOf } from '../../lib/walkBounce'
 import { resetSfx, sfx } from '../../lib/sfx'
+import { useSoundMutes } from '../useSoundMutes'
 import { setBroadcastForTest } from '../../lib/tv/broadcast'
 import { walkFacing } from '../../lib/walkEye'
 import { canonicalQuaternion, type Position, type ViewAxes } from '../../lib/space'
@@ -236,6 +237,22 @@ describe('a landing on a pad', () => {
     useWalk.getState().press('up')
     for (let t = 0; t < 3000; t += 16) frame(16)
     expect(plays).not.toHaveBeenCalled()
+  })
+
+  it('under MUTE ALL the bounce still happens, and nothing sounds', () => {
+    useSoundMutes.setState({ master: true })
+    try {
+      world(start, [bouncy(boxes('Pad', 'all', [FLOOR]), 8), [0, -1, 0]])
+      walk(true)
+      useWalk.getState().press('up')
+      untilBounce()
+      expect(fallState()!.v0).toBeGreaterThan(JUMP_SPEED)
+      expect(plays).toHaveBeenCalledTimes(1)
+      expect(sounded()).toBe(0)
+      expect(audio.oscillators).toBe(0)
+    } finally {
+      useSoundMutes.setState({ master: false })
+    }
   })
 
   it('on TV\'s broadcast the bounce still happens, and nothing sounds', () => {

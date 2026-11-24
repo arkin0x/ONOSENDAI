@@ -86,11 +86,14 @@ export const DEFAULT_BOUNCE: SfxVoice = (ac, t0, strength) => {
   const wobble = ac.createOscillator()
   wobble.type = 'sine'
   wobble.frequency.setValueAtTime(18, t0)
-  const depth = ac.createGain()
-  depth.gain.setValueAtTime(f0 * 0.15, t0)
-  depth.gain.exponentialRampToValueAtTime(1, end)
-  wobble.connect(depth)
+  wobble.start(t0)
+  wobble.stop(end + 0.02)
   for (const [mul, type, level] of [[1, 'triangle', 1], [2, 'sine', 0.2]] as const) {
+    // The wobble's depth in Hz, scaled with the note, so the octave bends with the tone it shines over.
+    const depth = ac.createGain()
+    depth.gain.setValueAtTime(f0 * mul * 0.15, t0)
+    depth.gain.exponentialRampToValueAtTime(mul, end)
+    wobble.connect(depth)
     const osc = ac.createOscillator()
     osc.type = type
     osc.frequency.setValueAtTime(f0 * mul, t0)
@@ -107,8 +110,6 @@ export const DEFAULT_BOUNCE: SfxVoice = (ac, t0, strength) => {
     osc.start(t0)
     osc.stop(end + 0.02)
   }
-  wobble.start(t0)
-  wobble.stop(end + 0.02)
 }
 
 /** Each sound's voice. Bounce: the shim above, until DECK-0003 gives shards sounds. */

@@ -26,13 +26,23 @@
  * shaders compiled again, and BUILD unmounted it at every hide and every move,
  * a new context each time (2026-11-18, memory over a long session of kit
  * imports and BUILD: 63 contexts made in 15 minutes for one compass).
+ *
+ * The black sun rides on it (arkinox, 2026-11-24: "Can we add the black sun to
+ * the 3d compass? that would help"). The sun is the direction +Z_cs and has no
+ * place (scene/BlackSun.tsx), so the bearing to it is the same from anywhere:
+ * it is drawn on the Z arrow, a dark disc in a violet ring that the arrowhead
+ * points into. Turned away from you, it lies past the centre of the ball, and
+ * is drawn dimmed through whatever is in front of it rather than hidden. The
+ * workshop leaves it off: the bench is a shard's own frame, which a placed
+ * shard can be turned out of, so a sun there would say something false.
  */
 
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Quaternion, Vector3 } from 'three'
+import { Quaternion, Vector3, type Group, type MeshBasicMaterial } from 'three'
 import { useCyberspace } from '../store/useCyberspace'
 import { cameraPose } from '../lib/cameraPose'
+import { BLACK_SUN } from '../lib/palette'
 import type { AxisName, ViewAxes } from '../lib/space'
 
 interface LabelPosition {
@@ -49,6 +59,27 @@ const ARROW_THICKNESS = 0.08
 const CONE_RADIUS = ARROW_THICKNESS * 2
 const CONE_HEIGHT = 0.3
 const LABEL_OFFSET = 0.2
+
+/**
+ * The black sun on the Z arrow, in the compass's units.
+ *
+ * Centred a little short of the arrowhead so the ring goes round it: the cone
+ * runs 1.05 to 1.35 and the ring 0.8 to 1.4, so the arrow points into the
+ * sun. The disc and its rings stand SUN_BACK behind that point, away from the
+ * eye, so the arrowhead is drawn over the dark disc rather than under it.
+ * The Z label moves out past the halo to make room.
+ */
+const SUN_AT = 1.1
+const SUN_BACK = 0.3
+const SUN_DISC = 0.24
+const SUN_RING: [number, number] = [0.24, 0.3]
+const SUN_HALO: [number, number] = [0.3, 0.4]
+const SUN_Z_LABEL = 1.58
+/** Opacities [disc, ring, halo]: facing you, and turned away past the centre. */
+const SUN_NEAR = [0.85, 1, 0.34] as const
+const SUN_FAR = [0.6, 0.85, 0.24] as const
+/** The disc's colour: the unlit space a black sun is. */
+const SUN_DARK = '#06030c'
 
 /** Local-frame direction that a cyberspace axis currently points along. */
 function localDir(axes: ViewAxes, axis: AxisName): Vector3 {
@@ -81,6 +112,80 @@ function Arrow({ dir, color }: { dir: Vector3; color: string }): JSX.Element {
 }
 
 type Dirs = Record<'x' | 'y' | 'z', Vector3>
+
+const INVERSE = new Quaternion()
+
+/**
+ * Where the black sun lies as the compass camera sees it: `sunDir` (the +Z
+ * arrow's direction) turned into the camera's own frame and written to `out`.
+ * +x is screen right, +y screen up, +z out of the screen toward you; so a sun
+ * ahead of you, the way the canonical view faces, comes out at -z. No
+ * allocation: it is called on every frame the compass draws.
+ */
+export function sunInView(sunDir: Vector3, pose: Quaternion, out: Vector3): Vector3 {
+  INVERSE.copy(pose).invert()
+  return out.copy(sunDir).applyQuaternion(INVERSE)
+}
+
+/**
+ * How near the sun's side of the ball is, 0 to 1: 1 when it points out of the
+ * screen at you, 0 when it points into it, past the centre. Eased over a band
+ * either side of edge-on so the dimming never pops as you orbit.
+ */
+export function sunNearness(inView: Vector3): number {
+  const t = Math.min(1, Math.max(0, (inView.z + 0.25) / 0.5))
+  return t * t * (3 - 2 * t)
+}
+
+export type SunBearing = 'ahead' | 'behind' | 'left' | 'right' | 'up' | 'down'
+
+/** The plain word for where the sun is from where you look: its largest component. */
+export function sunBearing(inView: Vector3): SunBearing {
+  const ax = Math.abs(inView.x), ay = Math.abs(inView.y), az = Math.abs(inView.z)
+  if (az >= ax && az >= ay) return inView.z < 0 ? 'ahead' : 'behind'
+  if (ax >= ay) return inView.x < 0 ? 'left' : 'right'
+  return inView.y < 0 ? 'down' : 'up'
+}
+
+/** What a screen reader hears for each bearing. */
+export const SUN_WORDS: Record<SunBearing, string> = {
+  ahead: 'Black sun ahead',
+  behind: 'Black sun behind you',
+  left: 'Black sun to your left',
+  right: 'Black sun to your right',
+  up: 'Black sun above',
+  down: 'Black sun below',
+}
+
+const SUN_SEEN = new Vector3()
+
+/** One part's opacity (0 disc, 1 ring, 2 halo) at a nearness from sunNearness. */
+const sunOpacity = (part: 0 | 1 | 2, near: number): number => SUN_FAR[part] + (SUN_NEAR[part] - SUN_FAR[part]) * near
+
+/** The sun's meshes, written to on the frames the compass draws. */
+export interface SunParts {
+  group: Group | null
+  disc: MeshBasicMaterial | null
+  ring: MeshBasicMaterial | null
+  halo: MeshBasicMaterial | null
+}
+
+/**
+ * Turns the sun to face the compass camera and dims it by how far round the
+ * ball it is. Turned away, the rings draw through what is in front of them,
+ * so the sun is never lost behind the centre; the disc stays depth tested,
+ * so the centre still reads as in front of it. Returns the bearing.
+ */
+export function placeSun(parts: SunParts, sunDir: Vector3, pose: Quaternion): SunBearing {
+  const seen = sunInView(sunDir, pose, SUN_SEEN)
+  const near = sunNearness(seen)
+  if (parts.group) parts.group.quaternion.copy(pose)
+  const front = seen.z >= 0
+  if (parts.disc) parts.disc.opacity = sunOpacity(0, near)
+  if (parts.ring) { parts.ring.opacity = sunOpacity(1, near); parts.ring.depthTest = front }
+  if (parts.halo) { parts.halo.opacity = sunOpacity(2, near); parts.halo.depthTest = front }
+  return sunBearing(seen)
+}
 
 /** What the compass's last frame was drawn from. */
 export interface Drawn {
@@ -132,7 +237,7 @@ export function compassStep(drawn: Drawn, pose: Quaternion, dirs: Dirs, width: n
   return 'draw'
 }
 
-function CompassScene({ onLabelsUpdate, pose, given }: { onLabelsUpdate: (labels: LabelPosition[]) => void; pose: Quaternion; given?: Dirs }): JSX.Element {
+function CompassScene({ onLabelsUpdate, onSun, pose, given, sun }: { onLabelsUpdate: (labels: LabelPosition[]) => void; onSun: (bearing: SunBearing) => void; pose: Quaternion; given?: Dirs; sun: boolean }): JSX.Element {
   const view = useCyberspace((s) => s.view)
   const axes = useMemo(() => useCyberspace.getState().axes(), [view])
   const camera = useThree((s) => s.camera)
@@ -146,6 +251,9 @@ function CompassScene({ onLabelsUpdate, pose, given }: { onLabelsUpdate: (labels
   }, [axes, given])
 
   const drawn = useRef(nothingDrawn())
+  const sunParts = useRef<SunParts>({ group: null, disc: null, ring: null, halo: null })
+  // The sun stands on the Z arrow, so it moves with the axes.
+  const sunAt = useMemo(() => dirs.z.clone().multiplyScalar(SUN_AT), [dirs])
   // A restored context starts blank: draw again.
   useEffect(() => {
     const canvas = gl.domElement
@@ -164,10 +272,11 @@ function CompassScene({ onLabelsUpdate, pose, given }: { onLabelsUpdate: (labels
     if (step === 'draw') {
       camera.quaternion.copy(pose)
       camera.position.copy(new Vector3(0, 0, CAMERA_DISTANCE).applyQuaternion(pose))
+      if (sun) onSun(placeSun(sunParts.current, dirs.z, pose))
     }
 
     const labels: LabelPosition[] = (['x', 'y', 'z'] as const).map((axis) => {
-      const world = dirs[axis].clone().multiplyScalar(ARROW_LENGTH + LABEL_OFFSET)
+      const world = dirs[axis].clone().multiplyScalar(sun && axis === 'z' ? SUN_Z_LABEL : ARROW_LENGTH + LABEL_OFFSET)
       const projected = world.project(camera)
       return {
         axis,
@@ -190,6 +299,25 @@ function CompassScene({ onLabelsUpdate, pose, given }: { onLabelsUpdate: (labels
         <sphereGeometry args={[0.12, 16, 16]} />
         <meshStandardMaterial color="#ffffff" emissive="#ffffff" emissiveIntensity={0.2} />
       </mesh>
+      {sun && (
+        <group position={sunAt} ref={(g) => { sunParts.current.group = g }}>
+          {/* Unlit and untone-mapped, so the violet is the scene sun's own. Front faces only: turned to the camera on every drawn frame, they are never seen from behind. */}
+          <group position={[0, 0, -SUN_BACK]}>
+            <mesh renderOrder={1}>
+              <circleGeometry args={[SUN_DISC, 32]} />
+              <meshBasicMaterial ref={(m) => { sunParts.current.disc = m }} color={SUN_DARK} transparent opacity={SUN_NEAR[0]} depthWrite={false} toneMapped={false} />
+            </mesh>
+            <mesh renderOrder={2}>
+              <ringGeometry args={[SUN_HALO[0], SUN_HALO[1], 48]} />
+              <meshBasicMaterial ref={(m) => { sunParts.current.halo = m }} color={BLACK_SUN} transparent opacity={SUN_NEAR[2]} depthWrite={false} toneMapped={false} />
+            </mesh>
+            <mesh renderOrder={3}>
+              <ringGeometry args={[SUN_RING[0], SUN_RING[1], 48]} />
+              <meshBasicMaterial ref={(m) => { sunParts.current.ring = m }} color={BLACK_SUN} transparent opacity={SUN_NEAR[1]} depthWrite={false} toneMapped={false} />
+            </mesh>
+          </group>
+        </group>
+      )}
     </group>
   )
 }
@@ -197,9 +325,11 @@ function CompassScene({ onLabelsUpdate, pose, given }: { onLabelsUpdate: (labels
 /**
  * By default the main camera's pose and the cyberspace axes. The workshop
  * passes the bench camera's pose and its own axis directions, and `bench`
- * takes the compass out of its fixed spot so the corner can hold it.
+ * takes the compass out of its fixed spot so the corner can hold it. `sun`
+ * draws the black sun on the Z arrow: on by default, which is every mode that
+ * shows the cyberspace axes, and off on the bench, where Z is not +Z_cs.
  */
-export function Compass3D({ onTap, pose = cameraPose, dirs, bench = false, hidden = false }: { onTap?: () => void; pose?: Quaternion; dirs?: Dirs; bench?: boolean; hidden?: boolean } = {}): JSX.Element {
+export function Compass3D({ onTap, pose = cameraPose, dirs, bench = false, hidden = false, sun = !bench }: { onTap?: () => void; pose?: Quaternion; dirs?: Dirs; bench?: boolean; hidden?: boolean; sun?: boolean } = {}): JSX.Element {
   // The labels follow the arrows every frame the camera turns, so they are
   // moved by hand rather than through state: as state, every frame of an
   // orbit re-rendered this component and, through its Canvas, the whole
@@ -211,6 +341,17 @@ export function Compass3D({ onTap, pose = cameraPose, dirs, bench = false, hidde
   const placed = useRef<LabelPosition[]>([])
   const spans = useRef<Partial<Record<LabelPosition['axis'], HTMLSpanElement | null>>>({})
   const [shown, setShown] = useState(false)
+  // Where the sun is, in words, for the button's label. State, but set only
+  // when the word changes, which is a turn of 45 degrees or so: an orbit
+  // neither re-renders the compass every frame nor chatters at a screen reader.
+  const sunSaid = useRef<SunBearing | null>(null)
+  const [sunWord, setSunWord] = useState<SunBearing | null>(null)
+  const handleSun = useCallback((bearing: SunBearing): void => {
+    if (sunSaid.current === bearing) return
+    sunSaid.current = bearing
+    setSunWord(bearing)
+  }, [])
+  const viewLabel = sun && sunWord ? `View controls. ${SUN_WORDS[sunWord]}.` : 'View controls'
 
   /** Puts one label where the arrows last were, if its span is there. */
   const place = useCallback((axis: LabelPosition['axis']): void => {
@@ -254,7 +395,7 @@ export function Compass3D({ onTap, pose = cameraPose, dirs, bench = false, hidde
       className={`compass-3d${onTap ? ' compass-3d--tappable' : ''}${bench ? ' compass-3d--bench' : ''}${hidden ? ' compass-3d--hidden' : ''}`}
       onPointerDown={onTap && !hidden ? (e) => { e.preventDefault(); e.stopPropagation(); onTap() } : undefined}
       role={onTap && !hidden ? 'button' : undefined}
-      aria-label={onTap && !hidden ? 'View controls' : undefined}
+      aria-label={onTap && !hidden ? viewLabel : undefined}
       aria-hidden={hidden || undefined}
     >
       <Canvas
@@ -265,7 +406,7 @@ export function Compass3D({ onTap, pose = cameraPose, dirs, bench = false, hidde
       >
         <ambientLight intensity={0.6} />
         <pointLight position={[5, 5, 5]} intensity={0.8} />
-        <CompassScene onLabelsUpdate={handleLabelsUpdate} pose={pose} given={dirs} />
+        <CompassScene onLabelsUpdate={handleLabelsUpdate} onSun={handleSun} pose={pose} given={dirs} sun={sun} />
       </Canvas>
       {shown && AXES.map((axis) => (
         <span key={axis} ref={attach[axis]} className={`compass-label compass-label--${axis}`}>

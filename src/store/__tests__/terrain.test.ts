@@ -25,6 +25,7 @@ vi.mock('../../lib/relay', () => ({
   relaySet: () => ['wss://relay.test'],
 }))
 
+import { Quaternion, Vector3 } from 'three'
 import { useCyberspace } from '../useCyberspace'
 import { useBuilder } from '../useBuilder'
 import { OUT_OF_REACH, enterTerrain, setTerrainSession, terrainSession, useTerrain } from '../useTerrain'
@@ -160,6 +161,24 @@ describe('mining and placing', () => {
     s.body.y = 1000
     expect(T().place({ cell: s.world.toView(-5, 5, 5), normal: s.world.toView(1, 0, 0) as [number, number, number], distance: 1 })).toBe(false)
     expect(T().message).toBe(OUT_OF_REACH)
+  })
+})
+
+describe('which way is up', () => {
+  it('in a view turned on its side, TERRAIN still stands on cyberspace +Y, so the body falls along -Y', async () => {
+    const before = useCyberspace.getState().view
+    useCyberspace.setState({ view: new Quaternion().setFromAxisAngle(new Vector3(0, 0, 1), Math.PI / 2) })
+    try {
+      expect(useCyberspace.getState().axes().up.axis).not.toBe('y')
+      await T().enter()
+      const s = terrainSession!
+      expect(s.world.axes.up).toEqual({ axis: 'y', dir: 1 })
+      // The view's +Y (up on screen) is cyberspace +Y.
+      expect(s.world.toView(0, 1, 0).map((v) => v + 0)).toEqual([0, 1, 0])
+    } finally {
+      await T().exit()
+      useCyberspace.setState({ view: before })
+    }
   })
 })
 

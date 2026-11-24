@@ -11,9 +11,9 @@
  *   hop and a two-block wall is a wall;
  * - the eye EYE_HEIGHT over the feet, about 1.4 blocks, and the body
  *   BODY_HEIGHT tall, so a two-block doorway fits;
- * - gravity along the builder's down, which is the compass's (lib/walkDown.ts);
- *   here that is the scene's -Y, since the TERRAIN view is built with the
- *   compass's up as its Y.
+ * - gravity along cyberspace -Y, the scene's -Y, matching the ground's tops
+ *   (ruled 2026-11-24: blocks live on the axis-aligned grid; WALK keeps the
+ *   compass's down).
  *
  * Works in the TERRAIN view's frame: Y up, a block at integer cell (i, j, k)
  * spanning [i - 0.5, i + 0.5] on each axis, the feet at the bottom middle of

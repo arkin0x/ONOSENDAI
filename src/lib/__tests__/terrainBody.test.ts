@@ -9,6 +9,9 @@
 import { describe, expect, it } from 'vitest'
 import { BODY_HEIGHT, JUMP_HEIGHT, WALK_SPEED, RUN_SPEED, liftFree, newBody, overlaps, stepBody, type BodyWorld } from '../terrain/body'
 import { raycast } from '../terrain/raycast'
+import { terrainAxes } from '../terrain/world'
+import { viewAxes } from '../space'
+import { Quaternion, Vector3 } from 'three'
 
 /** A floor of blocks at j = 0, and whatever else is listed. */
 function world(extra: Array<[number, number, number]> = [], opts: { gravity?: boolean; wall?: BodyWorld['wall'] } = {}): BodyWorld {
@@ -144,5 +147,32 @@ describe('the block cursor\'s ray', () => {
   it('reaches no further than it is told', () => {
     expect(raycast([0, 1.4, 0], [1, 0, 0], 2, solid)).toBeNull()
     expect(raycast([0, 1.4, 0], [0, 1, 0], 5, solid)).toBeNull()
+  })
+})
+
+describe('which way is up in TERRAIN (ruled 2026-11-24: cyberspace +Y, the ground\'s up)', () => {
+  const turn = (axis: Vector3, angle: number): Quaternion => new Quaternion().setFromAxisAngle(axis, angle)
+  const Y = new Vector3(0, 1, 0), X = new Vector3(1, 0, 0), Z = new Vector3(0, 0, 1)
+
+  it('a view turned only left or right is kept as it is', () => {
+    for (let k = 0; k < 4; k++) {
+      const v = viewAxes(turn(Y, (k * Math.PI) / 2))
+      expect(v.up).toEqual({ axis: 'y', dir: 1 })
+      expect(terrainAxes(v)).toEqual(v)
+    }
+  })
+
+  it('a view turned so up is not +Y becomes upright, keeping a level heading, and is a real view', () => {
+    const upright = [0, 1, 2, 3].map((k) => JSON.stringify(viewAxes(turn(Y, (k * Math.PI) / 2))))
+    for (const q of [turn(Z, Math.PI / 2), turn(Z, -Math.PI / 2), turn(X, Math.PI / 2), turn(X, -Math.PI / 2), turn(Z, Math.PI), turn(X, Math.PI)]) {
+      const v = viewAxes(q)
+      const t = terrainAxes(v)
+      expect(t.up).toEqual({ axis: 'y', dir: 1 })
+      // One of the four upright views, so nothing is drawn mirrored.
+      expect(upright).toContain(JSON.stringify(t))
+      // The heading kept: the view's right where it was level, else its out.
+      if (v.right.axis !== 'y') expect(t.right).toEqual(v.right)
+      else expect(t.out).toEqual(v.out)
+    }
   })
 })

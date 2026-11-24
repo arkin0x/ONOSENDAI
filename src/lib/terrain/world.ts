@@ -3,8 +3,10 @@
  * chunk your chain's head is in, and the rules for changing them.
  *
  * The frame. The view is built when TERRAIN opens: its origin is the corner
- * of the head's chunk, and its axes are the compass's as they were (Y is the
- * compass's up, so gravity is -Y, lib/walkDown.ts). Inside, everything is a
+ * of the head's chunk, and its Y is always cyberspace +Y, the ground's up
+ * (terrainAxes: ruled 2026-11-24, gravity in TERRAIN is cyberspace -Y, the
+ * compass rule staying WALK's), turned about Y to keep the heading the view
+ * had. Inside, everything is a
  * small integer: a cell is named by its offset from the origin in cyberspace
  * axes (cs offsets, -32 to 63 on each axis), and drawn at the view cell its
  * axes turn it to. Your chain does not move while you build (decision D7),
@@ -25,7 +27,7 @@
 
 import { CHUNK_BITS, CELLS, chunkInSpace, chunkKey, idx, type ChunkBase } from './coords'
 import { EMPTY } from './blocks'
-import type { ViewAxes, AxisName } from '../space'
+import type { AxisDirection, ViewAxes, AxisName } from '../space'
 
 /** Blocks of reach past the head chunk's walls, on each axis. */
 export const REACH = 16
@@ -37,6 +39,29 @@ const SIDE = 2 * RING + 1
 /** The box's extent in cs offsets: [LO, HI). */
 export const LO = -32 * RING
 export const HI = 32 * (RING + 1)
+
+/** The four views with cyberspace +Y up, as [right, out]: the default view turned about Y by quarter turns. */
+const UPRIGHT: ReadonlyArray<readonly [AxisDirection, AxisDirection]> = [
+  [{ axis: 'x', dir: 1 }, { axis: 'z', dir: -1 }],
+  [{ axis: 'z', dir: 1 }, { axis: 'x', dir: 1 }],
+  [{ axis: 'x', dir: -1 }, { axis: 'z', dir: 1 }],
+  [{ axis: 'z', dir: -1 }, { axis: 'x', dir: -1 }],
+]
+
+/**
+ * TERRAIN's frame for a view: up is always cyberspace +Y, the ground's up
+ * (ruled 2026-11-24), and the heading is the view's as near as it can be: the
+ * view's right where that is level, else its out. In the default view, and
+ * any view turned only left or right, it is the view itself.
+ */
+export function terrainAxes(view: ViewAxes): ViewAxes {
+  const same = (a: AxisDirection, b: AxisDirection): boolean => a.axis === b.axis && a.dir === b.dir
+  const pick = view.right.axis !== 'y'
+    ? UPRIGHT.find(([r]) => same(r, view.right))
+    : UPRIGHT.find(([, o]) => same(o, view.out))
+  const [right, out] = pick ?? UPRIGHT[0]
+  return { right, up: { axis: 'y', dir: 1 }, out }
+}
 
 /**
  * DECK-0009 §6.2: the Chebyshev distance in gibsons from a chain coordinate

@@ -32,7 +32,7 @@ import { useShards } from './useShards'
 import { BRIEF_TOAST_MS, useToast } from './useToast'
 import { warmWalls, wallItemsAt, stepLimit } from './walkWalls'
 import { chunkOf, chunkKey, type ChunkBase } from '../lib/terrain/coords'
-import { TerrainWorld, REACH, type Change } from '../lib/terrain/world'
+import { TerrainWorld, REACH, terrainAxes, type Change } from '../lib/terrain/world'
 import { applyLayer, encodeLayer, isLayer, type Layer } from '../lib/terrain/layer'
 import { generateChunk, releaseBlocksWorker } from '../lib/terrain/blocksClient'
 import { EMPTY, blockKind, blockName, kindId } from '../lib/terrain/blocks'
@@ -259,7 +259,8 @@ export const useTerrain = create<TerrainState>((set, get) => {
       const head = { ...cs.position }
       const plane = cs.plane
       const base: ChunkBase = chunkOf(head.x, head.y, head.z, plane)
-      const world = new TerrainWorld(base, cs.axes())
+      // Up is cyberspace +Y in TERRAIN whatever way the view was turned (terrainAxes, ruled 2026-11-24).
+      const world = new TerrainWorld(base, terrainAxes(cs.axes()))
       const hc = headCell(world, head)
       // Stood on the chain's head, feet at the bottom of its gibson.
       const body = newBody(hc[0], hc[1] - 0.5, hc[2])

@@ -12,10 +12,9 @@
  * Protocol visualization (chain trail, terrain dots, hX boxes, region keys,
  * spatial audio), Movement (gravity, hard mode gravity, fluid walk, optimize
  * chain), Interface (look sphere), Effects (headlamp, glow, hide avatar,
- * sound effects) and
- * Sync (sync hidden list). Interface also holds the screen's two ways, SHOW
- * EVERYTHING and NEWCOMER VIEW (hud/NewcomerSetting.tsx); in the newcomer
- * view only Interface shows. Each row is a title and a gray line under it, in
+ * sound effects) and Sync (sync hidden list). Interface also holds the
+ * screen's two ways, SHOW EVERYTHING and NEWCOMER VIEW
+ * (hud/NewcomerSetting.tsx); in the newcomer view only Interface shows. Each row is a title and a gray line under it, in
  * the style the trail switch had; its switch keeps the id it always had, so a
  * link that opens Settings at a row (hud/settingsLink.ts) still finds it.
  *
@@ -344,8 +343,8 @@ export function ViewPanel(): JSX.Element {
         avatar out of the way while you walk in first person, where the
         camera sits inside it. Sound effects plays the game's short sounds,
         like the boing when you bounce on a shard; turn it off for quiet. It
-        is kept for each identity you sign in as, and MUTE ALL in NOW PLAYING
-        silences them too.
+        is kept for each identity you sign in as. MUTE ALL in NOW PLAYING
+        silences these sounds too.
         In Sync, Sync hidden list is the one switch here that reaches the relay.
         Your list of hidden things is saved to the relay, encrypted so only
         you can read it. Any device signed in as you shows the same list and

@@ -63,6 +63,7 @@ import { GRAVITY_KEY, HARD_GRAVITY_KEY } from '../../store/walkGravity'
 import { HARD_GRAVITY_HINT, HARD_GRAVITY_TITLE, SPATIAL_AUDIO_HINT, SPATIAL_AUDIO_TITLE } from '../ViewPanel'
 import { FLUID_KEY, useFluidWalk } from '../../store/fluidSwitch'
 import { SFX_PREFIX, forgetSfxSwitch, sfxOn } from '../../store/sfxSwitch'
+import { kvGet, movesToKv } from '../../lib/kvStore'
 
 type SwitchEl = ReactElement<{ id: string; checked: boolean; onCheckedChange: (v: boolean) => void }>
 
@@ -319,17 +320,19 @@ describe('the Settings panel', () => {
   it('Sound effects starts on, turns off and on, and is kept for each identity on its own (owner, 2026-11-24)', () => {
     const me = useCyberspace.getState().identity
     const other = { pubkey: 'c3'.repeat(32), npub: 'npub-other' }
+    // A record per identity that kvStore keeps in IndexedDB, not localStorage.
+    expect(movesToKv(SFX_PREFIX + me.pubkey)).toBe(true)
     expect(sfxOn()).toBe(true)
     expect(switchTag(view(), 'view-sfx')).toContain('aria-checked="true"')
     viewSwitch('view-sfx').props.onCheckedChange(false)
     expect(sfxOn()).toBe(false)
-    expect(localStorage.getItem(SFX_PREFIX + me.pubkey)).toBe('0')
+    expect(kvGet(SFX_PREFIX + me.pubkey)).toBe('0')
     expect(switchTag(view(), 'view-sfx')).toContain('aria-checked="false"')
     // Another identity has its own switch, on by default; switching back finds yours as you left it.
     useCyberspace.setState({ identity: other })
     try {
       expect(switchTag(view(), 'view-sfx')).toContain('aria-checked="true"')
-      expect(localStorage.getItem(SFX_PREFIX + other.pubkey)).toBeNull()
+      expect(kvGet(SFX_PREFIX + other.pubkey)).toBeNull()
     } finally {
       useCyberspace.setState({ identity: me })
     }
@@ -338,7 +341,7 @@ describe('the Settings panel', () => {
     expect(switchTag(view(), 'view-sfx')).toContain('aria-checked="false"')
     viewSwitch('view-sfx').props.onCheckedChange(true)
     expect(sfxOn()).toBe(true)
-    expect(localStorage.getItem(SFX_PREFIX + me.pubkey)).toBe('1')
+    expect(kvGet(SFX_PREFIX + me.pubkey)).toBe('1')
   })
 
   it('touches no other flag: each switch changes only its own', () => {

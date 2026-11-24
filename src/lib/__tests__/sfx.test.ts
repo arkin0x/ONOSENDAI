@@ -3,9 +3,10 @@
  * The bounce is a short synthesised boing through the one audio context,
  * under 0.4 s and as quiet as the message chime; a harder bounce is a little
  * deeper. It is kept quiet by Settings' Sound effects switched off (per
- * identity), MUTE ALL, a hidden page, TV's broadcast and TV being on, and a second play within SFX_GAP_MS. While the browser holds
- * sound back it asks for sound and plays only if it is let out at once. The
- * audio context is a recording fake; nothing plays.
+ * identity), MUTE ALL, a hidden page, TV's broadcast and TV being on, and a
+ * second play within SFX_GAP_MS. While the browser holds sound back it asks
+ * for sound and plays only if it is let out at once. The audio context is a
+ * recording fake; nothing plays.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -122,6 +123,18 @@ describe('what keeps it quiet', () => {
       setSfxOn(true)
     }
     expect(sfx.play('bounce', 0, 3000)).toBe(true)
+  })
+
+  it('Sound effects turned off where storage refuses the write: still off for this page', () => {
+    vi.stubGlobal('localStorage', { getItem: () => null, setItem: () => { throw new Error('full') }, removeItem: () => undefined })
+    setSfxOn(false)
+    try {
+      expect(sfxAllowed()).toBe(false)
+      expect(sfx.play('bounce', 0, 1000)).toBe(false)
+    } finally {
+      setSfxOn(true)
+    }
+    expect(sfxAllowed()).toBe(true)
   })
 
   it('MUTE ALL', () => {

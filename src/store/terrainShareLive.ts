@@ -44,18 +44,23 @@ async function keyStatus(author: string, keys: string[]): Promise<Map<string, Ke
     return true
   })
   let until: number | undefined
+  const ids = new Set(seen.map((e) => e.id))
   for (let page = 0; page < NAMING_PAGES && left.length; page++) {
     const got = await queryAnyChecked([CYBERSPACE_RELAY], { kinds: [ACTION], authors: [author], limit: PAGE, ...(until !== undefined ? { until } : {}) })
     if (got.trouble) return out
-    seen.push(...own(got.events))
+    // A page may end inside a second: the next asks from that second again, and what was seen is skipped.
+    const fresh = got.events.filter((e) => !ids.has(e.id))
+    for (const e of fresh) ids.add(e.id)
+    seen.push(...own(fresh))
     // Newest first: the first naming found is a key's newest.
     left = left.filter((k) => {
       if (!seen.some((e) => e.tags.some((t) => t[0] === 'builder' && t[1] === k))) return true
       out.set(k, builderKeyValid(k, seen) ? 'valid' : 'void')
       return false
     })
-    if (got.events.length < PAGE) { for (const k of left) out.set(k, 'void'); return out }
-    until = Math.min(...got.events.map((e) => e.created_at)) - 1
+    // Nothing new: there are no more actions, so a key not named by now never was.
+    if (fresh.length === 0) { for (const k of left) out.set(k, 'void'); return out }
+    until = Math.min(...got.events.map((e) => e.created_at))
   }
   return out
 }

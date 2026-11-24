@@ -53,7 +53,7 @@ import {
 import type { Position, ViewAxes } from '../lib/space'
 import type { RayHit } from '../lib/terrain/raycast'
 import {
-  connectShareHost, fieldClosing, liveChanged, noteChange, noteMove, prepareChunk, sharedKeys, terrainClosed, terrainOpened, viewOf,
+  applyCarried, connectShareHost, fieldClosing, liveChanged, noteChange, noteMove, prepareChunk, sharedKeys, terrainClosed, terrainOpened, viewOf,
 } from './terrainShare'
 import { loadBuilder, releaseBuilderDb } from '../lib/terrain/builderKey'
 import './terrainShareLive'
@@ -457,6 +457,8 @@ async function build(s: TerrainSession, slot: ChunkSlot): Promise<void> {
     if (terrainSession !== s || s.world.slotByKey(slot.key) !== slot) return
     // Your own blocks where you surveyed, and everyone else's shared layers under them (store/terrainShare.ts).
     const own = s.surveyedKeys.has(slot.key) ? builtBlocks(s, slot.key, g.blocks) : null
+    // Blocks a new key carried in from your other keys' layers (store/terrainShare.ts, DECK-0009 §5.6) are yours here.
+    if (own) applyCarried(slot.key, own, g.blocks)
     slot.own = own
     s.world.setBlocks(slot.key, g.blocks, viewOf(slot.key, g.blocks, own))
     s.version++

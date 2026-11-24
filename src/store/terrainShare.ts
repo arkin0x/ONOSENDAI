@@ -196,6 +196,8 @@ export interface ShareRow extends PublishedRow {
   dirty: boolean
   /** Cells you set to their ground value over someone else's block or hole: written as changes (§5.4). */
   explicit: number[]
+  /** Cells a new key took from your other keys' layers (§5.6) and you have not changed since: yours, as published. */
+  carried: number[]
 }
 
 /** A chunk key without its plane: the address its layer and its twin's share. */
@@ -204,7 +206,8 @@ const rowKey = (owner: string, key: string): string => `${owner}|share|${key}`
 const pubPrefix = (owner: string): string => `${owner}|layer|`
 const pubKey = (owner: string, key: string): string => `${pubPrefix(owner)}${addressOf(key)}`
 const crewKey = (owner: string): string => `${owner}|crew`
-const emptyRow = (): ShareRow => ({ plaintext: null, eventId: null, builder: null, createdAt: 0, dirty: false, explicit: [] })
+const emptyRow = (): ShareRow => ({ plaintext: null, eventId: null, builder: null, createdAt: 0, dirty: false, explicit: [], carried: [] })
+const cellList = (v: unknown): number[] => (Array.isArray(v) ? v.filter((c): c is number => Number.isInteger(c) && (c as number) >= 0 && (c as number) < CELLS) : [])
 
 /** Everyone else's counted layers in a chunk, and the Crew lists they carry. */
 interface ChunkLayers {
@@ -215,6 +218,8 @@ interface ChunkLayers {
 interface ChunkView {
   layers: StackLayer[]
   from: Int32Array
+  /** Each author's newest list here (§8). */
+  lists: Map<string, readonly string[]>
 }
 
 interface Session {
@@ -231,6 +236,8 @@ interface Session {
   crew: string[]
   /** The Crew as kept is read (a change before it is would overwrite it). */
   crewRead: Promise<void> | null
+  /** Bumped by every Crew change and every retirement: a republish that began before one is not the last. */
+  gen: number
   /** The Crew changed, or the key did: every published layer goes out again. */
   republish: boolean
   idle: ReturnType<typeof setTimeout> | null
@@ -256,8 +263,11 @@ function sessionFor(): Session | null {
     if (session) closeSession(session)
     session = {
       owner: f.owner, plane: f.plane, rows: new Map(), loading: new Map(), waiting: new Map(), others: new Map(), views: new Map(), seen: new Map(),
-      crew: [], crewRead: null, republish: false, idle: null, retry: null, flushing: null, again: false, failed: null, readKey: '', closed: false,
+      crew: [], crewRead: null, gen: 0, republish: false, idle: null, retry: null, flushing: null, again: false, failed: null, readKey: '', closed: false,
     }
+    // Another identity (or plane): its own Crew, read from the device, never the one before's.
+    useShare.setState({ crew: [], crewOf: [] })
+    void loadCrew(session)
   }
   return session
 }
@@ -329,8 +339,7 @@ async function rowOf(s: Session, key: string): Promise<ShareRow> {
             request(store.get(rowKey(s.owner, key))) as Promise<{ value?: Partial<ShareRow> } | undefined>,
             request(store.get(pubKey(s.owner, key))) as Promise<{ value?: Partial<PublishedRow> } | undefined>,
           ])
-          const explicit = Array.isArray(mine?.value?.explicit) ? (mine!.value!.explicit as unknown[]).filter((c): c is number => Number.isInteger(c) && (c as number) >= 0 && (c as number) < CELLS) : []
-          row = { ...emptyRow(), dirty: mine?.value?.dirty === true, explicit, ...pickPublished(pub?.value) }
+          row = { ...emptyRow(), dirty: mine?.value?.dirty === true, explicit: cellList(mine?.value?.explicit), carried: cellList(mine?.value?.carried), ...pickPublished(pub?.value) }
         } catch { /* a fresh row */ }
       }
       // Chunks built before sharing existed are not published on their own: the first change made in one shares it (ruling A).
@@ -352,7 +361,7 @@ function saveRow(s: Session, key: string, row: ShareRow): void {
   const d = db()
   if (!d || s.closed) return
   const pub: PublishedRow = pickPublished(row)
-  void putMany(d, META, [{ key: rowKey(s.owner, key), value: { dirty: row.dirty, explicit: row.explicit } }, { key: pubKey(s.owner, key), value: pub }]).catch(() => { /* kept in memory */ })
+  void putMany(d, META, [{ key: rowKey(s.owner, key), value: { dirty: row.dirty, explicit: row.explicit, carried: row.carried } }, { key: pubKey(s.owner, key), value: pub }]).catch(() => { /* kept in memory */ })
 }
 
 /** Read a chunk's row before it is drawn. */
@@ -376,18 +385,19 @@ function loadCrew(s: Session): Promise<void> {
 
 async function readCrew(s: Session): Promise<void> {
   const d = db()
-  if (!d) return
+  // Not read yet (no database open yet): asked again next time, so a later change never overwrites what is kept.
+  if (!d) { s.crewRead = null; return }
   try {
     const got = await request(d.transaction([META], 'readonly').objectStore(META).get(crewKey(s.owner))) as { value?: { list?: unknown; republish?: unknown } } | undefined
     const list = Array.isArray(got?.value?.list) ? (got!.value!.list as unknown[]).filter((p): p is string => typeof p === 'string' && HEX64.test(p)) : []
     s.crew = list.slice(0, COBUILDERS_MAX)
-    s.republish = got?.value?.republish === true
-    useShare.setState({ crew: [...s.crew] })
-  } catch { /* none */ }
+    s.republish = s.republish || got?.value?.republish === true
+    if (s === session) useShare.setState({ crew: [...s.crew] })
+  } catch { s.crewRead = null }
 }
 
 function saveCrew(s: Session): void {
-  useShare.setState({ crew: [...s.crew] })
+  if (s === session) useShare.setState({ crew: [...s.crew] })
   const d = db()
   if (d && !s.closed) void putMany(d, META, [{ key: crewKey(s.owner), value: { list: s.crew, republish: s.republish } }]).catch(() => { /* kept in memory */ })
 }
@@ -400,6 +410,7 @@ export async function addCrew(pubkey: string): Promise<boolean> {
   if (s.closed || !HEX64.test(pubkey) || pubkey === s.owner || s.crew.includes(pubkey) || s.crew.length >= COBUILDERS_MAX) return false
   s.crew = [...s.crew, pubkey]
   s.republish = true
+  s.gen++
   saveCrew(s)
   redrawAll(s)
   void flush('crew')
@@ -414,6 +425,7 @@ export async function removeCrew(pubkey: string): Promise<boolean> {
   if (s.closed || !s.crew.includes(pubkey)) return false
   s.crew = s.crew.filter((p) => p !== pubkey)
   s.republish = true
+  s.gen++
   saveCrew(s)
   redrawAll(s)
   void flush('crew')
@@ -429,12 +441,12 @@ export function inCrew(pubkey: string): boolean {
 // Your view: the Stack, with this device's own blocks as your layer.
 
 /** This device's own blocks as a layer of yours: the cells it changed (from the ground, or explicitly at it), newest of all of yours. */
-function ownLayer(me: string, own: Uint8Array, ground: Uint8Array, plane: 0 | 1, explicit: ReadonlySet<number>, cobuilders: readonly string[]): StackLayer {
+function ownLayer(me: string, own: Uint8Array, ground: Uint8Array, plane: 0 | 1, explicit: ReadonlySet<number>, cobuilders: readonly string[], createdAt: number): StackLayer {
   const values = Int32Array.from(own)
   const changed: number[] = []
   for (let c = 0; c < CELLS; c++) if (own[c] !== ground[c] || explicit.has(c)) changed.push(c)
   const pl: DecodedPlane = { plane, survey: true, values, changed }
-  return { id: '', author: me, builder: '', createdAt: Number.MAX_SAFE_INTEGER, cobuilders, planes: [pl] }
+  return { id: '', author: me, builder: '', createdAt, cobuilders, planes: [pl] }
 }
 
 /**
@@ -443,10 +455,10 @@ function ownLayer(me: string, own: Uint8Array, ground: Uint8Array, plane: 0 | 1,
  * base (the ground where the plane is surveyed, open space where not). Also
  * which layer each cell shows.
  */
-export function composeView(o: { ground: Uint8Array; own: Uint8Array | null; explicit: ReadonlySet<number>; others: readonly StackLayer[]; plane: 0 | 1; view: StackView; myCrew: readonly string[]; mutes: ReadonlySet<string>; now: number }): { blocks: Uint8Array; layers: StackLayer[]; from: Int32Array } {
+export function composeView(o: { ground: Uint8Array; own: Uint8Array | null; explicit: ReadonlySet<number>; others: readonly StackLayer[]; plane: 0 | 1; view: StackView; myCrew: readonly string[]; mutes: ReadonlySet<string>; now: number; ownAt?: number }): { blocks: Uint8Array; layers: StackLayer[]; from: Int32Array } {
   const counted = countedLayers(o.others, o.view, o.mutes, o.now)
-  // Your own blocks count as yours, never held back by the clock or the cap.
-  const layers = o.own && o.view.me ? [...counted, ownLayer(o.view.me, o.own, o.ground, o.plane, o.explicit, o.myCrew)] : counted
+  // Your own blocks count as yours, never held back by the clock or the cap; dated as published (now while changes wait), so a newer layer of another device of yours wins as §7.3 says.
+  const layers = o.own && o.view.me ? [...counted, ownLayer(o.view.me, o.own, o.ground, o.plane, o.explicit, o.myCrew, o.ownAt ?? o.now)] : counted
   const r = resolveStack(layers, o.plane, o.view)
   const blocks = new Uint8Array(CELLS)
   for (let c = 0; c < CELLS; c++) {
@@ -471,8 +483,11 @@ export function viewOf(key: string, ground: Uint8Array, own: Uint8Array | null):
   const v = composeView({
     ground, own, explicit: new Set(s.rows.get(key)?.explicit ?? []), others: s.others.get(key)?.layers ?? [], plane: s.plane as 0 | 1,
     view: stackView(d.me() || null, base), myCrew: s.crew, mutes: d.muted(), now: Math.floor(d.now() / 1000),
+    ownAt: (() => { const r = s.rows.get(key); return r && !r.dirty && r.createdAt ? r.createdAt : Math.floor(d.now() / 1000) })(),
   })
-  s.views.set(key, { layers: v.layers, from: v.from })
+  const newest = new Map<string, StackLayer>()
+  for (const l of v.layers) { const n = newest.get(l.author); if (!n || withinRank(l, n) < 0) newest.set(l.author, l) }
+  s.views.set(key, { layers: v.layers, from: v.from, lists: new Map([...newest].map(([a, l]) => [a, l.cobuilders])) })
   while (s.views.size > 160) s.views.delete(s.views.keys().next().value as string)
   return v.blocks
 }
@@ -521,8 +536,7 @@ export function aimAt(key: string | null, cell: number): AimKind {
   if (v && i >= 0) {
     const author = v.layers[i].author
     // The builder's newest list here (§8): it lists you, so your edit counts with theirs.
-    const newest = v.layers.filter((l) => l.author === author).sort(withinRank)[0]
-    aim = author === me || home ? { kind: 'mine', author } : newest?.cobuilders.includes(me) ? { kind: 'crew', author } : { kind: 'other', author }
+    aim = author === me || home ? { kind: 'mine', author } : v.lists.get(author)?.includes(me) ? { kind: 'crew', author } : { kind: 'other', author }
   } else if (home) aim = { kind: 'mine', author: me }
   const was = useAim.getState()
   if (was.kind !== aim.kind || was.author !== aim.author) useAim.setState(aim)
@@ -629,13 +643,15 @@ export function noteChange(key: string, change?: CellChange): void {
     s.waiting.set(key, (s.waiting.get(key) ?? 0) + 1)
     const row = s.rows.get(key) ?? emptyRow()
     let explicit = row.explicit
+    let carried = row.carried
     if (change) {
       const set = new Set(explicit)
       if (explicitAfter(set.has(change.cell), change)) set.add(change.cell)
       else set.delete(change.cell)
       explicit = [...set]
+      carried = carried.filter((c) => c !== change.cell)
     }
-    saveRow(s, key, { ...row, dirty: true, explicit })
+    saveRow(s, key, { ...row, dirty: true, explicit, carried })
     if ((s.waiting.get(key) ?? 0) >= (near() ? BATCH_NEAR : BATCH_ALONE)) void flush('batch', [key])
     else arm(s)
     say(s)
@@ -714,7 +730,8 @@ let confirming: Promise<void> | null = null
 /** Ask the canonical relay which actions carrying an owed builder tag it holds. */
 export function confirmTags(): Promise<void> {
   const s = sessionFor()
-  if (!s) return Promise.resolve()
+  // LOCAL tells the relay nothing, not even which of your moves it holds.
+  if (!s || !current().live()) return Promise.resolve()
   if (confirming) return confirming
   const ids = waitingIds(s.owner)
   if (ids.length === 0) return Promise.resolve()
@@ -745,10 +762,11 @@ onBuilderChange((owner) => { if (session?.owner === owner) say(session) })
 export function retireDeviceKey(): boolean {
   const s = sessionFor()
   if (!s) return false
-  void loadCrew(s)
   const rec = retireCurrent(s.owner)
   s.republish = true
-  saveCrew(s)
+  s.gen++
+  // The Crew as kept is read first, so the republish flag is saved beside the list, never over it.
+  void loadCrew(s).then(() => { if (!s.closed) saveCrew(s) })
   say(s)
   return rec !== null
 }
@@ -766,6 +784,8 @@ export function flush(why: string, only?: string[]): Promise<void> {
       s.again = false
       if (!current().live() || s.closed) break
       if (current().me() !== s.owner) break
+      // Every layer carries the Crew as kept: read before anything goes out.
+      await loadCrew(s)
       await confirmTags()
       const list = only ?? [...s.waiting.keys()]
       for (const key of list) {
@@ -823,6 +843,7 @@ async function publishChunk(s: Session, key: string): Promise<void> {
   const explicit = new Set(row.explicit)
   let plain: LayerPlaintext | null
   let olds: OtherKey[] = []
+  let newKey: { mine: Map<0 | 1, PlaneChanges>; groundAt: (p: 0 | 1) => Uint8Array | null } | null = null
   if (row.builder === k.pub) {
     // The same key: this plane as the device holds it, the twin carried, the Crew. Nothing changed: nothing to publish.
     plain = nextPlaintext(prev, s.plane as 0 | 1, slot.own, slot.generated, s.crew, explicit)
@@ -838,17 +859,7 @@ async function publishChunk(s: Session, key: string): Promise<void> {
     for (let c = 0; c < CELLS; c++) if (slot.own[c] !== slot.generated[c] || explicit.has(c)) here.set(c, slot.own[c])
     mine.set(s.plane as 0 | 1, { survey: true, cells: here })
     plain = startFrom(olds.filter((o) => o.valid).map((o) => ({ changes: changesOf(o.plaintext, groundAt), createdAt: o.createdAt, builder: o.builder, id: o.id })), mine, groundAt, s.crew)
-    // What the other keys held here is yours on this device now, so the next version keeps it.
-    const carried = new Map<number, number>()
-    for (const o of olds) if (o.valid) for (const [c, v] of changesOf(o.plaintext, groundAt).get(s.plane as 0 | 1)?.cells ?? []) if (!here.has(c)) carried.set(c, v)
-    if (carried.size) {
-      const merged = changesOf(plain, groundAt).get(s.plane as 0 | 1)
-      const adopt = new Map([...carried.keys()].map((c) => [c, merged?.cells.get(c) ?? slot.generated![c]]))
-      await host!.adopt(key, adopt)
-      const ex = new Set(explicit)
-      for (const [c, v] of adopt) if (v === slot.generated[c]) ex.add(c)
-      saveRow(s, key, { ...(s.rows.get(key) ?? row), explicit: [...ex] })
-    }
+    newKey = { mine, groundAt }
   }
   if (plain) {
     const createdAt = Math.max(Math.floor(d.now() / 1000), row.createdAt + 1)
@@ -856,6 +867,8 @@ async function publishChunk(s: Session, key: string): Promise<void> {
     const res = await pacedPublish(ev, () => d.live() && d.me() === s.owner && !s.closed)
     if (!res.ok) throw new Held('Sharing again soon.')
     saveRow(s, key, { ...(s.rows.get(key) ?? row), plaintext: plaintextJson(plain), eventId: ev.id, builder: k.pub, createdAt, dirty: false })
+    // What the other keys held here is yours on this device now, in both planes, so the next version keeps it.
+    if (newKey) await carryIn(s, slot.base, plain, newKey.mine, newKey.groundAt)
     await emptyOlds(s, olds, slot.base, createdAt)
   } else {
     saveRow(s, key, { ...(s.rows.get(key) ?? row), dirty: false })
@@ -864,6 +877,55 @@ async function publishChunk(s: Session, key: string): Promise<void> {
   const left = (s.waiting.get(key) ?? 0) - waitingAtStart
   if (left > 0) { s.waiting.set(key, left); saveRow(s, key, { ...s.rows.get(key)!, dirty: true }) } else s.waiting.delete(key)
   s.failed = null
+}
+
+/**
+ * After a new key published a layer that started from the author's other
+ * keys' layers (§5.6): the cells it took from them, in each plane, are this
+ * device's own now. Kept as `carried` in each plane's row (applied to the
+ * device's blocks whenever the chunk loads, until changed), and taken into
+ * a loaded chunk at once.
+ */
+async function carryIn(s: Session, base: ChunkBase, plain: LayerPlaintext, mine: Map<0 | 1, PlaneChanges>, groundAt: (p: 0 | 1) => Uint8Array | null): Promise<void> {
+  for (const [plane, ch] of changesOf(plain, groundAt)) {
+    const own = mine.get(plane)?.cells
+    const cells = new Map([...ch.cells].filter(([c]) => !own?.has(c)))
+    if (cells.size === 0) continue
+    const key = chunkKey({ ...base, plane })
+    const row = s.rows.get(key) ?? (plane === s.plane ? await rowOf(s, key) : await storedRow(s, key))
+    const g = groundAt(plane)
+    const explicit = new Set(row.explicit)
+    if (g) for (const [c, v] of cells) if (v === g[c]) explicit.add(c)
+    const next: ShareRow = { ...row, carried: [...new Set([...row.carried, ...cells.keys()])], explicit: [...explicit] }
+    if (plane === s.plane) {
+      saveRow(s, key, { ...(s.rows.get(key) ?? next), carried: next.carried, explicit: next.explicit })
+      await host?.adopt(key, cells)
+    } else {
+      const d = db()
+      if (d) await putMany(d, META, [{ key: rowKey(s.owner, key), value: { dirty: next.dirty, explicit: next.explicit, carried: next.carried } }]).catch(() => undefined)
+    }
+  }
+}
+
+/** A plane row as kept on the device, for a chunk this session does not hold (the twin plane). */
+async function storedRow(s: Session, key: string): Promise<ShareRow> {
+  const d = db()
+  if (!d) return emptyRow()
+  try {
+    const got = await request(d.transaction([META], 'readonly').objectStore(META).get(rowKey(s.owner, key))) as { value?: Partial<ShareRow> } | undefined
+    return { ...emptyRow(), dirty: got?.value?.dirty === true, explicit: cellList(got?.value?.explicit), carried: cellList(got?.value?.carried) }
+  } catch { return emptyRow() }
+}
+
+/** When a chunk loads: the cells carried in from your other keys (carryIn) become your own blocks, as last published. */
+export function applyCarried(key: string, own: Uint8Array, ground: Uint8Array): void {
+  const s = sessionFor()
+  const row = s?.rows.get(key)
+  if (!s || !row?.plaintext || row.carried.length === 0) return
+  const p = parsePlaintext(row.plaintext)
+  const ch = p ? changesOf(p, (plane) => (plane === s.plane ? ground : null)).get(s.plane as 0 | 1) : undefined
+  if (!ch) return
+  for (const c of row.carried) { const v = ch.cells.get(c); if (v !== undefined) own[c] = Math.min(v, 255) }
 }
 
 /** Why a new key waits at a chunk: the words for the bag (§5.6). */
@@ -915,7 +977,8 @@ async function emptyOlds(s: Session, olds: OtherKey[], base: ChunkBase, createdA
   for (const o of olds) {
     const held = deviceKeys(s.owner).find((r) => r.pub === o.builder && !r.retire)
     if (!held || !o.valid) continue
-    const ev = await signLayer({ plaintext: emptiedPlaintext(o.plaintext), author: s.owner, base, sec: held.sec, createdAt })
+    // It keeps your Crew: the newest of your layers here may be this one (§8), and an empty list would drop every lift.
+    const ev = await signLayer({ plaintext: emptiedPlaintext(o.plaintext, s.crew), author: s.owner, base, sec: held.sec, createdAt })
     await pacedPublish(ev, () => current().live() && current().me() === s.owner && !s.closed).catch(() => undefined)
   }
 }
@@ -933,35 +996,47 @@ async function republishAll(s: Session): Promise<void> {
   const store = db()
   if (!k || !k.named) throw new Held('Shared after your next move.')
   if (!store) return
+  const gen = s.gen
+  let failed: unknown = null
   const rows = await request(store.transaction([META], 'readonly').objectStore(META).getAll(IDBKeyRange.bound(pubPrefix(s.owner), `${pubPrefix(s.owner)}~`))) as Array<{ key: string; value?: Partial<PublishedRow> }>
   for (const r of rows) {
-    if (s.closed || !d.live()) return
-    const pub = pickPublished(r.value)
-    const prev = pub.plaintext ? parsePlaintext(pub.plaintext) : null
-    const at = parseChunkKey(`0:${r.key.slice(pubPrefix(s.owner).length)}`)
-    if (!prev || !at) continue
-    if (pub.builder === k.pub && JSON.stringify(prev.cobuilders) === JSON.stringify(s.crew)) continue
-    let plain: LayerPlaintext = { ...prev, cobuilders: [...s.crew] }
-    let olds: OtherKey[] = []
-    if (pub.builder !== k.pub) {
-      olds = await otherKeys(s, at, k.pub)
-      const grounds = new Map<number, Uint8Array>()
-      for (const p of [0, 1] as const) grounds.set(p, await groundOf({ ...at, plane: p }))
-      const groundAt = (p: 0 | 1): Uint8Array | null => grounds.get(p) ?? null
-      plain = startFrom(olds.filter((o) => o.valid).map((o) => ({ changes: changesOf(o.plaintext, groundAt), createdAt: o.createdAt, builder: o.builder, id: o.id })), changesOf(prev, groundAt), groundAt, s.crew)
-    }
-    const createdAt = Math.max(Math.floor(d.now() / 1000), pub.createdAt + 1)
-    const ev = await signLayer({ plaintext: plain, author: s.owner, base: at, sec: k.sec, createdAt })
-    const res = await pacedPublish(ev, () => d.live() && d.me() === s.owner && !s.closed)
-    if (!res.ok) throw new Held('Sharing again soon.')
-    const next: PublishedRow = { plaintext: plaintextJson(plain), eventId: ev.id, builder: k.pub, createdAt }
-    await putMany(store, META, [{ key: r.key, value: next }]).catch(() => undefined)
-    await emptyOlds(s, olds, at, createdAt)
-    // Rows loaded this session see it too.
-    for (const [key, row] of s.rows) if (pubKey(s.owner, key) === r.key) s.rows.set(key, { ...row, ...next })
+    if (s.closed || !d.live() || s.gen !== gen) return
+    // One chunk that cannot go now never holds up the rest; it is tried again on the next pass.
+    try { await republishRow(s, store, k, r) } catch (err) { failed = err }
   }
-  s.republish = false
-  saveCrew(s)
+  if (failed) throw failed
+  if (s.gen === gen) { s.republish = false; saveCrew(s) }
+}
+
+async function republishRow(s: Session, store: IDBDatabase, k: { pub: string; sec: string }, r: { key: string; value?: Partial<PublishedRow> }): Promise<void> {
+  const d = current()
+  const pub = pickPublished(r.value)
+  const prev = pub.plaintext ? parsePlaintext(pub.plaintext) : null
+  const at = parseChunkKey(`0:${r.key.slice(pubPrefix(s.owner).length)}`)
+  if (!prev || !at) return
+  if (pub.builder === k.pub && JSON.stringify(prev.cobuilders) === JSON.stringify(s.crew)) return
+  let plain: LayerPlaintext = { ...prev, cobuilders: [...s.crew] }
+  let olds: OtherKey[] = []
+  let newKey: { mine: Map<0 | 1, PlaneChanges>; groundAt: (p: 0 | 1) => Uint8Array | null } | null = null
+  if (pub.builder !== k.pub) {
+    olds = await otherKeys(s, at, k.pub)
+    const grounds = new Map<number, Uint8Array>()
+    for (const p of [0, 1] as const) grounds.set(p, await groundOf({ ...at, plane: p }))
+    const groundAt = (p: 0 | 1): Uint8Array | null => grounds.get(p) ?? null
+    const mine = changesOf(prev, groundAt)
+    plain = startFrom(olds.filter((o) => o.valid).map((o) => ({ changes: changesOf(o.plaintext, groundAt), createdAt: o.createdAt, builder: o.builder, id: o.id })), mine, groundAt, s.crew)
+    newKey = { mine, groundAt }
+  }
+  const createdAt = Math.max(Math.floor(d.now() / 1000), pub.createdAt + 1)
+  const ev = await signLayer({ plaintext: plain, author: s.owner, base: at, sec: k.sec, createdAt })
+  const res = await pacedPublish(ev, () => d.live() && d.me() === s.owner && !s.closed)
+  if (!res.ok) throw new Held('Sharing again soon.')
+  const next: PublishedRow = { plaintext: plaintextJson(plain), eventId: ev.id, builder: k.pub, createdAt }
+  await putMany(store, META, [{ key: r.key, value: next }]).catch(() => undefined)
+  // Rows loaded this session see it too.
+  for (const [key, row] of s.rows) if (pubKey(s.owner, key) === r.key) s.rows.set(key, { ...row, ...next })
+  if (newKey) await carryIn(s, at, plain, newKey.mine, newKey.groundAt)
+  await emptyOlds(s, olds, at, createdAt)
 }
 
 /**
@@ -1095,11 +1170,18 @@ async function stackChunk(s: Session, base: ChunkBase, lookupId: string): Promis
   const key = chunkKey(base)
   const mine = new Set(deviceKeys(s.owner).map((k) => k.pub))
   const muted = d.muted()
-  const list = [...(s.seen.get(lookupId)?.values() ?? [])].filter((ev) => !mine.has(ev.pubkey))
+  // The cheap checks of §6 first (authentic, tags, limits), mutes removed, and no more authors than the Stack can count,
+  // before any author's movement actions are asked for: a flood of forged layers costs no lookups.
+  const nowSec = Math.floor(d.now() / 1000)
+  const list = [...(s.seen.get(lookupId)?.values() ?? [])]
+    .filter((ev) => !mine.has(ev.pubkey) && d.verify(ev) && serializedBytes(ev) <= LAYER_MAX_BYTES && freeTextWithinBounds(ev))
+    .filter((ev) => { const sh = layerShape(ev); return !!sh && !muted.has(sh.author) })
+  const view = stackView(d.me() || null, base)
+  const allowed = new Set(countedLayers(list.map((ev) => ({ author: layerShape(ev)!.author, createdAt: ev.created_at })), view, muted, nowSec).map((l) => l.author))
   const byAuthor = new Map<string, string[]>()
   for (const ev of list) {
-    const shape = layerShape(ev)
-    if (!shape || muted.has(shape.author)) continue
+    const shape = layerShape(ev)!
+    if (!allowed.has(shape.author)) continue
     byAuthor.set(shape.author, [...(byAuthor.get(shape.author) ?? []), ev.pubkey])
   }
   const status = new Map<string, KeyStatus>()
@@ -1107,8 +1189,8 @@ async function stackChunk(s: Session, base: ChunkBase, lookupId: string): Promis
   const { key: rkey } = chunkRegionKey(base)
   const layers: StackLayer[] = []
   for (const ev of list) {
-    const shape = layerShape(ev)
-    if (!shape || muted.has(shape.author)) continue
+    const shape = layerShape(ev)!
+    if (!allowed.has(shape.author)) continue
     const r = await readLayer(ev, {
       verify: d.verify, key: rkey, lookupId,
       ground: (plane) => groundOf({ ...base, plane }),

@@ -215,7 +215,7 @@ export function parsePlaintext(text: string): LayerPlaintext | null {
   const planes = o.planes
   if (!Array.isArray(planes) || planes.length < 1 || planes.length > 2 || !planes.every(isPlaneObject)) return null
   if (planes.length === 2 && planes[0].plane === planes[1].plane) return null
-  const cob = o.cobuilders ?? []
+  const cob = o.cobuilders === undefined ? [] : o.cobuilders
   if (!Array.isArray(cob) || cob.length > COBUILDERS_MAX || !cob.every((b) => typeof b === 'string' && HEX64.test(b))) return null
   return { planes: planes as PlaneObject[], cobuilders: cob as string[] }
 }
@@ -477,7 +477,7 @@ export function startFrom(others: ReadonlyArray<{ changes: Map<0 | 1, PlaneChang
   return { planes, cobuilders: [...cobuilders] }
 }
 
-/** A version of a layer that changes no cell (§5.6): each plane keeps its `survey` and `ground`. */
-export function emptiedPlaintext(p: LayerPlaintext): LayerPlaintext {
-  return { planes: p.planes.map((pl) => ({ plane: pl.plane, survey: pl.survey, ground: pl.ground ?? GROUND_REVISION, form: 'diff' as const, pal: [null], cells: [0, -(CELLS - 1)] })), cobuilders: [] }
+/** A version of a layer that changes no cell (§5.6): each plane keeps its `survey` and `ground`; the Crew is the writer's current one. */
+export function emptiedPlaintext(p: LayerPlaintext, cobuilders: readonly string[] = []): LayerPlaintext {
+  return { planes: p.planes.map((pl) => ({ plane: pl.plane, survey: pl.survey, ground: pl.ground ?? GROUND_REVISION, form: 'diff' as const, pal: [null], cells: [0, -(CELLS - 1)] })), cobuilders: [...cobuilders] }
 }

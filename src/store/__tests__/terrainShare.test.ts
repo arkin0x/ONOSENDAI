@@ -270,6 +270,27 @@ describe('the Crew', () => {
   })
 })
 
+describe('the Crew as kept', () => {
+  it('a layer that goes out before TERRAIN opens again still carries the Crew kept on the device', async () => {
+    const friend = getPublicKey(generateSecretKey())
+    const { base } = await named()
+    expect(await addCrew(friend)).toBe(true)
+    await settle(300)
+    await surveyHere()
+    mineSome(1)
+    await settle(50)
+    // Everything held in memory is let go (a reload of this module's state); only the device remembers the Crew.
+    resetShare()
+    expect(useShare.getState().crew).toEqual([])
+    mineSome(1)
+    await settle(50)
+    await flush('test')
+    await settle(200)
+    const last = published.at(-1)!
+    expect((await opened(last, base)).cobuilders).toEqual([friend])
+  })
+})
+
 describe('the cadence (DECK-0009 §5.7)', () => {
   it('with someone near: 50 waiting changes publish at once', async () => {
     near = true

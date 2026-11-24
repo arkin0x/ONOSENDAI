@@ -527,7 +527,7 @@ export function TouchControls(): JSX.Element {
             aria-label="Gravity"
             {...noCallout}
             onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); useWalk.getState().setGravity(!gravity) }}
-          >{plain ? <>GRAVITY<span className="touchpad__keyhint" aria-hidden>Z</span></> : 'GRAVITY'}</button>
+          >GRAVITY<span className="touchpad__keyhint" aria-hidden>Z</span></button>
         )}
         {pad.filter((b) => !b.side).map(padKey)}
         {/* The hub doubles as the scale readout and its reset: a tap returns

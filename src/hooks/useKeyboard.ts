@@ -7,7 +7,8 @@
  * until Space commits the hop.
  *
  * WALK has its own keys, first-person style (lib/walkKeys.ts): W forward,
- * S back, A and D sideways, Space or R up, C or F down, every press a step;
+ * S back, A and D sideways, Space or R up, C or F down, every press a step
+ * (Space and C up and down as you see the world, R and F by where you look);
  * W or S with A or D held steps diagonally, 45 degrees to that side. A held
  * key walks from the press on (store/walkHold.ts): the keyboard's own
  * repeats, which came after a pause, are ignored. They are answered before anything else, so in WALK Space never

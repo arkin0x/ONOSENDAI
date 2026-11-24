@@ -170,8 +170,8 @@ export interface PadKey {
  * | FORWARD, one large key | W | FAR, up and NEAR |
  * | BACKWARD | S | down |
  * | left, right | A, D | the same |
- * | JUMP | Space or R | + and the 2^ readout |
- * | DOWN | C or F | - |
+ * | JUMP | Space (R too under GRAVITY) | + and the 2^ readout |
+ * | DOWN | C (F too under GRAVITY) | - |
  *
  * Under GRAVITY JUMP is a jump, and DOWN moves nothing but absorbs a bounce
  * pressed just before the landing, or every landing while held

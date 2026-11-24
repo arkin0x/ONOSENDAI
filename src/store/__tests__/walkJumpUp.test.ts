@@ -242,6 +242,27 @@ describe('the step WALK, gravity off', () => {
     expect(stepOf('KeyA')).toEqual([-1, 0, 0])
   })
 
+  it('Space and R held together go the view\'s up; Space, C and R together leave R\'s, the camera\'s', () => {
+    walk()
+    look(60)
+    // R alone steps along the camera's up (-Z); Space going down with R
+    // held presses what both make, and the view's key agrees: the view's up.
+    walkKeyDown(key('KeyR'))
+    expect(rel()).toEqual([0, 0, -1])
+    walkKeyDown(key('Space'))
+    expect(rel()).toEqual([0, 1, -1])
+    walkKeysReleased()
+    // Space (+Y), then C with it: they cancel, nothing; then R: what is left
+    // is R's, along the camera's up (-Z).
+    walkKeyDown(key('Space'))
+    expect(rel()).toEqual([0, 2, -1])
+    walkKeyDown(key('KeyC'))
+    expect(rel()).toEqual([0, 2, -1])
+    walkKeyDown(key('KeyR'))
+    expect(rel()).toEqual([0, 2, -2])
+    walkKeysReleased()
+  })
+
   it('a step is still one step long, and the steps go to be proved through the walk as before', async () => {
     walk()
     look(-60)

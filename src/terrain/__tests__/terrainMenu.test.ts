@@ -35,7 +35,7 @@ describe('with the menu open', () => {
 
   it('TERRAIN\'s bag on a phone covers everything as the menu does: the HUD steps aside under it', () => {
     expect(APP).toContain('const crowded = menuCrowded || (isMobile && bagOpen)')
-    const at = CSS.indexOf('.terrainview.is-bag { z-index: 1000; }')
+    const at = CSS.indexOf('.terrainview.is-bag { z-index: 250; }')
     expect(at).toBeGreaterThan(-1)
     expect(CSS).toContain('.terrainview.is-bag > :not(.terrain-sheet) { visibility: hidden; }')
     expect(CSS).toContain('body:has(.terrainview.is-bag) .terrain-held { visibility: hidden; }')

@@ -139,8 +139,8 @@ for (const size of SIZES.filter((z) => z.w <= 430 && z.h > z.w)) {
   // Closed again: the HUD comes back.
   await page.evaluate(async () => { const m = await import('/src/store/useTerrain.ts'); m.useTerrain.getState().setSheet(false) })
   await page.waitForTimeout(800)
-  const back = await page.evaluate((sel) => !!document.querySelector(sel) && getComputedStyle(document.querySelector(sel)).visibility !== 'hidden', BOXES.hotbar)
-  if (!back) { bad++; console.log(`${size.name}: the hotbar did not come back when the bag closed`) }
+  const gone = await page.evaluate((sels) => sels.filter((sel) => { const e = document.querySelector(sel); return !e || getComputedStyle(e).visibility === 'hidden' }), [BOXES.hotbar, BOXES.place, BOXES.pad, BOXES.jump, BOXES.look])
+  if (gone.length) { bad++; console.log(`${size.name}: not back when the bag closed: ${gone.join(', ')}`) }
   await ctx.close()
 }
 await browser.close()

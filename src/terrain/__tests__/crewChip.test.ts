@@ -22,12 +22,14 @@ if (typeof localStorage === 'undefined') {
   }
 }
 
-import { CREW_NEAR, crewChipKeys, nearbyToAsk, resetCrewOffers } from '../TerrainCrew'
+import { CREW_NEAR, crewChipAsking, crewChipKeys, nearbyToAsk, resetCrewOffers } from '../TerrainCrew'
 import { useTerrain } from '../../store/useTerrain'
 import { useCyberspace } from '../../store/useCyberspace'
 import { usePresence } from '../../store/usePresence'
 import { useShare } from '../../store/terrainShare'
-import { escapeTop, registerEscape, topEscape } from '../../hooks/useEscape'
+import { registerEscape, topEscape } from '../../hooks/useEscape'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 
 /** A stand-in for the window: the listeners it holds, and a key press delivered to them. */
 function fakeWindow(): { on: EventTarget; press: (key: string, o?: { repeat?: boolean; inField?: boolean }) => { prevented: boolean }; count: () => number } {
@@ -55,10 +57,11 @@ beforeEach(() => {
 })
 
 describe('the Crew chip\'s keys', () => {
-  it('Enter adds, once for a held key; left to a field, a modal or the open bag', () => {
+  it('Enter adds, once for a held key; left to a field, a modal, the menu or the open bag', () => {
     const w = fakeWindow()
-    let adds = 0
-    const off = crewChipKeys(w.on, () => { adds++ })
+    let adds = 0, dismissed = 0
+    let captured = false
+    const off = crewChipKeys(w.on, () => { adds++ }, () => { dismissed++ }, () => captured)
     expect(w.press('Enter').prevented).toBe(true)
     expect(adds).toBe(1)
     w.press('Enter', { repeat: true })
@@ -70,25 +73,44 @@ describe('the Crew chip\'s keys', () => {
     useTerrain.setState({ sheet: false })
     const closeModal = registerEscape('modal', () => undefined)
     w.press('Enter')
-    expect(adds).toBe(1)
+    w.press('Escape')
+    expect([adds, dismissed]).toEqual([1, 0])
     closeModal()
+    const closeMenu = registerEscape('menu', () => undefined)
+    w.press('Enter')
+    expect(adds).toBe(1)
+    closeMenu()
     w.press('a')
     expect(adds).toBe(1)
     off()
     expect(w.count()).toBe(0)
   })
 
-  it('Esc closes the chip as the most recent chip, after a modal above it', () => {
-    let chip = 0, modal = 0
-    const offChip = registerEscape('chip', () => { chip++ })
-    const offModal = registerEscape('modal', () => { modal++ })
-    expect(topEscape()?.layer).toBe('modal')
-    escapeTop()
-    expect([modal, chip]).toEqual([1, 0])
-    offModal()
-    escapeTop()
-    expect(chip).toBe(1)
-    offChip()
+  it('dismissed by Backspace even with the mouse captured, and by Esc only while the mouse is free', () => {
+    const w = fakeWindow()
+    let dismissed = 0
+    let captured = true
+    const off = crewChipKeys(w.on, () => undefined, () => { dismissed++ }, () => captured)
+    expect(w.press('Escape').prevented).toBe(false)
+    expect(dismissed).toBe(0)
+    expect(w.press('Backspace').prevented).toBe(true)
+    expect(dismissed).toBe(1)
+    captured = false
+    expect(w.press('Escape').prevented).toBe(true)
+    expect(dismissed).toBe(2)
+    // Typing in a field keeps its Backspace.
+    w.press('Backspace', { inField: true })
+    expect(dismissed).toBe(2)
+    off()
+  })
+
+  it('it is not on the Escape stack, which would free a captured mouse; TERRAIN\'s Esc leaves it its key while it asks', () => {
+    const src = readFileSync(resolve(__dirname, '../TerrainCrew.tsx'), 'utf8')
+    expect(src).not.toMatch(/useEscape\(/)
+    expect(topEscape()).toBeNull()
+    expect(crewChipAsking()).toBe(false)
+    const view = readFileSync(resolve(__dirname, '../TerrainView.tsx'), 'utf8')
+    expect(view).toMatch(/else if \(crewChipAsking\(\)\) \{[^}]*\} else if \(topEscape\(\) === null/)
   })
 })
 

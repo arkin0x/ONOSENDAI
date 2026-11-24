@@ -2,10 +2,12 @@
  * TerrainCrew.tsx - the Crew in TERRAIN's scene (store/terrainShare.ts):
  *
  * - "Build with <name>?" when another player is within about 8 gibsons and
- *   not in your Crew: ADD (Enter), or the shared ✕ (Esc). Once per person
- *   per visit; ✕ hides it for that person. Answered by its keys too, so a
- *   walker whose mouse is captured never has to free it. Above the cross,
- *   over the scene, never over the menu or the controls.
+ *   not in your Crew: ADD (Enter), or the shared ✕ (Backspace, or Esc
+ *   while the mouse is free: a captured mouse takes Esc for itself). Once
+ *   per person per visit; ✕ hides it for that person. Answered by its keys,
+ *   so a walker whose mouse is captured never has to free it. It is not on
+ *   the Escape stack, which would free a captured mouse (TerrainView).
+ *   Above the cross, over the scene, never over the menu or the controls.
  * - A small Crew mark beside the cross while you aim at a block whose
  *   builder lists you (the outline is mint then too).
  * - The first time you aim at someone else's block (an amber outline), one
@@ -25,7 +27,8 @@ import { useProfile } from '../hooks/useProfile'
 import { useProfiles } from '../store/useProfiles'
 import { safeNpub } from '../lib/npub'
 import { ModalClose } from '../hud/ui/ModalClose'
-import { modalUp, useEscape } from '../hooks/useEscape'
+import { topEscape } from '../hooks/useEscape'
+import { walkMenuCovering } from '../store/walkInput'
 
 /** How near another player is, in gibsons, for the chip to ask. */
 export const CREW_NEAR = 8
@@ -45,10 +48,18 @@ function useName(pubkey: string | null): string {
 
 /** Asked or dismissed this visit, per person. */
 const offered = new Set<string>()
+/** Whom the chip asks about now, or null: TERRAIN's Esc leaves the chip its key while it asks. */
+let asking: string | null = null
+
+/** Whether the chip is up (terrain/TerrainView.tsx: Esc then dismisses it rather than leaving TERRAIN). */
+export function crewChipAsking(): boolean {
+  return asking !== null
+}
 
 /** For tests: forget who was asked. */
 export function resetCrewOffers(): void {
   offered.clear()
+  asking = null
 }
 
 /** The nearest player within CREW_NEAR gibsons, not you, not in your Crew, not asked this visit; null when none. */
@@ -71,21 +82,24 @@ export function nearbyToAsk(): string | null {
 const finePointer = (): boolean => { try { return window.matchMedia('(pointer: fine)').matches } catch { return false } }
 
 /**
- * The chip's keys while it asks: Enter adds them, Esc (through the shared
- * Escape stack, as a chip: a modal or the menu above it still closes first,
- * and TERRAIN is not left) dismisses. Enter is left to anything typed into.
+ * The chip's keys while it asks: Enter adds them; Backspace dismisses, and so
+ * does Esc while the mouse is free (heard ahead of TERRAIN's own Escape,
+ * which would otherwise leave TERRAIN). Nothing is taken while anything is
+ * on the Escape stack (a modal, the menu), while the bag is open or the menu
+ * covers the scene, or from a key typed into a field or pressed on a button.
  */
-export function crewChipKeys(on: EventTarget, add: () => void): () => void {
+export function crewChipKeys(on: EventTarget, add: () => void, dismiss: () => void, mouseCaptured: () => boolean = () => !!document.pointerLockElement): () => void {
   const down = (ev: Event): void => {
     const e = ev as KeyboardEvent
-    if (e.key !== 'Enter' || e.repeat || e.metaKey || e.ctrlKey || e.altKey) return
+    if (e.repeat || e.metaKey || e.ctrlKey || e.altKey) return
+    const act = e.key === 'Enter' ? add : e.key === 'Backspace' || (e.key === 'Escape' && !mouseCaptured()) ? dismiss : null
+    if (!act) return
     const t = e.target as HTMLElement | null
     if (t?.closest?.('input, textarea, select, button, [contenteditable="true"]')) return
-    // A modal or the bag above the chip has the keys.
-    if (modalUp() || useTerrain.getState().sheet) return
+    if (topEscape() !== null || useTerrain.getState().sheet || walkMenuCovering()) return
     e.preventDefault()
     e.stopImmediatePropagation()
-    add()
+    act()
   }
   on.addEventListener('keydown', down, true)
   return () => on.removeEventListener('keydown', down, true)
@@ -99,9 +113,8 @@ function CrewChip(): JSX.Element | null {
     return () => clearInterval(t)
   }, [who])
   const done = (): void => { if (who) offered.add(who); setWho(null) }
-  // Esc dismisses it, as the most recent chip on the Escape stack.
-  useEscape('chip', !!who, done)
-  useEffect(() => (who ? crewChipKeys(window, () => { void addCrew(who); offered.add(who); setWho(null) }) : undefined), [who])
+  useEffect(() => { asking = who; return () => { if (asking === who) asking = null } }, [who])
+  useEffect(() => (who ? crewChipKeys(window, () => { void addCrew(who); offered.add(who); setWho(null) }, () => { offered.add(who); setWho(null) }) : undefined), [who])
   if (!who) return null
   const keys = finePointer()
   return (
@@ -110,7 +123,8 @@ function CrewChip(): JSX.Element | null {
       <UserPlus size={14} strokeWidth={2.25} aria-hidden />
       <span>Build with {name}?</span>
       <button type="button" className="terrain-key" style={{ cursor: 'pointer', background: 'transparent' }} onClick={() => { void addCrew(who); done() }} aria-keyshortcuts="Enter">ADD{keys ? ' (ENTER)' : ''}</button>
-      <ModalClose onClose={done} label={`Not now: ${name}`} title={keys ? 'Not now (Esc)' : 'Not now'} />
+      <ModalClose onClose={done} label={`Not now: ${name}`} title={keys ? 'Not now (Backspace, or Esc)' : 'Not now'} />
+      {keys && <kbd className="terrain-key" aria-hidden>⌫</kbd>}
     </div>
   )
 }

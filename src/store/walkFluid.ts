@@ -278,6 +278,13 @@ export const FOOT_DROP_SPEED = Number(STEP_UP_MAX) * FLUID_MAX_SPEED * 1.1
 export const FOOT_SNAP = 0.5
 
 /**
+ * The most a walkable slope's drop over one frame may stretch FOOT_SNAP to,
+ * in steps: under a gibson, so a dip or a ledge a gibson deep is always
+ * fallen to, at 24 fps or through a long frame alike (review of the fall).
+ */
+export const FOOT_FOLLOW_MAX = 0.75
+
+/**
  * How fast the drawn feet may rise with the camera following them exactly,
  * in steps a second: a rise faster than this in a frame is a riser, and the
  * camera climbs the rest of it over GLIDE_TAU_S (lib/walkEye.ts walkRise).
@@ -546,7 +553,8 @@ export function groundFluid(now: number = performance.now()): void {
  */
 function dropTo(h: number, target: number, stepG: number, dt: number): number {
   const level = Math.hypot(st.v.x, st.v.y, st.v.z) * stepG
-  const follow = Math.max(FOOT_SNAP * stepG, FOOT_SLOPE * level * dt)
+  // A slow frame walks further, but never so far that a gibson's drop reads as a slope: under FOOT_FOLLOW_MAX at any frame rate.
+  const follow = Math.min(FOOT_FOLLOW_MAX, Math.max(FOOT_SNAP, (FOOT_SLOPE * level * dt) / stepG)) * stepG
   if (!foot.dropping && h - target <= follow + 1e-9) return Math.max(target, h - FOOT_DROP_SPEED * stepG * dt)
   foot.dropping = true
   // The arc itself over the frame, whatever the frame rate: v t + g t^2 / 2.

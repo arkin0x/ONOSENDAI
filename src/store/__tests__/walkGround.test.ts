@@ -666,7 +666,7 @@ describe('under GRAVITY the feet fall onto ground that drops away, at gravity\'s
     function LOE(p: typeof path, i: number): number { return LOW - p[i].y }
   })
 
-  for (const [name, ms] of [['60 fps', 16], ['30 fps', 33]] as const) {
+  for (const [name, ms] of [['60 fps', 16], ['30 fps', 33], ['24 fps', 42]] as const) {
     it(`a dip a gibson across and a gibson deep is crossed at walking speed with little drop, ${name}; every step published stands outside the floor`, async () => {
       // The dip is the gibson at x 3 (2.5 to 3.5).
       const { shard, surface } = floorWith(2.5, 3.5)
@@ -675,8 +675,8 @@ describe('under GRAVITY the feet fall onto ground that drops away, at gravity\'s
       const path = await run(8, ms)
       expect(drawn()[0]).toBeGreaterThan(8)
       const lowest = Math.min(...path.filter((f) => f.x > 2 && f.x < 4).map((f) => f.y))
-      // It barely goes in: about a fifth of a gibson at 60 fps, a third at 30 (before, it sank the whole gibson at once).
-      expect(lowest).toBeGreaterThan(LOW - (ms > 20 ? 0.4 : 0.25))
+      // It barely goes in: about a fifth of a gibson at 60 fps, a third at 30, under half at 24 (before, it sank the whole gibson at once).
+      expect(lowest).toBeGreaterThan(LOW - (ms > 40 ? 0.5 : ms > 20 ? 0.4 : 0.25))
       // Never under any surface.
       for (const f of path) expect(f.y).toBeGreaterThanOrEqual(surface(f.x) - 1e-6)
       await landAll()

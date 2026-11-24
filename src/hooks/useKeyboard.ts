@@ -251,7 +251,7 @@ export function useKeyboard(): void {
         return
       }
 
-      // T: TERRAIN from BUILD (store/padMode.ts enterTerrainMode); MODES' T opens it by name too.
+      // T: TERRAIN from any mode, as MODES lists its key (store/padMode.ts enterTerrainMode); not for newcomers, in the tour, /demo or TV.
       if (event.code === 'KeyT' && !useTerrain.getState().active) {
         event.preventDefault()
         if (!event.repeat) enterTerrainMode()

@@ -23,7 +23,7 @@
  * TERRAIN is WALK with block tools (store/useTerrain.ts): the camera and
  * the walker are WALK's. Here are only its marks, in the field's frame: the
  * block cursor on what the cross (or the mouse, or a tap) points at within
- * CURSOR_REACH, the chosen block's ghost, the chunks in reach and the chunk
+ * CURSOR_REACH (a plain outline, no glow), the chunks in reach and the chunk
  * SURVEY would fill; and a press waiting from the HUD is done here, where
  * the camera is.
  */
@@ -31,7 +31,7 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import {
-  BoxGeometry, BufferAttribute, BufferGeometry, EdgesGeometry, Group, InterleavedBuffer, InterleavedBufferAttribute, Matrix4, Mesh, MeshBasicMaterial,
+  BoxGeometry, BufferAttribute, BufferGeometry, EdgesGeometry, Group, InterleavedBuffer, InterleavedBufferAttribute, LineBasicMaterial, Matrix4, Mesh,
   Raycaster, Vector2, Vector3, type LineSegments,
 } from 'three'
 import { cellInReach, slotInReach, surveyTarget, terrainSession, useTerrain, type TerrainSession } from '../store/useTerrain'
@@ -41,10 +41,10 @@ import { raycast, type RayHit } from '../lib/terrain/raycast'
 import { CURSOR_REACH, TerrainWorld, type ChunkSlot } from '../lib/terrain/world'
 import { borderSlab, FLOATS_PER_VERTEX, type Borders } from '../lib/terrain/mesh'
 import { meshChunkAsync } from '../lib/terrain/blocksClient'
-import { blockKind, solid as isSolid } from '../lib/terrain/blocks'
+import { solid as isSolid } from '../lib/terrain/blocks'
 import { terrainInput } from '../terrain/terrainInput'
 import { makeTerrainMaterial } from '../terrain/terrainMaterial'
-import { BUILD, DANGER } from '../lib/palette'
+import { NO_BLOOM_BLEND } from './shardFaces'
 import { alignedOrigin } from '../store/useCyberspace'
 import type { ViewAxes } from '../lib/space'
 
@@ -176,7 +176,9 @@ function Chunks({ axes }: { axes: ViewAxes }): JSX.Element {
 }
 
 const CURSOR_EDGES = new EdgesGeometry(new BoxGeometry(1.02, 1.02, 1.02))
-const GHOST_BOX = new BoxGeometry(0.98, 0.98, 0.98)
+/** The targeted block's outline: plain white, a dull red out of reach. */
+const OUTLINE = '#ffffff'
+const OUTLINE_FAR = '#c86464'
 const UNIT_EDGES = new EdgesGeometry(new BoxGeometry(1, 1, 1))
 
 const ray = new Raycaster()
@@ -187,23 +189,20 @@ const toward = new Vector3()
 
 /**
  * TERRAIN's marks, in the field's frame (fieldMatrix): the block cursor, the
- * chosen block's ghost, the chunks in reach, the chunk SURVEY would fill.
+ * chunks in reach, the chunk SURVEY would fill. None of them blooms.
  * Each frame the cross (or the mouse) is cast into the blocks from WALK's
  * camera, and a press waiting from the HUD is done.
  */
 function Marks({ axes }: { axes: ViewAxes }): JSX.Element {
   const frame = useRef<Group>(null)
   const outline = useRef<LineSegments>(null)
-  const ghost = useRef<Mesh>(null)
   const survey = useRef<LineSegments>(null)
   const reachGroup = useRef<Group>(null)
-  const ghostMat = useMemo(() => new MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.16, depthWrite: false }), [])
-  useEffect(() => () => ghostMat.dispose(), [ghostMat])
   const last = useRef(0)
   useFrame((state) => {
     const s = terrainSession
-    const f = frame.current, o = outline.current, gh = ghost.current, sv = survey.current, rg = reachGroup.current
-    if (!f || !o || !gh || !sv || !rg) return
+    const f = frame.current, o = outline.current, sv = survey.current, rg = reachGroup.current
+    if (!f || !o || !sv || !rg) return
     const st = useTerrain.getState()
     const cs = useCyberspace.getState()
     const on = !!s && st.active && s.plane === cs.plane
@@ -232,17 +231,9 @@ function Marks({ axes }: { axes: ViewAxes }): JSX.Element {
     }
     const hit = terrainCursor.hit
     o.visible = !!hit
-    gh.visible = false
     if (hit) {
       o.position.set(hit.cell[0] + 0.5, hit.cell[1] + 0.5, hit.cell[2] + 0.5)
-      ;(o.material as MeshBasicMaterial).color.set(cellInReach(s, hit.cell) ? BUILD : DANGER)
-      const inv = st.inventory
-      const id = inv.hotbar[inv.slot]
-      const kind = id && inv.counts[id] > 0 ? blockKind(id) : null
-      const to: [number, number, number] = [hit.cell[0] + hit.normal[0], hit.cell[1] + hit.normal[1], hit.cell[2] + hit.normal[2]]
-      const face = hit.normal[0] !== 0 || hit.normal[1] !== 0 || hit.normal[2] !== 0
-      gh.visible = !!kind && face && cellInReach(s, to)
-      if (gh.visible && kind) { gh.position.set(to[0] + 0.5, to[1] + 0.5, to[2] + 0.5); ghostMat.color.set(kind.edge) }
+      ;(o.material as LineBasicMaterial).color.set(cellInReach(s, hit.cell) ? OUTLINE : OUTLINE_FAR)
     }
     const now = performance.now()
     if (now - last.current < 200) return
@@ -265,19 +256,19 @@ function Marks({ axes }: { axes: ViewAxes }): JSX.Element {
   })
   return (
     <group ref={frame} name="terrain-marks" visible={false} matrixAutoUpdate={false}>
+      {/* The targeted block: a thin plain outline that never blooms (owner, 2026-11-24: "get rid of the block preview glow"). */}
       <lineSegments ref={outline} geometry={CURSOR_EDGES} renderOrder={5}>
-        <lineBasicMaterial color={BUILD} transparent opacity={0.95} depthTest={false} toneMapped={false} />
+        <lineBasicMaterial color={OUTLINE} transparent opacity={0.6} depthTest={false} {...NO_BLOOM_BLEND} />
       </lineSegments>
-      <mesh ref={ghost} geometry={GHOST_BOX} material={ghostMat} renderOrder={4} />
       <group ref={reachGroup}>
         {Array.from({ length: 8 }, (_, i) => (
           <lineSegments key={i} geometry={UNIT_EDGES} scale={32} visible={false}>
-            <lineBasicMaterial color="#7cffc4" transparent opacity={0.22} toneMapped={false} />
+            <lineBasicMaterial color="#7cffc4" transparent opacity={0.18} {...NO_BLOOM_BLEND} />
           </lineSegments>
         ))}
       </group>
       <lineSegments ref={survey} geometry={UNIT_EDGES} scale={32} visible={false}>
-        <lineBasicMaterial color="#7cffc4" transparent opacity={0.75} toneMapped={false} />
+        <lineBasicMaterial color="#7cffc4" transparent opacity={0.5} {...NO_BLOOM_BLEND} />
       </lineSegments>
     </group>
   )

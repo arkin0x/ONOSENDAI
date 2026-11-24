@@ -8,9 +8,10 @@
  * open space (across cube and chunk borders too), as unit boxes centred on
  * their gibsons, the way WALK's walker stands on gibson points. Placed at
  * the cube's corner at height 3, so WALK only ever asks the cubes a step can
- * reach (regionReached). A cube's shard is made again only when its chunk
- * changed, so WALK builds its walls again only then (entryFor keys on the
- * shard object).
+ * reach (regionReached). A cube's shard is made again only when what it is
+ * made from changed (its cells and the layer round it), so mining one block
+ * remakes one cube or a few, and WALK builds only those walls again
+ * (entryFor keys on the shard object).
  *
  * Nothing is drawn from these: the scene draws the chunks' own meshes
  * (scene/TerrainLayer.tsx). Only WALK's collision reads them.
@@ -24,8 +25,31 @@ import type { ChunkSlot, TerrainWorld } from './world'
 const CUBE = 8
 const PER_CHUNK = 32 / CUBE
 
-/** One chunk's walls, as last made: its version, and its cubes' items. */
-const made = new WeakMap<ChunkSlot, { version: number; neighbours: string; items: WallItem[] }>()
+/** One chunk's walls, as last made: its version and neighbours, its items, and each cube's solidity and item. */
+const made = new WeakMap<ChunkSlot, { version: number; neighbours: string; items: WallItem[]; cubes: Array<{ solid: Uint8Array; item: WallItem | null } | null> }>()
+
+/** Which cells a cube's faces are made from are solid: its 8 cubed cells and the layer of cells round its six sides. */
+function cubeSolidity(world: TerrainWorld, slot: ChunkSlot, cx: number, cy: number, cz: number): Uint8Array {
+  const out = new Uint8Array(CUBE * CUBE * CUBE + 6 * CUBE * CUBE)
+  const ox = 32 * slot.off[0] + CUBE * cx, oy = 32 * slot.off[1] + CUBE * cy, oz = 32 * slot.off[2] + CUBE * cz
+  let n = 0
+  for (let y = 0; y < CUBE; y++) for (let z = 0; z < CUBE; z++) for (let x = 0; x < CUBE; x++) out[n++] = solid(world.blockCs(ox + x, oy + y, oz + z)) ? 1 : 0
+  for (let a = 0; a < CUBE; a++) for (let b = 0; b < CUBE; b++) {
+    out[n++] = solid(world.blockCs(ox - 1, oy + a, oz + b)) ? 1 : 0
+    out[n++] = solid(world.blockCs(ox + CUBE, oy + a, oz + b)) ? 1 : 0
+    out[n++] = solid(world.blockCs(ox + a, oy - 1, oz + b)) ? 1 : 0
+    out[n++] = solid(world.blockCs(ox + a, oy + CUBE, oz + b)) ? 1 : 0
+    out[n++] = solid(world.blockCs(ox + a, oy + b, oz - 1)) ? 1 : 0
+    out[n++] = solid(world.blockCs(ox + a, oy + b, oz + CUBE)) ? 1 : 0
+  }
+  return out
+}
+
+function same(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false
+  return true
+}
 
 /** A half-integer model coordinate as whole units and ticks (120 a unit). */
 function vertex(x: number, y: number, z: number): ShardVertex {
@@ -75,20 +99,29 @@ function neighbourStamp(world: TerrainWorld, slot: ChunkSlot): string {
   return out.join(',')
 }
 
-/** One chunk's walls, made again only when it or a neighbour changed. */
+/** One chunk's walls, looked at again only when it or a neighbour changed, and each cube made again only when its solidity did. */
 export function chunkWallItems(world: TerrainWorld, slot: ChunkSlot): WallItem[] {
   if (!slot.blocks) return []
   const stamp = neighbourStamp(world, slot)
   const had = made.get(slot)
   if (had && had.version === slot.version && had.neighbours === stamp) return had.items
   const items: WallItem[] = []
+  const cubes: Array<{ solid: Uint8Array; item: WallItem | null } | null> = []
   for (let cy = 0; cy < PER_CHUNK; cy++) for (let cz = 0; cz < PER_CHUNK; cz++) for (let cx = 0; cx < PER_CHUNK; cx++) {
-    const shard = cubeShard(world, slot, cx, cy, cz)
-    if (!shard) continue
-    const at = { x: slot.base.x + BigInt(CUBE * cx), y: slot.base.y + BigInt(CUBE * cy), z: slot.base.z + BigInt(CUBE * cz) }
-    items.push({ key: `terrain:${slot.key}:${cx}${cy}${cz}`, at, height: 3, plane: slot.base.plane as WallItem['plane'], shard, mine: true, terrain: true })
+    const c = cubes.length
+    const solidity = cubeSolidity(world, slot, cx, cy, cz)
+    const was = had?.cubes[c]
+    let item: WallItem | null
+    if (was && same(was.solid, solidity)) item = was.item
+    else {
+      const shard = cubeShard(world, slot, cx, cy, cz)
+      const at = { x: slot.base.x + BigInt(CUBE * cx), y: slot.base.y + BigInt(CUBE * cy), z: slot.base.z + BigInt(CUBE * cz) }
+      item = shard ? { key: `terrain:${slot.key}:${cx}${cy}${cz}`, at, height: 3, plane: slot.base.plane as WallItem['plane'], shard, mine: true, terrain: true } : null
+    }
+    cubes.push({ solid: solidity, item })
+    if (item) items.push(item)
   }
-  made.set(slot, { version: slot.version, neighbours: stamp, items })
+  made.set(slot, { version: slot.version, neighbours: stamp, items, cubes })
   return items
 }
 

@@ -29,6 +29,7 @@ vi.mock('../../lib/relay', () => ({
 
 import { useCyberspace } from '../useCyberspace'
 import { useWalk } from '../useWalk'
+import { useTutorial } from '../useTutorial'
 import { OUT_OF_REACH, setTerrainSession, syncTerrain, terrainSession, useTerrain } from '../useTerrain'
 import { switchMode, currentPadMode, enterTerrainMode, leaveTerrain } from '../padMode'
 import { chunkKey, chunkOf, CELLS } from '../../lib/terrain/coords'
@@ -118,6 +119,33 @@ describe('TERRAIN is WALK with block tools', () => {
     expect(currentPadMode()).toBe('terrain')
     switchMode('hop')
     expect(currentPadMode()).toBe('hop')
+  })
+
+  it('stays shut in the teaching list (the tour here): not by its key or the build bar either', async () => {
+    useTutorial.setState({ active: true })
+    try {
+      expect(enterTerrainMode()).toBe(false)
+      await settle(20)
+      expect(T().active).toBe(false)
+      expect(currentPadMode()).toBe('hop')
+    } finally {
+      useTutorial.setState({ active: false })
+    }
+  })
+
+  it('from WALK the walk goes on: WALK is never left on the way in', async () => {
+    switchMode('walk')
+    expect(useCyberspace.getState().walking).toBe(true)
+    let left = false
+    const off = useCyberspace.subscribe((c, p) => { if (p.walking && !c.walking) left = true })
+    try {
+      expect(enterTerrainMode()).toBe(true)
+      await settle(50)
+      expect(currentPadMode()).toBe('terrain')
+      expect(left).toBe(false)
+    } finally {
+      off()
+    }
   })
 
   it('WALK ending (its button, X) ends TERRAIN', async () => {

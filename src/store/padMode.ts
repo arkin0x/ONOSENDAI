@@ -47,7 +47,7 @@ import { regionAtOriginalSize, useRegion } from './useRegion'
 import { landFly } from '../lib/viewFly'
 import { buildPlane, placedCursor } from '../lib/buildCursor'
 import { SCAN_FOCUS_LABEL, scanBuying, useScan } from './useScan'
-import { effectiveModes, modeInfo, modeRoles, nextInRing, useModes, type ModeId } from './modeOrder'
+import { customModesApply, effectiveModes, modeInfo, modeRoles, nextInRing, useModes, type ModeId } from './modeOrder'
 import { refuseTerrain, terrainRefusal, useTerrain } from './useTerrain'
 
 export type PadMode = 'hop' | 'view' | 'walk' | 'build' | 'scan' | 'terrain'
@@ -431,10 +431,13 @@ function openTerrain(from: PadMode): void {
 export function enterTerrainMode(): boolean {
   const from = currentPadMode()
   if (from === 'terrain') return true
+  // Newcomers, the tour, /demo and TV keep to the teaching list, which has TERRAIN off: not by its key or button either.
+  if (!customModesApply()) return false
   const why = terrainRefusal()
   if (why) { refuseTerrain(why); return false }
   if (from === 'build' && buildHeld()) return false
-  if (!toHop(from)) return false
+  // From WALK the walk goes on (TERRAIN is WALK with tools): its steps waiting on proofs are kept, not dropped.
+  if (from !== 'walk' && !toHop(from)) return false
   openTerrain(from)
   return true
 }

@@ -42,7 +42,19 @@ let covers: () => boolean = () => false
  * brought them back whether or not they had been out. Otherwise, as always,
  * it shows or hides the controls.
  */
+/**
+ * What says a tap on the scene means something else here, and must not fold
+ * the controls or the chat: TERRAIN, where a tap mines (owner, 2026-11-24:
+ * "tapping still toggle-collapses the controls panel. disable that in terrain
+ * mode"). Set by store/useTerrain.ts; WALK and every other mode keep the fold.
+ */
+let tapTaken: () => boolean = () => false
+export function takeSceneTaps(when: () => boolean): void {
+  tapTaken = when
+}
+
 export function tapScene(): void {
+  if (tapTaken()) return
   const chat = useChat.getState()
   if (chat.open && covers()) chat.setOpen(false)
   else usePad.getState().toggle()

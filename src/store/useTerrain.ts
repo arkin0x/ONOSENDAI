@@ -35,6 +35,7 @@ import { useWalk } from './useWalk'
 import { walkLookDirection } from './walkFluid'
 import { BRIEF_TOAST_MS, useToast } from './useToast'
 import { setTerrainWalls } from './walkWalls'
+import { takeSceneTaps, usePad } from './usePad'
 import { chunkOf, chunkKey, type ChunkBase } from '../lib/terrain/coords'
 import { RING, TerrainWorld, REACH, type Change, type ChunkSlot } from '../lib/terrain/world'
 import { applyLayer, encodeLayer, isLayer, type Layer } from '../lib/terrain/layer'
@@ -198,6 +199,8 @@ export const useTerrain = create<TerrainState>((set, get) => ({
     if (!cs.walking) useWalk.getState().enter()
     if (!useCyberspace.getState().walking) { restoreZoom(); return }
     set({ active: true, loading: true, sheet: false, message: null, surveying: [] })
+    // WALK's pad stays out in TERRAIN: a tap mines there, and never folds it (takeSceneTaps below).
+    usePad.getState().setOpen(true)
     await syncTerrain()
     if (get().active) set({ loading: false })
   },
@@ -529,7 +532,7 @@ async function syncOnce(): Promise<TerrainSession | null> {
 
 const dist = (a: readonly number[], b: readonly number[]): number => Math.max(Math.abs(a[0] - b[0]), Math.abs(a[1] - b[1]), Math.abs(a[2] - b[2]))
 
-let wallMemo: { stamp: string; items: ReturnType<typeof terrainWallItems> } = { stamp: '', items: [] }
+let wallMemo: { world: TerrainWorld | null; stamp: string; items: ReturnType<typeof terrainWallItems> } = { world: null, stamp: '', items: [] }
 
 /** WALK's walls hear of the field's chunks (lib/terrain/walls.ts), so WALK walks on blocks: the same list while nothing changed. */
 function publishWalls(): void {
@@ -538,7 +541,8 @@ function publishWalls(): void {
     if (!s || s.plane !== plane) return []
     let stamp = ''
     for (const sl of s.world.chunks.values()) if (sl.blocks) stamp += `${sl.key}:${sl.version};`
-    if (stamp !== wallMemo.stamp) wallMemo = { stamp, items: terrainWallItems(s.world) }
+    // Keyed by the field too: another identity's field has its own blocks under the same keys and versions (review of #916).
+    if (stamp !== wallMemo.stamp || wallMemo.world !== s.world) wallMemo = { world: s.world, stamp, items: terrainWallItems(s.world) }
     return wallMemo.items
   })
 }
@@ -591,6 +595,9 @@ function follow(): void {
   lastKey = k
   void syncTerrain()
 }
+// A tap on the scene mines in TERRAIN: it never folds the controls or the chat (owner, 2026-11-24).
+takeSceneTaps(() => useTerrain.getState().active)
+
 useCyberspace.subscribe((c, prev) => {
   if (c.identity.pubkey !== prev.identity.pubkey && useTerrain.getState().active) void useTerrain.getState().exit()
   // WALK ending under TERRAIN (its button, X, a respawn) ends TERRAIN: TERRAIN is WALK.

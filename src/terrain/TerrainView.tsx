@@ -21,6 +21,7 @@ import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
 import { Backpack, Box, Radar } from 'lucide-react'
 import { HINT_DONE, headNow, offsetOf, surveyTarget as targetNow, terrainSession, useTerrain } from '../store/useTerrain'
 import { terrainCursor } from '../scene/TerrainLayer'
+import { topEscape } from '../hooks/useEscape'
 import { leaveTerrain } from '../store/padMode'
 import { resetTerrainInput, slotKey, terrainInput } from './terrainInput'
 import { blockKind, blockName } from '../lib/terrain/blocks'
@@ -131,7 +132,7 @@ function InventorySheet(): JSX.Element | null {
           <div><dt><Key>LONG PRESS</Key> <Key>RIGHT CLICK</Key></dt><dd>place</dd></div>
           <div><dt><Key>1 to 9</Key></dt><dd>choose a block</dd></div>
           <div><dt><Key>G</Key></dt><dd>survey</dd></div>
-          <div><dt><Key>T</Key></dt><dd>back to BUILD</dd></div>
+          <div><dt><Key>T</Key></dt><dd>leave TERRAIN</dd></div>
         </dl>
       </div>
     </div>
@@ -161,7 +162,7 @@ export function TerrainView(): JSX.Element | null {
   return active ? <TerrainScreen /> : null
 }
 
-/** A press held this long on the scene without moving places (a long press). */
+/** A press held longer than this is not a tap: it does not mine. */
 const LONG_MS = LONG_PRESS_MS
 
 /** Whether an event is on the cyberspace scene's canvas (not the compass's, not a HUD's). */
@@ -169,6 +170,59 @@ function onScene(e: Event): HTMLCanvasElement | null {
   const t = e.target as HTMLElement | null
   if (!t || t.tagName !== 'CANVAS' || t.closest('.compass-3d, .benchorb, .orbsquare')) return null
   return t as HTMLCanvasElement
+}
+
+/**
+ * The scene's pointer in TERRAIN, heard on `on` (the window, in capture)
+ * alongside WALK's, which still looks on a drag: a tap or a click mines at
+ * the point, the mouse's second button places, the mouse resting aims the
+ * cursor (owner: "Tap to mine, place with a button"). A tap never folds the
+ * controls here (usePad takeSceneTaps). Returns what stops it.
+ */
+export function terrainPointer(on: EventTarget): () => void {
+  let press: { id: number; x: number; y: number; moved: number; t: number; canvas: HTMLCanvasElement } | null = null
+  const ndc = (c: HTMLCanvasElement, x: number, y: number): { x: number; y: number } => {
+    const r = c.getBoundingClientRect()
+    return { x: ((x - r.left) / r.width) * 2 - 1, y: -(((y - r.top) / r.height) * 2 - 1) }
+  }
+  const end = (): void => { press = null }
+  const down = (ev: Event): void => {
+    const e = ev as PointerEvent
+    const c = onScene(e)
+    if (!c || useTerrain.getState().sheet) return
+    if (e.pointerType === 'mouse' && e.button === 2) { terrainInput.action = { kind: 'place', at: ndc(c, e.clientX, e.clientY) }; return }
+    if (e.pointerType === 'mouse' && e.button !== 0) return
+    press = { id: e.pointerId, x: e.clientX, y: e.clientY, moved: 0, t: performance.now(), canvas: c }
+  }
+  const move = (ev: Event): void => {
+    const e = ev as PointerEvent
+    const c = onScene(e)
+    if (e.pointerType === 'mouse') terrainInput.hover = c ? ndc(c, e.clientX, e.clientY) : null
+    if (!press || press.id !== e.pointerId) return
+    press.moved += Math.abs(e.movementX ?? 0) + Math.abs(e.movementY ?? 0)
+    if (Math.hypot(e.clientX - press.x, e.clientY - press.y) > TAP_SLOP) press.moved = TAP_SLOP + 1
+  }
+  const up = (ev: Event): void => {
+    const e = ev as PointerEvent
+    const p = press
+    if (!p || p.id !== e.pointerId) return
+    if (p.moved <= TAP_SLOP && performance.now() - p.t < LONG_MS) terrainInput.action = { kind: 'mine', at: ndc(p.canvas, p.x, p.y) }
+    end()
+  }
+  const menu = (e: Event): void => { if (onScene(e)) e.preventDefault() }
+  on.addEventListener('pointerdown', down, true)
+  on.addEventListener('pointermove', move, true)
+  on.addEventListener('pointerup', up, true)
+  on.addEventListener('pointercancel', end, true)
+  on.addEventListener('contextmenu', menu, true)
+  return () => {
+    end()
+    on.removeEventListener('pointerdown', down, true)
+    on.removeEventListener('pointermove', move, true)
+    on.removeEventListener('pointerup', up, true)
+    on.removeEventListener('pointercancel', end, true)
+    on.removeEventListener('contextmenu', menu, true)
+  }
 }
 
 function TerrainScreen(): JSX.Element {
@@ -198,7 +252,7 @@ function TerrainScreen(): JSX.Element {
       if (target?.closest?.('input, textarea, [contenteditable="true"]')) return
       const st = useTerrain.getState()
       const take = (): void => { e.preventDefault(); e.stopImmediatePropagation() }
-      if (e.code === 'Escape') { if (st.sheet) { take(); st.setSheet(false) } else if (!document.querySelector('[aria-modal="true"]')) { take(); leaveTerrain() } return }
+      if (e.code === 'Escape') { if (st.sheet) { take(); st.setSheet(false) } else if (topEscape() === null && !document.querySelector('[aria-modal="true"]')) { take(); leaveTerrain() } return }
       if (e.code === 'KeyT') { take(); if (!e.repeat) leaveTerrain(); return }
       if (e.code === 'KeyI') { take(); if (!e.repeat) st.setSheet(!st.sheet); return }
       if (st.sheet) return
@@ -212,52 +266,8 @@ function TerrainScreen(): JSX.Element {
     return () => window.removeEventListener('keydown', down, true)
   }, [])
 
-  // The scene's pointer, heard alongside WALK's (which still looks on a drag): a tap or a click mines at the point,
-  // the mouse's second button places, the mouse resting aims the cursor (owner: "Tap to mine, place with a button").
-  useEffect(() => {
-    let press: { id: number; x: number; y: number; moved: number; t: number; done: boolean; timer: number; canvas: HTMLCanvasElement } | null = null
-    const ndc = (c: HTMLCanvasElement, x: number, y: number): { x: number; y: number } => {
-      const r = c.getBoundingClientRect()
-      return { x: ((x - r.left) / r.width) * 2 - 1, y: -(((y - r.top) / r.height) * 2 - 1) }
-    }
-    const end = (): void => { if (press) clearTimeout(press.timer); press = null }
-    const down = (e: PointerEvent): void => {
-      const c = onScene(e)
-      if (!c || useTerrain.getState().sheet) return
-      if (e.pointerType === 'mouse' && e.button === 2) { terrainInput.action = { kind: 'place', at: ndc(c, e.clientX, e.clientY) }; return }
-      if (e.pointerType === 'mouse' && e.button !== 0) return
-      end()
-      const p = { id: e.pointerId, x: e.clientX, y: e.clientY, moved: 0, t: performance.now(), done: false, timer: 0, canvas: c }
-      press = p
-    }
-    const move = (e: PointerEvent): void => {
-      const c = onScene(e)
-      if (e.pointerType === 'mouse') terrainInput.hover = c ? ndc(c, e.clientX, e.clientY) : null
-      if (!press || press.id !== e.pointerId) return
-      press.moved += Math.abs(e.movementX ?? 0) + Math.abs(e.movementY ?? 0)
-      if (Math.hypot(e.clientX - press.x, e.clientY - press.y) > TAP_SLOP) press.moved = TAP_SLOP + 1
-    }
-    const up = (e: PointerEvent): void => {
-      const p = press
-      if (!p || p.id !== e.pointerId) return
-      if (!p.done && p.moved <= TAP_SLOP && performance.now() - p.t < LONG_MS) terrainInput.action = { kind: 'mine', at: ndc(p.canvas, p.x, p.y) }
-      end()
-    }
-    const menu = (e: MouseEvent): void => { if (onScene(e)) e.preventDefault() }
-    window.addEventListener('pointerdown', down, true)
-    window.addEventListener('pointermove', move, true)
-    window.addEventListener('pointerup', up, true)
-    window.addEventListener('pointercancel', end, true)
-    window.addEventListener('contextmenu', menu, true)
-    return () => {
-      end()
-      window.removeEventListener('pointerdown', down, true)
-      window.removeEventListener('pointermove', move, true)
-      window.removeEventListener('pointerup', up, true)
-      window.removeEventListener('pointercancel', end, true)
-      window.removeEventListener('contextmenu', menu, true)
-    }
-  }, [])
+  // The scene's pointer, heard alongside WALK's (which still looks on a drag).
+  useEffect(() => terrainPointer(window), [])
 
   return (
     <div className="terrainview" role="group" aria-label="TERRAIN: block tools">

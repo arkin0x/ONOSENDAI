@@ -112,7 +112,8 @@ export function isLayer(v: unknown): v is Layer {
  */
 export function applyLayer(generated: Uint8Array, layer: Layer): Uint8Array | null {
   if (!isLayer(layer)) return null
-  if ((layer.ground ?? 1) !== GENERATOR_VERSION) return null
+  // A whole chunk stands by itself; only a diff depends on the ground it was taken against.
+  if (layer.form === 'diff' && (layer.ground ?? 1) !== GENERATOR_VERSION) return null
   const pal = layer.pal
   if (pal.length < 1 || pal.length > 256) return null
   for (let i = 0; i < pal.length; i++) {

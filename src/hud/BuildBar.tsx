@@ -35,6 +35,7 @@ import { useCover } from '../hooks/useCover'
 import { useLayoutEffect, useRef } from 'react'
 import { Blocks, CopyPlus, DoorClosedLocked, House, Wrench } from 'lucide-react'
 import { enterTerrainMode } from '../store/padMode'
+import { TEACHING_MODES, useEffectiveModes } from '../store/modeOrder'
 import { ItemIcon } from './ItemIcon'
 import { sealAChest, sealADoor } from './ShardsPanel'
 
@@ -45,6 +46,8 @@ export function BuildBar(): JSX.Element | null {
   // Covers the scene from above: BUILD frames the cursor below it (hooks/useCover).
   const coverRef = useCover('top')
   const active = useBuilder((s) => s.active)
+  // TERRAIN is off in the teaching list (newcomers, the tour, /demo, TV): no button for it there.
+  const terrainOffered = useEffectiveModes() !== TEACHING_MODES
   const cursor = useCyberspace((s) => s.cursor)
   const position = useCyberspace((s) => s.position)
   const plane = useCyberspace(buildPlane)
@@ -129,7 +132,7 @@ export function BuildBar(): JSX.Element | null {
         <button className="buildbar__act" onClick={sealAChest} aria-label="Seal a chest" title="Seal a chest: place a chest, then seal a message, a model or an item in it to an item or a person"><ItemIcon type="chest" className="buildbar__icon" size={ICON} />CHEST</button>
         <button className="buildbar__act" onClick={sealADoor} aria-label="Seal a door" title="Seal a door: place a door, then whatever you place in its red cube at its height is sealed to it"><DoorClosedLocked className="item-icon buildbar__icon" size={ICON} strokeWidth={2.5} aria-hidden />DOOR</button>
         <button className="buildbar__act" onClick={() => useStash.getState().openSeed()} aria-label="Plant a seed" title="Plant a seed: pick a DNA, see what it grows, and plant it at the build cursor; everyone who finds it grows the same bloom"><ItemIcon type="seed" className="buildbar__icon" size={ICON} />SEED</button>
-        <button className="buildbar__act" onClick={() => { enterTerrainMode() }} aria-label="Terrain" title="Terrain: walk, mine and place blocks near your avatar (T)"><Blocks className="item-icon buildbar__icon" size={ICON} strokeWidth={2.25} aria-hidden />TERRAIN</button>
+        {terrainOffered && <button className="buildbar__act" onClick={() => { enterTerrainMode() }} aria-label="Terrain" title="Terrain: walk, mine and place blocks near your avatar (T)"><Blocks className="item-icon buildbar__icon" size={ICON} strokeWidth={2.25} aria-hidden />TERRAIN</button>}
         {again !== null && (
           <button className="buildbar__act" onClick={() => useShards.getState().placeAgain()} aria-label="Place again" title={`Place "${again}" again, with the same settings`}><CopyPlus className="item-icon buildbar__icon" size={ICON} strokeWidth={2.25} aria-hidden />AGAIN</button>
         )}

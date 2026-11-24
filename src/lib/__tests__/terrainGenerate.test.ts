@@ -168,7 +168,7 @@ describe('the rare band\'s thresholds', () => {
       expect(t).toBe(Math.floor(4294967296 * Math.min(1, RARE_TARGET[id] / MAXK_AT_LEAST[k])))
       expect((MAXK_AT_LEAST[k] * t) / 4294967296).toBeCloseTo(RARE_TARGET[id], 9)
     }
-    expect(RARE_ODDS.map(([id]) => id)).toEqual(RARE.map(([id]) => id))
+    expect(RARE_ODDS.map(([id, k]) => [id, k])).toEqual(RARE.map(([id, k]) => [id, k]))
   })
 })
 

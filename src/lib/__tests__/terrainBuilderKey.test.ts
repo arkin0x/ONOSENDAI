@@ -71,7 +71,8 @@ describe('the builder tag rides on the next movement action', () => {
     const rec = builderRecord(me)!
     const fresh = rec.current!
     expect(fresh).not.toBe(old)
-    expect(owedTags(rec)).toEqual([['builder', fresh], ['builder-retire', old]])
+    // With the R tag beside the retirement, so relays index it (§4.3).
+    expect(owedTags(rec)).toEqual([['builder', fresh], ['builder-retire', old], ['R', old]])
     expect(namedKey(me)).toBeNull()
     const t = withBuilderTags(move(), me)
     noteActionSigned({ id: 'c'.repeat(64), pubkey: me, kind: 3333, tags: t.tags })

@@ -29,6 +29,8 @@ const ACTION_KIND = 3333
 
 export const BUILDER_TAG = 'builder'
 export const BUILDER_RETIRE_TAG = 'builder-retire'
+/** The single-letter tag beside every `builder-retire`, naming the same key, so relays index retirements (§4.3). */
+export const RETIRE_INDEX_TAG = 'R'
 
 type Owed = (signer: string) => string[][]
 let owed: Owed = () => []

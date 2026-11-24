@@ -6,8 +6,9 @@
  * client does not verify hop work itself), the Bitcoin headers the seeds
  * clock already trusts (NTH's anchors and the header blobs,
  * lib/seeds/seedSources.ts), the blocks worker for the ground, the mute
- * list, the follow list and presence. Kept apart so tests hand terrainShare
- * a mock relay and never load any of this.
+ * list, the follow list, presence, and the witness's HTTP query on the same
+ * relay (lib/terrain/witness.ts). Kept apart so tests hand terrainShare a
+ * mock relay and never load any of this.
  */
 
 import { setDefaultShareDeps, NEAR_GIBSONS, type ShareDeps } from './terrainShare'
@@ -23,6 +24,9 @@ import { verifyOnce } from '../lib/verifiedSigs'
 import { generateChunk } from '../lib/terrain/blocksClient'
 import { SETTLE_DEPTH } from '../lib/terrain/blockLayer'
 import { fetchSeedHeaders, headerBook, headersReady, refreshTrustedTip, trustedTip } from '../lib/seeds/seedSources'
+import { WitnessBook } from '../lib/terrain/witness'
+import { getMeta, putMeta } from '../lib/idb'
+import { openTerrainDb } from '../lib/terrain/terrainDb'
 
 /** A block SETTLE_DEPTH below the trusted tip, with its verified hash (DECK-0009 §5.3). */
 async function commitBlock(): Promise<{ height: number; hash: string } | null> {
@@ -38,8 +42,8 @@ async function commitBlock(): Promise<{ height: number; hash: string } | null> {
 /**
  * A settle's block against our headers (DECK-0009 §6.1): pending while it is
  * not 6 below the trusted tip; then the verified header's hash decides. A
- * height whose header cannot be had is pending too (asked again on a later
- * read), never counted on a guess: recorded as a gap for the DECK.
+ * height 6 or more deep whose header cannot be had is pending too, until it
+ * can be (§6.1 says so), never counted on a guess.
  */
 async function header(height: number, hash: string): Promise<'ok' | 'pending' | 'bad'> {
   await headersReady()
@@ -78,6 +82,30 @@ async function authorChain(pubkey: string, actionId: string): Promise<NostrEvent
   return events
 }
 
+/** A URL's status and text, or null for no answer in 6 seconds or a network failure. */
+async function fetchText(url: string, init?: { headers?: Record<string, string> }): Promise<{ status: number; text: string } | null> {
+  try {
+    const r = await fetch(url, { ...init, signal: AbortSignal.timeout(6000) })
+    return { status: r.status, text: r.status === 200 ? await r.text() : '' }
+  } catch { return null }
+}
+
+/** The witness key, pinned on this device once learned (DECK-0009 §7.4: taken from NIP-11 `self` and pinned from then on). */
+const WITNESS_PIN = 'onosendai:witness-key'
+let pinDb: Promise<IDBDatabase> | null = null
+const pinStore = (): Promise<IDBDatabase> => (pinDb ??= openTerrainDb())
+const pin = {
+  // Kept in the terrain database's meta store (IndexedDB, never localStorage); not per identity, it is the relay's.
+  get: async (): Promise<string | null> => {
+    const v = await getMeta(await pinStore(), WITNESS_PIN).catch(() => null)
+    return typeof v === 'string' ? v : null
+  },
+  set: (k: string): void => { void pinStore().then((db) => putMeta(db, WITNESS_PIN, k)).catch(() => { /* pinned for this visit */ }) },
+}
+
+/** The witness, one for the visit: what it said is kept (lib/terrain/witness.ts). */
+const witness = new WitnessBook(fetchText, () => Date.now(), pin)
+
 function othersNear(): boolean {
   const cs = useCyberspace.getState()
   const me = cs.identity.pubkey
@@ -107,6 +135,7 @@ export function liveShareDeps(): ShareDeps {
     muted: () => useMutes.getState().muted.pubkeys,
     follows: (me) => followsOf(me),
     othersNear,
+    witness,
     verify: (ev) => verifyOnce(ev),
     now: () => Date.now(),
   }

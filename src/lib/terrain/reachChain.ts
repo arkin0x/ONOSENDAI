@@ -11,11 +11,12 @@
  * key, none at or before it retires the key, and no action of the author's
  * anywhere retires it with `all`.
  *
- * The line is the chain as buildChain resolves it from the newest spawn: a
- * reach event on a chain a respawn has ended, or on a fork that lost, is not
- * found there, and its layer does not count for now (§4.4: a reader that
- * cannot walk the ancestry treats the key as not valid). Recorded as a
- * limit in the PR.
+ * The line is the chain that holds the reach event, ended chains included
+ * (store/terrainShare.ts reads it from the canonical relay, which checks
+ * every hop's proof before it accepts it: §6.2 lets a reader that does not
+ * verify chains rely on that relay). A reach event on a fork that lost is
+ * not on its line, and its layer does not count for now (§4.4). An `all`
+ * retirement on another chain is found with the `R` tag (retirementsOf).
  */
 
 import { buildChain, type ActionEvent, type NostrEvent } from '../events'
@@ -75,9 +76,33 @@ function validAt(c: ReadChain, key: string, i: number): boolean {
   return named && !retiredAll(c, key)
 }
 
-/** Of the reach events a layer names, those the key is valid for, with their places (§4.4, §6.2). */
-export function reachPlaces(c: ReadChain, key: string, ids: readonly string[]): Map<string, ReachPlace> {
+/** A key's retirements by an author, found on any chain with `#R` (§4.3): whether one is `all`, and the actions that carry them. */
+export interface Retirements {
+  all: boolean
+  ids: string[]
+}
+
+/** Read the retirements of `key` from movement actions of `author`'s (what an `#R` filter brought back; anything else is ignored). */
+export function retirementsOf(events: readonly NostrEvent[], author: string, key: string): Retirements {
+  const out: Retirements = { all: false, ids: [] }
+  for (const e of events) {
+    if (e.pubkey !== author || e.kind !== 3333) continue
+    const tags = e.tags.filter((t) => t[0] === BUILDER_RETIRE_TAG && t[1] === key)
+    if (tags.length === 0) continue
+    out.ids.push(e.id)
+    if (tags.some((t) => t[2] === 'all')) out.all = true
+  }
+  return out
+}
+
+/**
+ * Of the reach events a layer names, those the key is valid for, with their
+ * places (§4.4, §6.2). `retiredAll` says an `all` retirement was found on
+ * some other chain of the author's (retirementsOf).
+ */
+export function reachPlaces(c: ReadChain, key: string, ids: readonly string[], retiredAll = false): Map<string, ReachPlace> {
   const out = new Map<string, ReachPlace>()
+  if (retiredAll) return out
   for (const id of ids) {
     const i = reachIndex(c, id)
     if (i < 0 || !validAt(c, key, i)) continue

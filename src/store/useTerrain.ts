@@ -672,6 +672,19 @@ connectShareHost({
   active: () => useTerrain.getState().active,
   fold: async (key) => { const s = terrainSession; if (s) await foldKey(s, key) },
   redisplay,
+  adopt: async (key, own) => {
+    const s = terrainSession
+    const slot = s?.world.slotByKey(key)
+    if (!s || !slot?.generated || !slot.own) return
+    // Your other keys' cells become your own here, with every change you made since kept over them (store/terrainShare.ts, §5.7).
+    const next = own.slice()
+    for (const { change } of s.pending.get(key) ?? []) next[change.cell] = change.id
+    slot.own = next
+    const layer = encodeLayer(slot.generated, next, s.plane === 1 ? 1 : 0)
+    s.layers.set(key, layer)
+    if (s.db) await foldChunk(s.db, s.owner, key, layer, [], Date.now()).catch(() => { /* kept in memory */ })
+    redisplay(key)
+  },
 })
 
 // Development only: the field, for browser probes (never in a production build).

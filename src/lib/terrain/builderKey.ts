@@ -20,13 +20,14 @@
  * on the next action and makes a new key at once, named on that same action.
  * The retirement is "from here on" (§4.3), the form for a key nobody else
  * holds; `all` voids everything a key ever wrote and is for a key that may
- * have been copied.
+ * have been copied. Beside it rides `["R", "<hex>"]`, the single-letter tag
+ * relays index, so a reader finds every retirement of a key with one filter.
  */
 
 import { generateSecretKey, getPublicKey } from 'nostr-tools/pure'
 import { putMany, request } from '../idb'
 import { META } from './terrainDb'
-import { BUILDER_RETIRE_TAG, BUILDER_TAG, onActionSigned, owedBuilderTagsFrom } from './builderTags'
+import { BUILDER_RETIRE_TAG, BUILDER_TAG, RETIRE_INDEX_TAG, onActionSigned, owedBuilderTagsFrom } from './builderTags'
 
 /** How many signed actions carrying a tag are remembered while waiting for one to reach the relay. */
 export const CANDIDATES_KEPT = 32
@@ -80,7 +81,12 @@ export function owedTags(rec: BuilderRecord | undefined): string[][] {
   const out: string[][] = []
   const cur = rec.keys.find((k) => k.pub === rec.current)
   if (cur && cur.named === null && !cur.retire) out.push([BUILDER_TAG, cur.pub])
-  for (const k of rec.keys) if (k.retire && k.retire.confirmed === null) out.push(k.retire.all ? [BUILDER_RETIRE_TAG, k.pub, 'all'] : [BUILDER_RETIRE_TAG, k.pub])
+  for (const k of rec.keys) {
+    if (!k.retire || k.retire.confirmed !== null) continue
+    out.push(k.retire.all ? [BUILDER_RETIRE_TAG, k.pub, 'all'] : [BUILDER_RETIRE_TAG, k.pub])
+    // Beside every retirement, the single-letter R tag relays index, so readers find it on any chain (§4.3).
+    out.push([RETIRE_INDEX_TAG, k.pub])
+  }
   return out
 }
 

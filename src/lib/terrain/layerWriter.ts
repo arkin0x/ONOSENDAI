@@ -18,8 +18,8 @@
 
 import { CELLS } from './coords'
 import {
-  GROUND_REVISION, SETTLES_MAX, claimsOf, decodePlane, encodePlane,
-  type LayerPlaintext, type PlaneObject, type Settle,
+  GROUND_REVISION, SETTLES_MAX, claimsOf, decodePlane, encodePlane, later,
+  type LayerPlaintext, type PlaneObject, type Settle, type SettleTime,
 } from './blockLayer'
 
 /** The block a new settle commits to: at least 6 below the tip (§5.3). */
@@ -62,6 +62,8 @@ export function nextPlaintext(o: {
   block: CommittedBlock
   nonce?: string
   builders?: string[]
+  /** Write a version even when nothing changed (a new key writing what another key held, §5.7). */
+  force?: boolean
 }): LayerPlaintext | null {
   const { prev, plane, values, ground, block } = o
   const prevSettles = prev?.settles ?? []
@@ -88,7 +90,7 @@ export function nextPlaintext(o: {
     }
   }
   for (const c of was.keys()) if (!now.has(c)) changed = true
-  if (prev && !changed) return null
+  if (prev && !changed && !o.force) return null
 
   // The settles still named, in either plane.
   const named = new Set<number>()
@@ -135,6 +137,75 @@ export function nextPlaintext(o: {
   }
   planes.sort((a, b) => a.plane - b.plane)
   return { settles, builders: o.builders ?? prev?.builders ?? [], planes }
+}
+
+/** Another builder key's layer of the same author at this chunk, as read, with its settles' times (§5.7, a new builder key at a chunk). */
+export interface OtherKeyLayer {
+  pubkey: string
+  plaintext: LayerPlaintext
+  /** Each settle's time, in order (§7.2): its height, its W, its work. */
+  times: SettleTime[]
+}
+
+/**
+ * Where a new key starts at a chunk (§5.7, a new builder key at a chunk):
+ * the author's other keys' layers there, every plane, every placement with
+ * its value, `t0` and `t1` and the settles they name, unchanged, claims and
+ * all. Where two of them place the same cell, the one whose latest change
+ * §7.2 makes later is taken. Null when there are none. Over 32 settles is
+ * left to nextPlaintext, which merges as §5.3 says.
+ */
+export function combineLayers(olds: readonly OtherKeyLayer[], groundOf: (plane: 0 | 1) => Uint8Array | null): LayerPlaintext | null {
+  if (olds.length === 0) return null
+  const settles: Settle[] = []
+  const at = new Map<string, number>()
+  const index = (st: Settle): number => {
+    const k = JSON.stringify(st)
+    let i = at.get(k)
+    if (i === undefined) { i = settles.length; settles.push(st); at.set(k, i) }
+    return i
+  }
+  const planes: PlaneObject[] = []
+  for (const plane of [0, 1] as const) {
+    const has = olds.filter((o) => o.plaintext.planes.some((p) => p.plane === plane))
+    if (has.length === 0) continue
+    const g = groundOf(plane)
+    if (!g) continue
+    let survey = false
+    const best = new Map<number, { v: number; t0: Settle; t1: Settle; last: SettleTime & { author: string; builder: string } }>()
+    for (const o of has) {
+      const pl = o.plaintext.planes.find((p) => p.plane === plane)!
+      const d = decodePlane(pl, g, o.plaintext.settles.length)
+      if (!d || d === 'aside') continue
+      survey ||= pl.survey
+      d.placements.forEach((c, k) => {
+        const last = { ...o.times[d.t1[k]], author: '', builder: o.pubkey }
+        const cur = best.get(c)
+        if (!cur || later(last, cur.last) < 0) best.set(c, { v: d.values[c], t0: o.plaintext.settles[d.t0[k]], t1: o.plaintext.settles[d.t1[k]], last })
+      })
+    }
+    const values = survey ? Int32Array.from(g) : new Int32Array(CELLS)
+    const t0 = new Map<number, number>(), t1 = new Map<number, number>()
+    for (const [c, x] of best) { values[c] = x.v; t0.set(c, index(x.t0)); t1.set(c, index(x.t1)) }
+    planes.push(encodePlane(plane, survey, values, g, t0, t1))
+  }
+  if (planes.length === 0) return null
+  // A layer holds at least one settle (§5.5).
+  if (settles.length === 0) settles.push(olds[0].plaintext.settles[0])
+  return { settles, builders: [], planes }
+}
+
+/**
+ * An emptied version of an old key's layer (§5.7): each plane keeps its
+ * `survey` and `ground`, has no placements, and the one settle is fresh and
+ * claims nothing.
+ */
+export function emptiedPlaintext(old: LayerPlaintext, block: CommittedBlock, nonce: string = randomNonce()): LayerPlaintext {
+  return {
+    settles: [[block.height, block.hash, nonce, claimsOf(new Set(), new Set())]],
+    builders: [],
+    planes: old.planes.map((p) => ({ plane: p.plane, survey: p.survey, ...(p.ground !== undefined ? { ground: p.ground } : {}), form: 'diff' as const, pal: [null], cells: [0, -(CELLS - 1)], t0: [], t1: [] })),
+  }
 }
 
 /** A version that only surveys: the plane's base, no placements, one settle that claims nothing (§5.5, §5.7). */

@@ -50,7 +50,7 @@ import {
 } from '../terrainShare'
 import { builderRecord, forgetBuilderRecords, namedKey } from '../../lib/terrain/builderKey'
 import { fixTags, onActionSigned } from '../../lib/terrain/builderTags'
-import { chunkOf, idx, type ChunkBase } from '../../lib/terrain/coords'
+import { chunkKey, chunkOf, idx, type ChunkBase } from '../../lib/terrain/coords'
 import { generate } from '../../lib/terrain/generate'
 import { EMPTY, kindId } from '../../lib/terrain/blocks'
 import { readLayer } from '../../lib/terrain/layerReader'
@@ -78,8 +78,12 @@ function matches(f: Filter, e: NostrEvent): boolean {
   if (f.ids && !f.ids.includes(e.id)) return false
   if (f.kinds && !f.kinds.includes(e.kind)) return false
   if (f.authors && !f.authors.includes(e.pubkey)) return false
-  const d = (f as Record<string, unknown>)['#d'] as string[] | undefined
-  if (d && !e.tags.some((t) => t[0] === 'd' && d.includes(t[1]))) return false
+  // Single-letter tag filters, as NIP-01 relays match them (#d, #p, #R).
+  for (const [k, v] of Object.entries(f)) {
+    if (!/^#[a-zA-Z]$/.test(k)) continue
+    const want = v as string[]
+    if (!e.tags.some((t) => t[0] === k[1] && want.includes(t[1]))) return false
+  }
   return true
 }
 
@@ -104,6 +108,8 @@ function standAt(p: { x: bigint; y: bigint; z: bigint; plane: number }): void {
 }
 
 let own: NostrEvent[] = []
+/** Make the mock relay refuse filters naming #p (the read a new key waits for). */
+let refuseP = false
 
 beforeEach(async () => {
   if (T().active) await T().exit()
@@ -116,13 +122,17 @@ beforeEach(async () => {
   published = []
   own = []
   near = false
+  refuseP = false
   muted = new Set()
   useWalk.setState({ gravity: false })
   useCyberspace.setState({ events: [], signerKind: 'local' })
   setShareDeps({
     live: () => true,
     publish: async (ev) => { published.push(ev); hold(ev); return { ok: true } },
-    query: async (f) => held.filter((e) => matches(f, e)),
+    query: async (f) => {
+      if (refuseP && (f as Record<string, unknown>)['#p']) throw new Error('unreachable')
+      return held.filter((e) => matches(f, e))
+    },
     authorChain: async (pk) => held.filter((e) => e.kind === 3333 && e.pubkey === pk),
     ownEvents: () => own,
     v1List: () => new Set(),
@@ -132,6 +142,8 @@ beforeEach(async () => {
     muted: () => muted,
     follows: async () => [],
     othersNear: () => near,
+    // The witness cannot be reached (it does not serve its query yet): every settle unwitnessed.
+    witness: { learn: async () => undefined, status: () => null, settle: () => null },
     verify: (ev) => verifyEvent(ev as never),
     now: () => Date.now(),
   })
@@ -342,9 +354,72 @@ describe('retiring this device\'s key', () => {
     const byOld = published.filter((e) => e.pubkey === old)
     expect(byNew).toHaveLength(1)
     expect(byOld).toHaveLength(2)
-    // The old key's newest layer has no placements left.
+    // The old key's newest layer has no placements left: same planes, one fresh settle claiming nothing.
     const lookupId = byOld[1].tags.find((t) => t[0] === 'd')![1]
     expect(byNew[0].tags).toContainEqual(['d', lookupId])
+    expect(byOld[1].tags.filter((t) => t[0] === 'settle')).toHaveLength(1)
+    // The move that retired it carried the R tag beside it (§4.3).
+    expect(step.tags).toContainEqual(['R', old])
+  })
+})
+
+describe('a new key at a chunk where another key of yours built (§5.7)', () => {
+  it('holds while the other key\'s layer cannot be read, then starts from its cells', async () => {
+    const otherSk = generateSecretKey()
+    const other = getPublicKey(otherSk)
+    const p = spawnPlace()
+    standAt(p)
+    await T().enter()
+    const key = builderRecord(me())!.current!
+    // Your spawn names this device's key and another device's.
+    const st = spawnTemplate(me(), Math.floor(Date.now() / 1000))
+    const spawn = await sign({ ...st, tags: [...st.tags, ['builder', other]] })
+    expect(spawn.tags).toContainEqual(['builder', key])
+    own = [spawn]
+    hold(spawn)
+    await confirmTags()
+    await settle(100)
+    // The other device's layer here: one Gibsonite in the air.
+    const base = chunkOf(p.x, p.y, p.z, p.plane)
+    const g = generate(base).blocks
+    let air = -1
+    for (let c = 32767; c >= 0 && air < 0; c--) if (g[c] === EMPTY) air = c
+    const values = g.slice()
+    values[air] = 43
+    const plain = nextPlaintext({ prev: null, plane: p.plane, values, ground: g, block: { height: 924_990, hash: H } })!
+    const { key: rk, lookupId } = chunkRegionKey(base)
+    const ids = plain.settles.map((x) => settleId(me(), lookupId, x)!)
+    hold(finalizeEvent({ kind: LAYER_KIND, created_at: 1_790_000_050, tags: layerTags({ lookupId, author: me(), reach: [spawn.id], settleIds: ids, encrypted: await encryptForRegion(rk, plaintextJson(plain)) }), content: '' }, otherSk) as unknown as NostrEvent)
+
+    refuseP = true
+    await surveyHere()
+    mineSome(1)
+    await flush('test')
+    expect(published).toHaveLength(0)
+    expect(useShare.getState().words).toMatch(/other devices/)
+
+    refuseP = false
+    await flush('test')
+    expect(published).toHaveLength(1)
+    const ev = published[0]
+    expect(ev.pubkey).toBe(key)
+    const r = await readLayer(ev, {
+      verify: (e) => verifyEvent(e as never), key: rk, lookupId, chunk: base, ground: async () => g,
+      reach: async (_a, b, ids2) => reachPlaces(readChainOf(me(), own, new Set()), b, ids2), header: async () => 'ok',
+    })
+    expect(r.status).toBe('counted')
+    if (r.status !== 'counted') return
+    const pl = r.layer.planes[0]
+    // The other key's Gibsonite, with its settle carried unchanged, and your own change over it.
+    expect(pl.values[air]).toBe(43)
+    expect(r.plaintext.settles).toContainEqual(plain.settles[0])
+    expect(pl.placements.length).toBeGreaterThanOrEqual(2)
+    // Not a key this device holds: no emptied layer for it.
+    expect(published.some((e) => e.pubkey === other)).toBe(false)
+    // It is your own here now, so the next version keeps it.
+    const s = terrainSession!
+    const slot = s.world.slotByKey(chunkKey(base))!
+    expect(slot.own![air]).toBe(43)
   })
 })
 

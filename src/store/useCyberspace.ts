@@ -31,6 +31,7 @@ import { checkCloudRide, type CloudRideCheck } from '../lib/cloudRide'
 import { Quaternion } from 'three'
 import { generateSecretKey, getEventHash, getPublicKey, verifiedSymbol, verifyEvent, type VerifiedEvent } from 'nostr-tools/pure'
 import { withNoBroadcast } from '../lib/noBroadcast'
+import { fixTags, noteActionSigned, tagsFixed, withBuilderTags } from '../lib/terrain/builderTags'
 import { attributed } from '../lib/client'
 import { nip19 } from 'nostr-tools'
 import { exportNcryptsec, exportNsec } from '../lib/keyExport'
@@ -2402,13 +2403,18 @@ async function signEvent(template: EventTemplate, patienceMs?: number, signer: S
     const look = lookBeforeSave()
     if (!(look instanceof Promise ? await look : look)) throw new Error(SAVE_BLOCKED_MESSAGE)
   }
+  // The builder tags (DECK-0009 §4, lib/terrain/builderTags.ts): the
+  // player's movement action names this device's builder key, or retires
+  // one, with no signature of its own. Never on a step whose id is already
+  // relied on (a WALK lane fixes its tags when it is proved).
+  if (!tagsFixed(template)) template = withBuilderTags(template, signer.pubkey)
   if (signer.kind === 'local') {
     // The local key computes the id and the signature itself, so its events
     // are authentic by construction, and are remembered as checked.
     const own = await signer.signEvent(template)
     verifiedSigs.add(`${own.id}:${own.sig}`)
     signedHere(own)
-    if (own.kind === ACTION_KIND) noteSigned(own)
+    if (own.kind === ACTION_KIND) { noteSigned(own); noteActionSigned(own) }
     return own
   }
   // A wake skipped for an AUTH's answer, and this is not an AUTH: drop the
@@ -2462,7 +2468,7 @@ async function signEvent(template: EventTemplate, patienceMs?: number, signer: S
     if (late) pendingAuthSigns--
   }
   const answer = checkedAnswer(signed, signer)
-  if (answer.kind === ACTION_KIND) noteSigned(answer)
+  if (answer.kind === ACTION_KIND) { noteSigned(answer); noteActionSigned(answer) }
   return answer
 }
 
@@ -6377,8 +6383,9 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     const by = currentSigner.pubkey
     const signed = attributed(withNoBroadcast(template, by))
     lane.by = by
-    lane.template = signed
-    lane.id = getEventHash({ ...signed, pubkey: by })
+    // With the builder tags owed now (DECK-0009 §4), fixed: signEvent adds none later, so the id the next step binds stays this one.
+    lane.template = fixTags(withBuilderTags(signed, by))
+    lane.id = getEventHash({ ...lane.template, pubkey: by })
     lane.coordHex = positionHex(lane.to, lanes.plane)
     lane.createdAt = signed.created_at
     lane.msg = msg

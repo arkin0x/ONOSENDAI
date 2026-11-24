@@ -1,0 +1,1047 @@
+{
+ "source": "cyberspace decks/blocks-vectors.json at 1389b22 (DECK-0009 draft, ground revision 2): the settles, runs, layer, reach and cell_rule sections",
+ "settles": [
+  {
+   "author": "0aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "lookup_id": "3c5d8c498f57d6d61527c53b824efe9edd768c2efd4d05acad6ea2775727c649",
+   "height": 925010,
+   "block_hash": "00000000000000000001a7d1f3a2d3c4b5a69788796a5b4c3d2e1f0a1b2c3d4e",
+   "nonce": "0000000000000000",
+   "claims": [
+    [
+     0,
+     -164,
+     1,
+     0,
+     -1022,
+     1,
+     0,
+     -1022,
+     1,
+     0,
+     -1022,
+     1,
+     0,
+     -1022,
+     1,
+     0,
+     -1022,
+     1,
+     0,
+     -1022,
+     1,
+     0,
+     -1022,
+     1,
+     0,
+     -1022,
+     1,
+     0,
+     -1022,
+     1,
+     0,
+     -1022,
+     1,
+     0,
+     -1022,
+     1,
+     0,
+     -1022,
+     1,
+     0,
+     -1022,
+     1,
+     0,
+     -1022,
+     1,
+     0,
+     -1022,
+     1,
+     0,
+     -1022,
+     1,
+     0,
+     -2046,
+     1,
+     0,
+     -2211,
+     1,
+     -5,
+     0,
+     -852,
+     1,
+     0,
+     -1022,
+     1,
+     0,
+     -1022,
+     1,
+     0,
+     -1022,
+     1,
+     0,
+     -1022,
+     1,
+     0,
+     -1022,
+     1,
+     0,
+     -1022,
+     1,
+     0,
+     -1022,
+     1,
+     0,
+     -2046,
+     1,
+     0,
+     -1022,
+     1,
+     0,
+     -857
+    ],
+    [
+     0,
+     -32767
+    ]
+   ],
+   "claims_digest": "98c4c69d716b657c9012b7a929c7de8e2c772d3fd93b70d6887f6cefd5802569",
+   "id": "d75cb3ad8917d717d3f6e9ab8de52f79c4a46dd1b41f4d6d7fefeda7b81bed89",
+   "work": 0
+  },
+  {
+   "author": "0aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "lookup_id": "3c5d8c498f57d6d61527c53b824efe9edd768c2efd4d05acad6ea2775727c649",
+   "height": 925040,
+   "block_hash": "0000000000000000000233f1c0de5eed5eed5eed5eed5eed5eed5eed5eed5eed",
+   "nonce": "000000000000094c",
+   "claims": [
+    [
+     1,
+     0,
+     -32766
+    ],
+    [
+     0,
+     -32767
+    ]
+   ],
+   "claims_digest": "2b8e753c2efa059010b3aecd6c00bff0a1a09c0f08d5d4522ffef4d207c1fb0c",
+   "id": "00048e297e7e07dc68d0af35e256ff55ee8dfa6d6f711641ab36baf4f9d6f5b7",
+   "work": 13
+  },
+  {
+   "author": "1bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+   "lookup_id": "3c5d8c498f57d6d61527c53b824efe9edd768c2efd4d05acad6ea2775727c649",
+   "height": 925010,
+   "block_hash": "00000000000000000001a7d1f3a2d3c4b5a69788796a5b4c3d2e1f0a1b2c3d4e",
+   "nonce": "0000000000000000",
+   "claims": [
+    [
+     0,
+     -32767
+    ],
+    [
+     0,
+     -32767
+    ]
+   ],
+   "claims_digest": "9f1dcbc35c350d6027f98be0f5c8b43b42ca52b7604459c0c42be3aa88913d47",
+   "id": "372eb841c1c92bfbeb2026fbe6b39b06a951b5bbc13755aaef7c8d267f0251b7",
+   "work": 2
+  }
+ ],
+ "runs": {
+  "accepted": [
+   {
+    "runs": [
+     7,
+     -11
+    ],
+    "length": 12,
+    "limit": 8,
+    "expanded": [
+     7,
+     7,
+     7,
+     7,
+     7,
+     7,
+     7,
+     7,
+     7,
+     7,
+     7,
+     7
+    ]
+   },
+   {
+    "runs": [
+     0,
+     -2,
+     1,
+     0,
+     -1
+    ],
+    "length": 6,
+    "limit": 2,
+    "expanded": [
+     0,
+     0,
+     0,
+     1,
+     0,
+     0
+    ]
+   }
+  ],
+  "rejected": [
+   {
+    "runs": [
+     -3,
+     1
+    ],
+    "length": 4,
+    "limit": 2,
+    "reason": "a repeat with nothing before it"
+   },
+   {
+    "runs": [
+     1,
+     -2
+    ],
+    "length": 4,
+    "limit": 2,
+    "reason": "expands to 3, not 4"
+   },
+   {
+    "runs": [
+     1,
+     -4
+    ],
+    "length": 4,
+    "limit": 2,
+    "reason": "expands to 5, not 4"
+   },
+   {
+    "runs": [
+     2,
+     -3
+    ],
+    "length": 4,
+    "limit": 2,
+    "reason": "index 2 is outside a palette of 2"
+   },
+   {
+    "runs": [
+     1.5,
+     -3
+    ],
+    "length": 4,
+    "limit": 2,
+    "reason": "not an integer"
+   }
+  ]
+ },
+ "layer": {
+  "note": "Author A in the origin chunk, surveyed. A shaft down column (5, *, 5), a Rustband beam at y 20, one beam cell turned to Gibsonite in a later settle, and the cell (0, 0, 0) set to the extension id 300. Cells equal to the ground are not placements, so the shaft counts only where the ground was solid.",
+  "author": "0aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "builder": "2ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "plaintext": "{\"settles\":[[925010,\"00000000000000000001a7d1f3a2d3c4b5a69788796a5b4c3d2e1f0a1b2c3d4e\",\"0000000000000000\",[[0,-164,1,0,-1022,1,0,-1022,1,0,-1022,1,0,-1022,1,0,-1022,1,0,-1022,1,0,-1022,1,0,-1022,1,0,-1022,1,0,-1022,1,0,-1022,1,0,-1022,1,0,-1022,1,0,-1022,1,0,-1022,1,0,-1022,1,0,-2046,1,0,-2211,1,-5,0,-852,1,0,-1022,1,0,-1022,1,0,-1022,1,0,-1022,1,0,-1022,1,0,-1022,1,0,-1022,1,0,-2046,1,0,-1022,1,0,-857],[0,-32767]]],[925040,\"0000000000000000000233f1c0de5eed5eed5eed5eed5eed5eed5eed5eed5eed\",\"000000000000094c\",[[1,0,-32766],[0,-32767]]]],\"builders\":[\"1bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"],\"planes\":[{\"plane\":0,\"survey\":true,\"ground\":2,\"form\":\"diff\",\"pal\":[null,300,0,5,43],\"cells\":[1,0,-163,2,0,-1022,2,0,-1022,2,0,-1022,2,0,-1022,2,0,-1022,2,0,-1022,2,0,-1022,2,0,-1022,2,0,-1022,2,0,-1022,2,0,-1022,2,0,-1022,2,0,-1022,2,0,-1022,2,0,-1022,2,0,-1022,2,0,-2046,2,0,-2211,3,-1,4,3,-2,0,-852,2,0,-1022,2,0,-1022,2,0,-1022,2,0,-1022,2,0,-1022,2,0,-1022,2,0,-1022,2,0,-2046,2,0,-1022,2,0,-857],\"t0\":[1,0,-33],\"t1\":[1,0,-19,1,0,-12]}]}",
+  "plaintext_bytes": 1063,
+  "form": "diff",
+  "placements": 35,
+  "placement_cells": [
+   {
+    "x": 0,
+    "y": 0,
+    "z": 0,
+    "value": 300,
+    "ground": 0,
+    "t0": 1,
+    "t1": 1
+   },
+   {
+    "x": 5,
+    "y": 0,
+    "z": 5,
+    "value": 0,
+    "ground": 1,
+    "t0": 0,
+    "t1": 0
+   },
+   {
+    "x": 5,
+    "y": 1,
+    "z": 5,
+    "value": 0,
+    "ground": 1,
+    "t0": 0,
+    "t1": 0
+   },
+   {
+    "x": 5,
+    "y": 2,
+    "z": 5,
+    "value": 0,
+    "ground": 1,
+    "t0": 0,
+    "t1": 0
+   },
+   {
+    "x": 5,
+    "y": 3,
+    "z": 5,
+    "value": 0,
+    "ground": 1,
+    "t0": 0,
+    "t1": 0
+   },
+   {
+    "x": 5,
+    "y": 4,
+    "z": 5,
+    "value": 0,
+    "ground": 1,
+    "t0": 0,
+    "t1": 0
+   },
+   {
+    "x": 5,
+    "y": 5,
+    "z": 5,
+    "value": 0,
+    "ground": 1,
+    "t0": 0,
+    "t1": 0
+   },
+   {
+    "x": 5,
+    "y": 6,
+    "z": 5,
+    "value": 0,
+    "ground": 1,
+    "t0": 0,
+    "t1": 0
+   },
+   {
+    "x": 5,
+    "y": 7,
+    "z": 5,
+    "value": 0,
+    "ground": 2,
+    "t0": 0,
+    "t1": 0
+   },
+   {
+    "x": 5,
+    "y": 8,
+    "z": 5,
+    "value": 0,
+    "ground": 2,
+    "t0": 0,
+    "t1": 0
+   },
+   {
+    "x": 5,
+    "y": 9,
+    "z": 5,
+    "value": 0,
+    "ground": 2,
+    "t0": 0,
+    "t1": 0
+   },
+   {
+    "x": 5,
+    "y": 10,
+    "z": 5,
+    "value": 0,
+    "ground": 2,
+    "t0": 0,
+    "t1": 0
+   },
+   {
+    "x": 5,
+    "y": 11,
+    "z": 5,
+    "value": 0,
+    "ground": 2,
+    "t0": 0,
+    "t1": 0
+   },
+   {
+    "x": 5,
+    "y": 12,
+    "z": 5,
+    "value": 0,
+    "ground": 2,
+    "t0": 0,
+    "t1": 0
+   },
+   {
+    "x": 5,
+    "y": 13,
+    "z": 5,
+    "value": 0,
+    "ground": 2,
+    "t0": 0,
+    "t1": 0
+   },
+   {
+    "x": 5,
+    "y": 14,
+    "z": 5,
+    "value": 0,
+    "ground": 5,
+    "t0": 0,
+    "t1": 0
+   },
+   {
+    "x": 5,
+    "y": 15,
+    "z": 5,
+    "value": 0,
+    "ground": 5,
+    "t0": 0,
+    "t1": 0
+   },
+   {
+    "x": 5,
+    "y": 16,
+    "z": 5,
+    "value": 0,
+    "ground": 6,
+    "t0": 0,
+    "t1": 0
+   },
+   {
+    "x": 5,
+    "y": 18,
+    "z": 5,
+    "value": 0,
+    "ground": 6,
+    "t0": 0,
+    "t1": 0
+   },
+   {
+    "x": 10,
+    "y": 20,
+    "z": 10,
+    "value": 5,
+    "ground": 2,
+    "t0": 0,
+    "t1": 0
+   },
+   {
+    "x": 11,
+    "y": 20,
+    "z": 10,
+    "value": 5,
+    "ground": 2,
+    "t0": 0,
+    "t1": 0
+   },
+   {
+    "x": 12,
+    "y": 20,
+    "z": 10,
+    "value": 43,
+    "ground": 2,
+    "t0": 0,
+    "t1": 1
+   },
+   {
+    "x": 13,
+    "y": 20,
+    "z": 10,
+    "value": 5,
+    "ground": 2,
+    "t0": 0,
+    "t1": 0
+   },
+   {
+    "x": 14,
+    "y": 20,
+    "z": 10,
+    "value": 5,
+    "ground": 2,
+    "t0": 0,
+    "t1": 0
+   },
+   {
+    "x": 15,
+    "y": 20,
+    "z": 10,
+    "value": 5,
+    "ground": 2,
+    "t0": 0,
+    "t1": 0
+   },
+   {
+    "x": 5,
+    "y": 21,
+    "z": 5,
+    "value": 0,
+    "ground": 2,
+    "t0": 0,
+    "t1": 0
+   },
+   {
+    "x": 5,
+    "y": 22,
+    "z": 5,
+    "value": 0,
+    "ground": 2,
+    "t0": 0,
+    "t1": 0
+   },
+   {
+    "x": 5,
+    "y": 23,
+    "z": 5,
+    "value": 0,
+    "ground": 2,
+    "t0": 0,
+    "t1": 0
+   },
+   {
+    "x": 5,
+    "y": 24,
+    "z": 5,
+    "value": 0,
+    "ground": 2,
+    "t0": 0,
+    "t1": 0
+   },
+   {
+    "x": 5,
+    "y": 25,
+    "z": 5,
+    "value": 0,
+    "ground": 2,
+    "t0": 0,
+    "t1": 0
+   },
+   {
+    "x": 5,
+    "y": 26,
+    "z": 5,
+    "value": 0,
+    "ground": 1,
+    "t0": 0,
+    "t1": 0
+   },
+   {
+    "x": 5,
+    "y": 27,
+    "z": 5,
+    "value": 0,
+    "ground": 1,
+    "t0": 0,
+    "t1": 0
+   },
+   {
+    "x": 5,
+    "y": 28,
+    "z": 5,
+    "value": 0,
+    "ground": 6,
+    "t0": 0,
+    "t1": 0
+   },
+   {
+    "x": 5,
+    "y": 30,
+    "z": 5,
+    "value": 0,
+    "ground": 1,
+    "t0": 0,
+    "t1": 0
+   },
+   {
+    "x": 5,
+    "y": 31,
+    "z": 5,
+    "value": 0,
+    "ground": 6,
+    "t0": 0,
+    "t1": 0
+   }
+  ],
+  "tags": [
+   [
+    "d",
+    "3c5d8c498f57d6d61527c53b824efe9edd768c2efd4d05acad6ea2775727c649"
+   ],
+   [
+    "p",
+    "0aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   ],
+   [
+    "e",
+    "<id of a kind 3333 event of author A whose C lies within reach of the chunk, in plane 0>",
+    "",
+    "reach"
+   ],
+   [
+    "settle",
+    "d75cb3ad8917d717d3f6e9ab8de52f79c4a46dd1b41f4d6d7fefeda7b81bed89"
+   ],
+   [
+    "settle",
+    "00048e297e7e07dc68d0af35e256ff55ee8dfa6d6f711641ab36baf4f9d6f5b7"
+   ],
+   [
+    "encrypted",
+    "aes-256-gcm",
+    "<base64 of nonce || AES-256-GCM(region key, plaintext) || tag>"
+   ],
+   [
+    "version",
+    "1"
+   ]
+  ],
+  "survey_only_plaintext": "{\"settles\":[[925010,\"00000000000000000001a7d1f3a2d3c4b5a69788796a5b4c3d2e1f0a1b2c3d4e\",\"0000000000000000\",[[0,-32767],[0,-32767]]]],\"builders\":[],\"planes\":[{\"plane\":0,\"survey\":true,\"ground\":2,\"form\":\"diff\",\"pal\":[null],\"cells\":[0,-32767],\"t0\":[],\"t1\":[]}]}",
+  "survey_only_bytes": 256,
+  "survey_only_settle_id": "385ebbb03c10fff4977aeee9131d66d5b6aa654b37ea3f4821e9ff1816b78842"
+ },
+ "reach": [
+  {
+   "name": "inside",
+   "chunk": [
+    "0",
+    "0",
+    "0",
+    0
+   ],
+   "coord": "0000000000000000000000000000000000000000000000000000000000000000",
+   "distance": 0,
+   "within_reach": true
+  },
+  {
+   "name": "16 past the far corner on every axis",
+   "chunk": [
+    "0",
+    "0",
+    "0",
+    0
+   ],
+   "coord": "0000000000000000000000000000000000000000000000000000000000071ffe",
+   "distance": 16,
+   "within_reach": true
+  },
+  {
+   "name": "17 past the far face on X",
+   "chunk": [
+    "0",
+    "0",
+    "0",
+    0
+   ],
+   "coord": "0000000000000000000000000000000000000000000000000000000000048000",
+   "distance": 17,
+   "within_reach": false
+  },
+  {
+   "name": "16 below the near face on Y",
+   "chunk": [
+    "0",
+    "32",
+    "0",
+    0
+   ],
+   "coord": "0000000000000000000000000000000000000000000000000000000000004000",
+   "distance": 16,
+   "within_reach": true
+  },
+  {
+   "name": "17 below the near face on Y",
+   "chunk": [
+    "0",
+    "32",
+    "0",
+    0
+   ],
+   "coord": "0000000000000000000000000000000000000000000000000000000000000924",
+   "distance": 17,
+   "within_reach": false
+  },
+  {
+   "name": "the other plane",
+   "chunk": [
+    "0",
+    "0",
+    "0",
+    0
+   ],
+   "coord": "0000000000000000000000000000000000000000000000000000000000000001",
+   "distance": null,
+   "within_reach": false
+  }
+ ],
+ "cell_rule": [
+  {
+   "name": "first placer owns",
+   "placements": [
+    {
+     "author": "0aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "builder": "a1",
+     "value": 5,
+     "first": {
+      "height": 925010,
+      "witness": 925010,
+      "work": 0
+     },
+     "last": {
+      "height": 925010,
+      "witness": 925010,
+      "work": 0
+     }
+    },
+    {
+     "author": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+     "builder": "c1",
+     "value": 1,
+     "first": {
+      "height": 925011,
+      "witness": 925011,
+      "work": 0
+     },
+     "last": {
+      "height": 925011,
+      "witness": 925011,
+      "work": 0
+     }
+    }
+   ],
+   "builders": {},
+   "home": null,
+   "expected": {
+    "value": 5,
+    "owner": "0aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "from": "0aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   }
+  },
+  {
+   "name": "late publisher loses: committed early, witnessed late",
+   "placements": [
+    {
+     "author": "0aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "builder": "a1",
+     "value": 5,
+     "first": {
+      "height": 925010,
+      "witness": 925012,
+      "work": 0
+     },
+     "last": {
+      "height": 925010,
+      "witness": 925012,
+      "work": 0
+     }
+    },
+    {
+     "author": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+     "builder": "c1",
+     "value": 1,
+     "first": {
+      "height": 925000,
+      "witness": 925050,
+      "work": 0
+     },
+     "last": {
+      "height": 925000,
+      "witness": 925050,
+      "work": 0
+     }
+    }
+   ],
+   "builders": {},
+   "home": null,
+   "expected": {
+    "value": 5,
+    "owner": "0aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "from": "0aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   }
+  },
+  {
+   "name": "listed builder changes the owner's cell later",
+   "placements": [
+    {
+     "author": "0aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "builder": "a1",
+     "value": 5,
+     "first": {
+      "height": 925010,
+      "witness": 925010,
+      "work": 0
+     },
+     "last": {
+      "height": 925010,
+      "witness": 925010,
+      "work": 0
+     }
+    },
+    {
+     "author": "1bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+     "builder": "b1",
+     "value": 1,
+     "first": {
+      "height": 925011,
+      "witness": 925011,
+      "work": 0
+     },
+     "last": {
+      "height": 925020,
+      "witness": 925020,
+      "work": 0
+     }
+    }
+   ],
+   "builders": {
+    "0aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": [
+     "1bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    ]
+   },
+   "home": null,
+   "expected": {
+    "value": 1,
+    "owner": "0aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "from": "1bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+   }
+  },
+  {
+   "name": "unlisted later change is not drawn",
+   "placements": [
+    {
+     "author": "0aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "builder": "a1",
+     "value": 5,
+     "first": {
+      "height": 925010,
+      "witness": 925010,
+      "work": 0
+     },
+     "last": {
+      "height": 925010,
+      "witness": 925010,
+      "work": 0
+     }
+    },
+    {
+     "author": "1bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+     "builder": "b1",
+     "value": 1,
+     "first": {
+      "height": 925011,
+      "witness": 925011,
+      "work": 0
+     },
+     "last": {
+      "height": 925020,
+      "witness": 925020,
+      "work": 0
+     }
+    }
+   ],
+   "builders": {},
+   "home": null,
+   "expected": {
+    "value": 5,
+    "owner": "0aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "from": "0aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   }
+  },
+  {
+   "name": "same block: more work wins",
+   "placements": [
+    {
+     "author": "0aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "builder": "a1",
+     "value": 5,
+     "first": {
+      "height": 925010,
+      "witness": 925010,
+      "work": 3
+     },
+     "last": {
+      "height": 925010,
+      "witness": 925010,
+      "work": 3
+     }
+    },
+    {
+     "author": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+     "builder": "c1",
+     "value": 1,
+     "first": {
+      "height": 925010,
+      "witness": 925010,
+      "work": 9
+     },
+     "last": {
+      "height": 925010,
+      "witness": 925010,
+      "work": 9
+     }
+    }
+   ],
+   "builders": {},
+   "home": null,
+   "expected": {
+    "value": 1,
+    "owner": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "from": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+   }
+  },
+  {
+   "name": "same block, same work: lower author pubkey wins",
+   "placements": [
+    {
+     "author": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+     "builder": "c1",
+     "value": 1,
+     "first": {
+      "height": 925010,
+      "witness": 925010,
+      "work": 0
+     },
+     "last": {
+      "height": 925010,
+      "witness": 925010,
+      "work": 0
+     }
+    },
+    {
+     "author": "0aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "builder": "a1",
+     "value": 5,
+     "first": {
+      "height": 925010,
+      "witness": 925010,
+      "work": 0
+     },
+     "last": {
+      "height": 925010,
+      "witness": 925010,
+      "work": 0
+     }
+    }
+   ],
+   "builders": {},
+   "home": null,
+   "expected": {
+    "value": 5,
+    "owner": "0aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "from": "0aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   }
+  },
+  {
+   "name": "unwitnessed placement comes after every witnessed one",
+   "placements": [
+    {
+     "author": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+     "builder": "c1",
+     "value": 1,
+     "first": {
+      "height": 925000,
+      "witness": null,
+      "work": 0
+     },
+     "last": {
+      "height": 925000,
+      "witness": null,
+      "work": 0
+     }
+    },
+    {
+     "author": "0aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "builder": "a1",
+     "value": 5,
+     "first": {
+      "height": 925010,
+      "witness": 925010,
+      "work": 0
+     },
+     "last": {
+      "height": 925010,
+      "witness": 925010,
+      "work": 0
+     }
+    }
+   ],
+   "builders": {},
+   "home": null,
+   "expected": {
+    "value": 5,
+    "owner": "0aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "from": "0aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   }
+  },
+  {
+   "name": "home chunk: the home owner counts even when later",
+   "placements": [
+    {
+     "author": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+     "builder": "c1",
+     "value": 1,
+     "first": {
+      "height": 925000,
+      "witness": 925000,
+      "work": 0
+     },
+     "last": {
+      "height": 925000,
+      "witness": 925000,
+      "work": 0
+     }
+    },
+    {
+     "author": "0aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "builder": "a1",
+     "value": 5,
+     "first": {
+      "height": 925030,
+      "witness": 925030,
+      "work": 0
+     },
+     "last": {
+      "height": 925030,
+      "witness": 925030,
+      "work": 0
+     }
+    }
+   ],
+   "builders": {},
+   "home": "0aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "expected": {
+    "value": 5,
+    "owner": "0aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "from": "0aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   }
+  },
+  {
+   "name": "home chunk: nobody but the owner and listed builders",
+   "placements": [
+    {
+     "author": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+     "builder": "c1",
+     "value": 1,
+     "first": {
+      "height": 925000,
+      "witness": 925000,
+      "work": 0
+     },
+     "last": {
+      "height": 925000,
+      "witness": 925000,
+      "work": 0
+     }
+    }
+   ],
+   "builders": {},
+   "home": "0aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "expected": null
+  }
+ ]
+}

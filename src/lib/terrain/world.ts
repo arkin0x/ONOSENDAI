@@ -79,8 +79,10 @@ export interface ChunkSlot {
   surveyed: boolean
   /** The generated ground, once surveyed and generated. */
   generated: Uint8Array | null
-  /** What stands: the ground with your layer and log over it. Null until generated. */
+  /** What stands: the ground with your layer and log over it, and everyone else's shared layers merged under them (store/terrainShare.ts). Null until generated. */
   blocks: Uint8Array | null
+  /** Your own blocks alone: the ground with your layer and log over it, what your layer is written from. Null where you have not surveyed. */
+  own?: Uint8Array | null
   /** Changed since it was last meshed. */
   dirty: boolean
   /** Bumped by every change to its blocks: the walls built from it (lib/terrain/walls.ts) follow it. */

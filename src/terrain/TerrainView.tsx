@@ -31,6 +31,7 @@ import { tileUrl } from '../lib/terrain/tiles'
 import { ModalClose } from '../hud/ui/ModalClose'
 import { Chamfer } from '../hud/ui/Chamfer'
 import { noCallout } from '../hooks/useRepeatable'
+import { ShareLine } from './ShareLine'
 
 /** A press held this long without moving places (a long press). */
 export const LONG_PRESS_MS = 420
@@ -100,7 +101,6 @@ function Hotbar(): JSX.Element {
 function InventorySheet(): JSX.Element | null {
   const open = useTerrain((s) => s.sheet)
   const inv = useTerrain((s) => s.inventory)
-  const waiting = useTerrain((s) => s.waiting)
   if (!open) return null
   const kinds = Object.entries(inv.counts).map(([id, n]) => [Number(id), n] as const).filter(([, n]) => n > 0).sort((a, b) => a[0] - b[0])
   const close = (): void => useTerrain.getState().setSheet(false)
@@ -126,7 +126,7 @@ function InventorySheet(): JSX.Element | null {
               ))}
             </div>
           )}
-        <p className="terrain-sheet__foot">{waiting > 0 ? `${waiting} ${waiting === 1 ? 'change' : 'changes'} saved on this device. Sharing them with other players comes later.` : 'Your changes are saved on this device. Sharing them with other players comes later.'}</p>
+        <ShareLine />
         <dl className="terrain-sheet__keys">
           <div><dt><Key>W A S D</Key></dt><dd>walk</dd></div>
           <div><dt><Key>SPACE</Key></dt><dd>jump</dd></div>

@@ -39,7 +39,7 @@
 
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { DoubleSide, Quaternion, Vector3, type Group, type MeshBasicMaterial } from 'three'
+import { Quaternion, Vector3, type Group, type MeshBasicMaterial } from 'three'
 import { useCyberspace } from '../store/useCyberspace'
 import { cameraPose } from '../lib/cameraPose'
 import { BLACK_SUN } from '../lib/palette'
@@ -77,7 +77,7 @@ const SUN_HALO: [number, number] = [0.3, 0.4]
 const SUN_Z_LABEL = 1.58
 /** Opacities [disc, ring, halo]: facing you, and turned away past the centre. */
 const SUN_NEAR = [0.85, 1, 0.34] as const
-const SUN_FAR = [0.55, 0.7, 0.2] as const
+const SUN_FAR = [0.6, 0.85, 0.24] as const
 /** The disc's colour: the unlit space a black sun is. */
 const SUN_DARK = '#06030c'
 
@@ -159,8 +159,11 @@ export const SUN_WORDS: Record<SunBearing, string> = {
 
 const SUN_SEEN = new Vector3()
 
+/** One part's opacity (0 disc, 1 ring, 2 halo) at a nearness from sunNearness. */
+const sunOpacity = (part: 0 | 1 | 2, near: number): number => SUN_FAR[part] + (SUN_NEAR[part] - SUN_FAR[part]) * near
+
 /** The sun's meshes, written to on the frames the compass draws. */
-interface SunParts {
+export interface SunParts {
   group: Group | null
   disc: MeshBasicMaterial | null
   ring: MeshBasicMaterial | null
@@ -173,17 +176,14 @@ interface SunParts {
  * so the sun is never lost behind the centre; the disc stays depth tested,
  * so the centre still reads as in front of it. Returns the bearing.
  */
-function placeSun(parts: SunParts, sunDir: Vector3, pose: Quaternion): SunBearing {
+export function placeSun(parts: SunParts, sunDir: Vector3, pose: Quaternion): SunBearing {
   const seen = sunInView(sunDir, pose, SUN_SEEN)
   const near = sunNearness(seen)
   if (parts.group) parts.group.quaternion.copy(pose)
-  const mats = [parts.disc, parts.ring, parts.halo]
-  for (let i = 0; i < 3; i++) {
-    const m = mats[i]
-    if (!m) continue
-    m.opacity = SUN_FAR[i] + (SUN_NEAR[i] - SUN_FAR[i]) * near
-    if (i > 0) m.depthTest = seen.z >= 0
-  }
+  const front = seen.z >= 0
+  if (parts.disc) parts.disc.opacity = sunOpacity(0, near)
+  if (parts.ring) { parts.ring.opacity = sunOpacity(1, near); parts.ring.depthTest = front }
+  if (parts.halo) { parts.halo.opacity = sunOpacity(2, near); parts.halo.depthTest = front }
   return sunBearing(seen)
 }
 
@@ -301,19 +301,19 @@ function CompassScene({ onLabelsUpdate, onSun, pose, given, sun }: { onLabelsUpd
       </mesh>
       {sun && (
         <group position={sunAt} ref={(g) => { sunParts.current.group = g }}>
-          {/* Unlit and untone-mapped, so the violet is the scene sun's own. */}
+          {/* Unlit and untone-mapped, so the violet is the scene sun's own. Front faces only: turned to the camera on every drawn frame, they are never seen from behind. */}
           <group position={[0, 0, -SUN_BACK]}>
             <mesh renderOrder={1}>
               <circleGeometry args={[SUN_DISC, 32]} />
-              <meshBasicMaterial ref={(m) => { sunParts.current.disc = m }} color={SUN_DARK} transparent opacity={SUN_NEAR[0]} depthWrite={false} toneMapped={false} side={DoubleSide} />
+              <meshBasicMaterial ref={(m) => { sunParts.current.disc = m }} color={SUN_DARK} transparent opacity={SUN_NEAR[0]} depthWrite={false} toneMapped={false} />
             </mesh>
             <mesh renderOrder={2}>
               <ringGeometry args={[SUN_HALO[0], SUN_HALO[1], 48]} />
-              <meshBasicMaterial ref={(m) => { sunParts.current.halo = m }} color={BLACK_SUN} transparent opacity={SUN_NEAR[2]} depthWrite={false} toneMapped={false} side={DoubleSide} />
+              <meshBasicMaterial ref={(m) => { sunParts.current.halo = m }} color={BLACK_SUN} transparent opacity={SUN_NEAR[2]} depthWrite={false} toneMapped={false} />
             </mesh>
             <mesh renderOrder={3}>
               <ringGeometry args={[SUN_RING[0], SUN_RING[1], 48]} />
-              <meshBasicMaterial ref={(m) => { sunParts.current.ring = m }} color={BLACK_SUN} transparent opacity={SUN_NEAR[1]} depthWrite={false} toneMapped={false} side={DoubleSide} />
+              <meshBasicMaterial ref={(m) => { sunParts.current.ring = m }} color={BLACK_SUN} transparent opacity={SUN_NEAR[1]} depthWrite={false} toneMapped={false} />
             </mesh>
           </group>
         </group>
@@ -341,24 +341,17 @@ export function Compass3D({ onTap, pose = cameraPose, dirs, bench = false, hidde
   const placed = useRef<LabelPosition[]>([])
   const spans = useRef<Partial<Record<LabelPosition['axis'], HTMLSpanElement | null>>>({})
   const [shown, setShown] = useState(false)
-  // Where the sun is, in words, for the button's label. Written to the
-  // element by hand like the labels, and only when the word changes, so an
-  // orbit neither re-renders the compass nor chatters at a screen reader.
-  const root = useRef<HTMLDivElement>(null)
+  // Where the sun is, in words, for the button's label. State, but set only
+  // when the word changes, which is a turn of 45 degrees or so: an orbit
+  // neither re-renders the compass every frame nor chatters at a screen reader.
   const sunSaid = useRef<SunBearing | null>(null)
-  const tappable = !!onTap && !hidden
-  const say = useCallback((bearing: SunBearing | null): void => {
-    const el = root.current
-    if (!el || !tappable) return
-    el.setAttribute('aria-label', bearing ? `View controls. ${SUN_WORDS[bearing]}.` : 'View controls')
-  }, [tappable])
+  const [sunWord, setSunWord] = useState<SunBearing | null>(null)
   const handleSun = useCallback((bearing: SunBearing): void => {
     if (sunSaid.current === bearing) return
     sunSaid.current = bearing
-    say(bearing)
-  }, [say])
-  // A render puts the static label back; put the bearing over it again.
-  useEffect(() => { say(sun ? sunSaid.current : null) })
+    setSunWord(bearing)
+  }, [])
+  const viewLabel = sun && sunWord ? `View controls. ${SUN_WORDS[sunWord]}.` : 'View controls'
 
   /** Puts one label where the arrows last were, if its span is there. */
   const place = useCallback((axis: LabelPosition['axis']): void => {
@@ -399,11 +392,10 @@ export function Compass3D({ onTap, pose = cameraPose, dirs, bench = false, hidde
 
   return (
     <div
-      ref={root}
       className={`compass-3d${onTap ? ' compass-3d--tappable' : ''}${bench ? ' compass-3d--bench' : ''}${hidden ? ' compass-3d--hidden' : ''}`}
       onPointerDown={onTap && !hidden ? (e) => { e.preventDefault(); e.stopPropagation(); onTap() } : undefined}
       role={onTap && !hidden ? 'button' : undefined}
-      aria-label={onTap && !hidden ? 'View controls' : undefined}
+      aria-label={onTap && !hidden ? viewLabel : undefined}
       aria-hidden={hidden || undefined}
     >
       <Canvas

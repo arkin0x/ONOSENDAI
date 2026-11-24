@@ -7,8 +7,8 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { Euler, Quaternion, Vector3 } from 'three'
-import { SUN_WORDS, sunBearing, sunInView, sunNearness } from '../Compass3D'
+import { Euler, Group, MeshBasicMaterial, Quaternion, Vector3 } from 'three'
+import { SUN_WORDS, placeSun, sunBearing, sunInView, sunNearness, type SunParts } from '../Compass3D'
 import { canonicalQuaternion, renderDirection, topDownQuaternion, viewAxes } from '../../lib/space'
 
 /**
@@ -102,7 +102,43 @@ describe('sunBearing', () => {
   it('has a plain sentence for every bearing', () => {
     for (const w of ['ahead', 'behind', 'left', 'right', 'up', 'down'] as const) {
       expect(SUN_WORDS[w]).toMatch(/^Black sun /)
-      expect(SUN_WORDS[w]).not.toMatch(/—/)
+      expect(SUN_WORDS[w]).not.toMatch(/\u2014/)
     }
+  })
+})
+
+describe('placeSun', () => {
+  const parts = (): SunParts => ({ group: new Group(), disc: new MeshBasicMaterial(), ring: new MeshBasicMaterial(), halo: new MeshBasicMaterial() })
+  const dir = new Vector3(0, 0, -1)
+
+  it('turns the sun to the compass camera', () => {
+    const p = parts()
+    const pose = new Quaternion().setFromEuler(new Euler(0.4, 1.1, -0.2))
+    placeSun(p, dir, pose)
+    expect(p.group!.quaternion.angleTo(pose)).toBeCloseTo(0)
+  })
+
+  it('facing you: full strength, depth tested like everything else', () => {
+    const p = parts()
+    expect(placeSun(p, dir, yaw(180))).toBe('behind')
+    expect(p.ring!.opacity).toBe(1)
+    expect(p.ring!.depthTest).toBe(true)
+    expect(p.halo!.depthTest).toBe(true)
+    expect(p.disc!.opacity).toBeGreaterThan(p.halo!.opacity)
+  })
+
+  it('past the centre: dimmed, and the rings draw through what is in front so it is never hidden', () => {
+    const p = parts()
+    expect(placeSun(p, dir, SNAPPED)).toBe('ahead')
+    expect(p.ring!.opacity).toBeLessThan(1)
+    expect(p.ring!.opacity).toBeGreaterThan(0.5)
+    expect(p.ring!.depthTest).toBe(false)
+    expect(p.halo!.depthTest).toBe(false)
+    // The disc stays depth tested, so the centre of the ball reads as in front of it.
+    expect(p.disc!.depthTest).toBe(true)
+  })
+
+  it('copes with parts not yet mounted', () => {
+    expect(placeSun({ group: null, disc: null, ring: null, halo: null }, dir, yaw(90))).toBe('right')
   })
 })

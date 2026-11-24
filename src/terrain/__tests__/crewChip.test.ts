@@ -104,6 +104,21 @@ describe('the Crew chip\'s keys', () => {
     off()
   })
 
+  it('a focused control keeps its Enter, but not the chip\'s Esc or Backspace', () => {
+    const held = new Set<(e: Event) => void>()
+    const on = { addEventListener: (_t: string, l: (e: Event) => void) => { held.add(l) }, removeEventListener: (_t: string, l: (e: Event) => void) => { held.delete(l) } } as unknown as EventTarget
+    let adds = 0, dismissed = 0
+    crewChipKeys(on, () => { adds++ }, () => { dismissed++ }, () => false)
+    // A focused button: matches the controls, not the fields.
+    const onButton = { closest: (sel: string) => (sel.startsWith('button') ? {} : null) }
+    const press = (key: string) => { const ev = { key, repeat: false, metaKey: false, ctrlKey: false, altKey: false, target: onButton, preventDefault: () => undefined, stopImmediatePropagation: () => undefined } as unknown as Event; for (const l of held) l(ev) }
+    press('Enter')
+    expect(adds).toBe(0)
+    press('Escape')
+    press('Backspace')
+    expect(dismissed).toBe(2)
+  })
+
   it('it is not on the Escape stack, which would free a captured mouse; TERRAIN\'s Esc leaves it its key while it asks', () => {
     const src = readFileSync(resolve(__dirname, '../TerrainCrew.tsx'), 'utf8')
     expect(src).not.toMatch(/useEscape\(/)

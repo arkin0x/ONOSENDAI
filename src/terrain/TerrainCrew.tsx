@@ -29,6 +29,7 @@ import { safeNpub } from '../lib/npub'
 import { ModalClose } from '../hud/ui/ModalClose'
 import { topEscape } from '../hooks/useEscape'
 import { walkMenuCovering } from '../store/walkInput'
+import { useGame } from '../store/useGame'
 
 /** How near another player is, in gibsons, for the chip to ask. */
 export const CREW_NEAR = 8
@@ -88,6 +89,14 @@ const finePointer = (): boolean => { try { return window.matchMedia('(pointer: f
  * on the Escape stack (a modal, the menu), while the bag is open or the menu
  * covers the scene, or from a key typed into a field or pressed on a button.
  */
+const FIELDS = 'input, textarea, select, [contenteditable="true"]'
+const CONTROLS = 'button, a[href], select, summary, [role="switch"], [role="checkbox"], [role="button"], [role="menuitem"], [role="tab"]'
+
+/**
+ * Registered only once the chip asks (after TERRAIN's own keys, which mount
+ * with TERRAIN): TERRAIN's Esc that frees a captured mouse is taken there
+ * first, and otherwise TERRAIN leaves Esc to the chip (crewChipAsking).
+ */
 export function crewChipKeys(on: EventTarget, add: () => void, dismiss: () => void, mouseCaptured: () => boolean = () => !!document.pointerLockElement): () => void {
   const down = (ev: Event): void => {
     const e = ev as KeyboardEvent
@@ -95,8 +104,10 @@ export function crewChipKeys(on: EventTarget, add: () => void, dismiss: () => vo
     const act = e.key === 'Enter' ? add : e.key === 'Backspace' || (e.key === 'Escape' && !mouseCaptured()) ? dismiss : null
     if (!act) return
     const t = e.target as HTMLElement | null
-    if (t?.closest?.('input, textarea, select, button, [contenteditable="true"]')) return
-    if (topEscape() !== null || useTerrain.getState().sheet || walkMenuCovering()) return
+    // A field keeps every key; a focused control keeps its Enter (useKeyboard.ts presses it).
+    if (t?.closest?.(FIELDS)) return
+    if (e.key === 'Enter' && t?.closest?.(CONTROLS)) return
+    if (topEscape() !== null || useTerrain.getState().sheet || walkMenuCovering() || useGame.getState().session || (typeof document !== 'undefined' && document.querySelector('[aria-modal="true"]'))) return
     e.preventDefault()
     e.stopImmediatePropagation()
     act()

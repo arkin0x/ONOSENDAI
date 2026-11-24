@@ -44,6 +44,8 @@ import './tutorial/dungeon'
 import { GameView } from './game/GameView'
 import { TerrainView } from './terrain/TerrainView'
 import { useTerrain } from './store/useTerrain'
+import { useWorkshop } from './store/useWorkshop'
+import { useGame } from './store/useGame'
 import { GameChip } from './hud/GameChip'
 import { TvScreen } from './hud/TvScreen'
 import { isTvPath, useTv } from './store/useTv'
@@ -323,6 +325,11 @@ export default function App(): JSX.Element {
   // it closes (terrain/TerrainView.tsx hides its own hotbar, PLACE and SURVEY).
   const bagOpen = useTerrain((s) => s.active && s.sheet)
   const crowded = menuCrowded || (isMobile && bagOpen)
+  // The menu, the workshop or a game opening puts the bag away, so it never comes back over them.
+  const workshopOpen = useWorkshop((s) => s.open)
+  const inGame = useGame((s) => !!s.session)
+  const coveredByMore = showPanels || workshopOpen || inGame
+  useEffect(() => { if (coveredByMore && useTerrain.getState().sheet) useTerrain.getState().setSheet(false) }, [coveredByMore])
   // The keys stand down with the pad while the menu covers the scene.
   useEffect(() => { setMenuCovering(crowded) }, [crowded])
 

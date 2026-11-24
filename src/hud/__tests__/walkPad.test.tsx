@@ -20,6 +20,7 @@
  *   spectating the SPECTATING bar holds that corner, so BUILD draws no block.
  */
 
+import { resetModes, setModeOn, updateModes } from '../../store/modeOrder'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createElement, isValidElement, type ReactElement, type ReactNode } from 'react'
 import { renderToString } from 'react-dom/server'
@@ -556,6 +557,8 @@ describe('the pad and the commit block with the chain status strip up', () => {
   const opsDrawn = (): boolean => drawn().some((b) => b.props.className?.split(' ').includes('touchops'))
 
   it('lifts the pad in HOP, VIEW, WALK, BUILD and SCAN alike, and not without the strip', () => {
+    // The ring as it was before TERRAIN joined it: TERRAIN has a test of its own (store/__tests__/terrain.test.ts).
+    updateModes((m) => setModeOn(m, 'terrain', false))
     useCyberspace.setState({ held: true })
     for (const mode of ['hop', 'view', 'build', 'scan', 'hop'] as const) {
       expect(currentPadMode()).toBe(mode)
@@ -574,6 +577,7 @@ describe('the pad and the commit block with the chain status strip up', () => {
     useBuilder.getState().enter('build')
     expect(find('touchops').props.className).not.toContain('touchops--status')
     expect(lifted()).toBe(false)
+    resetModes()
   })
 
   it('draws no commit block in BUILD while spectating, and so lifts nothing', async () => {

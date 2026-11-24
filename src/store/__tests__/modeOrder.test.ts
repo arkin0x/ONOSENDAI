@@ -28,7 +28,7 @@ import { useDemo } from '../useDemo'
 import { kvGet, movesToKv } from '../../lib/kvStore'
 import { setHudChoice, useNewcomer } from '../../newcomer/useNewcomer'
 import {
-  canSwitchOff, customModesApply, DEFAULT_MODE_ORDER, DEFAULT_MODES, effectiveModes, MODES, MODES_PREFIX, mergeModes, modeRoles,
+  TEACHING_MODES, canSwitchOff, customModesApply, DEFAULT_MODE_ORDER, DEFAULT_MODES, effectiveModes, MODES, MODES_PREFIX, mergeModes, modeRoles,
   moveModeBy, moveModeTo, nextInRing, readModes, resetModes, rolesOf, setModeOn, storedModes, updateModes, useModes,
   type ModeId, type ModeSettings,
 } from '../modeOrder'
@@ -47,17 +47,18 @@ beforeEach(() => {
   as(A)
 })
 
-describe('the default list is today\'s pad', () => {
-  it('HOP, WALK, VIEW, BUILD, SCAN, all on: start in HOP, WALK the second button, the ring HOP, VIEW, BUILD, SCAN', () => {
-    expect(DEFAULT_MODE_ORDER).toEqual(['hop', 'walk', 'view', 'build', 'scan'])
+describe('the default list is today\'s pad, with TERRAIN after WALK', () => {
+  it('HOP, WALK, TERRAIN, VIEW, BUILD, SCAN, all on: start in HOP, WALK the second button, the ring HOP, TERRAIN, VIEW, BUILD, SCAN', () => {
+    expect(DEFAULT_MODE_ORDER).toEqual(['hop', 'walk', 'terrain', 'view', 'build', 'scan'])
     expect(MODES.map((m) => m.id)).toEqual(DEFAULT_MODE_ORDER)
-    expect(rolesOf(DEFAULT_MODES)).toEqual({ start: 'hop', second: 'walk', ring: ['hop', 'view', 'build', 'scan'] })
+    expect(rolesOf(DEFAULT_MODES)).toEqual({ start: 'hop', second: 'walk', ring: ['hop', 'terrain', 'view', 'build', 'scan'] })
     expect(storedModes()).toEqual(DEFAULT_MODES)
     expect(modeRoles()).toEqual(rolesOf(DEFAULT_MODES))
   })
 
   it('the ring goes round in order, back to the first', () => {
-    expect(nextInRing(DEFAULT_MODES, 'hop')).toBe('view')
+    expect(nextInRing(DEFAULT_MODES, 'hop')).toBe('terrain')
+    expect(nextInRing(DEFAULT_MODES, 'terrain')).toBe('view')
     expect(nextInRing(DEFAULT_MODES, 'view')).toBe('build')
     expect(nextInRing(DEFAULT_MODES, 'build')).toBe('scan')
     expect(nextInRing(DEFAULT_MODES, 'scan')).toBe('hop')
@@ -69,17 +70,17 @@ describe('reordering', () => {
     let s: ModeSettings = DEFAULT_MODES
     s = moveModeTo(s, 'walk', 0)
     s = moveModeTo(s, 'build', 1)
-    expect(s.order).toEqual(['walk', 'build', 'hop', 'view', 'scan'])
-    expect(rolesOf(s)).toEqual({ start: 'walk', second: 'build', ring: ['walk', 'hop', 'view', 'scan'] })
+    expect(s.order).toEqual(['walk', 'build', 'hop', 'terrain', 'view', 'scan'])
+    expect(rolesOf(s)).toEqual({ start: 'walk', second: 'build', ring: ['walk', 'hop', 'terrain', 'view', 'scan'] })
     expect(nextInRing(s, 'scan')).toBe('walk')
   })
 
   it('up and down a place at a time, clamped at the ends, the same list back when nothing moves', () => {
     const s = moveModeBy(DEFAULT_MODES, 'scan', -1)
-    expect(s.order).toEqual(['hop', 'walk', 'view', 'scan', 'build'])
+    expect(s.order).toEqual(['hop', 'walk', 'terrain', 'view', 'scan', 'build'])
     expect(moveModeBy(DEFAULT_MODES, 'hop', -1)).toBe(DEFAULT_MODES)
     expect(moveModeBy(DEFAULT_MODES, 'scan', 1)).toBe(DEFAULT_MODES)
-    expect(moveModeTo(DEFAULT_MODES, 'walk', 99).order).toEqual(['hop', 'view', 'build', 'scan', 'walk'])
+    expect(moveModeTo(DEFAULT_MODES, 'walk', 99).order).toEqual(['hop', 'terrain', 'view', 'build', 'scan', 'walk'])
   })
 })
 
@@ -87,18 +88,18 @@ describe('switching modes off', () => {
   it('an off mode leaves the ring and the second button, and stays in the list', () => {
     const s = setModeOn(DEFAULT_MODES, 'view', false)
     expect(s.order).toEqual(DEFAULT_MODE_ORDER)
-    expect(rolesOf(s).ring).toEqual(['hop', 'build', 'scan'])
-    expect(nextInRing(s, 'hop')).toBe('build')
+    expect(rolesOf(s).ring).toEqual(['hop', 'terrain', 'build', 'scan'])
+    expect(nextInRing(s, 'terrain')).toBe('build')
   })
 
   it('the second button off: the next mode on is the second button', () => {
     const s = setModeOn(DEFAULT_MODES, 'walk', false)
-    expect(rolesOf(s)).toEqual({ start: 'hop', second: 'view', ring: ['hop', 'build', 'scan'] })
+    expect(rolesOf(s)).toEqual({ start: 'hop', second: 'terrain', ring: ['hop', 'view', 'build', 'scan'] })
   })
 
   it('only one mode on: no second button, and the ring is that mode', () => {
     let s: ModeSettings = DEFAULT_MODES
-    for (const id of ['walk', 'view', 'build', 'scan'] as const) s = setModeOn(s, id, false)
+    for (const id of ['walk', 'terrain', 'view', 'build', 'scan'] as const) s = setModeOn(s, id, false)
     expect(rolesOf(s)).toEqual({ start: 'hop', second: null, ring: ['hop'] })
     expect(nextInRing(s, 'hop')).toBe('hop')
   })
@@ -129,12 +130,12 @@ describe('a list from another version', () => {
   it('a mode added since joins at its default place; one this version lacks is dropped', () => {
     // Saved before SCAN existed, with WALK first; and a mode from a later version.
     const s = mergeModes({ order: ['walk', 'hop', 'view', 'teleport', 'build'], off: ['view', 'teleport'] })
-    expect(s.order).toEqual(['walk', 'hop', 'view', 'build', 'scan'])
+    expect(s.order).toEqual(['walk', 'terrain', 'hop', 'view', 'build', 'scan'])
     expect(s.off).toEqual(['view'])
   })
 
   it('a missing mode with nothing above it in the default list goes to the top; duplicates keep the first', () => {
-    expect(mergeModes({ order: ['view', 'walk', 'view', 'scan', 'build'] }).order).toEqual(['hop', 'view', 'walk', 'scan', 'build'])
+    expect(mergeModes({ order: ['view', 'walk', 'view', 'scan', 'build'] }).order).toEqual(['hop', 'view', 'walk', 'terrain', 'scan', 'build'])
   })
 
   it('a future default list merges a stored one the same way', () => {
@@ -146,7 +147,7 @@ describe('a list from another version', () => {
     expect(mergeModes(null)).toEqual(DEFAULT_MODES)
     expect(mergeModes('junk')).toEqual(DEFAULT_MODES)
     expect(mergeModes({ order: 'hop' }).order).toEqual(DEFAULT_MODE_ORDER)
-    expect(mergeModes({ order: ['scan', 'hop', 'walk', 'view', 'build'], off: ['scan', 'walk'] })).toEqual({ order: ['scan', 'hop', 'walk', 'view', 'build'], off: ['walk'] })
+    expect(mergeModes({ order: ['scan', 'hop', 'walk', 'view', 'build'], off: ['scan', 'walk'] })).toEqual({ order: ['scan', 'hop', 'walk', 'terrain', 'view', 'build'], off: ['walk'] })
   })
 
   it('a stored record that does not parse is the default', () => {
@@ -160,7 +161,7 @@ describe('kept per identity', () => {
   it('lives in the kv store under the pubkey, and comes back for that identity only', () => {
     expect(movesToKv(MODES_PREFIX + A)).toBe(true)
     updateModes((s) => moveModeTo(s, 'walk', 0))
-    expect(JSON.parse(kvGet(MODES_PREFIX + A)!)).toMatchObject({ order: ['walk', 'hop', 'view', 'build', 'scan'], off: [] })
+    expect(JSON.parse(kvGet(MODES_PREFIX + A)!)).toMatchObject({ order: ['walk', 'hop', 'terrain', 'view', 'build', 'scan'], off: [] })
     expect(storedModes().order[0]).toBe('walk')
 
     // Another identity starts with the default list, and keeps its own.
@@ -183,7 +184,7 @@ describe('kept per identity', () => {
     expect(kvGet(MODES_PREFIX + A)).toBeNull()
     expect(storedModes()).toEqual(DEFAULT_MODES)
     // Moving back to the default order by hand keeps no record either.
-    updateModes((s) => moveModeTo(s, 'walk', 4))
+    updateModes((s) => moveModeTo(s, 'walk', 5))
     updateModes((s) => moveModeTo(s, 'walk', 1))
     expect(kvGet(MODES_PREFIX + A)).toBeNull()
   })
@@ -194,13 +195,13 @@ describe('who gets the list', () => {
 
   it('the player, with nothing else on', () => {
     expect(customModesApply()).toBe(true)
-    expect(modeRoles()).toEqual({ start: 'walk', second: 'build', ring: ['walk', 'hop', 'view', 'scan'] })
+    expect(modeRoles()).toEqual({ start: 'walk', second: 'build', ring: ['walk', 'hop', 'terrain', 'view', 'scan'] })
   })
 
   it('the newcomer view keeps the default pad, and the list applies once it ends', () => {
     useNewcomer.setState({ record: { stage: 'newcomer', seen: [] } })
     expect(customModesApply()).toBe(false)
-    expect(effectiveModes()).toEqual(DEFAULT_MODES)
+    expect(effectiveModes()).toEqual(TEACHING_MODES)
     // Finished or skipped: graduated.
     useNewcomer.setState({ record: { stage: 'graduated', seen: [] } })
     expect(customModesApply()).toBe(true)
@@ -209,21 +210,33 @@ describe('who gets the list', () => {
 
   it('Settings > Interface: Newcomer view keeps the default pad too', () => {
     setHudChoice('newcomer')
-    expect(effectiveModes()).toEqual(DEFAULT_MODES)
+    expect(effectiveModes()).toEqual(TEACHING_MODES)
     setHudChoice('everything')
     expect(modeRoles().start).toBe('walk')
   })
 
   it('a tour run, the /demo tour and Cyberspace TV use the default pad', () => {
     useTutorial.setState({ active: true })
-    expect(effectiveModes()).toEqual(DEFAULT_MODES)
+    expect(effectiveModes()).toEqual(TEACHING_MODES)
     useTutorial.setState({ active: false })
     useTv.setState({ on: true })
-    expect(effectiveModes()).toEqual(DEFAULT_MODES)
+    expect(effectiveModes()).toEqual(TEACHING_MODES)
     useTv.setState({ on: false })
     useDemo.setState({ active: true })
-    expect(effectiveModes()).toEqual(DEFAULT_MODES)
+    expect(effectiveModes()).toEqual(TEACHING_MODES)
     useDemo.setState({ active: false })
     expect(modeRoles().start).toBe('walk')
+  })
+})
+
+describe('newcomers meet TERRAIN only once the tour is done', () => {
+  it('the teaching pad is the default list with TERRAIN off: the ring HOP, VIEW, BUILD, SCAN, WALK second', () => {
+    expect(TEACHING_MODES.off).toEqual(['terrain'])
+    expect(rolesOf(TEACHING_MODES)).toEqual({ start: 'hop', second: 'walk', ring: ['hop', 'view', 'build', 'scan'] })
+    useNewcomer.setState({ record: { stage: 'newcomer', seen: [] } })
+    expect(modeRoles().ring).not.toContain('terrain')
+    useNewcomer.setState({ record: { stage: 'graduated', seen: [] } })
+    resetModes()
+    expect(modeRoles().ring).toContain('terrain')
   })
 })

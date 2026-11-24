@@ -13,13 +13,10 @@
  * 3 plus the face, 0 top, 1 side, 2 bottom, tiles.ts), shade (1, the face's
  * light by which way it faces). The material repeats the tile once a block
  * across a merged rectangle, from the position, so it still reads as blocks.
- *
- * The chunk skin (the previews' rind): on a chunk face that borders a chunk
- * not surveyed, the exposed blocks within SKIN_DEPTH of it are drawn in the
- * family's skin (its top on top of open air, its band rock in blobs on the
- * sides), so a lone chunk reads as an island rather than a slice. Drawn
- * only, never stored (coordinator, 2026-11-24): the blocks are what they
- * are, and mining one gives what it is.
+
+ * No skin is drawn over a chunk's edge (owner, 2026-11-24: blocks are part
+ * of cyberspace like shards, and nothing changes on its own): what is drawn
+ * is what is stored.
  */
 
 import { idx } from './coords'
@@ -38,11 +35,6 @@ export interface ChunkMesh {
 
 export const FLOATS_PER_VERTEX = 5
 
-/** How deep the drawn skin reaches from a face that borders a chunk not surveyed. */
-export const SKIN_DEPTH = 3
-
-/** The skin's kinds: tile rows (blocks.ts index) for the top and the sides; null draws none. */
-export interface Skin { top: number; rind: number; seed: number }
 
 /** Light by face: -x, +x, -y, +y, -z, +z. Up (+y here) brightest. */
 const SHADE = [0.72, 0.8, 0.5, 1, 0.64, 0.88]
@@ -65,49 +57,15 @@ export function borderSlab(blocks: Uint8Array, face: number): Uint8Array {
   return out
 }
 
-/** A cell's place hash for the skin's blobs (the previews' h3). */
-function h3(x: number, y: number, z: number, seed: number): number {
-  let h = Math.imul((x * 73856093) ^ (y * 19349663) ^ (z * 83492791) ^ seed, 0x9e3779b1)
-  h ^= h >>> 15; h = Math.imul(h, 0x85ebca6b); h ^= h >>> 13
-  return (h >>> 0) / 4294967296
-}
-const blob = (x: number, y: number, z: number, seed: number): number => 0.6 * h3(x >> 2, y >> 2, z >> 2, seed) + 0.4 * h3((x + 1) >> 1, (y + 1) >> 1, (z + 1) >> 1, seed)
-
-/**
- * The skin's tile row for each cell (255 for none): exposed blocks near the
- * faces that border chunks not surveyed. Veins and the relic (ids 40 and up)
- * keep their own look. `open` is -x, +x, -y, +y, -z, +z, as Borders.
- */
-export function skinCells(blocks: Uint8Array, open: readonly boolean[], skin: Skin): Uint8Array | null {
-  if (!open.some(Boolean)) return null
-  const out = new Uint8Array(blocks.length).fill(255)
-  const near = (x: number, y: number, z: number): boolean =>
-    (open[0] && x < SKIN_DEPTH) || (open[1] && x > 31 - SKIN_DEPTH) || (open[2] && y < SKIN_DEPTH) ||
-    (open[3] && y > 31 - SKIN_DEPTH) || (open[4] && z < SKIN_DEPTH) || (open[5] && z > 31 - SKIN_DEPTH)
-  const emptyAt = (x: number, y: number, z: number): boolean => {
-    if (x < 0) return open[0]; if (x > 31) return open[1]; if (y < 0) return open[2]; if (y > 31) return open[3]; if (z < 0) return open[4]; if (z > 31) return open[5]
-    return blocks[idx(x, y, z)] === 0
-  }
-  for (let y = 0; y < 32; y++) for (let z = 0; z < 32; z++) for (let x = 0; x < 32; x++) {
-    const o = idx(x, y, z), id = blocks[o]
-    if (id === 0 || id >= 40 || !near(x, y, z)) continue
-    if (emptyAt(x, y + 1, z)) { out[o] = skin.top; continue }
-    if ((emptyAt(x + 1, y, z) || emptyAt(x - 1, y, z) || emptyAt(x, y - 1, z) || emptyAt(x, y, z + 1) || emptyAt(x, y, z - 1)) && blob(x, y, z, skin.seed) < 0.6) out[o] = skin.rind
-  }
-  return out
-}
-
 /**
  * Greedy mesh of one chunk. `tiles` maps each id 0 to 255 to its kind's tile
- * row (blocks.ts tileTable); `skin`, when given, draws the chunk skin.
+ * row (blocks.ts tileTable).
  */
-export function meshChunk(blocks: Uint8Array, borders: Borders, tiles: Uint8Array, skin: Skin | null = null): ChunkMesh {
+export function meshChunk(blocks: Uint8Array, borders: Borders, tiles: Uint8Array): ChunkMesh {
   let verts = new Float32Array(4096 * FLOATS_PER_VERTEX)
   let inds = new Uint32Array(6144)
   let nv = 0, ni = 0, quads = 0
-  const skinned = skin ? skinCells(blocks, borders.map((b) => b === null), skin) : null
-  // A face's look: the skin's row where the skin covers the cell, else the kind's.
-  const rowAt = (o: number): number => (skinned && skinned[o] !== 255 ? skinned[o] : tiles[blocks[o]])
+  const rowAt = (o: number): number => tiles[blocks[o]]
   const mask = new Int32Array(1024)
   const x = [0, 0, 0], q = [0, 0, 0], du = [0, 0, 0], dv = [0, 0, 0]
 

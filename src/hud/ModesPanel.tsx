@@ -26,7 +26,7 @@
  */
 
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react'
-import { ChevronDown, ChevronUp, Crosshair, Eye, Footprints, GripVertical, RotateCcw, ScanSearch, Wrench, type LucideIcon } from 'lucide-react'
+import { Blocks, ChevronDown, ChevronUp, Crosshair, Eye, Footprints, GripVertical, RotateCcw, ScanSearch, Wrench, type LucideIcon } from 'lucide-react'
 import { Switch } from './ui/Switch'
 import { Explanation } from './Explanation'
 import {
@@ -39,6 +39,7 @@ import { useTutorial } from '../store/useTutorial'
 export const MODE_ICON: Record<ModeId, LucideIcon> = {
   hop: Crosshair,
   walk: Footprints,
+  terrain: Blocks,
   view: Eye,
   build: Wrench,
   scan: ScanSearch,

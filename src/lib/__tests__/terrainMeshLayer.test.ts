@@ -7,7 +7,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { CELLS, idx } from '../terrain/coords'
-import { borderSlab, meshChunk, skinCells, slabIndex, FLOATS_PER_VERTEX, type Borders } from '../terrain/mesh'
+import { borderSlab, meshChunk, slabIndex, FLOATS_PER_VERTEX, type Borders } from '../terrain/mesh'
 import { tileTable } from '../terrain/blocks'
 
 const SLATE = 2
@@ -71,43 +71,6 @@ describe('the greedy mesh', () => {
       const centre = [(a[0] + bb[0] + c[0]) / 3 - 10.5, (a[1] + bb[1] + c[1]) / 3 - 10.5, (a[2] + bb[2] + c[2]) / 3 - 10.5]
       expect(n[0] * centre[0] + n[1] * centre[1] + n[2] * centre[2]).toBeGreaterThan(0)
     }
-  })
-})
-
-describe('the drawn-only chunk skin', () => {
-  const skin = { top: 3, rind: 1, seed: 7 }
-  it('covers the exposed top of a chunk whose neighbour above is not surveyed, and never a vein', () => {
-    const b = new Uint8Array(CELLS).fill(SLATE)
-    b[idx(4, 31, 4)] = 40
-    const s = skinCells(b, [false, false, false, true, false, false], skin)!
-    expect(s[idx(0, 31, 0)]).toBe(skin.top)
-    expect(s[idx(4, 31, 4)]).toBe(255)
-    // Deep inside, nothing.
-    expect(s[idx(10, 10, 10)]).toBe(255)
-    // It is drawn only: the blocks are unchanged.
-    expect(b[idx(0, 31, 0)]).toBe(SLATE)
-  })
-  it('is not drawn where every neighbour is surveyed', () => {
-    expect(skinCells(new Uint8Array(CELLS).fill(SLATE), [false, false, false, false, false, false], skin)).toBeNull()
-  })
-  it('changes what the faces show, never which faces there are', () => {
-    // Area of every rectangle drawn: the same with the skin as without, on a lumpy ground.
-    const b = generate({ x: 0n, y: 0n, z: 0n, plane: 0 }).blocks
-    const area = (m: ReturnType<typeof meshChunk>): number => {
-      let a = 0
-      const v = (i: number): number[] => [0, 1, 2].map((k) => m.vertices[i * FLOATS_PER_VERTEX + k])
-      for (let t = 0; t < m.indices.length; t += 6) {
-        const p0 = v(m.indices[t]), p1 = v(m.indices[t + 1]), p2 = v(m.indices[t + 2])
-        const u = p1.map((x, k) => x - p0[k]), w = p2.map((x, k) => x - p0[k])
-        a += Math.hypot(u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2], u[0] * w[1] - u[1] * w[0])
-      }
-      return a
-    }
-    const plain = meshChunk(b, NONE, colours), skinned = meshChunk(b, NONE, colours, skin)
-    expect(area(skinned)).toBeCloseTo(area(plain), 6)
-    // And the skin does show: some face takes the skin's top tile.
-    const rows = (m: ReturnType<typeof meshChunk>): Set<number> => { const r = new Set<number>(); for (let i = 3; i < m.vertices.length; i += FLOATS_PER_VERTEX) r.add(m.vertices[i]); return r }
-    expect(rows(skinned).has(skin.top * 3)).toBe(true)
   })
 })
 

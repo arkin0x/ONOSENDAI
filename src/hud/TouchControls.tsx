@@ -110,7 +110,7 @@ export const GO_LIVE_BODY = [
 ].join('\n')
 
 /** The mode button's word for each mode it can name. */
-const MODE_WORD: Record<PadMode, string> = { hop: 'HOP', view: 'VIEW', walk: 'WALK', build: 'BUILD', scan: 'SCAN' }
+const MODE_WORD: Record<PadMode, string> = { hop: 'HOP', view: 'VIEW', walk: 'WALK', build: 'BUILD', scan: 'SCAN', terrain: 'TERRAIN' }
 
 /**
  * The lit mode button's title with the default ring, word for word as it
@@ -128,6 +128,7 @@ const MODE_TITLE: Record<PadMode, string> = {
   hop: 'Hop: the pad lines up a move and COMMIT sends it',
   view: 'Viewing: the pad moves the cursor without planning a hop; RECALL brings the cursor home and stays in VIEW',
   walk: 'Walking: every press is a step, proved behind you',
+  terrain: 'TERRAIN: walk the blocks, mine and place them; every step goes to your chain',
   build: 'Building: the pad moves the build cursor and never you',
   scan: 'Scanning: the pad moves the cursor, SCAN looks inside the purple cube',
 }

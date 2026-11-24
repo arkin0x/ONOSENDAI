@@ -275,7 +275,7 @@ export interface Generated {
   meanK: number
   /** The chunk's own family (its corner's 2^11 digest; cells near a soft border may take a neighbour's). */
   family: string
-  /** That family's skin on top of open air and its rind: what the drawn-only chunk skin uses (lib/terrain/mesh.ts). */
+  /** That family's top (over open air) and its rind (DECK §3.9), for reference: nothing draws a skin. */
   top: number
   rind: number
 }

@@ -179,7 +179,7 @@ describe('the pad', () => {
 
 describe('the MODES panel', () => {
   it('lists every mode in order with what its place makes it', () => {
-    expect(rows().map((r) => r.props['data-mode'])).toEqual(['hop', 'walk', 'view', 'build', 'scan'])
+    expect(rows().map((r) => r.props['data-mode'])).toEqual(['hop', 'walk', 'terrain', 'view', 'build', 'scan'])
     const roles = rows().map((r) => words(r.props.children))
     expect(roles[0]).toContain('Starts in')
     expect(roles[1]).toContain('Second button')
@@ -188,6 +188,7 @@ describe('the MODES panel', () => {
     expect(words(inRow('build', 'modes__key').props.children)).toBe('B')
     expect(words(inRow('scan', 'modes__key').props.children)).toBe('N')
     expect(words(inRow('walk', 'modes__key').props.children)).toBe('')
+    expect(words(inRow('terrain', 'modes__key').props.children)).toBe('T')
     expect(panel().some((e) => words(e.props.children) === MODES_HINT)).toBe(true)
   })
 
@@ -199,8 +200,8 @@ describe('the MODES panel', () => {
     expect(storedModes().off).toEqual(['walk'])
     expect(words(rowOf('walk').props.children)).toContain('Off')
     expect(has(rowOf('walk'), 'is-off')).toBe(true)
-    // VIEW is the second button now.
-    expect(words(rowOf('view').props.children)).toContain('Second button')
+    // TERRAIN is the second button now.
+    expect(words(rowOf('terrain').props.children)).toContain('Second button')
     ;(inRow('walk', 'modes__switch').props.onCheckedChange as (on: boolean) => void)(true)
     expect(storedModes()).toEqual(DEFAULT_MODES)
   })
@@ -209,10 +210,10 @@ describe('the MODES panel', () => {
     expect(inRow('hop', 'modes__up').props.disabled).toBe(true)
     expect(inRow('scan', 'modes__down').props.disabled).toBe(true)
     ;(inRow('walk', 'modes__up').props.onClick as () => void)()
-    expect(storedModes().order).toEqual(['walk', 'hop', 'view', 'build', 'scan'])
+    expect(storedModes().order).toEqual(['walk', 'hop', 'terrain', 'view', 'build', 'scan'])
     expect(words(rowOf('walk').props.children)).toContain('Starts in')
     ;(inRow('build', 'modes__down').props.onClick as () => void)()
-    expect(storedModes().order).toEqual(['walk', 'hop', 'view', 'scan', 'build'])
+    expect(storedModes().order).toEqual(['walk', 'hop', 'terrain', 'view', 'scan', 'build'])
   })
 
   it('RESET TO DEFAULT puts today\'s list back, and waits while it already is', () => {

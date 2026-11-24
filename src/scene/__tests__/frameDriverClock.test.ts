@@ -45,7 +45,7 @@ vi.mock('../../store/useWorkshop', async (importOriginal) => {
 
 // A game on screen covers the scene too (game/GameView.tsx); none is, here.
 vi.mock('../../store/useGame', () => ({ useGame: (sel: (s: { session: null }) => unknown) => sel({ session: null }) }))
-vi.mock('../../store/useTerrain', () => ({ useTerrain: (sel: (s: { active: boolean }) => unknown) => sel({ active: false }) }))
+vi.mock('../../store/useTerrain', () => ({ useTerrain: Object.assign((sel: (s: { active: boolean }) => unknown) => sel({ active: false }), { getState: () => ({ active: false }) }) }))
 
 const { FrameDriver } = await import('../frameDriver')
 

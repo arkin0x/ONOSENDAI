@@ -106,6 +106,8 @@ export type WallItem = Pick<WorldItem, 'key' | 'at' | 'height' | 'plane'> & Part
    * (wallItemsAt), and stops one coming in from outside, as any closed door.
    */
   closedRoom?: number
+  /** A cube of the field's blocks (lib/terrain/walls.ts), not a placed shard. */
+  terrain?: boolean
 }
 
 /** No cut at all, for an uncut wall: wider than anything a wall mesh can reach. */
@@ -1832,7 +1834,28 @@ export function enclosesWalker(w: WallItem, from: Position): boolean {
  * held by an animation. The built-in slabs' open looks carry no setting,
  * which is OFF, so an opened built-in door holds nobody.
  */
+/**
+ * The field's blocks (store/useTerrain.ts, lib/terrain/walls.ts) as walls
+ * of their own, given by TERRAIN: WALK walks on blocks. The source returns
+ * the same list while nothing changed. None until TERRAIN's field sets it.
+ */
+let terrainSource: ((plane: number) => WallItem[]) | null = null
+export function setTerrainWalls(source: ((plane: number) => WallItem[]) | null): void {
+  terrainSource = source
+}
+
+let joined: { base: WallItem[]; blocks: WallItem[]; out: WallItem[] } | null = null
+
 export function wallItems(plane: number): WallItem[] {
+  const base = shardWallItems(plane)
+  const blocks = terrainSource ? terrainSource(plane) : []
+  if (blocks.length === 0) return base
+  if (joined && joined.base === base && joined.blocks === blocks) return joined.out
+  joined = { base, blocks, out: [...base, ...blocks] }
+  return joined.out
+}
+
+function shardWallItems(plane: number): WallItem[] {
   const all = useShards.getState().drawnItems()
   // The shards and chests of this plane, picked out once per world (drawnItems
   // keeps its list until the world changes): every WALK step, fall and stand

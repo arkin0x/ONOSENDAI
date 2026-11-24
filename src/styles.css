@@ -14021,10 +14021,11 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
   --terrain-cut: 8px;
   /* Ten slots and their gaps across a phone, never wider than the screen. */
   --terrain-slot: min(36px, calc((100vw - 32px - 27px) / 10));
+  /* Over the cyberspace scene, under the compass and the menu: TERRAIN is drawn in the scene itself. */
   position: fixed;
   inset: 0;
-  z-index: 210;
-  background: var(--bg);
+  z-index: 5;
+  pointer-events: none;
   color: #fff;
   font-family: var(--mono);
   touch-action: none;
@@ -14035,7 +14036,7 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
 @media (min-width: 700px) {
   .terrainview { --terrain-slot: 46px; }
 }
-.terrainview__canvas { position: absolute; inset: 0; cursor: crosshair; }
+.terrain-hotbar, .terrain-sheet { pointer-events: auto; }
 .terrainview .terrain-key {
   display: inline-block;
   margin-left: 6px;
@@ -14056,7 +14057,6 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
 .terrain-survey__btn,
 .terrain-hint__box,
 .terrain-act,
-.terrain-pad__btn,
 .terrain-slot,
 .terrain-sheet__card {
   position: relative;
@@ -14070,7 +14070,7 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
 .terrain-survey__btn::before,
 .terrain-hint__box::before,
 .terrain-act::before,
-.terrain-pad__btn::before,
+
 .terrain-slot::before,
 .terrain-sheet__card::before {
   content: "";
@@ -14081,11 +14081,13 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
   clip-path: polygon(calc(var(--terrain-cut) - 0.6px) 0, 100% 0, 100% calc(100% - var(--terrain-cut) + 0.6px), calc(100% - var(--terrain-cut) + 0.6px) 100%, 0 100%, 0 calc(var(--terrain-cut) - 0.6px));
 }
 
+/* Centred at the top, clear of the instrument chips on the left and the compass on the right. */
 .terrain-bar {
   position: absolute;
   top: max(12px, env(safe-area-inset-top));
-  left: 16px;
-  right: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(560px, calc(100% - 32px));
   display: flex;
   align-items: center;
   gap: 10px;
@@ -14129,7 +14131,7 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
 /* The first visit's steps and SURVEY: each in a slot of its own, so the bar and the scene never move when they come and go. */
 .terrain-hint {
   position: absolute;
-  top: calc(max(12px, env(safe-area-inset-top)) + 44px);
+  top: calc(max(12px, env(safe-area-inset-top)) + 54px + var(--terrain-slot));
   left: 16px;
   right: 16px;
   height: 44px;
@@ -14157,7 +14159,7 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
 }
 .terrain-survey {
   position: absolute;
-  top: calc(max(12px, env(safe-area-inset-top)) + 96px);
+  top: calc(max(12px, env(safe-area-inset-top)) + 104px + var(--terrain-slot));
   left: 0;
   right: 0;
   height: 40px;
@@ -14221,11 +14223,11 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
 .terrain-crosshair::before { left: 8px; top: 0; width: 2px; height: 18px; }
 .terrain-crosshair::after { top: 8px; left: 0; height: 2px; width: 18px; }
 
-/* The hotbar: nine slots and the bag, centred at the bottom. */
+/* The hotbar: nine slots and the bag, centred under the bar, so WALK's pad keeps the bottom. */
 .terrain-hotbar {
   position: absolute;
   left: 50%;
-  bottom: max(12px, env(safe-area-inset-bottom));
+  top: calc(max(12px, env(safe-area-inset-top)) + 46px);
   transform: translateX(-50%);
   display: flex;
   gap: 3px;
@@ -14275,50 +14277,18 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
 .terrain-swatch--glow { filter: drop-shadow(0 0 4px var(--sw-edge)); }
 .terrain-slot .terrain-swatch { width: calc(var(--terrain-slot) * 0.56) !important; height: calc(var(--terrain-slot) * 0.56) !important; }
 
-/* The touch controls: the walk on the left, mine, place, jump and LOOK on the right (WALK's sides, 2026-11-14). Not drawn for a mouse and keyboard. */
-.terrain-pad,
-.terrain-actions {
+/* MINE and PLACE: a pair on the left, half way down, clear of WALK's pad below and the hotbar above. */
+.terrain-tools {
   position: absolute;
-  bottom: calc(max(12px, env(safe-area-inset-bottom)) + var(--terrain-slot) + 14px);
+  left: 16px;
+  top: 42%;
   display: flex;
-  align-items: flex-end;
-  gap: 8px;
+  flex-direction: column;
+  gap: 6px;
+  pointer-events: auto;
 }
-.terrain-pad { left: 16px; }
-.terrain-actions { right: 16px; }
-.terrain-pad__dirs {
-  display: grid;
-  grid-template-columns: repeat(3, 46px);
-  grid-template-rows: repeat(3, 46px);
-  gap: 3px;
-}
-.terrain-pad__btn {
-  --terrain-line: rgba(255, 255, 255, 0.35);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  padding: 0;
-  color: #fff;
-  font: inherit;
-  font-size: 13px;
-  touch-action: none;
-}
-.terrain-pad__btn:active::before { background: rgba(124, 255, 196, 0.22); }
-.terrain-pad__btn--forward { grid-column: 2; grid-row: 1; }
-.terrain-pad__btn--left { grid-column: 1; grid-row: 2; }
-.terrain-pad__btn--right { grid-column: 3; grid-row: 2; }
-.terrain-pad__btn--back { grid-column: 2; grid-row: 3; }
-.terrain-pad__down { grid-column: 3; grid-row: 3; display: grid; }
-@media (max-width: 380px) {
-  .terrain-pad__dirs { grid-template-columns: repeat(3, 42px); grid-template-rows: repeat(3, 42px); }
-  .terrain-act, .terrain-pad__btn--jump { width: 86px; }
-  .orbsquare.terrainlook { width: 86px; height: 86px; }
-}
-.terrain-actions__col { display: flex; flex-direction: column; gap: 6px; }
-.terrain-act,
-.terrain-pad__btn--jump {
-  width: 92px;
+.terrain-act {
+  width: 96px;
   height: 36px;
   display: inline-flex;
   align-items: center;
@@ -14334,10 +14304,6 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
 }
 .terrain-act:active::before { background: rgba(124, 255, 196, 0.22); }
 .terrain-act .terrain-key { margin-left: 2px; }
-.orbsquare.terrainlook { width: 92px; height: 92px; }
-@media (hover: hover) and (pointer: fine) {
-  .terrain-pad, .terrain-actions { display: none; }
-}
 
 /* The inventory: a sheet over the scene, the shared ✕ on its title line. */
 .terrain-sheet {

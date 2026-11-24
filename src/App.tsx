@@ -43,6 +43,7 @@ import './tutorial/straylight'
 import './tutorial/dungeon'
 import { GameView } from './game/GameView'
 import { TerrainView } from './terrain/TerrainView'
+import { useTerrain } from './store/useTerrain'
 import { GameChip } from './hud/GameChip'
 import { TvScreen } from './hud/TvScreen'
 import { isTvPath, useTv } from './store/useTv'
@@ -362,6 +363,7 @@ export default function App(): JSX.Element {
   // body, so a hidden pad still shows it; the pad's open state is kept, so
   // it is back the moment the last modal closes.
   const modalUp = useModalUp()
+  const terrainOn = useTerrain((t) => t.active)
   const showPad = padOpen && !crowded
 
   const onSceneTap = useCallback(() => {
@@ -476,7 +478,7 @@ export default function App(): JSX.Element {
       <StarNickname />
       {!crowded && !offerUp && !deploying && viewMenuOpen && <ViewMenu onClose={() => setViewMenuOpen(false)} />}
       <div hidden={modalUp}>
-        {showPad && !offerUp && <TouchControls />}
+        {showPad && !offerUp && !terrainOn && <TouchControls />}
         {/* Not while placing: the deploy bar docks in this same corner
             (arkinox, 2026-10-12), and placing moves no avatar, so there is
             no route to show. */}
@@ -513,7 +515,7 @@ export default function App(): JSX.Element {
       <Workshop />
       {/* In-game mode: the game's world over everything, while you play one (DECK-0002 §2.3). */}
       <GameView />
-      {/* TERRAIN, a tool of BUILD: mine and place blocks, full screen over cyberspace while it is on (store/useTerrain.ts). */}
+      {/* TERRAIN's controls over the scene while it is on (store/useTerrain.ts); its blocks are drawn in the scene (scene/TerrainLayer.tsx). */}
       <TerrainView />
       {/* The one hidden canvas that draws every list's shard pictures, there only while it has some to draw. */}
       <ThumbHost />

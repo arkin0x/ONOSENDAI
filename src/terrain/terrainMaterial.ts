@@ -38,6 +38,10 @@ uniform sampler2D atlas;
 uniform vec3 bg;
 uniform float fogNear;
 uniform float fogFar;
+/** Render units per gibson: 1 at a gibson's zoom, smaller as you zoom out. */
+uniform float unit;
+/** GLOW in Settings: 1 lets the glowing texels feed the world bloom. */
+uniform float glow;
 varying vec3 vLocal;
 varying float vTile;
 varying float vShade;
@@ -55,10 +59,15 @@ void main() {
   vec2 g = vec2(16.0 / ${ATLAS.toFixed(1)});
   vec4 tex = textureGrad(atlas, uv, dFdx(c) * g, dFdy(c) * g);
   float em = 1.0 - tex.a;
-  float lamp = 0.5 + 0.5 * clamp(1.0 - vDist / 30.0, 0.0, 1.0);
-  vec3 col = tex.rgb * vShade * lamp * (1.0 - em) + tex.rgb * em * 1.6;
-  float fog = smoothstep(fogNear, fogFar, vDist);
-  gl_FragColor = vec4(mix(col, bg, fog), 1.0);
+  float gib = vDist / unit;
+  float lamp = 0.5 + 0.5 * clamp(1.0 - gib / 30.0, 0.0, 1.0);
+  vec3 col = tex.rgb * vShade * lamp * (1.0 - em) + tex.rgb * em * 1.15;
+  float fog = smoothstep(fogNear, fogFar, gib);
+  col = mix(col, bg, fog);
+  // Rock writes the world's untagged colour (alpha 0): the world bloom passes it by, as it passes a shard's face.
+  // A glowing texel writes alpha 1 while GLOW is on, and blooms.
+  float lit = step(0.35, em) * glow * (1.0 - fog);
+  gl_FragColor = vec4(col, lit);
 }
 `
 
@@ -68,7 +77,14 @@ export function rawColor(hex: string): Color {
   return new Color(((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255)
 }
 
-export function makeTerrainMaterial(): { material: ShaderMaterial; dispose: () => void } {
+export interface TerrainMaterial {
+  material: ShaderMaterial
+  /** The zoom (render units per gibson) and GLOW, each frame. */
+  setView: (unit: number, glow: boolean) => void
+  dispose: () => void
+}
+
+export function makeTerrainMaterial(): TerrainMaterial {
   const atlas = new DataTexture(buildAtlas(), ATLAS, ATLAS, RGBAFormat)
   atlas.magFilter = NearestFilter
   atlas.minFilter = LinearMipmapLinearFilter
@@ -82,7 +98,13 @@ export function makeTerrainMaterial(): { material: ShaderMaterial; dispose: () =
       bg: { value: rawColor(BG) },
       fogNear: { value: FOG_NEAR },
       fogFar: { value: FOG_FAR },
+      unit: { value: 1 },
+      glow: { value: 1 },
     },
   })
-  return { material, dispose: () => { material.dispose(); atlas.dispose() } }
+  return {
+    material,
+    setView: (unit, glow) => { material.uniforms.unit.value = unit; material.uniforms.glow.value = glow ? 1 : 0 },
+    dispose: () => { material.dispose(); atlas.dispose() },
+  }
 }

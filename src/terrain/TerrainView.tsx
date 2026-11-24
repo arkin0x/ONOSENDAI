@@ -1,45 +1,33 @@
 /**
- * TerrainView.tsx - TERRAIN mode on screen: the builder's view full screen
- * over cyberspace, on a canvas of its own (as a game's is, game/GameView.tsx),
- * and its controls.
+ * TerrainView.tsx - TERRAIN's tools on screen. TERRAIN is WALK with block
+ * tools (owner, 2026-11-24: "a normal WALK mode, but it has tools to survey
+ * and interact with blocks"), so WALK's pad, LOOK, camera and keys stay as
+ * they are, and the scene is cyberspace's own; this adds only the tools:
  *
- * Cyberspace is not drawn meanwhile (scene/frameDriver.tsx stops its frames),
- * and it is exactly as you left it when you come back: BUILD is still on, the
- * build cursor where it was. Nothing here is signed or published.
+ * - SURVEY (G) fills the chunk you stand in, or the next one in reach the way
+ *   you look, with its generated ground.
+ * - MINE (Q, a click or a tap on a block) and PLACE (E, a right click or a
+ *   long press) act on the block under the cross, or under the pointer.
+ * - The hotbar, 1 to 9, and the bag (I): what you carry, on this device.
+ * - T or Esc goes back to the mode you came from; the mode button goes on
+ *   round the ring.
  *
- * Controls (every key printed beside its button):
- * - W A S D or the arrows walk, Space jumps; in a chunk not yet surveyed the
- *   body floats, and Space and Shift go up and down.
- * - Drag the scene to look (WALK's own gain, lib/walkLook.ts), or drag the
- *   LOOK ball on a touch screen.
- * - A click or a tap mines the block under it; the second mouse button, or a
- *   long press, places the chosen block on the face under it. MINE (Q) and
- *   PLACE (E) do the same at the cursor in the middle of the screen.
- * - 1 to 9 choose a hotbar slot; I or the bag opens the inventory.
- * - G surveys the chunk you are in, or the next one you look at.
- * - T or Esc leaves, back to BUILD.
- *
- * The owner's taste (2026-11-15/17): white text with a dark shadow over the
- * scene, no jargon, no layout jumps (the status line and the hint keep their
- * slots), lucide icons, chamfered frames, key hints, the shared ✕.
+ * The owner's taste: white text with a dark shadow over the scene, no
+ * jargon, no layout jumps (every slot kept), lucide icons, chamfered frames,
+ * key hints, the shared ✕, colons in copy.
  */
 
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
-import { Canvas } from '@react-three/fiber'
-import { Backpack, Blocks, Box, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, ChevronsDown, ChevronsUp, Pickaxe, Radar } from 'lucide-react'
-import { HINT_DONE, bodyWorld, chunkAtView, surveyTargetOf, terrainSession, useTerrain } from '../store/useTerrain'
-import { TerrainScene, terrainCursor } from './TerrainScene'
-import { MOVE_KEYS, hold, release, releaseAll, resetTerrainInput, slotKey, terrainInput, turnLook } from './terrainInput'
-import { BG } from '../lib/palette'
+import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
+import { Backpack, Blocks, Box, Pickaxe, Radar } from 'lucide-react'
+import { HINT_DONE, headNow, offsetOf, surveyTarget as targetNow, terrainSession, useTerrain } from '../store/useTerrain'
+import { terrainCursor } from '../scene/TerrainLayer'
+import { cycleMode, leaveTerrain, nextModeWord } from '../store/padMode'
+import { resetTerrainInput, slotKey, terrainInput } from './terrainInput'
 import { blockKind, blockName } from '../lib/terrain/blocks'
 import { tileUrl } from '../lib/terrain/tiles'
-import { lookRadPerPx, sphereRadPerPx } from '../lib/walkLook'
-import { gravityHolds } from '../lib/terrain/body'
-import { OrbitSphere } from '../hud/ui/OrbitSphere'
 import { ModalClose } from '../hud/ui/ModalClose'
 import { Chamfer } from '../hud/ui/Chamfer'
 import { noCallout } from '../hooks/useRepeatable'
-import { FOG_FAR } from './terrainMaterial'
 
 /** A press held this long without moving places (a long press). */
 export const LONG_PRESS_MS = 420
@@ -53,18 +41,19 @@ export const HINT_STEPS = [
   'Open your inventory: the bag at the end of the bar (I).',
 ] as const
 
-/** The chunk the body stands in, or null. */
+/** The chunk you stand in, or null. */
 function hereKey(): string | null {
   const s = terrainSession
-  return s ? chunkAtView(s, [s.body.x, s.body.y + 1, s.body.z]) : null
+  if (!s) return null
+  const w = offsetOf(s, headNow())
+  return s.world.slotAtCs(w[0], w[1], w[2])?.key ?? null
 }
 
-/** The chunk SURVEY would fill now (store/useTerrain.ts surveyTargetOf), for the look as it is. */
+/** The chunk SURVEY would fill now (store/useTerrain.ts surveyTarget). */
 export function surveyTarget(): string | null {
-  return terrainSession ? surveyTargetOf(terrainSession, terrainInput.yaw, terrainInput.pitch) : null
+  return targetNow()
 }
 
-/** A block's picture: its side tile (lib/terrain/tiles.ts), as the scene draws it. */
 function Swatch({ id, size = 22 }: { id: number; size?: number }): JSX.Element {
   const k = blockKind(id)
   const url = k ? tileUrl(k) : ''
@@ -149,43 +138,12 @@ function InventorySheet(): JSX.Element | null {
   )
 }
 
-function PadButton({ name, label, children }: { name: string; label: string; children: ReactNode }): JSX.Element {
-  const pressed = useRef(false)
-  const up = (): void => { if (pressed.current) { pressed.current = false; release(name) } }
-  useEffect(() => up, [])
-  return (
-    <button
-      className={`terrain-pad__btn terrain-pad__btn--${name}`}
-      aria-label={label}
-      {...noCallout}
-      onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); (e.target as Element).setPointerCapture?.(e.pointerId); if (!pressed.current) { pressed.current = true; hold(name) } }}
-      onPointerUp={up}
-      onPointerCancel={up}
-      onLostPointerCapture={up}
-    >{children}</button>
-  )
-}
-
 /** The status line's words: where you stand, in plain words (messages have their own slot under the cross). */
 function standingWords(loading: boolean, surveying: boolean, target: string | null): string {
   if (loading) return 'Loading your blocks'
   if (surveying) return 'Surveying'
   if (target) return target === hereKey() ? 'Empty here: SURVEY' : 'Empty ahead: SURVEY'
   return 'Build near your avatar'
-}
-
-/** Whether the body floats (in a chunk not surveyed, with none under it), looked at a few times a second. */
-function useFloating(): boolean {
-  const [floating, setFloating] = useState(false)
-  useEffect(() => {
-    const t = window.setInterval(() => {
-      const s = terrainSession
-      if (!s) return
-      setFloating(!gravityHolds(bodyWorld(s), s.body))
-    }, 250)
-    return () => clearInterval(t)
-  }, [])
-  return floating
 }
 
 /** The survey target, looked at a few times a second (it follows the body and the look). */
@@ -203,18 +161,27 @@ export function TerrainView(): JSX.Element | null {
   return active ? <TerrainScreen /> : null
 }
 
+/** A press held this long on the scene without moving places (a long press). */
+const LONG_MS = LONG_PRESS_MS
+
+/** Whether an event is on the cyberspace scene's canvas (not the compass's, not a HUD's). */
+function onScene(e: Event): HTMLCanvasElement | null {
+  const t = e.target as HTMLElement | null
+  if (!t || t.tagName !== 'CANVAS' || t.closest('.compass-3d, .benchorb, .orbsquare')) return null
+  return t as HTMLCanvasElement
+}
+
 function TerrainScreen(): JSX.Element {
   const message = useTerrain((s) => s.message)
   const hint = useTerrain((s) => s.hint)
   const loading = useTerrain((s) => s.loading)
   const surveying = useTerrain((s) => s.surveying.length > 0)
   const target = useSurveyTarget()
-  const floating = useFloating()
   const standing = standingWords(loading, surveying, target)
-  const canvasRef = useRef<HTMLDivElement>(null)
+  const nextWord = nextModeWord()
 
-  // A fresh look and nothing held at every visit; everything let go on the way out.
-  useEffect(() => { resetTerrainInput(); return () => releaseAll() }, [])
+  // A fresh cursor at every visit.
+  useEffect(() => { resetTerrainInput() }, [])
 
   const doSurvey = (): void => {
     const key = surveyTarget()
@@ -222,130 +189,93 @@ function TerrainScreen(): JSX.Element {
     else useTerrain.getState().say('Everything here is surveyed.')
   }
 
-  // TERRAIN's keys, while it is on screen (the cyberspace keys stand down: hooks/useKeyboard.ts).
+  // TERRAIN's own keys, ahead of the rest (capture): the tools, T and Esc. WALK's keys go on to WALK (hooks/useKeyboard.ts).
   useEffect(() => {
     const down = (e: KeyboardEvent): void => {
-      if (e.key === 'Meta') { releaseAll(); return }
       if (e.metaKey || e.ctrlKey || e.altKey) return
       const target = e.target as HTMLElement | null
       if (target?.closest?.('input, textarea, [contenteditable="true"]')) return
       const st = useTerrain.getState()
-      if (e.code === 'Escape') { e.preventDefault(); if (st.sheet) st.setSheet(false); else void st.exit(); return }
-      if (e.code === 'KeyT') { e.preventDefault(); if (!e.repeat) void st.exit(); return }
-      if (e.code === 'KeyI' || e.code === 'Tab') { e.preventDefault(); if (!e.repeat) st.setSheet(!st.sheet); return }
+      const take = (): void => { e.preventDefault(); e.stopImmediatePropagation() }
+      if (e.code === 'Escape') { if (st.sheet) { take(); st.setSheet(false) } else if (!document.querySelector('[aria-modal="true"]')) { take(); leaveTerrain() } return }
+      if (e.code === 'KeyT') { take(); if (!e.repeat) leaveTerrain(); return }
+      if (e.code === 'KeyI') { take(); if (!e.repeat) st.setSheet(!st.sheet); return }
       if (st.sheet) return
       const slot = slotKey(e.code)
-      if (slot !== null) { e.preventDefault(); st.selectSlot(slot); return }
-      if (e.code === 'KeyG') { e.preventDefault(); if (!e.repeat) doSurvey(); return }
-      if (e.code === 'KeyQ') { e.preventDefault(); if (!e.repeat) terrainInput.action = { kind: 'mine', at: null }; return }
-      if (e.code === 'KeyE') { e.preventDefault(); if (!e.repeat) terrainInput.action = { kind: 'place', at: null }; return }
-      const move = MOVE_KEYS[e.code]
-      if (!move) return
-      e.preventDefault()
-      // Space and Enter on a focused button never press it here: Space is JUMP.
-      if (e.repeat) return
-      hold(move)
+      if (slot !== null) { take(); st.selectSlot(slot); return }
+      if (e.code === 'KeyG') { take(); if (!e.repeat) doSurvey(); return }
+      if (e.code === 'KeyQ') { take(); if (!e.repeat) terrainInput.action = { kind: 'mine', at: null }; return }
+      if (e.code === 'KeyE') { take(); if (!e.repeat) terrainInput.action = { kind: 'place', at: null } }
     }
-    const up = (e: KeyboardEvent): void => {
-      if (e.key === 'Meta') { releaseAll(); return }
-      const move = MOVE_KEYS[e.code]
-      if (move) { release(move); if (e.code === 'Space') e.preventDefault() }
+    window.addEventListener('keydown', down, true)
+    return () => window.removeEventListener('keydown', down, true)
+  }, [])
+
+  // The scene's pointer, heard alongside WALK's (which still looks on a drag): a tap or a click mines at the point,
+  // a long press or the second button places, the mouse resting aims the cursor.
+  useEffect(() => {
+    let press: { id: number; x: number; y: number; moved: number; t: number; done: boolean; timer: number; canvas: HTMLCanvasElement } | null = null
+    const ndc = (c: HTMLCanvasElement, x: number, y: number): { x: number; y: number } => {
+      const r = c.getBoundingClientRect()
+      return { x: ((x - r.left) / r.width) * 2 - 1, y: -(((y - r.top) / r.height) * 2 - 1) }
     }
-    const hidden = (): void => { if (document.visibilityState === 'hidden') releaseAll() }
-    window.addEventListener('keydown', down)
-    window.addEventListener('keyup', up)
-    window.addEventListener('blur', releaseAll)
-    document.addEventListener('visibilitychange', hidden)
+    const end = (): void => { if (press) clearTimeout(press.timer); press = null }
+    const down = (e: PointerEvent): void => {
+      const c = onScene(e)
+      if (!c || useTerrain.getState().sheet) return
+      if (e.pointerType === 'mouse' && e.button === 2) { terrainInput.action = { kind: 'place', at: ndc(c, e.clientX, e.clientY) }; return }
+      if (e.pointerType === 'mouse' && e.button !== 0) return
+      end()
+      const p = { id: e.pointerId, x: e.clientX, y: e.clientY, moved: 0, t: performance.now(), done: false, timer: 0, canvas: c }
+      if (e.pointerType !== 'mouse') {
+        p.timer = window.setTimeout(() => {
+          if (press !== p || p.moved > TAP_SLOP) return
+          p.done = true
+          terrainInput.action = { kind: 'place', at: ndc(c, p.x, p.y) }
+          navigator.vibrate?.(12)
+        }, LONG_MS)
+      }
+      press = p
+    }
+    const move = (e: PointerEvent): void => {
+      const c = onScene(e)
+      if (e.pointerType === 'mouse') terrainInput.hover = c ? ndc(c, e.clientX, e.clientY) : null
+      if (!press || press.id !== e.pointerId) return
+      press.moved += Math.abs(e.movementX ?? 0) + Math.abs(e.movementY ?? 0)
+      if (Math.hypot(e.clientX - press.x, e.clientY - press.y) > TAP_SLOP) press.moved = TAP_SLOP + 1
+    }
+    const up = (e: PointerEvent): void => {
+      const p = press
+      if (!p || p.id !== e.pointerId) return
+      if (!p.done && p.moved <= TAP_SLOP && performance.now() - p.t < LONG_MS) terrainInput.action = { kind: 'mine', at: ndc(p.canvas, p.x, p.y) }
+      end()
+    }
+    const menu = (e: MouseEvent): void => { if (onScene(e)) e.preventDefault() }
+    window.addEventListener('pointerdown', down, true)
+    window.addEventListener('pointermove', move, true)
+    window.addEventListener('pointerup', up, true)
+    window.addEventListener('pointercancel', end, true)
+    window.addEventListener('contextmenu', menu, true)
     return () => {
-      window.removeEventListener('keydown', down)
-      window.removeEventListener('keyup', up)
-      window.removeEventListener('blur', releaseAll)
-      document.removeEventListener('visibilitychange', hidden)
-      releaseAll()
+      end()
+      window.removeEventListener('pointerdown', down, true)
+      window.removeEventListener('pointermove', move, true)
+      window.removeEventListener('pointerup', up, true)
+      window.removeEventListener('pointercancel', end, true)
+      window.removeEventListener('contextmenu', menu, true)
     }
   }, [])
 
-  // The scene's pointer: drag to look, tap to mine, long press or the second button to place, hover to aim.
-  const press = useRef<{ id: number; x: number; y: number; sx: number; sy: number; t: number; moved: number; timer: number; done: boolean; mouse: boolean } | null>(null)
-  const ndc = (x: number, y: number): { x: number; y: number } => {
-    const r = canvasRef.current?.getBoundingClientRect()
-    if (!r) return { x: 0, y: 0 }
-    return { x: ((x - r.left) / r.width) * 2 - 1, y: -(((y - r.top) / r.height) * 2 - 1) }
-  }
-  const endPress = (): void => {
-    const p = press.current
-    if (p) clearTimeout(p.timer)
-    press.current = null
-  }
-
   return (
-    <div className="terrainview" role="application" aria-label="TERRAIN: mine and place blocks">
-      <div
-        ref={canvasRef}
-        className="terrainview__canvas"
-        onContextMenu={(e) => e.preventDefault()}
-        onPointerDown={(e) => {
-          if (useTerrain.getState().sheet) return
-          if (e.pointerType === 'mouse' && e.button === 2) {
-            terrainInput.action = { kind: 'place', at: ndc(e.clientX, e.clientY) }
-            return
-          }
-          if (e.pointerType === 'mouse' && e.button !== 0) return
-          endPress()
-          ;(e.target as Element).setPointerCapture?.(e.pointerId)
-          const mouse = e.pointerType === 'mouse'
-          const at = { id: e.pointerId, x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, t: performance.now(), moved: 0, timer: 0, done: false, mouse }
-          // A long press places, on a touch screen, once it has held still long enough.
-          if (!mouse) {
-            at.timer = window.setTimeout(() => {
-              const p = press.current
-              if (!p || p.id !== at.id || p.moved > TAP_SLOP) return
-              p.done = true
-              terrainInput.action = { kind: 'place', at: ndc(p.sx, p.sy) }
-              navigator.vibrate?.(12)
-            }, LONG_PRESS_MS)
-          }
-          press.current = at
-        }}
-        onPointerMove={(e) => {
-          if (e.pointerType === 'mouse') terrainInput.hover = ndc(e.clientX, e.clientY)
-          const p = press.current
-          if (!p || p.id !== e.pointerId) return
-          const dx = e.clientX - p.x, dy = e.clientY - p.y
-          p.moved += Math.abs(dx) + Math.abs(dy)
-          p.x = e.clientX
-          p.y = e.clientY
-          // Past the slop the press is a look: WALK's gain on the scene, per screen width.
-          if (p.moved > TAP_SLOP) {
-            const k = lookRadPerPx(canvasRef.current?.clientWidth ?? window.innerWidth)
-            turnLook(dx * k, dy * k)
-          }
-        }}
-        onPointerUp={(e) => {
-          const p = press.current
-          if (!p || p.id !== e.pointerId) return
-          if (!p.done && p.moved <= TAP_SLOP) terrainInput.action = { kind: 'mine', at: ndc(p.sx, p.sy) }
-          endPress()
-        }}
-        onPointerCancel={endPress}
-        onPointerLeave={(e) => { if (e.pointerType === 'mouse') terrainInput.hover = null }}
-      >
-        <Canvas
-          camera={{ fov: 72, near: 0.05, far: FOG_FAR + 8 }}
-          dpr={[1, 2]}
-          gl={{ antialias: true, powerPreference: 'high-performance' }}
-          style={{ background: BG }}
-        >
-          <TerrainScene />
-        </Canvas>
-        <span className="terrain-crosshair" aria-hidden />
-      </div>
+    <div className="terrainview" role="group" aria-label="TERRAIN: block tools">
+      <span className="terrain-crosshair" aria-hidden />
 
       <div className="terrain-bar">
         <span className="terrain-bar__title"><Blocks size={14} strokeWidth={2.25} aria-hidden />TERRAIN</span>
         {/* One line, always there, so nothing below it moves when it changes. */}
         <span className="terrain-bar__status">{standing}</span>
-        <button className="terrain-bar__exit" onClick={(e) => { e.currentTarget.blur(); void useTerrain.getState().exit() }} title="Back to BUILD, where the build cursor was (T or Esc)">EXIT<Key>T</Key></button>
+        <button className="terrain-bar__exit terrain-bar__mode" onClick={(e) => { e.currentTarget.blur(); cycleMode() }} title={`On to ${nextWord}, the next mode of the pad`}>{nextWord}</button>
+        <button className="terrain-bar__exit" onClick={(e) => { e.currentTarget.blur(); leaveTerrain() }} title="Back to the mode you came from (T or Esc)">EXIT<Key>T</Key></button>
       </div>
 
       {/* What just happened (a refusal, a survey), under the cross, in a slot of its own: up to two lines, nothing moves. */}
@@ -360,37 +290,15 @@ function TerrainScreen(): JSX.Element {
 
       <div className="terrain-survey">
         {(target || surveying) && (
-          <button className="terrain-survey__btn" disabled={surveying || loading} onClick={(e) => { e.currentTarget.blur(); doSurvey() }} title="Fill this chunk with the ground everyone computes the same (G)">
+          <button className="terrain-survey__btn" disabled={surveying} onClick={(e) => { e.currentTarget.blur(); doSurvey() }} title="Fill this chunk with the ground everyone computes the same (G)">
             <Radar size={16} strokeWidth={2.25} aria-hidden />{surveying ? 'SURVEYING' : 'SURVEY'}<Key>G</Key>
           </button>
         )}
       </div>
 
-      <div className="terrain-pad" aria-label="Walk">
-        <div className="terrain-pad__dirs">
-          <PadButton name="forward" label="Forward"><ChevronUp size={20} strokeWidth={2.5} aria-hidden /></PadButton>
-          <PadButton name="left" label="Left"><ChevronLeft size={20} strokeWidth={2.5} aria-hidden /></PadButton>
-          <PadButton name="right" label="Right"><ChevronRight size={20} strokeWidth={2.5} aria-hidden /></PadButton>
-          <PadButton name="back" label="Back"><ChevronDown size={20} strokeWidth={2.5} aria-hidden /></PadButton>
-          {/* While floating in a chunk not surveyed, a way down (Shift or C on a keyboard); its cell is kept, so nothing moves. */}
-          <span className="terrain-pad__down">{floating && <PadButton name="down" label="Down (Shift)"><ChevronsDown size={18} strokeWidth={2.5} aria-hidden /></PadButton>}</span>
-        </div>
-      </div>
-
-      <div className="terrain-actions" aria-label="Mine, place, jump and look">
-        <div className="terrain-actions__col">
-          <button className="terrain-act" {...noCallout} onPointerDown={(e) => { e.preventDefault(); terrainInput.action = { kind: 'mine', at: null } }} aria-label="Mine the block at the middle (Q)"><Pickaxe size={16} strokeWidth={2.25} aria-hidden />MINE<Key>Q</Key></button>
-          <button className="terrain-act" {...noCallout} onPointerDown={(e) => { e.preventDefault(); terrainInput.action = { kind: 'place', at: null } }} aria-label="Place a block at the middle (E)"><Box size={16} strokeWidth={2.25} aria-hidden />PLACE<Key>E</Key></button>
-          <PadButton name="jump" label="Jump (Space)"><ChevronsUp size={18} strokeWidth={2.25} aria-hidden />JUMP</PadButton>
-        </div>
-        <OrbitSphere
-          className="terrainlook"
-          square
-          onTurn={(dx, dy, size) => { const k = sphereRadPerPx(size); turnLook(dx * k, dy * k) }}
-          label="LOOK"
-          title="Drag to look around; keep dragging past the ball."
-          ariaLabel="Look around. Drag to turn your view."
-        />
+      <div className="terrain-tools" aria-label="Mine and place">
+        <button className="terrain-act" {...noCallout} onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); terrainInput.action = { kind: 'mine', at: null } }} aria-label="Mine the block at the cross (Q)"><Pickaxe size={16} strokeWidth={2.25} aria-hidden />MINE<Key>Q</Key></button>
+        <button className="terrain-act" {...noCallout} onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); terrainInput.action = { kind: 'place', at: null } }} aria-label="Place a block at the cross (E)"><Box size={16} strokeWidth={2.25} aria-hidden />PLACE<Key>E</Key></button>
       </div>
 
       <Hotbar />

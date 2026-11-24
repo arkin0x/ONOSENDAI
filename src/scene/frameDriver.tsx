@@ -38,6 +38,8 @@ export function viewBusy(): boolean {
   if (isBroadcast()) return true
   const cs = useCyberspace.getState()
   if (cs.walking || cs.transit !== null) return true
+  // TERRAIN draws its body's every frame (it walks under WALK, so the line above covers it too).
+  if (useTerrain.getState().active) return true
   // VIEW flying (a button held, or two or three fingers at rest): the cursor and the camera move every frame.
   if (flyDir() !== 0) return true
   if (useTv.getState().on || useDemo.getState().active || useBuilder.getState().active) return true
@@ -62,9 +64,7 @@ export function FrameDriver(): null {
   // A game on screen (game/GameView.tsx) covers it the same way, with a canvas of its own.
   const benchOpen = useWorkshop((s) => s.open)
   const playing = useGame((s) => s.session !== null)
-  // TERRAIN (terrain/TerrainView.tsx) is the same: full screen, a canvas of its own.
-  const building = useTerrain((s) => s.active)
-  const covered = benchOpen || playing || building
+  const covered = benchOpen || playing
   // Across a pause: the time the scene has seen.
   const elapsed = useRef(0)
   useEffect(() => {

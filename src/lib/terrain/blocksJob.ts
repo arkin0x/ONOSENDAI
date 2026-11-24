@@ -7,11 +7,11 @@
 import { tileTable } from './blocks'
 import type { ChunkBase } from './coords'
 import { generate } from './generate'
-import { meshChunk, type Borders, type ChunkMesh, type Skin } from './mesh'
+import { meshChunk, type Borders, type ChunkMesh } from './mesh'
 
 export type BlocksRequest =
   | { type: 'generate'; id: number; base: ChunkBase }
-  | { type: 'mesh'; id: number; blocks: Uint8Array; borders: Borders; skin: Skin | null }
+  | { type: 'mesh'; id: number; blocks: Uint8Array; borders: Borders }
 
 export type BlocksAnswer =
   | { type: 'generate'; id: number; blocks: Uint8Array; top: number; rind: number; ms: number }
@@ -29,7 +29,7 @@ export function handleBlocks(req: BlocksRequest): { answer: BlocksAnswer; transf
       return { answer: { type: 'generate', id: req.id, blocks: g.blocks, top: g.top, rind: g.rind, ms: performance.now() - t0 }, transfer: [g.blocks.buffer] }
     }
     tiles ??= tileTable()
-    const mesh = meshChunk(req.blocks, req.borders, tiles, req.skin)
+    const mesh = meshChunk(req.blocks, req.borders, tiles)
     return { answer: { type: 'mesh', id: req.id, mesh, ms: performance.now() - t0 }, transfer: [mesh.vertices.buffer, mesh.indices.buffer] }
   } catch (err) {
     return { answer: { type: 'error', id: req.id, message: err instanceof Error ? err.message : String(err) }, transfer: [] }

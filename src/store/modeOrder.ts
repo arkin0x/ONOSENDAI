@@ -66,6 +66,8 @@ export interface ModeInfo {
 export const MODES: readonly ModeInfo[] = [
   { id: 'hop', word: 'HOP', what: 'Line up a move, COMMIT sends it' },
   { id: 'walk', word: 'WALK', what: 'First person, every press a step' },
+  // TERRAIN (owner, 2026-11-24: "TERRAIN is a mode like HOP or WALK"): on by default, after WALK.
+  { id: 'terrain', word: 'TERRAIN', key: 'T', what: 'Walk the blocks, mine and place them' },
   { id: 'view', word: 'VIEW', what: 'Look around, nothing moves' },
   { id: 'build', word: 'BUILD', key: 'B', what: 'Place things at a build cursor' },
   { id: 'scan', word: 'SCAN', key: 'N', what: 'Look for hidden things' },
@@ -84,6 +86,13 @@ export interface ModeSettings {
 }
 
 export const DEFAULT_MODES: ModeSettings = { order: DEFAULT_MODE_ORDER, off: [] }
+
+/**
+ * The pad the newcomer view, a tour run, the /demo tour and TV follow: the
+ * default list with TERRAIN off, so a newcomer meets TERRAIN only once the
+ * tour is done (coordinator, 2026-11-24).
+ */
+export const TEACHING_MODES: ModeSettings = { order: DEFAULT_MODE_ORDER, off: ['terrain'] }
 
 /** What the list makes of the pad. */
 export interface ModeRoles {
@@ -274,7 +283,7 @@ export function customModesApply(): boolean {
 
 /** The list the pad follows now (customModesApply). */
 export function effectiveModes(): ModeSettings {
-  return customModesApply() ? storedModes() : DEFAULT_MODES
+  return customModesApply() ? storedModes() : TEACHING_MODES
 }
 
 /** What the pad follows now. */
@@ -293,7 +302,7 @@ export function useEffectiveModes(): ModeSettings {
   const demo = useDemo((s) => s.active)
   const tv = useTv((s) => s.on)
   return useMemo(() => {
-    if (newcomerViewOf(record) || touring || demo || tv) return DEFAULT_MODES
+    if (newcomerViewOf(record) || touring || demo || tv) return TEACHING_MODES
     return pubkey !== me ? storedModesFor(me) : saved ?? DEFAULT_MODES
     // tourSwitch: newcomerViewOf reads the tutorial's switch.
     // eslint-disable-next-line react-hooks/exhaustive-deps

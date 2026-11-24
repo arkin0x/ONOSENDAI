@@ -9,7 +9,7 @@
 
 import type { ChunkBase } from './coords'
 import { handleBlocks, type BlocksAnswer, type BlocksRequest } from './blocksJob'
-import type { Borders, ChunkMesh, Skin } from './mesh'
+import type { Borders, ChunkMesh } from './mesh'
 
 let worker: Worker | null = null
 let broken = false
@@ -57,7 +57,7 @@ function ask(req: BlocksRequest, transfer: Transferable[] = []): Promise<BlocksA
   })
 }
 
-/** A chunk's generated ground, and its family's skin ids (DECK ids). */
+/** A chunk's generated ground, and its family's top and rind ids (DECK ids). */
 export async function generateChunk(base: ChunkBase): Promise<{ blocks: Uint8Array; top: number; rind: number }> {
   const a = await ask({ type: 'generate', id: nextId++, base })
   if (a.type === 'error') throw new Error(a.message)
@@ -66,9 +66,9 @@ export async function generateChunk(base: ChunkBase): Promise<{ blocks: Uint8Arr
 }
 
 /** A chunk's mesh, from a copy of its blocks (the caller keeps its own). */
-export async function meshChunkAsync(blocks: Uint8Array, borders: Borders, skin: Skin | null = null): Promise<ChunkMesh> {
+export async function meshChunkAsync(blocks: Uint8Array, borders: Borders): Promise<ChunkMesh> {
   const copy = blocks.slice()
-  const a = await ask({ type: 'mesh', id: nextId++, blocks: copy, borders, skin }, [copy.buffer])
+  const a = await ask({ type: 'mesh', id: nextId++, blocks: copy, borders }, [copy.buffer])
   if (a.type === 'error') throw new Error(a.message)
   if (a.type !== 'mesh') throw new Error('unexpected answer')
   return a.mesh

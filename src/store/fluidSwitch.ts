@@ -129,12 +129,13 @@ export function clearFluidPause(): void {
 }
 
 /** A tap's push (FLUID_NUDGE_MS): the direction it pushes, until `until` (ms). */
-export const fluidNudge = { fwd: 0, strafe: 0, vert: 0, until: 0 }
+export const fluidNudge = { fwd: 0, strafe: 0, vert: 0, view: false, until: 0 }
 
-/** A direction went down: it pushes at least until `until`, however short the press. */
-export function noteNudge(dir: { fwd: number; strafe: number; vert: number }, until: number): void {
+/** A direction went down: it pushes at least until `until`, however short the press (`view`: its vertical is the view's, lib/walkKeys.ts). */
+export function noteNudge(dir: { fwd: number; strafe: number; vert: number; view?: boolean }, until: number): void {
   fluidNudge.fwd = dir.fwd
   fluidNudge.strafe = dir.strafe
   fluidNudge.vert = dir.vert
+  fluidNudge.view = dir.view === true
   fluidNudge.until = until
 }

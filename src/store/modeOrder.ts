@@ -79,10 +79,8 @@ export interface ModeInfo {
   id: ModeId
   /** The word on the pad's buttons. */
   word: string
-  /** The key that goes into it, wherever it stands in the list. */
+  /** The key that goes into it, wherever it stands in the list, switched off or not (padMode modeKeyAllowed). */
   key?: string
-  /** Whether its key opens it switched off too (B and N, by name); H, V and Y follow MODES and do nothing then. */
-  keyWhenOff?: boolean
   /** What it does, in a few words. */
   what: string
 }
@@ -92,11 +90,11 @@ export const MODES: readonly ModeInfo[] = [
   { id: 'hop', word: 'HOP', key: 'H', what: 'Line up a move, COMMIT sends it' },
   { id: 'walk', word: 'WALK', key: 'Y', what: 'First person, every press a step' },
   // TERRAIN (owner, 2026-11-24: "TERRAIN is a mode like HOP or WALK"): on by default, in the ring after HOP. T opens it
-  // switched off too, as B and N do, except in the teaching list (newcomers, the tour, /demo, TV).
-  { id: 'terrain', word: 'TERRAIN', key: 'T', keyWhenOff: true, what: 'Walk the blocks, mine and place them' },
+  // switched off too, as every mode's key does, except in the teaching list (newcomers, the tour, /demo, TV).
+  { id: 'terrain', word: 'TERRAIN', key: 'T', what: 'Walk the blocks, mine and place them' },
   { id: 'view', word: 'VIEW', key: 'V', what: 'Look around, nothing moves' },
-  { id: 'build', word: 'BUILD', key: 'B', keyWhenOff: true, what: 'Place things at a build cursor' },
-  { id: 'scan', word: 'SCAN', key: 'N', keyWhenOff: true, what: 'Look for hidden things' },
+  { id: 'build', word: 'BUILD', key: 'B', what: 'Place things at a build cursor' },
+  { id: 'scan', word: 'SCAN', key: 'N', what: 'Look for hidden things' },
 ]
 
 /** The toggle slot's place in the list, and the default mode's: the first in the ring. */

@@ -181,9 +181,10 @@ export function flatten(v: Vec, up: AxisName | null): Vec {
  * The way the held keys ask to go, as a vector of length at most 1, in
  * cyberspace axes: `forward` and `right` are the camera's, laid flat across
  * `up` (under GRAVITY the axis of the walker's gravity, else the screen's
- * up), so forward never digs into the floor; `vertical` is the screen's up
- * (gravity off only: under gravity Up and Down are a jump and Down, never a
- * push). Forward with a side is 45 degrees to that side, no faster than
+ * up), so forward never digs into the floor; `vertical` is the up the held
+ * vertical key goes along, the view's for Space and C, the camera's for R
+ * and F (lib/walkKeys.ts verticalAlong; gravity off only: under gravity Up
+ * and Down are a jump and Down, never a push). Forward with a side is 45 degrees to that side, no faster than
  * forward alone.
  */
 export function wishOf(forward: Vec, right: Vec, up: AxisName, fwd: number, strafe: number, vertical: AxisDirection | null, vert: number): Vec {

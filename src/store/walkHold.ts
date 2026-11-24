@@ -72,13 +72,19 @@ let timer: ReturnType<typeof setInterval> | null = null
 
 const sign = (n: number): -1 | 0 | 1 => (n > 0 ? 1 : n < 0 ? -1 : 0)
 
-/** Everything held, combined: opposite directions cancel. */
+/**
+ * Everything held, combined: opposite directions cancel. The vertical is
+ * the view's (`view`, lib/walkKeys.ts) when Space, C or the pad's JUMP or
+ * DOWN pushes the way it comes out, else the camera's (R or F).
+ */
 export function heldNow(): HeldDir {
   let fwd = 0
   let strafe = 0
   let vert = 0
-  for (const d of held.values()) { fwd += d.fwd; strafe += d.strafe; vert += d.vert }
-  return { fwd: sign(fwd), strafe: sign(strafe), vert: sign(vert) }
+  let viewVert = 0
+  for (const d of held.values()) { fwd += d.fwd; strafe += d.strafe; vert += d.vert; if (d.view) viewVert += d.vert }
+  const v = sign(vert)
+  return v !== 0 && sign(viewVert) === v ? { fwd: sign(fwd), strafe: sign(strafe), vert: v, view: true } : { fwd: sign(fwd), strafe: sign(strafe), vert: v }
 }
 
 /** Whether anything is held. */
@@ -94,9 +100,9 @@ function levelPress(d: HeldDir): boolean {
   return false
 }
 
-/** The up or down press `vert` makes, if any. */
-function verticalPress(vert: -1 | 0 | 1): void {
-  if (vert !== 0) useWalk.getState().press(vert > 0 ? 'up' : 'down')
+/** The up or down press `vert` makes, if any: along the view's up when `view` (Space, C, the pad), else the camera's (R, F). */
+function verticalPress(vert: -1 | 0 | 1, view = false): void {
+  if (vert !== 0) useWalk.getState().press(vert > 0 ? 'up' : 'down', 0, view)
 }
 
 /** One beat of the loop: what is held, pressed once. */
@@ -111,9 +117,9 @@ function beat(): void {
   // Fluid WALK (store/walkFluid.ts): what is held accelerates, read every
   // frame; nothing is pressed, except under GRAVITY Up and Down, which are
   // still a jump and Down as they were.
-  if (fluidOn()) { if (useWalk.getState().gravity) verticalPress(d.vert); return }
-  if (useWalk.getState().gravity) { verticalPress(d.vert); levelPress(d) }
-  else if (!levelPress(d)) verticalPress(d.vert)
+  if (fluidOn()) { if (useWalk.getState().gravity) verticalPress(d.vert, d.view); return }
+  if (useWalk.getState().gravity) { verticalPress(d.vert, d.view); levelPress(d) }
+  else if (!levelPress(d)) verticalPress(d.vert, d.view)
 }
 
 function restart(): void {
@@ -147,12 +153,12 @@ export function holdStart(source: string, dir: HeldDir): void {
     // short nudge) and a hold accelerates; under GRAVITY Up and Down are
     // still a jump and Down, pressed as they were.
     const gravity = useWalk.getState().gravity
-    if (gravity && dir.vert !== 0 && !doubled) verticalPress(now.vert)
+    if (gravity && dir.vert !== 0 && !doubled) verticalPress(now.vert, now.view)
     if (dir.fwd !== 0 || dir.strafe !== 0 || (!gravity && dir.vert !== 0)) noteNudge(dir, performance.now() + FLUID_NUDGE_MS)
     restart()
     return
   }
-  if (dir.vert !== 0 && !doubled) verticalPress(now.vert)
+  if (dir.vert !== 0 && !doubled) verticalPress(now.vert, now.view)
   if (dir.fwd !== 0 || dir.strafe !== 0) levelPress(now)
   restart()
 }

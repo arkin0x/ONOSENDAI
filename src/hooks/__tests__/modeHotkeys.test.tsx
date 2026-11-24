@@ -3,9 +3,10 @@
  * "H = HOP, V = VIEW, Y = WALK", and "M toggles the menu open and closed"),
  * through the real keyboard path (hooks/useKeyboard.ts) on a stand-in window:
  *
- * - H, V and Y go straight into their mode, and follow MODES: a mode turned
- *   off does nothing; the newcomer view and a tour run follow the default
- *   list; TV hears no keys; a field being typed in keeps its letters;
+ * - H, V and Y go straight into their mode, turned off in MODES or not, as
+ *   B and N do (owner: off is "not part of the rotation"); the newcomer view
+ *   and a tour run follow the default list; TV hears no keys; a field being
+ *   typed in keeps its letters;
  * - they move the ring and the toggle no more than B and N: out of WALK by
  *   Y's way in, the dim way back is the mode it came from;
  * - the hyperspace line scrubber moved from H to L;
@@ -64,7 +65,8 @@ import { useTv } from '../../store/useTv'
 import { useWorkshop } from '../../store/useWorkshop'
 import { useHyperspace } from '../../store/useHyperspace'
 import { useNewcomer } from '../../newcomer/useNewcomer'
-import { backOf, currentPadMode, cycleMode, switchMode, watchLastRing } from '../../store/padMode'
+import { backOf, currentPadMode, cycleMode, leaveTerrain, modeKeyAllowed, switchMode, watchLastRing } from '../../store/padMode'
+import { useDemo } from '../../store/useDemo'
 import { MODES, resetModes, setModeOn, updateModes, useModes } from '../../store/modeOrder'
 import { placeSpawn } from '../../store/fixtures/placeSpawn'
 
@@ -162,17 +164,51 @@ describe('H, V, Y', () => {
     expect(backOf('build')).toBe('view')
   })
 
-  it('do nothing for a mode turned off in MODES (B and N still open theirs by name)', () => {
-    updateModes((s) => setModeOn(setModeOn(s, 'view', false), 'walk', false))
+  it('open a mode turned off in MODES too, as B and N do: off is only out of the turns', () => {
+    updateModes((s) => setModeOn(setModeOn(setModeOn(setModeOn(s, 'view', false), 'walk', false), 'build', false), 'terrain', false))
+    expect(modeKeyAllowed('view')).toBe(true)
     press('KeyV')
+    expect(currentPadMode()).toBe('view')
+    press('KeyH')
     expect(currentPadMode()).toBe('hop')
     press('KeyY')
+    expect(currentPadMode()).toBe('walk')
+    press('KeyH')
     expect(currentPadMode()).toBe('hop')
-    updateModes((s) => setModeOn(s, 'build', false))
     press('KeyB')
     expect(currentPadMode()).toBe('build')
     press('KeyH')
     expect(currentPadMode()).toBe('hop')
+    // Still out of the turns: the mode button passes over them.
+    cycleMode()
+    expect(currentPadMode()).toBe('scan')
+  })
+
+  it('T opens TERRAIN turned off in MODES too; the newcomer view, a tour run, /demo and TV keep it shut', async () => {
+    expect(Object.fromEntries(MODES.map((m) => [m.id, m.key])).terrain).toBe('T')
+    updateModes((s) => setModeOn(s, 'terrain', false))
+    press('KeyT')
+    await settled()
+    expect(currentPadMode()).toBe('terrain')
+    leaveTerrain()
+    await settled()
+    expect(currentPadMode()).toBe('hop')
+    useNewcomer.setState({ record: { stage: 'newcomer', seen: [] } })
+    press('KeyT')
+    expect(currentPadMode()).toBe('hop')
+    useNewcomer.setState({ record: { seen: [] } })
+    useTutorial.setState({ active: true })
+    press('KeyT')
+    expect(currentPadMode()).toBe('hop')
+    useTutorial.setState({ active: false })
+    useDemo.setState({ active: true })
+    press('KeyT')
+    expect(currentPadMode()).toBe('hop')
+    useDemo.setState({ active: false })
+    useTv.setState({ on: true })
+    press('KeyT')
+    expect(currentPadMode()).toBe('hop')
+    useTv.setState({ on: false })
   })
 
   it('follow the default list in the newcomer view and a tour run, and nothing in TV', () => {

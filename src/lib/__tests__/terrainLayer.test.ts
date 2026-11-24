@@ -17,7 +17,7 @@ import { reachDistance } from '../terrain/world'
 import { regionKeyAt, encryptForRegion } from '../shardCrypto'
 import {
   LAYER_KIND, canonicalNumbers, claimsOf, decodePlane, earlier, encodePlane, expandRuns, layerShape, layerTags, parsePlaintext, plaintextJson,
-  resolveCell, resolvePlane, serializedBytes, settleId, workOf, countedAuthors,
+  resolveCell, resolvePlane, serializedBytes, settleId, workOf, countedAuthors, freeTextWithinBounds,
   type CountedLayer, type LayerPlaintext, type Placement, type Settle,
 } from '../terrain/blockLayer'
 import { readLayer, type ReadDeps } from '../terrain/layerReader'
@@ -130,6 +130,23 @@ const deps = (over: Partial<ReadDeps> = {}): ReadDeps => ({
   ...over,
 })
 
+describe('free text within its bounds (§5.6)', () => {
+  const tags = layerTags({ lookupId: LOOKUP, author: 'a'.repeat(64), reach: ['e'.repeat(64)], settleIds: ['1'.repeat(64)], encrypted: 'AAAA' })
+  it('content and alt at most 280 bytes of UTF-8, one alt at most, relay hints at most 256', () => {
+    expect(freeTextWithinBounds({ content: '', tags })).toBe(true)
+    expect(freeTextWithinBounds({ content: 'x'.repeat(280), tags: [...tags, ['alt', 'y'.repeat(280)]] })).toBe(true)
+    expect(freeTextWithinBounds({ content: 'x'.repeat(281), tags })).toBe(false)
+    // Bytes, not characters: 141 two-byte characters are 282 bytes.
+    expect(freeTextWithinBounds({ content: 'é'.repeat(140), tags })).toBe(true)
+    expect(freeTextWithinBounds({ content: 'é'.repeat(141), tags })).toBe(false)
+    expect(freeTextWithinBounds({ content: '', tags: [...tags, ['alt', 'y'.repeat(281)]] })).toBe(false)
+    expect(freeTextWithinBounds({ content: '', tags: [...tags, ['alt', 'a'], ['alt', 'b']] })).toBe(false)
+    const hinted = (hint: string) => tags.map((t) => (t[0] === 'e' ? ['e', t[1], hint, 'reach'] : t))
+    expect(freeTextWithinBounds({ content: '', tags: hinted('wss://' + 'h'.repeat(250)) })).toBe(true)
+    expect(freeTextWithinBounds({ content: '', tags: hinted('wss://' + 'h'.repeat(251)) })).toBe(false)
+  })
+})
+
 describe('sealing and opening (§5.2, §6.1)', () => {
   it('a layer sealed to the chunk\'s key opens again to the same plaintext, and counts', async () => {
     const plain = parsePlaintext(V.layer.plaintext)!
@@ -155,6 +172,13 @@ describe('sealing and opening (§5.2, §6.1)', () => {
     expect((await readLayer(ev as never, deps({ reach: async () => new Map() }))).status).toBe('dropped')
     expect((await readLayer(ev as never, deps({ header: async () => 'bad' }))).status).toBe('dropped')
     expect((await readLayer(ev as never, deps({ header: async () => 'pending' }))).status).toBe('pending')
+    // Free text past its bounds (§6.1 check 3): a second alt, or a long relay hint.
+    const twoAlts = finalizeEvent({ kind: LAYER_KIND, created_at: ev.created_at, tags: [...ev.tags, ['alt', 'a'], ['alt', 'b']], content: '' }, sk)
+    expect(await readLayer(twoAlts as never, deps())).toEqual({ status: 'dropped', why: 'free text past its bounds' })
+    const longHint = finalizeEvent({ kind: LAYER_KIND, created_at: ev.created_at, tags: ev.tags.map((t) => (t[0] === 'e' ? ['e', t[1], 'wss://' + 'h'.repeat(300), 'reach'] : t)), content: '' }, sk)
+    expect((await readLayer(longHint as never, deps())).status).toBe('dropped')
+    const longContent = finalizeEvent({ kind: LAYER_KIND, created_at: ev.created_at, tags: ev.tags, content: 'x'.repeat(281) }, sk)
+    expect((await readLayer(longContent as never, deps())).status).toBe('dropped')
     // A placement whose first settle does not claim its cell (§6.1 check 8).
     const bad: LayerPlaintext = JSON.parse(JSON.stringify(plain))
     bad.settles[0][3] = [[0, -32767], [0, -32767]]

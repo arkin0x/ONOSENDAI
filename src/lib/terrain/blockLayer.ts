@@ -350,6 +350,27 @@ export function layerShape(ev: { kind: number; tags: string[][] }): LayerShape |
   return { lookupId: d[0][1], author: p[0][1], reach: reach.map((t) => t[1]), settleIds: settles.map((t) => t[1]), encrypted: enc[0][2] }
 }
 
+/** The most bytes of UTF-8 in `content` and in the `alt` value (§5.6). */
+export const FREE_TEXT_MAX = 280
+/** The most bytes of UTF-8 in a relay hint (§5.6). */
+export const RELAY_HINT_MAX = 256
+
+const utf8Bytes = (s: string): number => new TextEncoder().encode(s).length
+
+/**
+ * The free text within its bounds (§5.6, §6.1 check 3): `content` and the
+ * `alt` value at most 280 bytes of UTF-8 each, at most one `alt`, every relay
+ * hint at most 256 bytes. Relays that escape characters count free text up
+ * to six times over, and these bounds keep any layer within 240,000 bytes
+ * inside the canonical relay's 262,144-byte cap however it counts.
+ */
+export function freeTextWithinBounds(ev: { content: string; tags: string[][] }): boolean {
+  if (typeof ev.content !== 'string' || utf8Bytes(ev.content) > FREE_TEXT_MAX) return false
+  const alts = ev.tags.filter((t) => Array.isArray(t) && t[0] === 'alt')
+  if (alts.length > 1 || alts.some((t) => typeof t[1] !== 'string' || utf8Bytes(t[1]) > FREE_TEXT_MAX)) return false
+  return ev.tags.every((t) => !Array.isArray(t) || t[0] !== 'e' || t[2] === undefined || (typeof t[2] === 'string' && utf8Bytes(t[2]) <= RELAY_HINT_MAX))
+}
+
 /** The serialized length of an event as §5.6 measures it: compact JSON, the NIP-01 keys in order, UTF-8. */
 export function serializedBytes(ev: { id: string; pubkey: string; created_at: number; kind: number; tags: string[][]; content: string; sig: string }): number {
   const s = JSON.stringify({ id: ev.id, pubkey: ev.pubkey, created_at: ev.created_at, kind: ev.kind, tags: ev.tags, content: ev.content, sig: ev.sig })

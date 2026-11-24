@@ -53,7 +53,7 @@ import { CELLS, chunkKey, chunkOf, type ChunkBase } from '../lib/terrain/coords'
 import { regionKeyAt, encryptForRegion } from '../lib/shardCrypto'
 import { reachDistance, REACH } from '../lib/terrain/world'
 import {
-  LAYER_KIND, LAYER_MAX_BYTES, SETTLE_DEPTH, countedAuthors, decodePlane, layerShape, workOf, layerTags, parsePlaintext, plaintextJson, resolvePlane, serializedBytes, settleId,
+  LAYER_KIND, LAYER_MAX_BYTES, SETTLE_DEPTH, countedAuthors, freeTextWithinBounds, decodePlane, layerShape, workOf, layerTags, parsePlaintext, plaintextJson, resolvePlane, serializedBytes, settleId,
   type CountedLayer, type LayerPlaintext,
 } from '../lib/terrain/blockLayer'
 import { combineLayers, emptiedPlaintext, nextPlaintext, type CommittedBlock, type OtherKeyLayer } from '../lib/terrain/layerWriter'
@@ -65,6 +65,7 @@ import {
 import { onActionSigned } from '../lib/terrain/builderTags'
 import { putMany, request } from '../lib/idb'
 import { localSigner } from '../lib/signers'
+import { isRateLimited } from '../lib/rateLimit'
 import { META } from '../lib/terrain/terrainDb'
 import type { NostrEvent } from '../lib/events'
 import type { Position } from '../lib/space'
@@ -306,6 +307,7 @@ export function resetShare(): void {
   chains.clear()
   retirements.clear()
   grounds.clear()
+  nextSendAt = 0
   keys.clear()
   lastRead = 0
   useShare.setState({ state: 'saved', words: 'Saved on this device.' })
@@ -645,6 +647,8 @@ async function signLayer(o: { plaintext: LayerPlaintext; author: string; base: C
   // Signed through lib/signers.ts like every key this app holds; a block layer carries no client tag (lib/client.ts, §5.1).
   const ev = await localSigner(sk).signEvent({ kind: LAYER_KIND, created_at: o.createdAt, tags, content: LAYER_CONTENT })
   if (serializedBytes(ev) > LAYER_MAX_BYTES) throw new Held('This chunk holds more than one layer can carry: undo some changes here.')
+  // Free text within the DECK's bounds (§5.6): empty content and empty relay hints always are; checked so it stays so.
+  if (!freeTextWithinBounds(ev)) throw new Held('Something here could not be written.')
   return ev
 }
 
@@ -707,7 +711,7 @@ async function publishChunk(s: Session, key: string): Promise<void> {
     if (!d.live() || d.me() !== s.owner || s.closed) throw new Held('Sharing again soon.')
     s.sending = true
     say(s)
-    const res = await d.publish(ev).finally(() => { s.sending = false })
+    const res = await pacedPublish(ev, () => d.live() && d.me() === s.owner && !s.closed).finally(() => { s.sending = false })
     if (!res.ok) throw new Held('Sharing again soon.')
     // Each old key this device still holds: its layer here emptied, so a cell the new layer released does not stand on in it (§5.7).
     for (const old of olds) await emptyOld(s, old, slot.base, block, createdAt)
@@ -769,6 +773,40 @@ export function ownFromPublished(key: string, own: Uint8Array, ground: Uint8Arra
     if (own[c] !== v) { own[c] = v; touched = true }
   }
   return touched
+}
+
+/**
+ * The canonical relay takes events replaceable by `d` at 3 a second per
+ * connection (a burst of 8), and bags share that budget (cyberspace-relay
+ * #50). Layers go out at most one per LAYER_GAP_MS, whoever sends them, and
+ * a rate-limit refusal waits and tries again, longer each time, so a long
+ * LOCAL-to-LIVE flush drains without tripping it or giving up.
+ */
+export const LAYER_GAP_MS = 500
+export const RATE_BACKOFF_MS = 1_000
+export const RATE_BACKOFF_MAX_MS = 16_000
+export const RATE_TRIES = 6
+let nextSendAt = 0
+let sendQueue: Promise<unknown> = Promise.resolve()
+const wait = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, Math.max(0, ms)))
+
+/** Publish a layer, paced, retrying a rate-limit refusal with a growing wait; `still` is asked before every try (LOCAL never publishes). */
+function pacedPublish(ev: NostrEvent, still: () => boolean): Promise<{ ok: boolean; reason?: string }> {
+  const job = sendQueue.then(async () => {
+    let backoff = RATE_BACKOFF_MS
+    for (let i = 0; i < RATE_TRIES; i++) {
+      await wait(nextSendAt - current().now())
+      if (!still()) return { ok: false, reason: 'not sent: no longer LIVE' }
+      nextSendAt = current().now() + LAYER_GAP_MS
+      const res = await current().publish(ev).catch((err: unknown) => ({ ok: false, reason: String(err) }))
+      if (res.ok || !isRateLimited(res.reason ?? '')) return res
+      nextSendAt = current().now() + backoff
+      backoff = Math.min(backoff * 2, RATE_BACKOFF_MAX_MS)
+    }
+    return { ok: false, reason: 'rate-limited' }
+  })
+  sendQueue = job.catch(() => undefined)
+  return job
 }
 
 /** A reach event for the twin plane of a chunk, for this key, that the canonical relay holds; null when there is none. */
@@ -853,7 +891,7 @@ async function emptyOld(s: Session, old: OldLayer, base: ChunkBase, block: Commi
   const held = deviceKeys(s.owner).find((r) => r.pub === old.pubkey)
   if (!held || old.reach.length === 0) return
   const ev = await signLayer({ plaintext: emptiedPlaintext(old.plaintext, block), author: s.owner, base, reach: old.reach, sec: held.sec, createdAt })
-  if (current().live() && current().me() === s.owner && !s.closed) await current().publish(ev).catch(() => undefined)
+  await pacedPublish(ev, () => current().live() && current().me() === s.owner && !s.closed).catch(() => undefined)
 }
 
 // ---------------------------------------------------------------------------------------------------------------

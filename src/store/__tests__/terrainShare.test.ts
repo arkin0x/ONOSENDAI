@@ -46,7 +46,7 @@ import { useCyberspace } from '../useCyberspace'
 import { useWalk } from '../useWalk'
 import { setTerrainSession, terrainSession, useTerrain } from '../useTerrain'
 import {
-  BATCH_NEAR, RETIRED_UNCHECKED, chunkRegionKey, confirmTags, flush, liveChanged, readChunks, resetShare, retireDeviceKey, setShareDeps, useShare, LAYER_CONTENT,
+  BATCH_NEAR, LAYER_GAP_MS, RATE_BACKOFF_MS, RETIRED_UNCHECKED, chunkRegionKey, confirmTags, flush, liveChanged, readChunks, resetShare, retireDeviceKey, setShareDeps, useShare, LAYER_CONTENT,
 } from '../terrainShare'
 import { builderRecord, forgetBuilderRecords, namedKey } from '../../lib/terrain/builderKey'
 import { fixTags, onActionSigned } from '../../lib/terrain/builderTags'
@@ -55,7 +55,7 @@ import { generate } from '../../lib/terrain/generate'
 import { EMPTY, kindId } from '../../lib/terrain/blocks'
 import { readLayer } from '../../lib/terrain/layerReader'
 import { reachPlaces, readChainOf } from '../../lib/terrain/reachChain'
-import { LAYER_KIND, layerTags, plaintextJson, settleId } from '../../lib/terrain/blockLayer'
+import { LAYER_KIND, freeTextWithinBounds, layerTags, plaintextJson, settleId } from '../../lib/terrain/blockLayer'
 import { nextPlaintext } from '../../lib/terrain/layerWriter'
 import { encryptForRegion } from '../../lib/shardCrypto'
 import { hopTemplate, spawnTemplate, type NostrEvent } from '../../lib/events'
@@ -108,6 +108,8 @@ function standAt(p: { x: bigint; y: bigint; z: bigint; plane: number }): void {
 }
 
 let own: NostrEvent[] = []
+/** When each event went to the mock relay. */
+const sentAt = new Map<string, number>()
 /** Make the mock relay refuse filters naming #p (the read a new key waits for). */
 let refuseP = false
 
@@ -128,7 +130,7 @@ beforeEach(async () => {
   useCyberspace.setState({ events: [], signerKind: 'local' })
   setShareDeps({
     live: () => true,
-    publish: async (ev) => { published.push(ev); hold(ev); return { ok: true } },
+    publish: async (ev) => { sentAt.set(ev.id, Date.now()); published.push(ev); hold(ev); return { ok: true } },
     query: async (f) => {
       if (refuseP && (f as Record<string, unknown>)['#p']) throw new Error('unreachable')
       return held.filter((e) => matches(f, e))
@@ -243,6 +245,9 @@ describe('publishing', () => {
     expect(ev.kind).toBe(33339)
     expect(ev.pubkey).toBe(key)
     expect(ev.content).toBe(LAYER_CONTENT)
+    // Within the free-text bounds (§5.6): empty content, no alt, empty relay hints.
+    expect(freeTextWithinBounds(ev)).toBe(true)
+    expect(ev.tags.filter((t) => t[0] === 'e').every((t) => t[2] === '')).toBe(true)
     const { key: rk, lookupId } = chunkRegionKey(base)
     expect(ev.tags.map((t) => t[0])).toEqual(['d', 'p', 'e', 'settle', 'encrypted', 'version'])
     expect(ev.tags).toContainEqual(['d', lookupId])
@@ -276,6 +281,52 @@ describe('publishing', () => {
     await flush('test')
     expect(published).toHaveLength(0)
   })
+})
+
+describe('pacing for the relay\'s rate limit', () => {
+  it('a rate-limit refusal waits and tries again, longer each time, until the layer goes', async () => {
+    const tries: number[] = []
+    let refusals = 2
+    setShareDeps({
+      publish: async (ev) => {
+        tries.push(Date.now())
+        if (ev.kind === LAYER_KIND && refusals > 0) { refusals--; return { ok: false, reason: 'rate-limited: slow down' } }
+        published.push(ev); hold(ev); return { ok: true }
+      },
+    })
+    let isLive = false
+    setShareDeps({ live: () => isLive })
+    await namedAtSpawn()
+    await surveyHere()
+    mineSome(2)
+    await flush('test')
+    expect(tries).toHaveLength(0)
+    // The LOCAL-to-LIVE flush: refused twice for rate, then accepted.
+    isLive = true
+    liveChanged(true)
+    const until = Date.now() + 8_000
+    while (published.length === 0 && Date.now() < until) await settle(100)
+    expect(published).toHaveLength(1)
+    expect(tries).toHaveLength(3)
+    expect(tries[1] - tries[0]).toBeGreaterThanOrEqual(RATE_BACKOFF_MS - 50)
+    expect(tries[2] - tries[1]).toBeGreaterThanOrEqual(2 * RATE_BACKOFF_MS - 50)
+  }, 15_000)
+
+  it('back to LOCAL while it waits: the retry never goes out', async () => {
+    let isLive = true
+    let calls = 0
+    setShareDeps({ live: () => isLive, publish: async () => { calls++; return { ok: false, reason: 'rate-limited: slow down' } } })
+    await namedAtSpawn()
+    await surveyHere()
+    mineSome(1)
+    void flush('test')
+    const until = Date.now() + 3_000
+    while (calls === 0 && Date.now() < until) await settle(50)
+    expect(calls).toBe(1)
+    isLive = false
+    await settle(RATE_BACKOFF_MS + 500)
+    expect(calls).toBe(1)
+  }, 10_000)
 })
 
 describe('the cadence (DECK-0009 §5.7)', () => {
@@ -354,6 +405,8 @@ describe('retiring this device\'s key', () => {
     const byOld = published.filter((e) => e.pubkey === old)
     expect(byNew).toHaveLength(1)
     expect(byOld).toHaveLength(2)
+    // Paced: the new layer and the emptied one went out at least LAYER_GAP_MS apart.
+    expect(sentAt.get(byOld[1].id)! - sentAt.get(byNew[0].id)!).toBeGreaterThanOrEqual(LAYER_GAP_MS - 50)
     // The old key's newest layer has no placements left: same planes, one fresh settle claiming nothing.
     const lookupId = byOld[1].tags.find((t) => t[0] === 'd')![1]
     expect(byNew[0].tags).toContainEqual(['d', lookupId])

@@ -3,7 +3,9 @@
  * what it says when it does.
  *
  * The checks, in the DECK's order, each dropping the layer alone when it
- * fails: authentic; its tags as §5.1 requires; no longer than 240,000 bytes;
+ * fails: authentic; its tags as §5.1 requires; no longer than 240,000 bytes,
+ * with its free text within bounds (content and alt 280 bytes, one alt at
+ * most, relay hints 256);
  * it opens with the chunk's region key; its plaintext well formed; its
  * settles hash to its settle tags; its planes decode against their base;
  * every placement's first settle claims its cell; its builder key valid for
@@ -23,7 +25,7 @@ import { decryptForRegion } from '../shardCrypto'
 import { CELLS, type ChunkBase } from './coords'
 import { reachDistance, REACH } from './world'
 import {
-  LAYER_MAX_BYTES, decodePlane, expandRuns, layerShape, parsePlaintext, serializedBytes, settleId, workOf,
+  LAYER_MAX_BYTES, decodePlane, expandRuns, freeTextWithinBounds, layerShape, parsePlaintext, serializedBytes, settleId, workOf,
   type CountedLayer, type DecodedPlane, type LayerPlaintext, type SettleTime,
 } from './blockLayer'
 import type { NostrEvent } from '../events'
@@ -74,6 +76,7 @@ export async function readLayer(ev: NostrEvent, d: ReadDeps): Promise<ReadResult
   if (!shape) return drop('tags')
   if (shape.lookupId !== d.lookupId) return drop('another chunk')
   if (serializedBytes(ev) > LAYER_MAX_BYTES) return drop('too long')
+  if (!freeTextWithinBounds(ev)) return drop('free text past its bounds')
   const text = await decryptForRegion(d.key, shape.encrypted)
   if (text === null) return drop('does not open')
   const plain = parsePlaintext(text)

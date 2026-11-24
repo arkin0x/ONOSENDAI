@@ -693,7 +693,7 @@ describe('under GRAVITY the feet fall onto ground that drops away, at gravity\'s
   }
 
   it('a staircase with half-gibson risers is walked down on the ground: the feet never leave it by more than FOOT_SNAP, and never fall', async () => {
-    // Eight steps up from x 2.3, half a gibson each, every half gibson (as the Maze Kit's grand stair climbs).
+    // Eight steps up from x 2.3, half a gibson each, every half gibson: a 45-degree staircase.
     const list: Array<[V3, V3]> = [[[-40, -6, -40], [2.3, LOW, 40]]]
     for (let k = 0; k < 8; k++) list.push([[2.3 + k * 0.5, -6, -40], [k === 7 ? 40 : 2.3 + (k + 1) * 0.5, LOW + (k + 1) * 0.5, 40]])
     const shard = boxes('Half-gibson steps', list)

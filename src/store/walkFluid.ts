@@ -265,9 +265,8 @@ export const FOOT_DROP_SPEED = Number(STEP_UP_MAX) * FLUID_MAX_SPEED * 1.1
 
 /**
  * Under GRAVITY, the most the ground may drop away under the feet and still
- * be stepped down onto, in steps: half a gibson, a stair's riser (the Maze
- * Kit's grand stair rises half a gibson a step), eased down at
- * FOOT_DROP_SPEED as before; or more, when a walkable slope (FOOT_SLOPE)
+ * be stepped down onto, in steps: half a gibson, a usual stair's riser,
+ * eased down at FOOT_DROP_SPEED as before; or more, when a walkable slope (FOOT_SLOPE)
  * drops more than that over the frame's way across. Ground dropping away
  * further than that (a ledge, a riser of a gibson, a dip) is fallen to at
  * WALK_GRAVITY, from rest, while the walk's level speed carries the walker

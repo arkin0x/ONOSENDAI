@@ -37,6 +37,11 @@
  * otherwise leaves the one mode for HOP at your head and enters the other
  * from there (switchMode). With the default list every press does exactly
  * what it did before.
+ *
+ * A switch into HOP keeps the cursor where it is, as every other switch does
+ * (owner, 2026-11-24). It used to come home, a leftover of RETURN ending the
+ * free view (#102), which the ring took over when it ended VIEW, BUILD and
+ * SCAN for HOP. RECALL (or X) brings it home on demand.
  */
 
 import { samePosition, useCyberspace, VIEW_FOCUS_LABEL } from './useCyberspace'
@@ -81,13 +86,15 @@ export function buildHeld(shards = useShards.getState()): boolean {
 
 /**
  * Out of BUILD and back to HOP: the mode ends, and the view it rode ends too,
- * so the cursor and the camera are home at your head.
- * Every way out of BUILD does this now (arkinox, 2026-11-17; useBuilder
- * `exit`). Spectating, there is no HOP to go to: the scene goes back to
- * watching them. Nothing while a deploy is lined up.
+ * so the camera is at your head (arkinox, 2026-11-17; useBuilder `exit`).
+ * The build cursor stays where it is as HOP's cursor, as every other switch
+ * of mode leaves it (owner, 2026-11-24: "when I switch to hop mode, the
+ * cursor is recalled, but that isn't helpful"); RECALL brings it home.
+ * Spectating, there is no HOP to go to: the scene goes back to watching
+ * them. Nothing while a deploy is lined up.
  */
 export function buildToHop(): void {
-  useBuilder.getState().exit()
+  useBuilder.getState().exit({ keepCursor: true })
 }
 
 /**
@@ -110,12 +117,13 @@ export function buildToScan(): void {
 
 /**
  * SCAN to HOP: the mode ends, and the view it rode ends too, at the zoom you
- * are at, so the cursor and the camera are home at your head, as BUILD's
- * turn of the ring does. A scan under way keeps running (store/useScan.ts).
+ * are at, so the camera is at your head and the cursor stays where it is, as
+ * BUILD's turn of the ring leaves it. A scan under way keeps running
+ * (store/useScan.ts).
  */
 export function scanToHop(): void {
   if (!useScan.getState().active) return
-  useScan.getState().exit()
+  useScan.getState().exit(false, true)
 }
 
 /**
@@ -147,18 +155,40 @@ function buildToView(): void {
   useCyberspace.getState().focusOn(at, plane, VIEW_FOCUS_LABEL, undefined, true, false, { view: true })
 }
 
-/** VIEW ended, back to HOP at your head at the zoom you are at. */
+/**
+ * VIEW ended, back to HOP at your head at the zoom you are at, the cursor
+ * kept where it is (and where a fly not yet landed has taken it), as VIEW to
+ * BUILD keeps it.
+ */
 function viewToHop(): void {
   const cs = useCyberspace.getState()
   if (!cs.viewing()) return
-  landFly(true)
+  landFly()
   leaveViewForMode()
   useRegion.getState().exit()
-  useCyberspace.getState().clearFocus(true)
+  useCyberspace.getState().clearFocus(true, true)
+}
+
+/**
+ * How long COMMIT ignores a press after a switch into HOP. The cursor is kept
+ * now, so a switch into HOP with it off your avatar puts COMMIT in the slot
+ * the mode button just stood in (hud/TouchControls.tsx). A quick second tap
+ * meant to go on round the ring would land on COMMIT and sign a hop nobody
+ * asked for; for this long it lands on nothing.
+ */
+export const HOP_COMMIT_SETTLE_MS = 600
+
+/** When the pad last switched into HOP (switchMode). */
+let hopAt = -Infinity
+
+/** Whether a switch into HOP was too recent for a press on COMMIT to be meant for it (HOP_COMMIT_SETTLE_MS). */
+export function commitSettling(now: number = Date.now()): boolean {
+  return now - hopAt < HOP_COMMIT_SETTLE_MS
 }
 
 /** Out of `from` to HOP at your head. False when it could not (a deploy lined up in BUILD). */
 function toHop(from: PadMode): boolean {
+  if (from !== 'hop') hopAt = Date.now()
   switch (from) {
     case 'hop': return true
     case 'walk':

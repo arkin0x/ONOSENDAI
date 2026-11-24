@@ -74,7 +74,8 @@ export class CrashNote extends Component<Props, State> {
     // modals. A HUD or menu crash leaves it open, with any unsent comment draft
     // (review of #622).
     if (this.props.closesCard) useShards.getState().selectSecret(null)
-    this.props.onClose?.()
+    // A tour that fails to put itself away still lets the note close (RELOAD stays).
+    try { this.props.onClose?.() } catch (e) { console.warn('[onosendai] closing after a crash:', e) }
     this.setState({ error: null, stack: '', copied: false })
   }
 

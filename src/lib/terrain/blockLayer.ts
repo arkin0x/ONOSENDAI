@@ -1,63 +1,59 @@
 /**
- * blockLayer.ts - DECK-0009 §5 to §7 as plain functions: the block layer
- * (kind 33339), its settles, its planes with their per-placement times, the
- * reader's checks of a layer's shape and plaintext, and the Cell Rule.
+ * blockLayer.ts - DECK-0009's block layer (kind 33339) as plain functions:
+ * its plaintext (one plane object per plane, the cells as palette runs, and
+ * the author's co-builders), the event's tags and limits, builder key
+ * validity, the home, and the Stack with co-builders, the rule every reader
+ * uses to say which layer a cell shows. Written to the DECK at cyberspace
+ * c4930ff, and checked against its vectors.
  *
- * Nothing here talks to a relay, a signer or IndexedDB: the writer
- * (lib/terrain/layerWriter.ts), the reader (lib/terrain/layerReader.ts) and
- * the store (store/terrainShare.ts) do. Everything is checked against the
- * DECK's vectors (lib/__tests__/fixtures/deck0009-layer-vectors.json, from
- * the draft's blocks-vectors.json at cyberspace 1389b22).
+ * Nothing here talks to a relay, a signer or IndexedDB: the reader
+ * (lib/terrain/layerReader.ts) and the store (store/terrainShare.ts) do.
  *
- * The rules, in short:
+ * In short:
  *
  * - A layer is addressable: one per builder key per chunk, `d` the chunk's
- *   lookup id, `p` the author, one `e` reach tag per plane, one `settle` tag
- *   per settle, the plaintext sealed with the chunk's region key in an
- *   `encrypted` tag, and `version` 1. Nothing else public: no C, no height,
- *   no hint, no sector, no client tag (§5.1).
- * - A settle is `[height, block hash, nonce, claims]`; its id binds the
- *   author, the chunk and the claims (§5.3). Claims are the cells it first
- *   placed in, as two runs arrays of 0 and 1.
- * - A plane is the diff from its base or the whole chunk, whichever is
- *   shorter, with `t0` and `t1` naming, for each placement, the settle that
- *   first placed it and the settle of its latest change (§5.5).
- * - The Cell Rule: the earliest first placement owns a cell; only the owner
- *   and the builders it lists change it, the latest change winning; a home
- *   chunk is its spawner's (§7.3). Order is by the witness's time
- *   T = max(h, W), unwitnessed after witnessed, then work, then pubkeys (§7.2).
+ *   lookup id, `p` the author, the plaintext sealed with the chunk's region
+ *   key in an `encrypted` tag, `version` 1, empty content (§5.1).
+ * - A plane's base is the generated ground when it surveys, open space when
+ *   not. In a `diff` every non-null cell is changed, even at the base value
+ *   (how a layer removes a block another placed, or refills a hole another
+ *   mined); in a `whole` a cell is changed when it differs from the base. A
+ *   layer speaks only for the cells it changed (§5.4).
+ * - The Stack (§7): per cell, the first candidate in Stack order. Ranks: 1
+ *   the home owner inside their home (the 3 by 3 by 3 chunks round the chunk
+ *   of their spawn coordinate, in its plane, wrapping at the axis ends), 2
+ *   the reader, 3 whom the reader follows, 4 everyone else; within a rank the
+ *   newest first, then the lower author, builder key and event id.
+ * - Co-builders (§8): a layer's author lists them; in a cell the author
+ *   changed, the layers of the people on the author's newest list count at
+ *   the author's own rank when that is better, never through a second hop.
  */
 
-import { sha256 } from '@noble/hashes/sha2.js'
-import { CELLS } from './coords'
+import { CELLS, type ChunkBase } from './coords'
+import { coordToXyz } from 'cyberspace-core'
 
-/** The block layer's kind (DECK-0009 §5.1; the owner confirmed 33339 on 2026-11-24). */
+/** The block layer's kind (DECK-0009 §5.1; the owner confirmed 33339 on 2026-11-25). */
 export const LAYER_KIND = 33339
 /** The `version` tag's value (§5.1). */
 export const LAYER_VERSION = '1'
 /** The ground revision this client writes and reads (§3.10). */
 export const GROUND_REVISION = 2
-/** The settle id's domain (§5.3), 27 ASCII bytes. */
-export const SETTLE_DOMAIN = new TextEncoder().encode('CYBERSPACE_BLOCKS_SETTLE_V1')
-/** The longest serialized layer anyone may sign or read (§5.6): the bag guard. */
+/** The longest serialized layer anyone may sign or read (§5.5): the bag guard. */
 export const LAYER_MAX_BYTES = 240_000
-export const SETTLES_MAX = 32
-export const BUILDERS_MAX = 64
 export const PALETTE_MAX = 256
-/** How deep a writer commits its block (§5.3), and how deep a reader confirms one (§6.1). */
-export const SETTLE_DEPTH = 6
+/** The most bytes of UTF-8 in `content` and in the `alt` value (§5.5). */
+export const FREE_TEXT_MAX = 280
+/** The most co-builders a layer lists (§5.5). */
+export const COBUILDERS_MAX = 64
+/** A layer dated more than this many seconds past the reader's clock is not counted yet (§7.1). */
+export const FUTURE_SLACK_SECONDS = 600
 /** The most authors a reader counts in one chunk (§7.1). */
 export const AUTHORS_MAX = 64
 
 const HEX64 = /^[0-9a-f]{64}$/
-const HEX16 = /^[0-9a-f]{16}$/
+const AXIS_MASK = (1n << 85n) - 1n
 
-/** Two runs arrays of 0 and 1: the cells a settle claims, in plane 0 and plane 1 (§5.3). */
-export type Claims = [number[], number[]]
-/** `[height, block hash, nonce, claims]` (§5.3). */
-export type Settle = [number, string, string, Claims]
-
-/** One plane object of the plaintext (§5.5). */
+/** One plane object of the plaintext (§5.4). */
 export interface PlaneObject {
   plane: 0 | 1
   survey: boolean
@@ -65,22 +61,17 @@ export interface PlaneObject {
   form: 'diff' | 'whole'
   pal: Array<number | null>
   cells: number[]
-  t0: number[]
-  t1: number[]
 }
 
-/** The plaintext (§5.5). */
+/** The plaintext (§5.4). */
 export interface LayerPlaintext {
-  settles: Settle[]
-  builders: string[]
   planes: PlaneObject[]
+  /** The author's co-builders (the Crew, §8). */
+  cobuilders: string[]
 }
-
-/** A plane with nothing claimed: every cell 0 (§5.3). */
-export const NO_CLAIMS: number[] = [0, -(CELLS - 1)]
 
 // ---------------------------------------------------------------------------------------------------------------
-// Runs (§5.4)
+// Runs (§5.3)
 
 /** Runs of `values`, the shortest form: a value, then -N for N more of it. */
 export function encodeRuns(values: ArrayLike<number>): number[] {
@@ -99,7 +90,7 @@ export function encodeRuns(values: ArrayLike<number>): number[] {
 
 /**
  * Expand a runs array to exactly `length` values, each below `limit`, or null
- * when it is malformed (§5.4): a first repeat, a value out of range, an entry
+ * when it is malformed (§5.3): a first repeat, a value out of range, an entry
  * that is not an integer from -32768 to 65535, or the wrong length. The
  * length is checked as it expands, so `[0, -1000000000]` costs nothing.
  */
@@ -124,7 +115,7 @@ export function expandRuns(runs: unknown, length: number, limit: number): Int32A
 }
 
 /**
- * Whether every number in a JSON text is written as §5.4 requires: an
+ * Whether every number in a JSON text is written as §5.3 requires: an
  * optional `-` and decimal digits, no leading zero, no fraction, no exponent,
  * not `-0`. JSON.parse reads `1.0` as `1`, so the text is checked first.
  */
@@ -135,139 +126,66 @@ export function canonicalNumbers(text: string): boolean {
 }
 
 // ---------------------------------------------------------------------------------------------------------------
-// Settles (§5.3)
+// Planes (§5.4)
 
-const hexBytes = (hex: string): Uint8Array => {
-  const out = new Uint8Array(hex.length / 2)
-  for (let i = 0; i < out.length; i++) out[i] = parseInt(hex.slice(2 * i, 2 * i + 2), 16)
-  return out
-}
-export const toHex = (b: Uint8Array): string => Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('')
-
-/** A plane's claims as 4,096 bytes: cell i is bit i mod 8 of byte floor(i / 8); null when malformed. */
-export function claimsBitmap(runs: unknown): Uint8Array | null {
-  const bits = expandRuns(runs, CELLS, 2)
-  if (!bits) return null
-  const b = new Uint8Array(CELLS / 8)
-  for (let i = 0; i < CELLS; i++) if (bits[i]) b[i >> 3] |= 1 << (i & 7)
-  return b
-}
-
-/** Claims runs for sets of cells, per plane. */
-export function claimsOf(p0: ReadonlySet<number>, p1: ReadonlySet<number>): Claims {
-  const one = (s: ReadonlySet<number>): number[] => {
-    if (s.size === 0) return NO_CLAIMS.slice()
-    const v = new Uint8Array(CELLS)
-    for (const c of s) v[c] = 1
-    return encodeRuns(v)
-  }
-  return [one(p0), one(p1)]
-}
-
-/** The settle id (§5.3), or null when the settle is malformed. */
-export function settleId(author: string, lookupId: string, s: Settle): string | null {
-  if (!isSettle(s) || !HEX64.test(author) || !HEX64.test(lookupId)) return null
-  const b0 = claimsBitmap(s[3][0])
-  const b1 = claimsBitmap(s[3][1])
-  if (!b0 || !b1) return null
-  const digest = sha256(new Uint8Array([...b0, ...b1]))
-  const h = new Uint8Array(4)
-  new DataView(h.buffer).setUint32(0, s[0])
-  const parts = [SETTLE_DOMAIN, hexBytes(author), hexBytes(lookupId), h, hexBytes(s[1]), hexBytes(s[2]), digest]
-  const msg = new Uint8Array(parts.reduce((n, p) => n + p.length, 0))
-  let o = 0
-  for (const p of parts) { msg.set(p, o); o += p.length }
-  return toHex(sha256(msg))
-}
-
-/** A settle's work: the leading zero bits of its id (NIP-13's measure). */
-export function workOf(id: string): number {
-  let n = 0
-  for (let i = 0; i < id.length; i++) {
-    const v = parseInt(id[i], 16)
-    if (v === 0) { n += 4; continue }
-    return n + Math.clz32(v) - 28
-  }
-  return n
-}
-
-/** Whether a value has a settle's shape (its claims are checked by settleId). */
-export function isSettle(s: unknown): s is Settle {
-  if (!Array.isArray(s) || s.length !== 4) return false
-  const [h, hash, nonce, claims] = s
-  return Number.isInteger(h) && h >= 0 && h < 2 ** 32 && typeof hash === 'string' && HEX64.test(hash)
-    && typeof nonce === 'string' && HEX16.test(nonce) && Array.isArray(claims) && claims.length === 2
-}
-
-// ---------------------------------------------------------------------------------------------------------------
-// Planes (§5.5)
-
-/** A decoded plane: every cell's value, its placements in index order, and their settles. */
+/** A decoded plane: every cell's value, and the cells it changed, in index order. */
 export interface DecodedPlane {
   plane: 0 | 1
   survey: boolean
   values: Int32Array
-  placements: number[]
-  t0: Int32Array
-  t1: Int32Array
+  changed: number[]
 }
 
 /**
  * Decode a plane against its ground (the revision 2 ground of its chunk in its
- * plane). 'aside' for a plane this reader does not implement (a revision
- * other than 2: §3.10; a whole plane under one is drawn by its author's own
- * client, and takes no part in the Cell Rule here); null when malformed.
+ * plane). 'aside' for a surveyed plane under a revision this reader does not
+ * implement (§3.10: a diff set aside; a whole read for its values only,
+ * which takes no part in the Stack); null when malformed.
  */
-export function decodePlane(pl: PlaneObject, ground: Uint8Array, settleCount: number): DecodedPlane | 'aside' | null {
-  if (pl.ground !== GROUND_REVISION) return 'aside'
-  const pal = pl.pal
-  const base = pl.survey ? ground : new Uint8Array(CELLS)
-  const idx = expandRuns(pl.cells, CELLS, pal.length)
+export function decodePlane(pl: PlaneObject, ground: Uint8Array): DecodedPlane | 'aside' | null {
+  const idx = expandRuns(pl.cells, CELLS, pl.pal.length)
   if (!idx) return null
+  if (pl.survey && pl.ground !== GROUND_REVISION) return 'aside'
+  const base = pl.survey ? ground : new Uint8Array(CELLS)
   const values = new Int32Array(CELLS)
-  const placements: number[] = []
+  const changed: number[] = []
   for (let o = 0; o < CELLS; o++) {
-    const g = pal[idx[o]]
+    const g = pl.pal[idx[o]]
     values[o] = g === null ? base[o] : g
-    if (values[o] !== base[o]) placements.push(o)
+    // A non-null cell of a diff is a change even at the base value; in a whole only a different value is.
+    if (pl.form === 'diff' ? g !== null : values[o] !== base[o]) changed.push(o)
   }
-  const t0 = expandRuns(pl.t0, placements.length, settleCount)
-  const t1 = expandRuns(pl.t1, placements.length, settleCount)
-  if (!t0 || !t1) return null
-  return { plane: pl.plane, survey: pl.survey, values, placements, t0, t1 }
+  return { plane: pl.plane, survey: pl.survey, values, changed }
 }
 
 /**
- * Write a plane in whichever form is shorter as compact JSON (§5.5), with the
- * settle index of each placement's first and latest change. `values` may hold
- * ids above 255 (the extension space); the base is the ground when surveyed.
+ * Write a plane (§5.4): the cells that differ from the base, and `explicit`
+ * cells written as changed at their base value (which only a diff can say),
+ * in the shorter of the forms that can express them.
  */
-export function encodePlane(plane: 0 | 1, survey: boolean, values: ArrayLike<number>, ground: Uint8Array, t0: ReadonlyMap<number, number>, t1: ReadonlyMap<number, number>): PlaneObject {
+export function encodePlane(plane: 0 | 1, survey: boolean, values: ArrayLike<number>, ground: Uint8Array, explicit: ReadonlySet<number> = new Set()): PlaneObject {
   const base = survey ? ground : new Uint8Array(CELLS)
-  const placements: number[] = []
-  for (let o = 0; o < CELLS; o++) if (values[o] !== base[o]) placements.push(o)
-  const r0 = encodeRuns(placements.map((o) => t0.get(o) ?? 0))
-  const r1 = encodeRuns(placements.map((o) => t1.get(o) ?? 0))
   const make = (form: 'diff' | 'whole'): PlaneObject => {
     const pal: Array<number | null> = form === 'diff' ? [null] : []
     const at = new Map<number, number>()
     const idx = new Uint16Array(CELLS)
     for (let o = 0; o < CELLS; o++) {
-      if (form === 'diff' && values[o] === base[o]) continue
+      if (form === 'diff' && values[o] === base[o] && !explicit.has(o)) continue
       const v = values[o]
       let i = at.get(v)
       if (i === undefined) { i = pal.length; at.set(v, i); pal.push(v) }
       idx[o] = i
     }
-    return { plane, survey, ground: GROUND_REVISION, form, pal, cells: encodeRuns(idx), t0: r0, t1: r1 }
+    return { plane, survey, ground: GROUND_REVISION, form, pal, cells: encodeRuns(idx) }
   }
   const d = make('diff')
+  if (explicit.size > 0) return d
   const w = make('whole')
-  return JSON.stringify(w).length < JSON.stringify(d).length ? w : d
+  return JSON.stringify(d).length <= JSON.stringify(w).length ? d : w
 }
 
 // ---------------------------------------------------------------------------------------------------------------
-// The plaintext (§5.5)
+// The plaintext (§5.4)
 
 function isPlaneObject(p: unknown): p is PlaneObject {
   const o = p as PlaneObject | null
@@ -280,58 +198,63 @@ function isPlaneObject(p: unknown): p is PlaneObject {
     if (o.form === 'diff' && i === 0) { if (g !== null) return false; continue }
     if (typeof g !== 'number' || !Number.isInteger(g) || g < 0 || g > 65535) return false
   }
-  return Array.isArray(o.cells) && Array.isArray(o.t0) && Array.isArray(o.t1)
+  return Array.isArray(o.cells)
 }
 
 /**
- * The plaintext of a layer, read strictly (§5.5, check 5 of §6.1 short of
- * decoding the planes), or null: numbers as §5.4 writes them, 1 to 32
- * settles, 0 to 64 builders of 64 hex, 1 or 2 planes, at most one per plane.
- * Other fields are ignored, as the DECK says.
+ * The plaintext of a layer, read strictly (§5.4), or null: numbers as §5.3
+ * writes them, 1 or 2 plane objects, at most one per plane, and an optional
+ * `cobuilders` of 0 to 64 pubkeys. Other fields are ignored.
  */
 export function parsePlaintext(text: string): LayerPlaintext | null {
   if (!canonicalNumbers(text)) return null
   let v: unknown
   try { v = JSON.parse(text) } catch { return null }
-  const o = v as LayerPlaintext | null
+  const o = v as { planes?: unknown; cobuilders?: unknown } | null
   if (!o || typeof o !== 'object' || Array.isArray(o)) return null
-  if (!Array.isArray(o.settles) || o.settles.length < 1 || o.settles.length > SETTLES_MAX || !o.settles.every(isSettle)) return null
-  if (!Array.isArray(o.builders) || o.builders.length > BUILDERS_MAX || !o.builders.every((b) => typeof b === 'string' && HEX64.test(b))) return null
-  if (!Array.isArray(o.planes) || o.planes.length < 1 || o.planes.length > 2 || !o.planes.every(isPlaneObject)) return null
-  if (o.planes.length === 2 && o.planes[0].plane === o.planes[1].plane) return null
-  return { settles: o.settles, builders: o.builders, planes: o.planes }
+  const planes = o.planes
+  if (!Array.isArray(planes) || planes.length < 1 || planes.length > 2 || !planes.every(isPlaneObject)) return null
+  if (planes.length === 2 && planes[0].plane === planes[1].plane) return null
+  const cob = o.cobuilders ?? []
+  if (!Array.isArray(cob) || cob.length > COBUILDERS_MAX || !cob.every((b) => typeof b === 'string' && HEX64.test(b))) return null
+  return { planes: planes as PlaneObject[], cobuilders: cob as string[] }
 }
 
-/** The plaintext as compact JSON, its fields in the DECK's order. */
+/** The plaintext as compact JSON. */
 export function plaintextJson(p: LayerPlaintext): string {
   return JSON.stringify({
-    settles: p.settles,
-    builders: p.builders,
-    planes: p.planes.map((pl) => ({ plane: pl.plane, survey: pl.survey, ground: pl.ground, form: pl.form, pal: pl.pal, cells: pl.cells, t0: pl.t0, t1: pl.t1 })),
+    planes: [...p.planes].sort((a, b) => a.plane - b.plane).map((pl) => ({ plane: pl.plane, survey: pl.survey, ground: pl.ground ?? GROUND_REVISION, form: pl.form, pal: pl.pal, cells: pl.cells })),
+    cobuilders: p.cobuilders,
   })
 }
 
-// ---------------------------------------------------------------------------------------------------------------
-// The event (§5.1, §5.6, §6.1 checks 2 and 3)
+/**
+ * The next plaintext: this plane as `values` hold it now over `ground`, its
+ * `explicit` cells changed at their base value, the other plane carried as
+ * `prev` holds it, unchanged (§5.6), and the Crew. Null when that is what
+ * `prev` already says.
+ */
+export function nextPlaintext(prev: LayerPlaintext | null, plane: 0 | 1, values: ArrayLike<number>, ground: Uint8Array, cobuilders: readonly string[] = [], explicit: ReadonlySet<number> = new Set()): LayerPlaintext | null {
+  const mine = encodePlane(plane, true, values, ground, explicit)
+  const was = prev?.planes.find((p) => p.plane === plane)
+  const crew = [...cobuilders]
+  if (prev && was && JSON.stringify(was) === JSON.stringify(mine) && JSON.stringify(prev.cobuilders) === JSON.stringify(crew)) return null
+  const other = prev?.planes.find((p) => p.plane !== plane)
+  return { planes: other ? [mine, other].sort((a, b) => a.plane - b.plane) : [mine], cobuilders: crew }
+}
 
-/** A layer's public tags, as §5.1 orders them. `reach` is one event id per plane, at most two. */
-export function layerTags(o: { lookupId: string; author: string; reach: string[]; settleIds: string[]; encrypted: string }): string[][] {
-  return [
-    ['d', o.lookupId],
-    ['p', o.author],
-    ...o.reach.slice(0, 2).map((id) => ['e', id, '', 'reach']),
-    ...o.settleIds.map((id) => ['settle', id]),
-    ['encrypted', 'aes-256-gcm', o.encrypted],
-    ['version', LAYER_VERSION],
-  ]
+// ---------------------------------------------------------------------------------------------------------------
+// The event (§5.1, §5.5, §6 checks 2 and 3)
+
+/** A layer's public tags, as §5.1 orders them. */
+export function layerTags(o: { lookupId: string; author: string; encrypted: string }): string[][] {
+  return [['d', o.lookupId], ['p', o.author], ['encrypted', 'aes-256-gcm', o.encrypted], ['version', LAYER_VERSION]]
 }
 
 /** What a layer's tags say, or null when they are not as §5.1 requires (check 2). */
 export interface LayerShape {
   lookupId: string
   author: string
-  reach: string[]
-  settleIds: string[]
   encrypted: string
 }
 
@@ -339,173 +262,222 @@ export function layerShape(ev: { kind: number; tags: string[][] }): LayerShape |
   if (ev.kind !== LAYER_KIND || !Array.isArray(ev.tags)) return null
   const all = (name: string): string[][] => ev.tags.filter((t) => Array.isArray(t) && t[0] === name)
   const d = all('d'), p = all('p'), enc = all('encrypted'), ver = all('version')
-  const reach = ev.tags.filter((t) => Array.isArray(t) && t[0] === 'e' && t[3] === 'reach')
-  const settles = all('settle')
-  if (d.length !== 1 || p.length !== 1 || enc.length !== 1 || ver.length !== 1) return null
+  if (d.length !== 1 || p.length !== 1 || enc.length !== 1 || ver.length !== 1 || all('alt').length > 1) return null
   if (ver[0][1] !== LAYER_VERSION) return null
   if (!HEX64.test(d[0][1] ?? '') || !HEX64.test(p[0][1] ?? '')) return null
   if (enc[0][1] !== 'aes-256-gcm' || typeof enc[0][2] !== 'string') return null
-  if (reach.length < 1 || reach.length > 2 || !reach.every((t) => HEX64.test(t[1] ?? ''))) return null
-  if (settles.length < 1 || settles.length > SETTLES_MAX || !settles.every((t) => HEX64.test(t[1] ?? ''))) return null
-  return { lookupId: d[0][1], author: p[0][1], reach: reach.map((t) => t[1]), settleIds: settles.map((t) => t[1]), encrypted: enc[0][2] }
+  return { lookupId: d[0][1], author: p[0][1], encrypted: enc[0][2] }
 }
-
-/** The most bytes of UTF-8 in `content` and in the `alt` value (§5.6). */
-export const FREE_TEXT_MAX = 280
-/** The most bytes of UTF-8 in a relay hint (§5.6). */
-export const RELAY_HINT_MAX = 256
 
 const utf8Bytes = (s: string): number => new TextEncoder().encode(s).length
 
 /**
- * The free text within its bounds (§5.6, §6.1 check 3): `content` and the
- * `alt` value at most 280 bytes of UTF-8 each, at most one `alt`, every relay
- * hint at most 256 bytes. Relays that escape characters count free text up
- * to six times over, and these bounds keep any layer within 240,000 bytes
- * inside the canonical relay's 262,144-byte cap however it counts.
+ * The free text within its limits (§5.5, §6 check 3): `content` and the
+ * `alt` value at most 280 bytes of UTF-8 each, at most one `alt`. Relays that
+ * escape characters count free text up to six times over; these bounds keep
+ * any layer within 240,000 bytes inside the canonical relay's 262,144-byte
+ * cap however it counts.
  */
 export function freeTextWithinBounds(ev: { content: string; tags: string[][] }): boolean {
   if (typeof ev.content !== 'string' || utf8Bytes(ev.content) > FREE_TEXT_MAX) return false
   const alts = ev.tags.filter((t) => Array.isArray(t) && t[0] === 'alt')
-  if (alts.length > 1 || alts.some((t) => typeof t[1] !== 'string' || utf8Bytes(t[1]) > FREE_TEXT_MAX)) return false
-  return ev.tags.every((t) => !Array.isArray(t) || t[0] !== 'e' || t[2] === undefined || (typeof t[2] === 'string' && utf8Bytes(t[2]) <= RELAY_HINT_MAX))
+  return alts.length <= 1 && alts.every((t) => typeof t[1] === 'string' && utf8Bytes(t[1]) <= FREE_TEXT_MAX)
 }
 
-/** The serialized length of an event as §5.6 measures it: compact JSON, the NIP-01 keys in order, UTF-8. */
+/** The serialized length of an event as §5.5 measures it: compact JSON, the NIP-01 keys in order, UTF-8. */
 export function serializedBytes(ev: { id: string; pubkey: string; created_at: number; kind: number; tags: string[][]; content: string; sig: string }): number {
   const s = JSON.stringify({ id: ev.id, pubkey: ev.pubkey, created_at: ev.created_at, kind: ev.kind, tags: ev.tags, content: ev.content, sig: ev.sig })
   return new TextEncoder().encode(s).length
 }
 
 // ---------------------------------------------------------------------------------------------------------------
-// The Cell Rule (§7)
-
-/** One settle's place in time, as the order reads it: its committed height, the witness's height or null, its work. */
-export interface SettleTime {
-  height: number
-  witness: number | null
-  work: number
-}
-
-/** One placement of one cell, from one counted layer. */
-export interface Placement {
-  author: string
-  builder: string
-  value: number
-  first: SettleTime
-  last: SettleTime
-}
-
-function orderKey(t: SettleTime): [number, number] {
-  const witnessed = t.witness !== null
-  return [witnessed ? 0 : 1, witnessed ? Math.max(t.height, t.witness as number) : t.height]
-}
-
-function tieBreak(a: SettleTime & { author: string; builder: string }, b: SettleTime & { author: string; builder: string }): number {
-  if (a.work !== b.work) return b.work - a.work
-  if (a.author !== b.author) return a.author < b.author ? -1 : 1
-  if (a.builder !== b.builder) return a.builder < b.builder ? -1 : 1
-  return 0
-}
-
-type Timed = SettleTime & { author: string; builder: string }
-
-/** Below 0 when `a` is earlier (§7.2): witnessed first, then the smaller T, then work, then pubkeys. */
-export function earlier(a: Timed, b: Timed): number {
-  const ka = orderKey(a), kb = orderKey(b)
-  if (ka[0] !== kb[0]) return ka[0] - kb[0]
-  if (ka[1] !== kb[1]) return ka[1] - kb[1]
-  return tieBreak(a, b)
-}
-
-/** Below 0 when `a` is the later change (§7.2): unwitnessed after witnessed, the greater T, then ties as `earlier`. */
-export function later(a: Timed, b: Timed): number {
-  const ka = orderKey(a), kb = orderKey(b)
-  if (ka[0] !== kb[0]) return kb[0] - ka[0]
-  if (ka[1] !== kb[1]) return kb[1] - ka[1]
-  return tieBreak(a, b)
-}
+// Builder keys (§4.4)
 
 /**
- * One cell by §7.3: its owner (the home chunk's spawner, else the author of
- * the earliest first placement), and the value of the latest of the
- * placements that count (the owner's and those of the authors it lists), or
- * null when none counts and the cell shows its base.
+ * Whether builder key `k` is valid for an author, from the author's own
+ * authentic movement events (any chain): named by some `builder` tag, never
+ * retired by `builder-retire` `k`, and named last after every
+ * `builder-retire` `all` (by created_at; a naming in the same second as an
+ * `all` is retired by it).
  */
-export function resolveCell(placements: readonly Placement[], builders: ReadonlyMap<string, ReadonlySet<string>>, homeOwner: string | null = null): { value: number; owner: string; from: string } | null {
-  if (placements.length === 0) return null
-  const firstOf = (p: Placement): Timed => ({ ...p.first, author: p.author, builder: p.builder })
-  const lastOf = (p: Placement): Timed => ({ ...p.last, author: p.author, builder: p.builder })
-  let owner = homeOwner
-  if (owner === null) {
-    let best = placements[0]
-    for (const p of placements) if (earlier(firstOf(p), firstOf(best)) < 0) best = p
-    owner = best.author
+export function builderKeyValid(k: string, events: ReadonlyArray<{ created_at: number; tags: string[][] }>): boolean {
+  let named: number | null = null
+  let retired = false
+  let lastAll: number | null = null
+  for (const e of events) for (const t of e.tags) {
+    if (t[0] === 'builder' && t[1] === k) named = named === null ? e.created_at : Math.max(named, e.created_at)
+    if (t[0] === 'builder-retire' && t[1] === k) retired = true
+    if (t[0] === 'builder-retire' && t[1] === 'all') lastAll = lastAll === null ? e.created_at : Math.max(lastAll, e.created_at)
   }
-  const listed = builders.get(owner)
-  let win: Placement | null = null
-  for (const p of placements) {
-    if (p.author !== owner && !listed?.has(p.author)) continue
-    if (!win || later(lastOf(p), lastOf(win)) < 0) win = p
-  }
-  return win ? { value: win.value, owner, from: win.author } : null
+  if (named === null || retired) return false
+  return lastAll === null || named > lastAll
 }
 
-/** A layer as the Cell Rule counts it: who wrote it, whom it lists, its settles' times, and its decoded planes. */
-export interface CountedLayer {
+// ---------------------------------------------------------------------------------------------------------------
+// The home (§7.2)
+
+/**
+ * Whether `chunk` is in the home of `pubkey`: the 27 chunks of a 3 by 3 by 3
+ * cube centred on the chunk holding its spawn coordinate (the pubkey read as
+ * a coordinate), in the plane its lowest bit names; on each axis the chunk's
+ * base minus the spawn chunk's, modulo 2^85, is 0, 32 or 2^85 - 32.
+ */
+export function inHome(pubkey: string, chunk: ChunkBase): boolean {
+  if (!HEX64.test(pubkey)) return false
+  const c = coordToXyz(BigInt(`0x${pubkey}`))
+  if (chunk.plane !== c.plane) return false
+  const near = (a: bigint, s: bigint): boolean => {
+    const d = (a - ((s >> 5n) << 5n)) & AXIS_MASK
+    return d === 0n || d === 32n || d === AXIS_MASK + 1n - 32n
+  }
+  return near(chunk.x, c.x) && near(chunk.y, c.y) && near(chunk.z, c.z)
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// The Stack (§7) and co-builders (§8)
+
+/** A layer as the Stack counts it: who wrote it, with which key, its event id, when, whom it lists, and its decoded planes. */
+export interface StackLayer {
+  id: string
   author: string
   builder: string
-  builders: readonly string[]
-  /** Signed by a key its author has retired (either form, any chain): it cannot list builders (§7.3 rule 3). */
-  retiredKey: boolean
-  times: readonly SettleTime[]
+  createdAt: number
+  cobuilders: readonly string[]
   planes: ReadonlyArray<DecodedPlane>
 }
 
-/**
- * Resolve one plane of a chunk by §7.3 and §7.5: per cell the value the Cell
- * Rule gives, or -1 where no placement decides and the cell shows its base;
- * `surveyed` says whether that base is the ground (some counted survey; in a
- * home chunk only the owner's and its builders').
- */
-export function resolvePlane(layers: readonly CountedLayer[], plane: 0 | 1, homeOwner: string | null): { values: Int32Array; surveyed: boolean } {
-  const builders = new Map<string, Set<string>>()
-  for (const l of layers) {
-    if (l.retiredKey) continue
-    const set = builders.get(l.author) ?? new Set<string>()
-    for (const b of l.builders) if (b !== l.author) set.add(b)
-    builders.set(l.author, set)
-  }
-  const planes = layers.map((l) => l.planes.find((p) => p.plane === plane) ?? null)
-  const listedByHome = homeOwner ? builders.get(homeOwner) ?? new Set<string>() : null
-  const surveyed = layers.some((l, i) => planes[i]?.survey && (!listedByHome || l.author === homeOwner || listedByHome.has(l.author)))
-  // Per cell, the placements: built by walking each layer's placements once.
-  const byCell = new Map<number, Placement[]>()
-  layers.forEach((l, i) => {
-    const pl = planes[i]
-    if (!pl) return
-    pl.placements.forEach((cell, k) => {
-      const list = byCell.get(cell) ?? []
-      list.push({ author: l.author, builder: l.builder, value: pl.values[cell], first: l.times[pl.t0[k]], last: l.times[pl.t1[k]] })
-      byCell.set(cell, list)
-    })
-  })
-  const values = new Int32Array(CELLS).fill(-1)
-  for (const [cell, list] of byCell) {
-    const r = resolveCell(list, builders, homeOwner)
-    if (r) values[cell] = r.value
-  }
-  return { values, surveyed }
+/** Who ranks where for a reader in a chunk. */
+export interface StackView {
+  /** The reader, or null. */
+  me: string | null
+  /** Whom the reader follows (kind 3). */
+  follows: ReadonlySet<string>
+  /** Whether the chunk is in an author's home (inHome). */
+  home: (author: string) => boolean
+}
+
+/** An author's own rank in a chunk (§7.3): 1 a home owner, 2 the reader, 3 whom the reader follows, 4 everyone else. */
+export function ownRank(author: string, v: StackView): number {
+  if (v.home(author)) return 1
+  if (author === v.me) return 2
+  if (v.follows.has(author)) return 3
+  return 4
+}
+
+const lowerFirst = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0)
+
+/** Order within a rank (§7.3): the newer first, then the lower author, builder key and event id. */
+export function withinRank(a: Pick<StackLayer, 'createdAt' | 'author' | 'builder' | 'id'>, b: Pick<StackLayer, 'createdAt' | 'author' | 'builder' | 'id'>): number {
+  return b.createdAt - a.createdAt || lowerFirst(a.author, b.author) || lowerFirst(a.builder, b.builder) || lowerFirst(a.id, b.id)
 }
 
 /**
- * Which authors a reader counts in a chunk (§7.1): mutes removed first, then
- * at most AUTHORS_MAX, in the order: yourself, whom you follow, the home
- * chunk's owner, then the rest by their earliest settle.
+ * The counted layers (§7.1): mutes removed, then layers dated more than 600
+ * seconds past `now` (Unix seconds), then at most AUTHORS_MAX authors, by own
+ * rank, the newest layer of each, the lower pubkey.
  */
-export function countedAuthors(authors: Iterable<string>, o: { me: string | null; follows: ReadonlySet<string>; muted: ReadonlySet<string>; home: string | null; earliest: (author: string) => Timed }): Set<string> {
-  const left = [...new Set(authors)].filter((a) => !o.muted.has(a))
-  const rank = (a: string): number => (a === o.me ? 0 : o.follows.has(a) ? 1 : a === o.home ? 2 : 3)
-  left.sort((a, b) => rank(a) - rank(b) || (rank(a) === 3 ? earlier(o.earliest(a), o.earliest(b)) : 0) || (a < b ? -1 : a > b ? 1 : 0))
-  return new Set(left.slice(0, AUTHORS_MAX))
+export function countedLayers<T extends Pick<StackLayer, 'author' | 'createdAt'>>(layers: readonly T[], v: StackView, mutes: ReadonlySet<string>, now: number, cap = AUTHORS_MAX): T[] {
+  const kept = layers.filter((l) => !mutes.has(l.author) && l.createdAt <= now + FUTURE_SLACK_SECONDS)
+  const newest = new Map<string, number>()
+  for (const l of kept) newest.set(l.author, Math.max(newest.get(l.author) ?? -Infinity, l.createdAt))
+  const authors = [...newest.keys()].sort((a, b) => ownRank(a, v) - ownRank(b, v) || newest.get(b)! - newest.get(a)! || lowerFirst(a, b))
+  const allowed = new Set(authors.slice(0, cap))
+  return kept.filter((l) => allowed.has(l.author))
+}
+
+/**
+ * One plane of a chunk by the Stack (§7.4, §8), over counted layers. Per
+ * cell: the candidates are the layers that changed it; a candidate whose
+ * author is on the newest list of another placer in that cell takes the
+ * better of its own rank and that placer's own rank; the first in Stack
+ * order wins. `values` is -1 where no layer changed the cell (it shows the
+ * base); `from` is the index in `layers` of the winner, or -1; `surveyed`
+ * says whether the plane is surveyed (inside a home only a home owner's
+ * surveys count, §7.5).
+ */
+export function resolveStack(layers: readonly StackLayer[], plane: 0 | 1, v: StackView): { values: Int32Array; from: Int32Array; rank: Int8Array; surveyed: boolean } {
+  const values = new Int32Array(CELLS).fill(-1)
+  const from = new Int32Array(CELLS).fill(-1)
+  const rank = new Int8Array(CELLS)
+  const planes = layers.map((l) => l.planes.find((p) => p.plane === plane) ?? null)
+  const own = layers.map((l) => ownRank(l.author, v))
+  // Each author's list: the cobuilders of their newest counted layer here (§8).
+  const lists = new Map<string, Set<string>>()
+  const newestOf = new Map<string, StackLayer>()
+  for (const l of layers) { const n = newestOf.get(l.author); if (!n || withinRank(l, n) < 0) newestOf.set(l.author, l) }
+  for (const [a, l] of newestOf) lists.set(a, new Set(l.cobuilders.filter((c) => c !== a)))
+  const anyHome = own.some((r) => r === 1)
+  const surveyed = layers.some((_l, i) => !!planes[i]?.survey && (!anyHome || own[i] === 1))
+  // Per cell, the layers that changed it.
+  const touching = new Map<number, number[]>()
+  planes.forEach((pl, i) => { if (pl) for (const c of pl.changed) { const t = touching.get(c); if (t) t.push(i); else touching.set(c, [i]) } })
+  for (const [c, list] of touching) {
+    let best = -1
+    let bestRank = 9
+    for (const i of list) {
+      let r = own[i]
+      for (const j of list) {
+        const a = layers[j].author
+        if (a !== layers[i].author && own[j] < r && lists.get(a)?.has(layers[i].author)) r = own[j]
+      }
+      if (best < 0 || r < bestRank || (r === bestRank && withinRank(layers[i], layers[best]) < 0)) { best = i; bestRank = r }
+    }
+    values[c] = planes[best]!.values[c]
+    from[c] = best
+    rank[c] = bestRank
+  }
+  return { values, from, rank, surveyed }
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// A new builder key at a chunk (§5.6)
+
+/** One plane's changed cells and their values, and whether it surveys. */
+export interface PlaneChanges {
+  survey: boolean
+  cells: Map<number, number>
+}
+
+/** A plaintext's changed cells, per plane (planes this reader sets aside, or without a ground given, left out). */
+export function changesOf(p: LayerPlaintext, groundOf: (plane: 0 | 1) => Uint8Array | null): Map<0 | 1, PlaneChanges> {
+  const out = new Map<0 | 1, PlaneChanges>()
+  for (const pl of p.planes) {
+    const g = groundOf(pl.plane)
+    if (!g) continue
+    const d = decodePlane(pl, g)
+    if (!d || d === 'aside') continue
+    out.set(pl.plane, { survey: d.survey, cells: new Map(d.changed.map((c) => [c, d.values[c]])) })
+  }
+  return out
+}
+
+/**
+ * Where a new key's layer at a chunk starts (§5.6): every plane of the
+ * author's other keys' layers there, the twin included, with every changed
+ * cell's value, the newer layer winning where two change one cell; then
+ * this writer's own changes over them. A cell changed at its base value is
+ * written explicitly, so it stays a change.
+ */
+export function startFrom(others: ReadonlyArray<{ changes: Map<0 | 1, PlaneChanges>; createdAt: number; builder: string; id: string }>, mine: Map<0 | 1, PlaneChanges>, groundOf: (plane: 0 | 1) => Uint8Array | null, cobuilders: readonly string[]): LayerPlaintext {
+  // Oldest first, so the newer layer's value is the one left standing.
+  const order = [...others].sort((a, b) => -withinRank({ ...a, author: '' }, { ...b, author: '' }))
+  const planes: PlaneObject[] = []
+  for (const plane of [0, 1] as const) {
+    const parts = [...order.map((o) => o.changes.get(plane)), mine.get(plane)].filter((c): c is PlaneChanges => !!c)
+    const g = groundOf(plane)
+    if (parts.length === 0 || !g) continue
+    const survey = parts.some((c) => c.survey)
+    const base = survey ? g : new Uint8Array(CELLS)
+    const values = Int32Array.from(base)
+    const touched = new Set<number>()
+    for (const part of parts) for (const [c, v] of part.cells) { values[c] = v; touched.add(c) }
+    const explicit = new Set([...touched].filter((c) => values[c] === base[c]))
+    planes.push(encodePlane(plane, survey, values, g, explicit))
+  }
+  return { planes, cobuilders: [...cobuilders] }
+}
+
+/** A version of a layer that changes no cell (§5.6): each plane keeps its `survey` and `ground`. */
+export function emptiedPlaintext(p: LayerPlaintext): LayerPlaintext {
+  return { planes: p.planes.map((pl) => ({ plane: pl.plane, survey: pl.survey, ground: pl.ground ?? GROUND_REVISION, form: 'diff' as const, pal: [null], cells: [0, -(CELLS - 1)] })), cobuilders: [] }
 }

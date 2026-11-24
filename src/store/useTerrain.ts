@@ -14,8 +14,8 @@
  * DECK §5.5 planes (lib/terrain/layer.ts), the chunks surveyed, the
  * inventory and the first-visit hint. While LIVE, each chunk's changes are
  * shared as this device's block layer, and other builders' layers near you
- * are read and merged under yours (store/terrainShare.ts, DECK-0009 §5 to
- * §7); LOCAL shares nothing.
+ * are read and stacked with yours (store/terrainShare.ts, DECK-0009 §5 to
+ * §7, the Stack); LOCAL shares nothing.
  *
  * TERRAIN THE MODE (owner, 2026-11-24: "I basically just want terrain mode
  * to be a normal WALK mode, but it has tools to survey and interact with
@@ -53,7 +53,7 @@ import {
 import type { Position, ViewAxes } from '../lib/space'
 import type { RayHit } from '../lib/terrain/raycast'
 import {
-  connectShareHost, fieldClosing, liveChanged, noteChange, noteMove, ownFromPublished, prepareChunk, sharedKeys, terrainClosed, terrainOpened, viewOf,
+  connectShareHost, fieldClosing, liveChanged, noteChange, noteMove, prepareChunk, sharedKeys, terrainClosed, terrainOpened, viewOf,
 } from './terrainShare'
 import { loadBuilder, releaseBuilderDb } from '../lib/terrain/builderKey'
 import './terrainShareLive'
@@ -277,7 +277,7 @@ export const useTerrain = create<TerrainState>((set, get) => ({
     // A chunk others built in, shown but not surveyed by you: survey it before changing it.
     const at = s.world.locate(dx, dy, dz)
     if (!at.slot?.own) { get().say('Survey this chunk before building in it.'); return false }
-    // What is yours in that cell: someone else's block mined is gone for you, and never carried.
+    // What is yours in that cell: someone else's block mined is gone for you (and for whoever ranks you first), never carried.
     const yours = at.slot.own[at.cell]
     const change = s.world.setCs(dx, dy, dz, EMPTY)
     if (!change) return false
@@ -408,8 +408,10 @@ async function foldKey(s: TerrainSession, key: string): Promise<void> {
 /** Record a change: the log in memory and on the device, the layer folded when the log is long. */
 function record(s: TerrainSession, change: Change): void {
   const slot = s.world.slotByKey(change.chunk)
+  const ownBefore = slot?.own ? slot.own[change.cell] : change.was
   if (slot?.own) slot.own[change.cell] = change.id
-  noteChange(change.chunk, { cell: change.cell, backToGround: !!slot?.generated && slot.generated[change.cell] === change.id })
+  // What it was, for the layer: setting a cell to its ground over someone else's block is written as a change (DECK-0009 §5.4).
+  noteChange(change.chunk, slot?.generated ? { cell: change.cell, ownBefore, ownAfter: change.id, shownBefore: change.was, ground: slot.generated[change.cell] } : undefined)
   const seq = s.nextSeq++
   const list = s.pending.get(change.chunk) ?? []
   list.push({ seq, change })
@@ -455,8 +457,6 @@ async function build(s: TerrainSession, slot: ChunkSlot): Promise<void> {
     if (terrainSession !== s || s.world.slotByKey(slot.key) !== slot) return
     // Your own blocks where you surveyed, and everyone else's shared layers under them (store/terrainShare.ts).
     const own = s.surveyedKeys.has(slot.key) ? builtBlocks(s, slot.key, g.blocks) : null
-    // Up to what this device last published there (a new key may have carried another key's cells).
-    if (own) ownFromPublished(slot.key, own, g.blocks)
     slot.own = own
     s.world.setBlocks(slot.key, g.blocks, viewOf(slot.key, g.blocks, own))
     s.version++
@@ -674,18 +674,13 @@ connectShareHost({
   active: () => useTerrain.getState().active,
   fold: async (key) => { const s = terrainSession; if (s) await foldKey(s, key) },
   redisplay,
-  adopt: async (key, values, keep) => {
+  adopt: async (key, cells) => {
     const s = terrainSession
     const slot = s?.world.slotByKey(key)
     if (!s || !slot?.generated || !slot.own) return
-    // What was published, onto your own blocks, except cells you changed since (store/terrainShare.ts, §5.7).
-    let moved = false
-    for (let c = 0; c < slot.own.length; c++) {
-      if (keep(c)) continue
-      const v = Math.min(values[c], 255)
-      if (slot.own[c] !== v) { slot.own[c] = v; moved = true }
-    }
-    if (!moved) return
+    // Another key's blocks a new key started from (store/terrainShare.ts, DECK-0009 §5.6): yours on this device now.
+    for (const [c, v] of cells) slot.own[c] = Math.min(v, 255)
+    for (const { change } of s.pending.get(key) ?? []) slot.own[change.cell] = change.id
     const layer = encodeLayer(slot.generated, slot.own, s.plane === 1 ? 1 : 0)
     s.layers.set(key, layer)
     if (s.db) await foldChunk(s.db, s.owner, key, layer, [], Date.now()).catch(() => { /* kept in memory */ })

@@ -1,259 +1,242 @@
 /**
- * terrainLayer.test.ts - DECK-0009 §5 to §7 as TERRAIN reads and writes them
- * (lib/terrain/blockLayer.ts, layerReader.ts): the DECK's vectors for runs,
- * settles, the worked layer, reach and the Cell Rule; the layer event's
- * shape; sealing to the region key and opening again; and a merge of two
- * authors by the Cell Rule, withholding included (T = max(h, W)).
+ * terrainLayer.test.ts - DECK-0009 (cyberspace c4930ff) as TERRAIN reads and
+ * writes it (lib/terrain/blockLayer.ts, layerReader.ts): the DECK's vectors
+ * for runs, the worked layer, builder keys, the home and the Stack with
+ * co-builders; planes with explicit changes at the base value; the event's
+ * tags and limits; sealing and opening; the checks that drop a layer; and a
+ * new key's start from the author's other keys' layers.
  *
  * Every key here is a throwaway made for the test. Nothing is published.
  */
 
 import { describe, expect, it } from 'vitest'
-import { coordToXyz } from 'cyberspace-core'
-import { finalizeEvent, generateSecretKey, getPublicKey, verifyEvent } from 'nostr-tools/pure'
-import { CELLS, idx } from '../terrain/coords'
+import { finalizeEvent, generateSecretKey, verifyEvent } from 'nostr-tools/pure'
+import { idx } from '../terrain/coords'
 import { generate } from '../terrain/generate'
-import { reachDistance } from '../terrain/world'
 import { regionKeyAt, encryptForRegion } from '../shardCrypto'
 import {
-  LAYER_KIND, canonicalNumbers, claimsOf, decodePlane, earlier, encodePlane, expandRuns, layerShape, layerTags, parsePlaintext, plaintextJson,
-  resolveCell, resolvePlane, serializedBytes, settleId, workOf, countedAuthors, freeTextWithinBounds,
-  type CountedLayer, type LayerPlaintext, type Placement, type Settle,
+  FUTURE_SLACK_SECONDS, LAYER_KIND, builderKeyValid, canonicalNumbers, changesOf, countedLayers, decodePlane, emptiedPlaintext, encodePlane, expandRuns,
+  freeTextWithinBounds, inHome, layerShape, layerTags, nextPlaintext, ownRank, parsePlaintext, plaintextJson, resolveStack, serializedBytes, startFrom,
+  type LayerPlaintext, type StackLayer, type StackView,
 } from '../terrain/blockLayer'
-import { readLayer, type ReadDeps } from '../terrain/layerReader'
+import { readLayer, type KeyStatus, type ReadDeps } from '../terrain/layerReader'
 import V from './fixtures/deck0009-layer-vectors.json'
 
 const ORIGIN = { x: 0n, y: 0n, z: 0n, plane: 0 }
 const origin = generate(ORIGIN).blocks
-const hex = (b: Uint8Array): string => Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('')
 const { key: KEY, lookupId: LOOKUP } = regionKeyAt(ORIGIN, 5, 5)
+const pk = (n: number): string => n.toString(16).padStart(64, '0')
+let air = -1, rock = -1
+for (let c = 0; c < origin.length && (air < 0 || rock < 0); c++) { if (origin[c] === 0 && air < 0) air = c; if (origin[c] !== 0 && rock < 0) rock = c }
+const chunkOfVector = (c: (string | number)[]) => ({ x: BigInt(c[0]), y: BigInt(c[1]), z: BigInt(c[2]), plane: Number(c[3]) })
 
 describe('the DECK vectors', () => {
-  it('the origin chunk\'s lookup id is the vectors\'', () => {
-    expect(LOOKUP).toBe(V.settles[0].lookup_id)
-  })
-
-  it('runs: accepted ones expand, rejected ones do not (§5.4)', () => {
+  it('runs (§5.3)', () => {
     for (const a of V.runs.accepted) expect(Array.from(expandRuns(a.runs, a.length, a.limit)!)).toEqual(a.expanded)
     for (const r of V.runs.rejected) expect(expandRuns(r.runs, r.length, r.limit), r.reason).toBeNull()
-    // The length is checked as it expands.
     expect(expandRuns([0, -1000000000], 4, 1)).toBeNull()
-    expect(canonicalNumbers('[1,-2,0]')).toBe(true)
     for (const bad of ['[1.0]', '[1e2]', '[01]', '[-0]']) expect(canonicalNumbers(bad), bad).toBe(false)
-    // Strings are not numbers.
-    expect(canonicalNumbers('["1.5e3",2]')).toBe(true)
   })
 
-  it('settles: ids, claims and work (§5.3)', () => {
-    for (const s of V.settles) {
-      const settle: Settle = [s.height, s.block_hash, s.nonce, s.claims as [number[], number[]]]
-      const id = settleId(s.author, s.lookup_id, settle)
-      expect(id).toBe(s.id)
-      expect(workOf(id!)).toBe(s.work)
-    }
-    expect(settleId(V.layer.author, LOOKUP, JSON.parse(V.layer.survey_only_plaintext).settles[0])).toBe(V.layer.survey_only_settle_id)
-  })
-
-  it('the worked layer decodes to its 35 placements, values, grounds and settles (§5.5)', () => {
+  it('the worked layer: 36 changed cells, an explicit change at the base value among them, one co-builder; written back byte for byte', () => {
     const plain = parsePlaintext(V.layer.plaintext)!
-    expect(plain).not.toBeNull()
-    expect(new TextEncoder().encode(V.layer.plaintext).length).toBe(V.layer.plaintext_bytes)
-    const d = decodePlane(plain.planes[0], origin, plain.settles.length)
+    expect(plain.cobuilders).toEqual(['1'.repeat(1) + 'b'.repeat(63)])
+    const d = decodePlane(plain.planes[0], origin)
     if (!d || d === 'aside') throw new Error('plane')
-    expect(d.placements.length).toBe(V.layer.placements)
-    const got = d.placements.map((c, k) => ({ x: c & 31, y: c >> 10, z: (c >> 5) & 31, value: d.values[c], ground: origin[c], t0: d.t0[k], t1: d.t1[k] }))
-    expect(got).toEqual(V.layer.placement_cells)
-    // Its settle tags are its settles' ids.
-    const ids = plain.settles.map((s) => settleId(V.layer.author, LOOKUP, s))
-    expect(V.layer.tags.filter((t: string[]) => t[0] === 'settle').map((t: string[]) => t[1])).toEqual(ids)
-    // Written again from its values and times, it is the same plane.
-    const t0 = new Map(d.placements.map((c, k) => [c, d.t0[k]]))
-    const t1 = new Map(d.placements.map((c, k) => [c, d.t1[k]]))
-    expect(encodePlane(0, true, d.values, origin, t0, t1)).toEqual(plain.planes[0])
-    expect(plaintextJson(plain)).toBe(V.layer.plaintext)
-    expect(plaintextJson(parsePlaintext(V.layer.survey_only_plaintext)!)).toBe(V.layer.survey_only_plaintext)
+    expect(d.changed.length).toBe(V.layer.changed)
+    expect(d.changed.map((c) => ({ x: c & 31, y: c >> 10, z: (c >> 5) & 31, value: d.values[c], ground: origin[c] }))).toEqual(V.layer.changed_cells)
+    const explicit = new Set(d.changed.filter((c) => d.values[c] === origin[c]))
+    expect(explicit.size).toBeGreaterThan(0)
+    expect(encodePlane(0, true, d.values, origin, explicit)).toEqual(plain.planes[0])
+    expect(parsePlaintext(V.layer.survey_only_plaintext)?.planes[0].cells).toEqual([0, -32767])
   })
 
-  it('reach (§6.2)', () => {
-    for (const r of V.reach) {
-      const c = coordToXyz(BigInt(`0x${r.coord}`))
-      const chunk = { x: BigInt(r.chunk[0]), y: BigInt(r.chunk[1]), z: BigInt(r.chunk[2]), plane: r.chunk[3] as number }
-      const d = reachDistance({ x: c.x, y: c.y, z: c.z, plane: c.plane }, chunk)
-      expect(d === Infinity ? null : d, r.name).toBe(r.distance)
-      expect(d <= 16, r.name).toBe(r.within_reach)
-    }
+  it('builder keys (§4.4)', () => {
+    for (const c of V.builder_keys) expect(builderKeyValid(c.key, c.events), c.name).toBe(c.valid)
   })
 
-  it('the Cell Rule\'s nine cells (§7.3)', () => {
-    for (const c of V.cell_rule) {
-      const builders = new Map(Object.entries(c.builders as Record<string, string[]>).map(([a, l]) => [a, new Set(l)]))
-      const r = resolveCell(c.placements as Placement[], builders, c.home)
-      expect(r, c.name).toEqual(c.expected)
+  it('the home (§7.2)', () => {
+    for (const c of V.home) expect(inHome(c.identity, chunkOfVector(c.chunk)), c.name).toBe(c.in_home)
+  })
+
+  it('the Stack and co-builders (§7, §8)', () => {
+    const S = V.stack
+    expect(V.future_slack).toBe(FUTURE_SLACK_SECONDS)
+    for (const c of S.cases) {
+      const chunk = chunkOfVector(c.chunk)
+      const view: StackView = { me: S.reader, follows: new Set(S.follows), home: (a) => inHome(a, chunk) }
+      const layers: StackLayer[] = c.layers.map((l) => {
+        const values = new Int32Array(32768)
+        const changed = Object.keys(l.changed).map(Number).sort((a, b) => a - b)
+        for (const k of changed) values[k] = (l.changed as Record<string, number>)[String(k)]
+        return { id: l.id, author: l.author, builder: l.builder, createdAt: l.created_at, cobuilders: l.cobuilders, planes: [{ plane: chunk.plane as 0 | 1, survey: false, values, changed }] }
+      })
+      const counted = countedLayers(layers, view, new Set(c.mutes), S.now, c.cap)
+      const r = resolveStack(counted, chunk.plane as 0 | 1, view)
+      for (const cell of c.cells) {
+        const i = r.from[cell.cell]
+        expect(i < 0 ? null : r.values[cell.cell], `${c.name}: cell ${cell.cell}`).toBe(cell.value)
+        expect(i < 0 ? null : counted[i].id, `${c.name}: cell ${cell.cell} from`).toBe(cell.from)
+        expect(i < 0 ? null : r.rank[cell.cell], `${c.name}: cell ${cell.cell} rank`).toBe(cell.rank)
+      }
     }
   })
 })
 
-describe('the layer event (§5.1)', () => {
-  it('has exactly the DECK\'s tags, and nothing public about the place', () => {
-    const tags = layerTags({ lookupId: LOOKUP, author: 'a'.repeat(64), reach: ['e'.repeat(64)], settleIds: ['1'.repeat(64), '2'.repeat(64)], encrypted: 'AAAA' })
-    expect(tags).toEqual([
-      ['d', LOOKUP], ['p', 'a'.repeat(64)], ['e', 'e'.repeat(64), '', 'reach'], ['settle', '1'.repeat(64)], ['settle', '2'.repeat(64)],
-      ['encrypted', 'aes-256-gcm', 'AAAA'], ['version', '1'],
-    ])
-    for (const t of tags) expect(['d', 'p', 'e', 'settle', 'encrypted', 'version']).toContain(t[0])
+describe('planes and the plaintext (§5.4)', () => {
+  it('in a diff a cell set explicitly to its base value is a change; a whole cannot say it, so the plane stays a diff', () => {
+    const values = Int32Array.from(origin)
+    values[rock] = 0
+    const pl = encodePlane(0, true, values, origin, new Set([air]))
+    expect(pl.form).toBe('diff')
+    const d = decodePlane(pl, origin)
+    if (!d || d === 'aside') throw new Error('plane')
+    expect(d.changed).toEqual([air, rock].sort((a, b) => a - b))
+    expect(d.values[air]).toBe(0)
+    // Without it, only the mined rock is a change.
+    const d2 = decodePlane(encodePlane(0, true, values, origin), origin)
+    expect(d2 !== 'aside' && d2?.changed).toEqual([rock])
+    // Every plane carries ground 2; a surveyed plane under another revision is set aside.
+    expect(pl.ground).toBe(2)
+    expect(decodePlane({ ...pl, ground: 1 }, origin)).toBe('aside')
+  })
+
+  it('the next plaintext carries the twin plane and the Crew, and is null when nothing changed', () => {
+    const v = origin.slice()
+    v[air] = 8
+    const first = nextPlaintext(null, 0, v, origin, [pk(5)])!
+    expect(first.cobuilders).toEqual([pk(5)])
+    expect(parsePlaintext(plaintextJson(first))).toEqual(first)
+    expect(nextPlaintext(first, 0, v, origin, [pk(5)])).toBeNull()
+    expect(nextPlaintext(first, 0, v, origin, [])?.cobuilders).toEqual([])
+    const twin: LayerPlaintext = { cobuilders: [], planes: [{ ...first.planes[0], plane: 1 }] }
+    const both = nextPlaintext(twin, 0, v, origin)!
+    expect(both.planes.map((p) => p.plane)).toEqual([0, 1])
+    expect(both.planes[1]).toEqual(twin.planes[0])
+    expect(parsePlaintext(JSON.stringify({ cobuilders: ['nope'], planes: first.planes }))).toBeNull()
+    // No cobuilders field: an empty list.
+    expect(parsePlaintext(JSON.stringify({ planes: first.planes }))?.cobuilders).toEqual([])
+  })
+})
+
+describe('the layer event (§5.1, §5.5)', () => {
+  it('has exactly the DECK\'s tags; at most one alt', () => {
+    const tags = layerTags({ lookupId: LOOKUP, author: 'a'.repeat(64), encrypted: 'AAAA' })
+    expect(tags).toEqual([['d', LOOKUP], ['p', 'a'.repeat(64)], ['encrypted', 'aes-256-gcm', 'AAAA'], ['version', '1']])
     expect(layerShape({ kind: LAYER_KIND, tags })).not.toBeNull()
-    // Each of check 2's requirements.
+    expect(layerShape({ kind: LAYER_KIND, tags: [...tags, ['alt', 'a'], ['alt', 'b']] })).toBeNull()
     expect(layerShape({ kind: LAYER_KIND, tags: tags.filter((t) => t[0] !== 'p') })).toBeNull()
-    expect(layerShape({ kind: LAYER_KIND, tags: tags.filter((t) => t[0] !== 'e') })).toBeNull()
-    expect(layerShape({ kind: LAYER_KIND, tags: tags.filter((t) => t[0] !== 'settle') })).toBeNull()
     expect(layerShape({ kind: LAYER_KIND, tags: tags.map((t) => (t[0] === 'version' ? ['version', '2'] : t)) })).toBeNull()
-    expect(layerShape({ kind: LAYER_KIND, tags: [...tags, ['d', LOOKUP]] })).toBeNull()
-    expect(layerShape({ kind: 33336, tags })).toBeNull()
   })
-})
 
-/** A layer of `author` at the origin chunk, signed by a throwaway builder key. */
-async function signedLayer(plain: LayerPlaintext, author: string, builderSk: Uint8Array, reach = 'f'.repeat(64)): Promise<ReturnType<typeof finalizeEvent>> {
-  const ids = plain.settles.map((s) => settleId(author, LOOKUP, s)!)
-  const encrypted = await encryptForRegion(KEY, plaintextJson(plain))
-  return finalizeEvent({ kind: LAYER_KIND, created_at: 1_790_000_000, tags: layerTags({ lookupId: LOOKUP, author, reach: [reach], settleIds: ids, encrypted }), content: '' }, builderSk)
-}
-
-const deps = (over: Partial<ReadDeps> = {}): ReadDeps => ({
-  verify: (ev) => verifyEvent(ev as never),
-  key: KEY,
-  lookupId: LOOKUP,
-  chunk: ORIGIN,
-  ground: async () => origin,
-  reach: async (_a, _b, ids) => new Map(ids.map((id) => [id, { x: 3n, y: 40n, z: 3n, plane: 0 }])),
-  header: async () => 'ok',
-  ...over,
-})
-
-describe('free text within its bounds (§5.6)', () => {
-  const tags = layerTags({ lookupId: LOOKUP, author: 'a'.repeat(64), reach: ['e'.repeat(64)], settleIds: ['1'.repeat(64)], encrypted: 'AAAA' })
-  it('content and alt at most 280 bytes of UTF-8, one alt at most, relay hints at most 256', () => {
-    expect(freeTextWithinBounds({ content: '', tags })).toBe(true)
+  it('content and alt at most 280 bytes of UTF-8', () => {
+    const tags = layerTags({ lookupId: LOOKUP, author: 'a'.repeat(64), encrypted: 'AAAA' })
     expect(freeTextWithinBounds({ content: 'x'.repeat(280), tags: [...tags, ['alt', 'y'.repeat(280)]] })).toBe(true)
-    expect(freeTextWithinBounds({ content: 'x'.repeat(281), tags })).toBe(false)
-    // Bytes, not characters: 141 two-byte characters are 282 bytes.
     expect(freeTextWithinBounds({ content: 'é'.repeat(140), tags })).toBe(true)
     expect(freeTextWithinBounds({ content: 'é'.repeat(141), tags })).toBe(false)
     expect(freeTextWithinBounds({ content: '', tags: [...tags, ['alt', 'y'.repeat(281)]] })).toBe(false)
-    expect(freeTextWithinBounds({ content: '', tags: [...tags, ['alt', 'a'], ['alt', 'b']] })).toBe(false)
-    const hinted = (hint: string) => tags.map((t) => (t[0] === 'e' ? ['e', t[1], hint, 'reach'] : t))
-    expect(freeTextWithinBounds({ content: '', tags: hinted('wss://' + 'h'.repeat(250)) })).toBe(true)
-    expect(freeTextWithinBounds({ content: '', tags: hinted('wss://' + 'h'.repeat(251)) })).toBe(false)
   })
 })
 
-describe('sealing and opening (§5.2, §6.1)', () => {
-  it('a layer sealed to the chunk\'s key opens again to the same plaintext, and counts', async () => {
-    const plain = parsePlaintext(V.layer.plaintext)!
-    const ev = await signedLayer(plain, V.layer.author, generateSecretKey())
-    // Nothing in the clear but the DECK's tags: the plaintext's numbers never show.
-    expect(JSON.stringify(ev.tags)).not.toContain('925010')
+async function signed(plain: LayerPlaintext, author: string, builder: Uint8Array, extra: { content?: string; tags?: string[][] } = {}) {
+  const encrypted = await encryptForRegion(KEY, plaintextJson(plain))
+  return finalizeEvent({ kind: LAYER_KIND, created_at: 1_790_000_000, tags: [...layerTags({ lookupId: LOOKUP, author, encrypted }), ...(extra.tags ?? [])], content: extra.content ?? '' }, builder)
+}
+const deps = (status: KeyStatus = 'valid', over: Partial<ReadDeps> = {}): ReadDeps => ({
+  verify: (ev) => verifyEvent(ev as never), key: KEY, lookupId: LOOKUP, ground: async () => origin, keyStatus: async () => status, ...over,
+})
+
+describe('sealing and opening (§5.2, §6)', () => {
+  const v = origin.slice()
+  v[air] = 8
+  const plain = nextPlaintext(null, 0, v, origin, [pk(9)])!
+
+  it('a layer sealed to the chunk\'s key opens again and counts', async () => {
+    const ev = await signed(plain, pk(1), generateSecretKey())
     expect(serializedBytes(ev)).toBeLessThan(240_000)
     const r = await readLayer(ev as never, deps())
     expect(r.status).toBe('counted')
     if (r.status !== 'counted') return
-    expect(plaintextJson(r.plaintext)).toBe(V.layer.plaintext)
-    expect(r.layer.author).toBe(V.layer.author)
-    expect(r.layer.planes[0].placements.length).toBe(35)
+    expect(r.layer.cobuilders).toEqual([pk(9)])
+    expect(r.layer.planes[0].changed).toEqual([air])
   })
 
-  it('drops what fails a check, and leaves what is not yet 6 deep pending', async () => {
-    const plain = parsePlaintext(V.layer.plaintext)!
+  it('drops what fails a check (a void key among them); a key not checked yet waits', async () => {
     const sk = generateSecretKey()
-    const ev = await signedLayer(plain, V.layer.author, sk)
-    const forged = { ...ev, tags: ev.tags.map((t) => (t[0] === 'p' ? ['p', 'd'.repeat(64)] : t)) }
-    expect((await readLayer(forged as never, deps())).status).toBe('dropped')
-    expect((await readLayer(ev as never, deps({ key: generateSecretKey() }))).status).toBe('dropped')
-    expect((await readLayer(ev as never, deps({ reach: async () => new Map() }))).status).toBe('dropped')
-    expect((await readLayer(ev as never, deps({ header: async () => 'bad' }))).status).toBe('dropped')
-    expect((await readLayer(ev as never, deps({ header: async () => 'pending' }))).status).toBe('pending')
-    // Free text past its bounds (§6.1 check 3): a second alt, or a long relay hint.
-    const twoAlts = finalizeEvent({ kind: LAYER_KIND, created_at: ev.created_at, tags: [...ev.tags, ['alt', 'a'], ['alt', 'b']], content: '' }, sk)
-    expect(await readLayer(twoAlts as never, deps())).toEqual({ status: 'dropped', why: 'free text past its bounds' })
-    const longHint = finalizeEvent({ kind: LAYER_KIND, created_at: ev.created_at, tags: ev.tags.map((t) => (t[0] === 'e' ? ['e', t[1], 'wss://' + 'h'.repeat(300), 'reach'] : t)), content: '' }, sk)
-    expect((await readLayer(longHint as never, deps())).status).toBe('dropped')
-    const longContent = finalizeEvent({ kind: LAYER_KIND, created_at: ev.created_at, tags: ev.tags, content: 'x'.repeat(281) }, sk)
-    expect((await readLayer(longContent as never, deps())).status).toBe('dropped')
-    // A placement whose first settle does not claim its cell (§6.1 check 8).
-    const bad: LayerPlaintext = JSON.parse(JSON.stringify(plain))
-    bad.settles[0][3] = [[0, -32767], [0, -32767]]
-    expect((await readLayer(await signedLayer(bad, V.layer.author, sk) as never, deps())).status).toBe('dropped')
-    // A reach event out of reach drops the plane, and with no plane left nothing is placed.
-    const far = await readLayer(ev as never, deps({ reach: async (_a, _b, ids) => new Map(ids.map((id) => [id, { x: 500n, y: 0n, z: 0n, plane: 0 }])) }))
-    expect(far.status === 'counted' && far.layer.planes.length).toBe(0)
+    const ev = await signed(plain, pk(1), sk)
+    expect(await readLayer(ev as never, deps('void'))).toEqual({ status: 'dropped', why: 'builder key not valid' })
+    expect((await readLayer(ev as never, deps('unknown'))).status).toBe('pending')
+    expect((await readLayer(ev as never, deps('valid', { key: generateSecretKey() }))).status).toBe('dropped')
+    expect((await readLayer(await signed(plain, pk(1), sk, { content: 'x'.repeat(281) }) as never, deps())).status).toBe('dropped')
   })
 })
 
-describe('two authors merged by the Cell Rule', () => {
-  const A = getPublicKey(generateSecretKey())
-  const B = getPublicKey(generateSecretKey())
+describe('the Stack (§7)', () => {
   const cell = idx(4, 30, 4)
-  const layerOf = (author: string, value: number, height: number, witness: number | null): CountedLayer => {
+  const layer = (author: string, value: number, createdAt: number, cells: number[] = [cell], cobuilders: string[] = []): StackLayer => {
     const values = Int32Array.from(origin)
-    values[cell] = value
-    const t = new Map([[cell, 0]])
-    const pl = encodePlane(0, true, values, origin, t, t)
-    const d = decodePlane(pl, origin, 1)
+    for (const c of cells) values[c] = value
+    const d = decodePlane(encodePlane(0, true, values, origin), origin)
     if (!d || d === 'aside') throw new Error('plane')
-    return { author, builder: author, builders: [], retiredKey: false, times: [{ height, witness, work: 0 }], planes: [d] }
+    return { id: `${author.slice(0, 8)}${createdAt}`.padEnd(64, '0'), author, builder: author, createdAt, cobuilders, planes: [d] }
   }
+  const view = (o: Partial<StackView> = {}): StackView => ({ me: pk(1), follows: new Set(), home: () => false, ...o })
+  const show = (layers: StackLayer[], v: StackView, now = 2_000_000_000) => resolveStack(countedLayers(layers, v, new Set(), now), 0, v).values[cell]
 
-  it('the first placer owns the cell; a later stranger is not drawn', () => {
-    const r = resolvePlane([layerOf(B, 41, 925_020, null), layerOf(A, 40, 925_010, null)], 0, null)
-    expect(r.values[cell]).toBe(40)
-    expect(r.surveyed).toBe(true)
-    // Cells nobody placed show the base.
-    expect(r.values[idx(0, 0, 0)]).toBe(-1)
+  it('ranks 1 to 4: home owner, you, whom you follow, everyone else', () => {
+    const v = view({ follows: new Set([pk(3)]), home: (a) => a === pk(7) })
+    expect([pk(7), pk(1), pk(3), pk(9)].map((a) => ownRank(a, v))).toEqual([1, 2, 3, 4])
   })
 
-  it('withholding loses: committed early but first seen late, T = max(h, W)', () => {
-    // A committed to an old block but the witness saw it only at 925,050; B committed later and was seen at once.
-    const late = layerOf(A, 40, 925_000, 925_050)
-    const prompt = layerOf(B, 41, 925_020, 925_021)
-    expect(resolvePlane([late, prompt], 0, null).values[cell]).toBe(41)
-    // Without the witness (every settle unwitnessed), the committed block alone orders them, the DECK's fallback.
-    expect(resolvePlane([layerOf(A, 40, 925_000, null), layerOf(B, 41, 925_020, null)], 0, null).values[cell]).toBe(40)
-    // A witnessed settle comes before any unwitnessed one.
-    expect(earlier({ height: 925_100, witness: 925_100, work: 0, author: B, builder: B }, { height: 925_000, witness: null, work: 0, author: A, builder: A })).toBeLessThan(0)
+  it('a stranger\'s newer layer never overrides yours, for you or for those who follow you', () => {
+    const mine = layer(pk(1), 5, 100)
+    const stranger = layer(pk(9), 41, 900)
+    expect(show([mine, stranger], view())).toBe(5)
+    expect(show([mine, stranger], view({ me: pk(2), follows: new Set([pk(1)]) }))).toBe(5)
+    expect(show([mine, stranger], view({ me: pk(2) }))).toBe(41)
   })
 
-  it('a listed builder changes the owner\'s cell; a retired key lists nobody', () => {
-    const owner = { ...layerOf(A, 40, 925_010, null), builders: [B] }
-    const helper = layerOf(B, 41, 925_030, null)
-    expect(resolvePlane([owner, helper], 0, null).values[cell]).toBe(41)
-    expect(resolvePlane([{ ...owner, retiredKey: true }, helper], 0, null).values[cell]).toBe(40)
+  it('inside a home only the owner\'s surveys count', () => {
+    const owner = layer(pk(7), 5, 1, [])
+    const stranger = { ...layer(pk(9), 41, 1, []) }
+    const v = view({ home: (a) => a === pk(7) })
+    expect(resolveStack([stranger], 0, v).surveyed).toBe(true)
+    expect(resolveStack([owner, stranger], 0, v).surveyed).toBe(true)
+    const unsurveyedOwner: StackLayer = { ...owner, planes: [{ ...owner.planes[0], survey: false }] }
+    expect(resolveStack([unsurveyedOwner, stranger], 0, v).surveyed).toBe(false)
   })
 
-  it('mutes and the cap: a muted author is never counted; you and whom you follow come first', () => {
-    const authors = Array.from({ length: 70 }, (_, i) => i.toString(16).padStart(64, '0'))
-    const earliest = (a: string) => ({ height: 925_000 + parseInt(a, 16), witness: null, work: 0, author: a, builder: a })
-    const me = authors[69], friend = authors[68]
-    const kept = countedAuthors(authors, { me, follows: new Set([friend]), muted: new Set([authors[0]]), home: null, earliest })
-    expect(kept.size).toBe(64)
-    expect(kept.has(authors[0])).toBe(false)
-    expect(kept.has(me) && kept.has(friend)).toBe(true)
-    // The rest by earliest settle: the latest are the ones left out.
-    expect(kept.has(authors[1]) && !kept.has(authors[67])).toBe(true)
+  it('a layer dated more than 600 s ahead waits', () => {
+    const now = 1_000_000
+    expect(show([layer(pk(9), 41, now + 601), layer(pk(8), 40, now)], view(), now)).toBe(40)
+    expect(show([layer(pk(9), 41, now + 600), layer(pk(8), 40, now)], view(), now)).toBe(41)
   })
+})
 
-  it('a home chunk is its owner\'s whoever placed first', () => {
-    const stranger = layerOf(B, 41, 925_000, null)
-    const owner = layerOf(A, 40, 925_090, null)
-    expect(resolvePlane([stranger, owner], 0, A).values[cell]).toBe(40)
-    expect(resolvePlane([stranger], 0, A).values[cell]).toBe(-1)
-  })
+describe('a new builder key at a chunk (§5.6)', () => {
+  const other = idx(6, 30, 6)
+  const ground = (): Uint8Array => origin
 
-  it('claims are written for exactly the cells given', () => {
-    const c = claimsOf(new Set([cell]), new Set())
-    const bits = expandRuns(c[0], CELLS, 2)!
-    expect(bits[cell]).toBe(1)
-    expect(bits.reduce((n, v) => n + v, 0)).toBe(1)
-    expect(c[1]).toEqual([0, -32767])
-    expect(hex(new Uint8Array([1]))).toBe('01')
+  it('starts from the other keys\' layers, the newer winning, then applies its own changes; an emptied version changes nothing', () => {
+    const a = origin.slice(); a[air] = 8; a[other] = 9
+    const b = origin.slice(); b[air] = 10
+    const pa = nextPlaintext(null, 0, a, origin)!
+    const pb = nextPlaintext(null, 0, b, origin)!
+    const mine = new Map([[0 as const, { survey: true, cells: new Map([[rock, 0]]) }]])
+    const start = startFrom([
+      { changes: changesOf(pa, ground), createdAt: 100, builder: pk(2), id: pk(20) },
+      { changes: changesOf(pb, ground), createdAt: 200, builder: pk(3), id: pk(30) },
+    ], mine, ground, [pk(5)])
+    const d = decodePlane(start.planes[0], origin)
+    if (!d || d === 'aside') throw new Error('plane')
+    expect(d.values[air]).toBe(10)
+    expect(d.values[other]).toBe(9)
+    expect(d.values[rock]).toBe(0)
+    expect(start.cobuilders).toEqual([pk(5)])
+    const e = emptiedPlaintext(start)
+    const ed = decodePlane(e.planes[0], origin)
+    expect(ed !== 'aside' && ed?.changed).toEqual([])
+    expect(e.planes[0].survey).toBe(true)
+    expect(e.planes[0].ground).toBe(2)
   })
 })

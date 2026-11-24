@@ -11,9 +11,9 @@
  * (coords.ts idx) as runs: a palette index, then, when it repeats, a negative
  * number for how many more cells repeat it.
  *
- * Kept on the device only for now. Publishing (kind 33339, sealed to the
- * region key) adds the settles and the per-placement t0 and t1 of §5.3 and
- * §5.5; this plane is what goes inside.
+ * Kept on the device; while LIVE store/terrainShare.ts publishes it (kind
+ * 33339, sealed to the region key, DECK-0009 §5), and this plane is what
+ * goes inside.
  */
 
 import { CELLS } from './coords'

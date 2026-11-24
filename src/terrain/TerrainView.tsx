@@ -33,6 +33,7 @@ import { ModalClose } from '../hud/ui/ModalClose'
 import { Chamfer } from '../hud/ui/Chamfer'
 import { noCallout } from '../hooks/useRepeatable'
 import { ShareLine } from './ShareLine'
+import { TerrainCrew } from './TerrainCrew'
 
 /** A press held this long without moving places (a long press). */
 export const LONG_PRESS_MS = 420
@@ -502,6 +503,7 @@ function TerrainScreen({ covered }: { covered: boolean }): JSX.Element {
         </span>
       </div>
 
+      <TerrainCrew />
       <Hotbar />
       <InventorySheet />
     </div>

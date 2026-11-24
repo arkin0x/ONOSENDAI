@@ -4,18 +4,21 @@
  * and every key is a throwaway (the store's own minted test identity, and
  * keys made here).
  *
- * - The builder tag rides on the next movement action the player puts a signature on
- *   anyway, with no signature of its own, and no layer goes out before an
- *   action carrying it is on the relay.
- * - LOCAL never publishes; back to LIVE, what waited goes out.
- * - The layer's shape: signed by the builder key, sealed to the chunk's
- *   region key, every tag the DECK requires and no other; it reads back.
- * - The cadence: 50 waiting changes with someone near, 3 seconds quiet with
- *   someone near, leaving the chunk by more than 4 blocks, closing TERRAIN.
- * - Retiring this device's key: the next action carries both tags, the next
- *   layer is the new key's, and the old key's layer is emptied.
- * - Another builder's layer, read and merged: drawn and walked on, your own
- *   change drawn over it for you, and gone when you mute them.
+ * - The builder tag rides on the next movement action the player puts a
+ *   signature on anyway, with no signature of its own, and no layer goes out
+ *   before an action carrying it is on the relay.
+ * - LOCAL never publishes; back to LIVE, the layer goes out: only the DECK's
+ *   tags, sealed, within the free-text bounds, carrying your Crew.
+ * - The Crew: written into every layer you publish; adding or removing
+ *   someone publishes your layers again; ADD BACK.
+ * - The cadence, and pacing for the relay's rate limit.
+ * - Retiring this device's key: both tags on the next move, then your blocks
+ *   again under the new key.
+ * - Reading by the Stack: a stranger's blocks drawn; their newer layer never
+ *   overrides yours; whom you follow outranks a newer stranger; a mute hides
+ *   them; a retired key voids its layers.
+ * - The cursor's outline colour: yours, your home, a builder who lists you,
+ *   someone else's, unbuilt ground.
  */
 
 import 'fake-indexeddb/auto'
@@ -46,23 +49,21 @@ import { useCyberspace } from '../useCyberspace'
 import { useWalk } from '../useWalk'
 import { setTerrainSession, terrainSession, useTerrain } from '../useTerrain'
 import {
-  BATCH_NEAR, LAYER_GAP_MS, RATE_BACKOFF_MS, RETIRED_UNCHECKED, chunkRegionKey, confirmTags, flush, liveChanged, readChunks, resetShare, retireDeviceKey, setShareDeps, useShare, LAYER_CONTENT,
+  AIM_COLORS, BATCH_NEAR, LAYER_CONTENT, RATE_BACKOFF_MS, addCrew, aimAt, chunkRegionKey, confirmTags, flush, liveChanged, readChunks,
+  removeCrew, resetShare, retireDeviceKey, setShareDeps, useShare,
 } from '../terrainShare'
 import { builderRecord, forgetBuilderRecords, namedKey } from '../../lib/terrain/builderKey'
 import { fixTags, onActionSigned } from '../../lib/terrain/builderTags'
-import { chunkKey, chunkOf, idx, type ChunkBase } from '../../lib/terrain/coords'
+import { chunkKey, chunkOf, type ChunkBase } from '../../lib/terrain/coords'
 import { generate } from '../../lib/terrain/generate'
-import { EMPTY, kindId } from '../../lib/terrain/blocks'
-import { readLayer } from '../../lib/terrain/layerReader'
-import { reachPlaces, readChainOf } from '../../lib/terrain/reachChain'
-import { LAYER_KIND, freeTextWithinBounds, layerTags, plaintextJson, settleId } from '../../lib/terrain/blockLayer'
-import { nextPlaintext } from '../../lib/terrain/layerWriter'
-import { encryptForRegion } from '../../lib/shardCrypto'
-import { hopTemplate, spawnTemplate, type NostrEvent } from '../../lib/events'
+import { EMPTY } from '../../lib/terrain/blocks'
+import { readLayer, type KeyStatus } from '../../lib/terrain/layerReader'
+import { LAYER_KIND, builderKeyValid, expandRuns, freeTextWithinBounds, layerTags, nextPlaintext, parsePlaintext, plaintextJson } from '../../lib/terrain/blockLayer'
+import { encryptForRegion, decryptForRegion } from '../../lib/shardCrypto'
+import { spawnTemplate, type NostrEvent } from '../../lib/events'
 import type { Filter } from 'nostr-tools/filter'
 import type { RayHit } from '../../lib/terrain/raycast'
 
-const H = '00000000000000000001a7d1f3a2d3c4b5a69788796a5b4c3d2e1f0a1b2c3d4e'
 const T = () => useTerrain.getState()
 const me = (): string => useCyberspace.getState().identity.pubkey
 const settle = (ms = 40): Promise<void> => new Promise((r) => setTimeout(r, ms))
@@ -73,6 +74,8 @@ let held: NostrEvent[] = []
 let published: NostrEvent[] = []
 let near = false
 let muted = new Set<string>()
+let follows: string[] = []
+const sentAt = new Map<string, number>()
 
 function matches(f: Filter, e: NostrEvent): boolean {
   if (f.ids && !f.ids.includes(e.id)) return false
@@ -96,7 +99,7 @@ function hold(ev: NostrEvent): void {
   held.push(ev)
 }
 
-/** Where your spawn stands: your home chunk, where your spawn is your reach event. */
+/** Where your spawn stands: the chunk of your home. */
 function spawnPlace(): { x: bigint; y: bigint; z: bigint; plane: 0 | 1 } {
   const c = coordToXyz(hexToCoord(me()))
   return { x: c.x, y: c.y, z: c.z, plane: c.plane as 0 | 1 }
@@ -107,12 +110,6 @@ function standAt(p: { x: bigint; y: bigint; z: bigint; plane: number }): void {
   useCyberspace.setState({ position: { ...at }, cursor: { ...at }, anchor: { ...at }, plane: p.plane as 0 | 1, walking: false, spectate: null, exploreIndex: null, transit: null })
 }
 
-let own: NostrEvent[] = []
-/** When each event went to the mock relay. */
-const sentAt = new Map<string, number>()
-/** Make the mock relay refuse filters naming #p (the read a new key waits for). */
-let refuseP = false
-
 beforeEach(async () => {
   if (T().active) await T().exit()
   setTerrainSession(null)
@@ -122,30 +119,20 @@ beforeEach(async () => {
   forgetBuilderRecords()
   held = []
   published = []
-  own = []
   near = false
-  refuseP = false
   muted = new Set()
+  follows = []
   useWalk.setState({ gravity: false })
   useCyberspace.setState({ events: [], signerKind: 'local' })
   setShareDeps({
     live: () => true,
     publish: async (ev) => { sentAt.set(ev.id, Date.now()); published.push(ev); hold(ev); return { ok: true } },
-    query: async (f) => {
-      if (refuseP && (f as Record<string, unknown>)['#p']) throw new Error('unreachable')
-      return held.filter((e) => matches(f, e))
-    },
-    authorChain: async (pk) => held.filter((e) => e.kind === 3333 && e.pubkey === pk),
-    ownEvents: () => own,
-    v1List: () => new Set(),
-    commitBlock: async () => ({ height: 925_000, hash: H }),
-    header: async () => 'ok',
+    query: async (f) => held.filter((e) => matches(f, e)),
+    keyStatus: async (author, keys) => new Map<string, KeyStatus>(keys.map((k) => [k, builderKeyValid(k, held.filter((e) => e.pubkey === author && e.kind === 3333)) ? 'valid' : 'void'])),
     ground: async (b) => generate(b).blocks,
     muted: () => muted,
-    follows: async () => [],
+    follows: async () => follows,
     othersNear: () => near,
-    // The witness cannot be reached (it does not serve its query yet): every settle unwitnessed.
-    witness: { learn: async () => undefined, status: () => null, settle: () => null },
     verify: (ev) => verifyEvent(ev as never),
     now: () => Date.now(),
   })
@@ -155,14 +142,13 @@ afterEach(async () => {
   if (T().active) await T().exit()
 })
 
-/** Open TERRAIN at your spawn, sign your spawn (it names the builder key), and let the relay hold it. */
-async function namedAtSpawn(onRelay = true): Promise<{ spawn: NostrEvent; key: string; base: ChunkBase }> {
-  const p = spawnPlace()
+/** Open TERRAIN at `at` (your spawn when not given), sign your spawn (it names the builder key), and let the relay hold it. */
+async function named(onRelay = true, at?: { x: bigint; y: bigint; z: bigint; plane: number }): Promise<{ spawn: NostrEvent; key: string; base: ChunkBase }> {
+  const p = at ?? spawnPlace()
   standAt(p)
   await T().enter()
   const key = builderRecord(me())!.current!
   const spawn = await sign(spawnTemplate(me(), Math.floor(Date.now() / 1000)))
-  own = [spawn]
   if (onRelay) { hold(spawn); await confirmTags() }
   // What the naming sets going (a flush of what waits) is done before the test builds.
   await settle(100)
@@ -190,29 +176,30 @@ function mineSome(n: number): number {
   return done
 }
 
+/** A published layer's plaintext, opened with its chunk's key. */
+async function opened(ev: NostrEvent, base: ChunkBase) {
+  const text = await decryptForRegion(chunkRegionKey(base).key, ev.tags.find((t) => t[0] === 'encrypted')![2])
+  return parsePlaintext(text!)!
+}
+
 describe('the builder key is named on the next move you sign anyway', () => {
   it('the tag rides on the next movement action, with no signature of its own; no layer before the relay holds it', async () => {
     const signed: string[] = []
     const off = onActionSigned((ev) => signed.push(ev.id))
     try {
-      const { spawn, key } = await namedAtSpawn(false)
+      const { spawn, key } = await named(false)
       expect(key).not.toBe(me())
       expect(spawn.tags).toContainEqual(['builder', key])
-      // One signature: the move itself. The builder key asked nothing of the signer.
       expect(signed).toEqual([spawn.id])
-      // Built on, but the relay does not hold the naming yet: nothing published.
       await surveyHere()
       mineSome(3)
       await flush('test')
       expect(published).toHaveLength(0)
       expect(useShare.getState().words).toMatch(/next move/)
-      // The next move carries it again: harmless until one is on the relay.
       const again = await sign({ kind: 3333, created_at: Math.floor(Date.now() / 1000), tags: [['A', 'hop']], content: '' })
       expect(again.tags).toContainEqual(['builder', key])
-      // A step whose id is already relied on is never changed.
       const fixed = await sign(fixTags({ kind: 3333, created_at: Math.floor(Date.now() / 1000), tags: [['A', 'hop']], content: '' }))
       expect(fixed.tags.some((t) => t[0] === 'builder')).toBe(false)
-      // The relay holds the spawn now: named, and owed no more.
       hold(spawn)
       await confirmTags()
       expect(namedKey(me())?.named).toBe(spawn.id)
@@ -223,20 +210,17 @@ describe('the builder key is named on the next move you sign anyway', () => {
 })
 
 describe('publishing', () => {
-  it('LOCAL never publishes; back to LIVE, the layer goes out: the DECK\'s shape, sealed, and it reads back', async () => {
-    // LOCAL, as this module is told it (the store's switch, read through its deps).
+  it('LOCAL never publishes; back to LIVE the layer goes out: the DECK\'s tags only, sealed, within bounds, and it reads back', async () => {
     let isLive = false
     setShareDeps({ live: () => isLive })
-    const { spawn, key, base } = await namedAtSpawn()
+    const { key, base } = await named()
     await surveyHere()
     expect(mineSome(3)).toBe(3)
     await flush('test')
     await T().exit()
     await settle(100)
     expect(published).toHaveLength(0)
-    expect(useShare.getState().state).toBe('saved')
     expect(useShare.getState().words).toMatch(/LOCAL/)
-
     isLive = true
     liveChanged(true)
     await settle(300)
@@ -245,41 +229,92 @@ describe('publishing', () => {
     expect(ev.kind).toBe(33339)
     expect(ev.pubkey).toBe(key)
     expect(ev.content).toBe(LAYER_CONTENT)
-    // Within the free-text bounds (§5.6): empty content, no alt, empty relay hints.
-    expect(freeTextWithinBounds(ev)).toBe(true)
-    expect(ev.tags.filter((t) => t[0] === 'e').every((t) => t[2] === '')).toBe(true)
-    const { key: rk, lookupId } = chunkRegionKey(base)
-    expect(ev.tags.map((t) => t[0])).toEqual(['d', 'p', 'e', 'settle', 'encrypted', 'version'])
-    expect(ev.tags).toContainEqual(['d', lookupId])
+    expect(ev.tags.map((t) => t[0])).toEqual(['d', 'p', 'encrypted', 'version'])
     expect(ev.tags).toContainEqual(['p', me()])
-    expect(ev.tags).toContainEqual(['e', spawn.id, '', 'reach'])
-    expect(ev.tags).toContainEqual(['version', '1'])
-    // Nothing public says where it is beyond what the DECK requires: no C, no height, no sector, no client.
-    for (const name of ['C', 'H', 'h', 'hint', 'S', 'X', 'Y', 'Z', 'client', '-']) expect(ev.tags.some((t) => t[0] === name), name).toBe(false)
+    expect(freeTextWithinBounds(ev)).toBe(true)
     expect(useShare.getState().state).toBe('shared')
-    // It opens with the chunk's key and counts by the DECK's checks, against our own chain.
+    const { key: rk, lookupId } = chunkRegionKey(base)
     const g = generate(base).blocks
-    const r = await readLayer(ev, {
-      verify: (e) => verifyEvent(e as never), key: rk, lookupId, chunk: base, ground: async () => g,
-      reach: async (_a, b, ids) => reachPlaces(readChainOf(me(), own, new Set()), b, ids), header: async () => 'ok',
-    })
+    const r = await readLayer(ev, { verify: (e) => verifyEvent(e as never), key: rk, lookupId, ground: async () => g, keyStatus: async () => 'valid' })
     expect(r.status).toBe('counted')
     if (r.status !== 'counted') return
-    expect(r.layer.planes[0].survey).toBe(true)
-    // The three mined, and the walker's own gibson if the survey's ground filled it (it is opened, never left in rock).
-    expect(r.layer.planes[0].placements.length).toBeGreaterThanOrEqual(3)
-    expect(r.layer.planes[0].placements.length).toBeLessThanOrEqual(4)
-    for (const c of r.layer.planes[0].placements) expect(r.layer.planes[0].values[c]).toBe(EMPTY)
-    expect(settleId(me(), lookupId, r.plaintext.settles[0])).toBe(ev.tags.find((t) => t[0] === 'settle')![1])
+    expect(r.layer.planes[0].changed.length).toBeGreaterThanOrEqual(3)
+    expect(r.plaintext.cobuilders).toEqual([])
   })
+})
 
-  it('a reach event the relay does not hold yet: nothing goes out', async () => {
-    await namedAtSpawn()
-    held = []
+describe('the Crew', () => {
+  it('is written into every layer you publish; adding and removing someone publishes them again', async () => {
+    const friend = getPublicKey(generateSecretKey())
+    const { base } = await named()
     await surveyHere()
     mineSome(1)
     await flush('test')
+    expect(published).toHaveLength(1)
+    expect((await opened(published[0], base)).cobuilders).toEqual([])
+    expect(await addCrew(friend)).toBe(true)
+    await settle(800)
+    expect(useShare.getState().crew).toEqual([friend])
+    const withFriend = published.at(-1)!
+    expect(published.length).toBe(2)
+    expect((await opened(withFriend, base)).cobuilders).toEqual([friend])
+    // A new change carries it too.
+    mineSome(1)
+    await flush('test')
+    expect((await opened(published.at(-1)!, base)).cobuilders).toEqual([friend])
+    const before = published.length
+    expect(await removeCrew(friend)).toBe(true)
+    await settle(800)
+    expect(published.length).toBe(before + 1)
+    expect((await opened(published.at(-1)!, base)).cobuilders).toEqual([])
+  })
+})
+
+describe('the cadence (DECK-0009 §5.7)', () => {
+  it('with someone near: 50 waiting changes publish at once', async () => {
+    near = true
+    await named()
+    await surveyHere()
+    await settle(50)
+    expect(mineSome(BATCH_NEAR - 1)).toBe(BATCH_NEAR - 1)
+    await settle(400)
+    expect(published.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('with someone near: 3 seconds without a change', async () => {
+    near = true
+    await named()
+    await surveyHere()
+    mineSome(1)
+    await settle(1000)
     expect(published).toHaveLength(0)
+    await settle(2600)
+    expect(published).toHaveLength(1)
+  }, 10_000)
+
+  it('leaving the chunk by more than 4 blocks', async () => {
+    const { base } = await named()
+    await surveyHere()
+    mineSome(1)
+    await settle(50)
+    expect(useCyberspace.getState().walking).toBe(true)
+    useCyberspace.setState({ cursor: { x: base.x - 3n, y: base.y, z: base.z } })
+    await settle(200)
+    expect(published).toHaveLength(0)
+    useCyberspace.setState({ cursor: { x: base.x - 6n, y: base.y, z: base.z } })
+    await settle(300)
+    expect(published).toHaveLength(1)
+  })
+
+  it('closing TERRAIN', async () => {
+    await named()
+    await surveyHere()
+    mineSome(2)
+    await settle(50)
+    expect(published).toHaveLength(0)
+    await T().exit()
+    await settle(300)
+    expect(published).toHaveLength(1)
   })
 })
 
@@ -287,21 +322,20 @@ describe('pacing for the relay\'s rate limit', () => {
   it('a rate-limit refusal waits and tries again, longer each time, until the layer goes', async () => {
     const tries: number[] = []
     let refusals = 2
+    let isLive = false
     setShareDeps({
+      live: () => isLive,
       publish: async (ev) => {
         tries.push(Date.now())
         if (ev.kind === LAYER_KIND && refusals > 0) { refusals--; return { ok: false, reason: 'rate-limited: slow down' } }
         published.push(ev); hold(ev); return { ok: true }
       },
     })
-    let isLive = false
-    setShareDeps({ live: () => isLive })
-    await namedAtSpawn()
+    await named()
     await surveyHere()
     mineSome(2)
     await flush('test')
     expect(tries).toHaveLength(0)
-    // The LOCAL-to-LIVE flush: refused twice for rate, then accepted.
     isLive = true
     liveChanged(true)
     const until = Date.now() + 8_000
@@ -316,7 +350,7 @@ describe('pacing for the relay\'s rate limit', () => {
     let isLive = true
     let calls = 0
     setShareDeps({ live: () => isLive, publish: async () => { calls++; return { ok: false, reason: 'rate-limited: slow down' } } })
-    await namedAtSpawn()
+    await named()
     await surveyHere()
     mineSome(1)
     void flush('test')
@@ -329,254 +363,191 @@ describe('pacing for the relay\'s rate limit', () => {
   }, 10_000)
 })
 
-describe('the cadence (DECK-0009 §5.7)', () => {
-  it('with someone near: 50 waiting changes publish at once', async () => {
-    near = true
-    await namedAtSpawn()
-    await surveyHere()
-    await settle(50)
-    // The survey itself waits as one change.
-    expect(mineSome(BATCH_NEAR - 1)).toBe(BATCH_NEAR - 1)
-    await settle(400)
-    expect(published.length).toBeGreaterThanOrEqual(1)
-  })
-
-  it('with someone near: 3 seconds without a change', async () => {
-    near = true
-    await namedAtSpawn()
-    await surveyHere()
-    mineSome(1)
-    await settle(1000)
-    expect(published).toHaveLength(0)
-    await settle(2600)
-    expect(published).toHaveLength(1)
-  }, 10_000)
-
-  it('leaving the chunk by more than 4 blocks', async () => {
-    const { base } = await namedAtSpawn()
-    await surveyHere()
-    mineSome(1)
-    await settle(50)
-    expect(published).toHaveLength(0)
-    // Walking out of it: 3 blocks past its wall, then 6.
-    expect(useCyberspace.getState().walking).toBe(true)
-    useCyberspace.setState({ cursor: { x: base.x - 3n, y: base.y, z: base.z } })
-    await settle(200)
-    expect(published).toHaveLength(0)
-    useCyberspace.setState({ cursor: { x: base.x - 6n, y: base.y, z: base.z } })
-    await settle(300)
-    expect(published).toHaveLength(1)
-  })
-
-  it('closing TERRAIN', async () => {
-    await namedAtSpawn()
-    await surveyHere()
-    mineSome(2)
-    await settle(50)
-    expect(published).toHaveLength(0)
-    await T().exit()
-    await settle(300)
-    expect(published).toHaveLength(1)
-  })
-})
-
 describe('retiring this device\'s key', () => {
-  it('both tags on the next move; the next layer is the new key\'s, and the old key\'s is emptied', async () => {
-    const { key: old } = await namedAtSpawn()
+  it('both tags on the next move; then your blocks go out again under the new key, paced', async () => {
+    const { key: old, base } = await named()
     await surveyHere()
     mineSome(1)
     await flush('test')
-    expect(published).toHaveLength(1)
-    expect(published[0].pubkey).toBe(old)
-
+    expect(published.map((e) => e.pubkey)).toEqual([old])
     expect(retireDeviceKey()).toBe(true)
     const fresh = builderRecord(me())!.current!
     expect(fresh).not.toBe(old)
-    const step = await sign({ ...spawnTemplate(me(), Math.floor(Date.now() / 1000) + 1) })
+    const step = await sign(spawnTemplate(me(), Math.floor(Date.now() / 1000) + 1))
     expect(step.tags).toContainEqual(['builder', fresh])
     expect(step.tags).toContainEqual(['builder-retire', old])
-    own = [step]
+    expect(step.tags).toContainEqual(['R', old])
     hold(step)
     await confirmTags()
     expect(namedKey(me())?.pub).toBe(fresh)
-    await settle(300)
+    await settle(800)
     await flush('test')
     const byNew = published.filter((e) => e.pubkey === fresh)
-    const byOld = published.filter((e) => e.pubkey === old)
     expect(byNew).toHaveLength(1)
-    expect(byOld).toHaveLength(2)
-    // Paced: the new layer and the emptied one went out at least LAYER_GAP_MS apart.
-    expect(sentAt.get(byOld[1].id)! - sentAt.get(byNew[0].id)!).toBeGreaterThanOrEqual(LAYER_GAP_MS - 50)
-    // The old key's newest layer has no placements left: same planes, one fresh settle claiming nothing.
-    const lookupId = byOld[1].tags.find((t) => t[0] === 'd')![1]
-    expect(byNew[0].tags).toContainEqual(['d', lookupId])
-    expect(byOld[1].tags.filter((t) => t[0] === 'settle')).toHaveLength(1)
-    // The move that retired it carried the R tag beside it (§4.3).
-    expect(step.tags).toContainEqual(['R', old])
+    // The same blocks, under the new key; the old key's layer is void, never emptied.
+    expect(published.filter((e) => e.pubkey === old)).toHaveLength(1)
+    expect((await opened(byNew[0], base)).planes).toEqual((await opened(published[0], base)).planes)
   })
 })
 
-describe('a new key at a chunk where another key of yours built (§5.7)', () => {
-  it('holds while the other key\'s layer cannot be read, then starts from its cells', async () => {
-    const otherSk = generateSecretKey()
-    const other = getPublicKey(otherSk)
-    const p = spawnPlace()
-    standAt(p)
-    await T().enter()
-    const key = builderRecord(me())!.current!
-    // Your spawn names this device's key and another device's.
-    const st = spawnTemplate(me(), Math.floor(Date.now() / 1000))
-    const spawn = await sign({ ...st, tags: [...st.tags, ['builder', other]] })
-    expect(spawn.tags).toContainEqual(['builder', key])
-    own = [spawn]
-    hold(spawn)
-    await confirmTags()
-    await settle(100)
-    // The other device's layer here: one Gibsonite in the air.
-    const base = chunkOf(p.x, p.y, p.z, p.plane)
-    const g = generate(base).blocks
-    let air = -1
-    for (let c = 32767; c >= 0 && air < 0; c--) if (g[c] === EMPTY) air = c
-    const values = g.slice()
-    values[air] = 43
-    const plain = nextPlaintext({ prev: null, plane: p.plane, values, ground: g, block: { height: 924_990, hash: H } })!
-    const { key: rk, lookupId } = chunkRegionKey(base)
-    const ids = plain.settles.map((x) => settleId(me(), lookupId, x)!)
-    hold(finalizeEvent({ kind: LAYER_KIND, created_at: 1_790_000_050, tags: layerTags({ lookupId, author: me(), reach: [spawn.id], settleIds: ids, encrypted: await encryptForRegion(rk, plaintextJson(plain)) }), content: '' }, otherSk) as unknown as NostrEvent)
+describe('reading by the Stack', () => {
+  const HEAD = { x: 0x1234567890abcdef12350n, y: 0xfedcba0987654321fed90n, z: 0x0f0f0f0f0f0f0f0f0f0f0n, plane: 0 as const }
 
-    refuseP = true
-    await surveyHere()
-    mineSome(1)
-    await flush('test')
-    expect(published).toHaveLength(0)
-    expect(useShare.getState().words).toMatch(/other devices/)
-
-    refuseP = false
-    await flush('test')
-    expect(published).toHaveLength(1)
-    const ev = published[0]
-    expect(ev.pubkey).toBe(key)
-    const r = await readLayer(ev, {
-      verify: (e) => verifyEvent(e as never), key: rk, lookupId, chunk: base, ground: async () => g,
-      reach: async (_a, b, ids2) => reachPlaces(readChainOf(me(), own, new Set()), b, ids2), header: async () => 'ok',
-    })
-    expect(r.status).toBe('counted')
-    if (r.status !== 'counted') return
-    const pl = r.layer.planes[0]
-    // The other key's Gibsonite, with its settle carried unchanged, and your own change over it.
-    expect(pl.values[air]).toBe(43)
-    expect(r.plaintext.settles).toContainEqual(plain.settles[0])
-    expect(pl.placements.length).toBeGreaterThanOrEqual(2)
-    // Not a key this device holds: no emptied layer for it.
-    expect(published.some((e) => e.pubkey === other)).toBe(false)
-    // It is your own here now, so the next version keeps it.
-    const s = terrainSession!
-    const slot = s.world.slotByKey(chunkKey(base))!
-    expect(slot.own![air]).toBe(43)
-  })
-})
-
-describe('reading another builder\'s layer', () => {
-  /** A throwaway builder whose chain hops to `to`, with their builder key named on the spawn. */
-  function stranger(to: { x: bigint; y: bigint; z: bigint }, plane: 0 | 1): { pubkey: string; builder: Uint8Array; hop: NostrEvent; sk: Uint8Array } {
-    let sk = generateSecretKey()
-    let pubkey = getPublicKey(sk)
-    while ((parseInt(pubkey.slice(-1), 16) & 1) !== plane) { sk = generateSecretKey(); pubkey = getPublicKey(sk) }
+  /** A throwaway builder whose spawn names their builder key (held by the relay). */
+  function stranger(): { pubkey: string; builder: Uint8Array; sk: Uint8Array } {
+    const sk = generateSecretKey()
+    const pubkey = getPublicKey(sk)
     const builder = generateSecretKey()
     const st = spawnTemplate(pubkey, 1_790_000_000)
-    const spawn = finalizeEvent({ ...st, tags: [...st.tags, ['builder', getPublicKey(builder)]] }, sk) as unknown as NostrEvent
-    const hop = finalizeEvent(hopTemplate({ createdAt: 1_790_000_001, genesisId: spawn.id, previousId: spawn.id, prevCoordHex: pubkey, to: { ...to }, plane, proofHash: 'ab'.repeat(32), mn: '0'.repeat(16), mp: '00'.repeat(32) }), sk) as unknown as NostrEvent
-    hold(spawn)
-    hold(hop)
-    return { pubkey, builder, hop, sk }
+    hold(finalizeEvent({ ...st, tags: [...st.tags, ['builder', getPublicKey(builder)]] }, sk) as unknown as NostrEvent)
+    return { pubkey, builder, sk }
   }
 
-  async function strangerLayer(who: { pubkey: string; builder: Uint8Array; hop: NostrEvent }, base: ChunkBase, cells: Record<number, number>): Promise<void> {
+  async function layerBy(who: { pubkey: string; builder: Uint8Array }, base: ChunkBase, cells: Record<number, number>, createdAt: number, crew: string[] = []): Promise<void> {
     const g = generate(base).blocks
     const values = g.slice()
     for (const [c, v] of Object.entries(cells)) values[Number(c)] = v
-    const plain = nextPlaintext({ prev: null, plane: base.plane as 0 | 1, values, ground: g, block: { height: 924_990, hash: H } })!
+    const plain = nextPlaintext(null, base.plane as 0 | 1, values, g, crew)!
     const { key, lookupId } = chunkRegionKey(base)
-    const ids = plain.settles.map((s) => settleId(who.pubkey, lookupId, s)!)
-    const encrypted = await encryptForRegion(key, plaintextJson(plain))
-    hold(finalizeEvent({ kind: LAYER_KIND, created_at: 1_790_000_100, tags: layerTags({ lookupId, author: who.pubkey, reach: [who.hop.id], settleIds: ids, encrypted }), content: '' }, who.builder) as unknown as NostrEvent)
+    hold(finalizeEvent({ kind: LAYER_KIND, created_at: createdAt, tags: layerTags({ lookupId, author: who.pubkey, encrypted: await encryptForRegion(key, plaintextJson(plain)) }), content: '' }, who.builder) as unknown as NostrEvent)
   }
 
-  it('a retired key the witness cannot judge yet: the bag says so, and only while that is true', async () => {
-    const HEAD = { x: 0x2234567890abcdef12350n, y: 0xfedcba0987654321fed90n, z: 0x0f0f0f0f0f0f0f0f0f0f0n, plane: 0 as const }
-    standAt(HEAD)
-    await T().enter()
+  /** Open TERRAIN at HEAD with the chunk surveyed; returns the chunk, its ground and a cell helper. */
+  async function atHead() {
+    await named(true, HEAD)
     const base = chunkOf(HEAD.x, HEAD.y, HEAD.z, 0)
     const g = generate(base).blocks
-    let air = -1
-    for (let c = 0; c < 32768 && air < 0; c++) if (g[c] === EMPTY) air = c
-    const who = stranger({ x: HEAD.x + 1n, y: HEAD.y, z: HEAD.z }, 0)
-    await strangerLayer(who, base, { [air]: 8 })
-    // Later on their chain they retire that key, from here on: the layer's reach came before it, so it still counts.
-    const authorSk = who.sk
-    const bpub = getPublicKey(who.builder)
-    const retire = (hopTemplate({ createdAt: 1_790_000_200, genesisId: who.hop.tags.find((t) => t[3] === 'genesis')![1], previousId: who.hop.id, prevCoordHex: who.hop.tags.find((t) => t[0] === 'C')![1], to: { x: HEAD.x + 2n, y: HEAD.y, z: HEAD.z }, plane: 0, proofHash: 'ab'.repeat(32), mn: '0'.repeat(16), mp: '00'.repeat(32) }))
-    const retired = finalizeEvent({ ...retire, tags: [...retire.tags, ['builder-retire', bpub], ['R', bpub]] }, authorSk) as unknown as NostrEvent
-    hold(retired)
-    await readChunks([base])
-    await settle(100)
-    // The witness gave no answer (it does not serve its query yet): their block shows, and the bag says why.
-    expect(terrainSession!.world.blockCs(...[Number(base.x - terrainSession!.world.origin.x) + (air & 31), Number(base.y - terrainSession!.world.origin.y) + (air >> 10), Number(base.z - terrainSession!.world.origin.z) + ((air >> 5) & 31)] as [number, number, number])).toBe(8)
-    expect(useShare.getState().note).toBe(RETIRED_UNCHECKED)
-    // The witness answers: it recorded the layer before the retirement. Judged, so the note goes.
-    const layerEv = held.find((e) => e.kind === LAYER_KIND && e.pubkey === bpub)!
-    setShareDeps({ witness: { learn: async () => undefined, settle: () => null, status: (id) => (id === layerEv.id ? { recorded: true, height: 925_000 } : id === retired.id ? { recorded: true, height: 925_010 } : null) } })
-    await readChunks([base])
-    await settle(100)
-    expect(useShare.getState().note).toBeUndefined()
-    // Recorded after the retirement: rule 4 drops it, and there is nothing left to say.
-    setShareDeps({ witness: { learn: async () => undefined, settle: () => null, status: (id) => (id === layerEv.id ? { recorded: true, height: 925_020 } : id === retired.id ? { recorded: true, height: 925_010 } : null) } })
-    await readChunks([base])
-    await settle(100)
-    expect(useShare.getState().note).toBeUndefined()
-    expect(terrainSession!.world.blockCs(...[Number(base.x - terrainSession!.world.origin.x) + (air & 31), Number(base.y - terrainSession!.world.origin.y) + (air >> 10), Number(base.z - terrainSession!.world.origin.z) + ((air >> 5) & 31)] as [number, number, number])).toBe(EMPTY)
-  })
-
-  it('drawn and walked on like yours; your own change shows over it for you; a mute hides them', async () => {
-    const HEAD = { x: 0x1234567890abcdef12350n, y: 0xfedcba0987654321fed90n, z: 0x0f0f0f0f0f0f0f0f0f0f0n, plane: 0 as const }
-    standAt(HEAD)
-    await T().enter()
-    const base = chunkOf(HEAD.x, HEAD.y, HEAD.z, 0)
-    const g = generate(base).blocks
-    // Two cells the stranger changes: one that is air in the ground (they place Prismite), one you will mine too.
-    let air = -1
-    let rock = -1
-    for (let c = 0; c < 32768 && (air < 0 || rock < 0); c++) { if (g[c] === EMPTY && air < 0) air = c; if (g[c] !== EMPTY && rock < 0) rock = c }
-    const who = stranger({ x: HEAD.x + 1n, y: HEAD.y, z: HEAD.z }, 0)
-    await strangerLayer(who, base, { [air]: 8, [rock]: 42 })
-    await readChunks([base])
-    await settle(300)
     const s = terrainSession!
     const at = (c: number): [number, number, number] => [Number(base.x - s.world.origin.x) + (c & 31), Number(base.y - s.world.origin.y) + (c >> 10), Number(base.z - s.world.origin.z) + ((c >> 5) & 31)]
-    // Shown, though you never surveyed here: they did.
-    expect(s.world.blockCs(...at(air))).toBe(8)
-    expect(s.world.blockCs(...at(rock))).toBe(42)
-    // Not yours to change until you survey it yourself.
-    expect(T().mine({ cell: at(rock), normal: [0, 1, 0], distance: 1 })).toBe(false)
-    // Surveyed: you mine their Glowcore; you see your change, while their block stays theirs for everyone else.
-    await T().survey(s.world.slotAtCs(...at(rock))!.key)
-    expect(s.world.blockCs(...at(air))).toBe(8)
-    const glow = kindId(42)
-    const before = T().inventory.counts[glow] ?? 0
-    expect(T().mine({ cell: at(rock), normal: [0, 1, 0], distance: 1 })).toBe(true)
-    expect(s.world.blockCs(...at(rock))).toBe(EMPTY)
-    // Their block is never carried: you get what was yours there (the ground's rock), not their Glowcore.
-    expect(T().inventory.counts[glow] ?? 0).toBe(before)
-    expect(T().inventory.counts[kindId(g[rock])]).toBeGreaterThan(0)
+    let air = -1
+    let rock = -1
+    for (let c = 32767; c >= 0 && (air < 0 || rock < 0); c--) { if (g[c] === EMPTY && air < 0) air = c; if (g[c] !== EMPTY && rock < 0) rock = c }
+    return { base, g, at, air, rock, s }
+  }
+
+  it('a stranger\'s blocks are drawn; their newer layer never overrides yours; a mute hides them; a retired key voids its layers', async () => {
+    const { base, at, air, rock, s } = await atHead()
+    const who = stranger()
+    await layerBy(who, base, { [air]: 8 }, 1_790_000_100)
     await readChunks([base])
-    await settle(100)
+    await settle(300)
+    expect(s.world.blockCs(...at(air))).toBe(8)
+    // Not yours to change until you survey the chunk yourself.
+    expect(T().mine({ cell: at(air), normal: [0, 1, 0], distance: 1 })).toBe(false)
+    // You survey and mine a rock; the stranger, later, puts Glowcore in that cell: yours shows for you.
+    await T().survey(s.world.slotAtCs(...at(rock))!.key)
+    expect(T().mine({ cell: at(rock), normal: [0, 1, 0], distance: 1 })).toBe(true)
+    await layerBy(who, base, { [air]: 8, [rock]: 42 }, 1_790_000_200)
+    await readChunks([base])
+    await settle(200)
     expect(s.world.blockCs(...at(rock))).toBe(EMPTY)
     expect(s.world.blockCs(...at(air))).toBe(8)
     // Muted: they never built here, for you.
     muted = new Set([who.pubkey])
     await readChunks([base])
-    await settle(100)
+    await settle(200)
     expect(s.world.blockCs(...at(air))).toBe(EMPTY)
-    expect(idx(0, 0, 0)).toBe(0)
+    // Unmuted, but their key retired: every layer it signed is void.
+    muted = new Set()
+    resetStatuses()
+    const ret = finalizeEvent({ kind: 3333, created_at: 1_790_000_300, tags: [['A', 'hop'], ['builder-retire', getPublicKey(who.builder)], ['R', getPublicKey(who.builder)]], content: '' }, who.sk) as unknown as NostrEvent
+    hold(ret)
+    await readChunks([base])
+    await settle(200)
+    expect(s.world.blockCs(...at(air))).toBe(EMPTY)
+  })
+
+  it('mining someone else\'s block in open air is an explicit change at the ground value, published as one (§5.4)', async () => {
+    const { base, at, air, s } = await atHead()
+    const who = stranger()
+    await layerBy(who, base, { [air]: 8 }, 1_790_000_100)
+    await readChunks([base])
+    await settle(300)
+    await T().survey(s.world.slotAtCs(...at(air))!.key)
+    expect(s.world.blockCs(...at(air))).toBe(8)
+    expect(T().mine({ cell: at(air), normal: [0, 1, 0], distance: 1 })).toBe(true)
+    expect(s.world.blockCs(...at(air))).toBe(EMPTY)
+    await settle(50)
+    await flush('test')
+    const ev = published.at(-1)!
+    const plain = await opened(ev, base)
+    const pl = plain.planes.find((p) => p.plane === 0)!
+    expect(pl.form).toBe('diff')
+    const idxs = expandRuns(pl.cells, 32768, pl.pal.length)!
+    expect(pl.pal[idxs[air]]).toBe(0)
+    // Read again, yours stands over theirs for you.
+    await readChunks([base])
+    await settle(200)
+    expect(s.world.blockCs(...at(air))).toBe(EMPTY)
+  })
+
+  it('whom you follow outranks a newer stranger', async () => {
+    const { base, at, air, s } = await atHead()
+    const friend = stranger(), other = stranger()
+    follows = [friend.pubkey]
+    resetFollows()
+    await terrainOpenedAgain()
+    await layerBy(friend, base, { [air]: 40 }, 1_790_000_100)
+    await layerBy(other, base, { [air]: 41 }, 1_790_000_900)
+    await readChunks([base])
+    await settle(300)
+    expect(s.world.blockCs(...at(air))).toBe(40)
+  })
+
+  it('the cursor\'s colour: yours mint, theirs amber, a builder who lists you mint with the crew mark, unbuilt ground white; ADD BACK', async () => {
+    const { base, at, air, rock, s } = await atHead()
+    const them = stranger(), crewing = stranger()
+    let air2 = -1
+    const g = generate(base).blocks
+    for (let c = air - 1; c >= 0 && air2 < 0; c--) if (g[c] === EMPTY) air2 = c
+    await layerBy(them, base, { [air]: 8 }, 1_790_000_100)
+    await layerBy(crewing, base, { [air2]: 9 }, 1_790_000_100, [me()])
+    await T().survey(s.world.slotAtCs(...at(rock))!.key)
+    await readChunks([base])
+    await settle(300)
+    const key = chunkKey(base)
+    const aim = (c: number) => { const [x, y, z] = at(c); return aimAt(key, s.world.locate(x, y, z).cell) }
+    expect(aim(air)).toBe('other')
+    expect(AIM_COLORS.other).toBe('#ffb347')
+    expect(aim(air2)).toBe('crew')
+    let ground = -1
+    for (let c = 0; c < 32768 && ground < 0; c++) if (g[c] !== EMPTY && c !== rock) ground = c
+    expect(aim(ground)).toBe('ground')
+    expect(T().mine({ cell: at(rock), normal: [0, 1, 0], distance: 1 })).toBe(true)
+    // Redrawn with your change: it is yours.
+    await readChunks([base])
+    s.world.setBlocks(key, g, (await import('../terrainShare')).viewOf(key, g, s.world.slotByKey(key)!.own!))
+    expect(aim(rock)).toBe('mine')
+    // They list you: "You build on theirs", with ADD BACK until they are in yours.
+    expect(useShare.getState().crewOf).toEqual([crewing.pubkey])
+    expect(await addCrew(crewing.pubkey)).toBe(true)
+    expect(useShare.getState().crew).toContain(crewing.pubkey)
+  })
+
+  it('in your home every block is yours to the cursor', async () => {
+    const p = spawnPlace()
+    await named(true, p)
+    const base = chunkOf(p.x, p.y, p.z, p.plane)
+    const who = stranger()
+    const g = generate(base).blocks
+    let air = -1
+    for (let c = 32767; c >= 0 && air < 0; c--) if (g[c] === EMPTY) air = c
+    await layerBy(who, base, { [air]: 8 }, 1_790_000_100)
+    await readChunks([base])
+    await settle(300)
+    expect(aimAt(chunkKey(base), air)).toBe('mine')
   })
 })
+
+/** Forget cached key statuses and follows between steps (resetShare forgets them all). */
+function resetStatuses(): void {
+  // Statuses are trusted for a minute: a step later in time sees a retirement.
+  const now = Date.now()
+  setShareDeps({ now: () => now + 120_000 })
+}
+function resetFollows(): void { /* follows are read on TERRAIN's open */ }
+async function terrainOpenedAgain(): Promise<void> {
+  const { terrainOpened } = await import('../terrainShare')
+  await terrainOpened()
+  await settle(50)
+}

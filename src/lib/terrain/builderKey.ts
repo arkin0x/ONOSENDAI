@@ -14,14 +14,15 @@
  * sign anyway (lib/terrain/builderTags.ts). Until an action carrying the tag
  * is found on the canonical relay, the tag rides on every movement action,
  * which is harmless (§4.2), and no layer is published. Every named key
- * stays valid until a `builder-retire` tag retires it (ruled 2026-11-24).
+ * stays valid until a `builder-retire` tag retires it, and a retired key
+ * voids every layer it ever signed (the owner's Blocks design, 2026-11-25).
  *
  * Retiring this device's key (the bag's RETIRE) owes a `builder-retire`
- * on the next action and makes a new key at once, named on that same action.
- * The retirement is "from here on" (§4.3), the form for a key nobody else
- * holds; `all` voids everything a key ever wrote and is for a key that may
- * have been copied. Beside it rides `["R", "<hex>"]`, the single-letter tag
- * relays index, so a reader finds every retirement of a key with one filter.
+ * on the next action and makes a new key at once, named on that same action;
+ * once named, this device publishes its blocks again under it
+ * (store/terrainShare.ts). Beside the retirement rides `["R", "<hex>"]`,
+ * the single-letter tag relays index, so a reader finds every retirement of
+ * a key with one filter.
  */
 
 import { generateSecretKey, getPublicKey } from 'nostr-tools/pure'
@@ -41,7 +42,7 @@ export interface BuilderKeyRow {
   /** Actions signed carrying its `builder` tag, newest last, not yet found on the relay. */
   naming: string[]
   /** Retired, or being retired: owed on the next action until an action carrying it is found on the relay. */
-  retire?: { all: boolean; signed: string[]; confirmed: string | null }
+  retire?: { signed: string[]; confirmed: string | null }
 }
 
 export interface BuilderRecord {
@@ -83,7 +84,7 @@ export function owedTags(rec: BuilderRecord | undefined): string[][] {
   if (cur && cur.named === null && !cur.retire) out.push([BUILDER_TAG, cur.pub])
   for (const k of rec.keys) {
     if (!k.retire || k.retire.confirmed !== null) continue
-    out.push(k.retire.all ? [BUILDER_RETIRE_TAG, k.pub, 'all'] : [BUILDER_RETIRE_TAG, k.pub])
+    out.push([BUILDER_RETIRE_TAG, k.pub])
     // Beside every retirement, the single-letter R tag relays index, so readers find it on any chain (§4.3).
     out.push([RETIRE_INDEX_TAG, k.pub])
   }
@@ -205,22 +206,12 @@ export function noteFound(owner: string, found: ReadonlySet<string>): boolean {
   return touched
 }
 
-/** The naming found on the relay is not on the chain any more (a respawn, a fork that lost): name the key again on the next action. */
-export function nameAgain(owner: string, pub: string): void {
-  const rec = records.get(owner)
-  const k = rec?.keys.find((r) => r.pub === pub)
-  if (!rec || !k || k.named === null) return
-  k.named = null
-  k.naming = []
-  changed(rec)
-}
-
-/** Retire this device's current key (from here on, or `all`) and make a new one, both carried by the next action. */
-export function retireCurrent(owner: string, all = false, now: number = Date.now()): BuilderRecord | null {
+/** Retire this device's current key and make a new one, both carried by the next action. */
+export function retireCurrent(owner: string, now: number = Date.now()): BuilderRecord | null {
   const rec = records.get(owner)
   const k = rec?.keys.find((r) => r.pub === rec.current)
   if (!rec || !k) return null
-  k.retire = { all, signed: [], confirmed: null }
+  k.retire = { signed: [], confirmed: null }
   const row = newRow(now)
   rec.keys = [...rec.keys, row]
   rec.current = row.pub

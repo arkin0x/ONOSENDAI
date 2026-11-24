@@ -30,19 +30,20 @@
  * The black sun rides on it (arkinox, 2026-11-24: "Can we add the black sun to
  * the 3d compass? that would help"). The sun is the direction +Z_cs and has no
  * place (scene/BlackSun.tsx), so the bearing to it is the same from anywhere:
- * it is drawn on the Z arrow, a dark disc in a violet ring that the arrowhead
- * points into. Turned away from you, it lies past the centre of the ball, and
- * is drawn dimmed through whatever is in front of it rather than hidden. The
- * workshop leaves it off: the bench is a shard's own frame, which a placed
- * shard can be turned out of, so a sun there would say something false.
+ * it is drawn out along the Z arrow, past the arrowhead and past the Z label:
+ * a dark disc in a glowing violet ring (arkinox, 2026-11-24: "it should be
+ * beyond the Z+ arrow, not on top of the arrow. make it be past the letter Z
+ * on that axis"). Turned away from you, it lies past the centre of the ball,
+ * and is drawn dimmed through whatever is in front of it rather than hidden.
+ * The workshop leaves it off: the bench is a shard's own frame, which a
+ * placed shard can be turned out of, so a sun there would say something false.
  */
 
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Quaternion, Vector3, type Group, type MeshBasicMaterial } from 'three'
+import { BufferGeometry, Color, Float32BufferAttribute, Quaternion, Vector3, type Group, type MeshBasicMaterial } from 'three'
 import { useCyberspace } from '../store/useCyberspace'
 import { cameraPose } from '../lib/cameraPose'
-import { BLACK_SUN } from '../lib/palette'
 import type { AxisName, ViewAxes } from '../lib/space'
 
 interface LabelPosition {
@@ -60,26 +61,54 @@ const CONE_RADIUS = ARROW_THICKNESS * 2
 const CONE_HEIGHT = 0.3
 const LABEL_OFFSET = 0.2
 
+/** Half the vertical field of view's tangent: the compass camera's 40 degrees. */
+const HALF_FOV_TAN = Math.tan((20 * Math.PI) / 180)
+
 /**
- * The black sun on the Z arrow, in the compass's units.
+ * The black sun beyond the Z arrow, in the compass's units: outward from the
+ * centre, the arrow, then its Z label, then the sun.
  *
- * Centred a little short of the arrowhead so the ring goes round it: the cone
- * runs 1.05 to 1.35 and the ring 0.8 to 1.4, so the arrow points into the
- * sun. The disc and its rings stand SUN_BACK behind that point, away from the
- * eye, so the arrowhead is drawn over the dark disc rather than under it.
- * The Z label moves out past the halo to make room.
+ * The panel is small (84px on a phone) and the Z label is fixed in pixels, so
+ * the three only fit end to end with the arrows a little shorter while the
+ * sun is shown: SUN_ARROW instead of ARROW_LENGTH, every label the usual
+ * LABEL_OFFSET past its arrow. The sun stands at SUN_AT, but never further
+ * out on screen than SUN_EDGE of the way from the centre to the panel's edge
+ * (sunReach), so the ring stays inside the panel when the axis leans toward
+ * you and perspective swings it outward. Seen end on, the reach collapses to
+ * the centre, where the ring circles the centre dot.
+ *
+ * Its size on screen never changes with depth (sunScale), as the scene sun's
+ * does not: a thing at infinity does not grow as it swings toward you. It
+ * grows only as it comes end on, by up to SUN_RETICLE, so the ring stands
+ * clear round the centre dot rather than hiding behind it.
  */
-const SUN_AT = 1.1
-const SUN_BACK = 0.3
-const SUN_DISC = 0.24
-const SUN_RING: [number, number] = [0.24, 0.3]
-const SUN_HALO: [number, number] = [0.3, 0.4]
-const SUN_Z_LABEL = 1.58
-/** Opacities [disc, ring, halo]: facing you, and turned away past the centre. */
-const SUN_NEAR = [0.85, 1, 0.34] as const
-const SUN_FAR = [0.6, 0.85, 0.24] as const
+const SUN_ARROW = 0.85
+const SUN_AT = 2.2
+const SUN_EDGE = 0.8
+const SUN_RETICLE = 1.8
+const SUN_DISC = 0.12
+/** The corona: its glow fades to nothing over [0] to [1], is full over [1] to [2], fades out over [2] to [3]. */
+const SUN_CORONA = [0.08, 0.12, 0.16, 0.23] as const
+/** Opacities [disc, corona]: facing you, and turned away past the centre. */
+const SUN_NEAR = [0.85, 1] as const
+const SUN_FAR = [0.6, 0.9] as const
 /** The disc's colour: the unlit space a black sun is. */
 const SUN_DARK = '#06030c'
+/**
+ * The corona's colours, core and glow, matched to the scene sun as it shows
+ * on screen (arkinox, 2026-11-24: "the purple ring isn't the same bright color
+ * as the actual black sun"). The scene sun is BLACK_SUN (#9258d1) at 0.9
+ * through the world's bloom, intensity 2.6 at a threshold near zero
+ * (worldBloom.tsx), which lifts it far past the swatch: measured in the
+ * canonical view, its rim's median pixel is #dc90ff to #dea3ff (375px and
+ * 1440px). Its brightest pixels read near white, but those are where the
+ * spawn's white outline crosses it. The compass has no bloom, so the core is
+ * that rim colour a shade hotter and the glow either side, standing in for
+ * the bloom's spread, a shade deeper: a whiter core read as white, not violet,
+ * at the compass's size.
+ */
+const SUN_CORE = '#e8acff'
+const SUN_GLOW = '#d48cff'
 
 /** Local-frame direction that a cyberspace axis currently points along. */
 function localDir(axes: ViewAxes, axis: AxisName): Vector3 {
@@ -92,18 +121,18 @@ function localDir(axes: ViewAxes, axis: AxisName): Vector3 {
 
 const UP = new Vector3(0, 1, 0)
 
-function Arrow({ dir, color }: { dir: Vector3; color: string }): JSX.Element {
+function Arrow({ dir, color, length }: { dir: Vector3; color: string; length: number }): JSX.Element {
   const q = useMemo(
     () => new Quaternion().setFromUnitVectors(UP, dir.clone().normalize()),
     [dir],
   )
   return (
     <group quaternion={q}>
-      <mesh position={[0, ARROW_LENGTH / 2, 0]}>
-        <cylinderGeometry args={[ARROW_THICKNESS, ARROW_THICKNESS, ARROW_LENGTH, 8]} />
+      <mesh position={[0, length / 2, 0]}>
+        <cylinderGeometry args={[ARROW_THICKNESS, ARROW_THICKNESS, length, 8]} />
         <meshStandardMaterial color={color} emissive={color} emissiveIntensity={0.3} />
       </mesh>
-      <mesh position={[0, ARROW_LENGTH, 0]}>
+      <mesh position={[0, length, 0]}>
         <coneGeometry args={[CONE_RADIUS, CONE_HEIGHT, 8]} />
         <meshStandardMaterial color={color} emissive={color} emissiveIntensity={0.3} />
       </mesh>
@@ -159,32 +188,126 @@ export const SUN_WORDS: Record<SunBearing, string> = {
 
 const SUN_SEEN = new Vector3()
 
-/** One part's opacity (0 disc, 1 ring, 2 halo) at a nearness from sunNearness. */
-const sunOpacity = (part: 0 | 1 | 2, near: number): number => SUN_FAR[part] + (SUN_NEAR[part] - SUN_FAR[part]) * near
+/**
+ * How far out along the Z arrow the sun stands, for a sun seen at `inView`
+ * (sunInView): SUN_AT, or less where SUN_AT would put its centre more than
+ * SUN_EDGE of the way to the panel's edge. A point L out along the axis
+ * lands L * lateral / ((CAMERA_DISTANCE - L * z) * tan) from the centre in
+ * the camera's normalised units, so the reach that lands exactly on SUN_EDGE
+ * solves directly. End on (no lateral) it never reaches the edge.
+ */
+export function sunReach(inView: Vector3): number {
+  const lateral = Math.hypot(inView.x, inView.y)
+  const k = SUN_EDGE * HALF_FOV_TAN
+  const denom = lateral + k * inView.z
+  if (denom <= 0) return SUN_AT
+  return Math.min(SUN_AT, (k * CAMERA_DISTANCE) / denom)
+}
+
+/**
+ * The sun's scale at `reach` (sunReach) for a sun seen at `inView`: its
+ * depth over the compass's own distance, so its size on screen stays the
+ * same however far round the ball it is, and up to SUN_RETICLE more as it
+ * comes end on (lateral under 0.5), where it rings the centre.
+ */
+export function sunScale(inView: Vector3, reach: number): number {
+  const reticle = 1 + (SUN_RETICLE - 1) * sunEndOn(inView)
+  return ((CAMERA_DISTANCE - reach * inView.z) / CAMERA_DISTANCE) * reticle
+}
+
+/** How end on the sun is seen, 0 to 1: 1 dead end on, easing to 0 by a lateral of 0.5. */
+export function sunEndOn(inView: Vector3): number {
+  const t = Math.min(1, Math.hypot(inView.x, inView.y) / 0.5)
+  return 1 - t * t * (3 - 2 * t)
+}
+
+/** How far from the centre, in the camera's normalised units (1 is the panel's edge), a point `reach` out along the axis lands. */
+export function sunOnScreen(inView: Vector3, reach: number): number {
+  return (reach * Math.hypot(inView.x, inView.y)) / ((CAMERA_DISTANCE - reach * inView.z) * HALF_FOV_TAN)
+}
+
+/** The layout the tests check the sun against: where the arrowheads end, the labels and the sun stand, and the corona's radii. */
+export const SUN_LAYOUT = {
+  cameraDistance: CAMERA_DISTANCE,
+  halfFovTan: HALF_FOV_TAN,
+  arrowTip: SUN_ARROW + CONE_HEIGHT / 2,
+  label: SUN_ARROW + LABEL_OFFSET,
+  at: SUN_AT,
+  edge: SUN_EDGE,
+  /** The bright band's outer radius: its edge nearest the label, which lies toward the centre. */
+  coronaCoreOuter: SUN_CORONA[2],
+  coronaCore: SUN_CORONA[1],
+  coronaOuter: SUN_CORONA[3],
+} as const
+
+/** One part's opacity (0 disc, 1 corona) at a nearness from sunNearness. */
+const sunOpacity = (part: 0 | 1, near: number): number => SUN_FAR[part] + (SUN_NEAR[part] - SUN_FAR[part]) * near
 
 /** The sun's meshes, written to on the frames the compass draws. */
 export interface SunParts {
   group: Group | null
   disc: MeshBasicMaterial | null
   ring: MeshBasicMaterial | null
-  halo: MeshBasicMaterial | null
 }
 
 /**
- * Turns the sun to face the compass camera and dims it by how far round the
- * ball it is. Turned away, the rings draw through what is in front of them,
- * so the sun is never lost behind the centre; the disc stays depth tested,
- * so the centre still reads as in front of it. Returns the bearing.
+ * Stands the sun out along the Z arrow (sunReach), sizes it (sunScale),
+ * turns it to face the compass camera and dims it by how far round the ball
+ * it is. Turned away,
+ * the corona draws through what is in front of it, so the sun is never lost
+ * behind the centre; the disc stays depth tested, so the centre still reads
+ * as in front of it. Returns the bearing.
  */
 export function placeSun(parts: SunParts, sunDir: Vector3, pose: Quaternion): SunBearing {
   const seen = sunInView(sunDir, pose, SUN_SEEN)
   const near = sunNearness(seen)
-  if (parts.group) parts.group.quaternion.copy(pose)
-  const front = seen.z >= 0
-  if (parts.disc) parts.disc.opacity = sunOpacity(0, near)
-  if (parts.ring) { parts.ring.opacity = sunOpacity(1, near); parts.ring.depthTest = front }
-  if (parts.halo) { parts.halo.opacity = sunOpacity(2, near); parts.halo.depthTest = front }
+  if (parts.group) {
+    const reach = sunReach(seen)
+    parts.group.position.copy(sunDir).multiplyScalar(reach)
+    parts.group.quaternion.copy(pose)
+    parts.group.scale.setScalar(sunScale(seen, reach))
+  }
+  // End on and on your side, the disc is nearest the eye and would cover the
+  // centre dot and the Z arrowhead, so it fades out and leaves the ring.
+  if (parts.disc) parts.disc.opacity = sunOpacity(0, near) * (seen.z > 0 ? 1 - sunEndOn(seen) : 1)
+  if (parts.ring) { parts.ring.opacity = sunOpacity(1, near); parts.ring.depthTest = seen.z >= 0 }
   return sunBearing(seen)
+}
+
+/**
+ * The corona as one flat ring whose glow fades in and out by vertex alpha
+ * (SUN_CORONA): a bright core with a soft spread either side, the look the
+ * scene's bloom gives the sun, drawn by one mesh with one opacity to dim.
+ */
+function coronaGeometry(): BufferGeometry {
+  const SEGMENTS = 64
+  const core = new Color(SUN_CORE)
+  const glow = new Color(SUN_GLOW)
+  const rings: Array<[number, Color, number]> = [
+    [SUN_CORONA[0], glow, 0], [SUN_CORONA[1], core, 1], [SUN_CORONA[2], core, 1], [SUN_CORONA[3], glow, 0],
+  ]
+  const position: number[] = []
+  const color: number[] = []
+  for (const [r, c, a] of rings) {
+    for (let i = 0; i < SEGMENTS; i++) {
+      const t = (i / SEGMENTS) * Math.PI * 2
+      position.push(Math.cos(t) * r, Math.sin(t) * r, 0)
+      color.push(c.r, c.g, c.b, a)
+    }
+  }
+  const index: number[] = []
+  for (let k = 0; k < rings.length - 1; k++) {
+    for (let i = 0; i < SEGMENTS; i++) {
+      const a = k * SEGMENTS + i, b = k * SEGMENTS + ((i + 1) % SEGMENTS)
+      const c = a + SEGMENTS, d = b + SEGMENTS
+      index.push(a, c, b, b, c, d)
+    }
+  }
+  const g = new BufferGeometry()
+  g.setAttribute('position', new Float32BufferAttribute(position, 3))
+  g.setAttribute('color', new Float32BufferAttribute(color, 4))
+  g.setIndex(index)
+  return g
 }
 
 /** What the compass's last frame was drawn from. */
@@ -251,9 +374,10 @@ function CompassScene({ onLabelsUpdate, onSun, pose, given, sun }: { onLabelsUpd
   }, [axes, given])
 
   const drawn = useRef(nothingDrawn())
-  const sunParts = useRef<SunParts>({ group: null, disc: null, ring: null, halo: null })
-  // The sun stands on the Z arrow, so it moves with the axes.
-  const sunAt = useMemo(() => dirs.z.clone().multiplyScalar(SUN_AT), [dirs])
+  const sunParts = useRef<SunParts>({ group: null, disc: null, ring: null })
+  const corona = useMemo(() => (sun ? coronaGeometry() : null), [sun])
+  useEffect(() => () => corona?.dispose(), [corona])
+  const arrowLength = sun ? SUN_ARROW : ARROW_LENGTH
   // A restored context starts blank: draw again.
   useEffect(() => {
     const canvas = gl.domElement
@@ -276,7 +400,7 @@ function CompassScene({ onLabelsUpdate, onSun, pose, given, sun }: { onLabelsUpd
     }
 
     const labels: LabelPosition[] = (['x', 'y', 'z'] as const).map((axis) => {
-      const world = dirs[axis].clone().multiplyScalar(sun && axis === 'z' ? SUN_Z_LABEL : ARROW_LENGTH + LABEL_OFFSET)
+      const world = dirs[axis].clone().multiplyScalar(arrowLength + LABEL_OFFSET)
       const projected = world.project(camera)
       return {
         axis,
@@ -292,30 +416,25 @@ function CompassScene({ onLabelsUpdate, onSun, pose, given, sun }: { onLabelsUpd
 
   return (
     <group>
-      <Arrow dir={dirs.x} color="#ff4444" />
-      <Arrow dir={dirs.y} color="#44ff44" />
-      <Arrow dir={dirs.z} color="#4488ff" />
+      <Arrow dir={dirs.x} color="#ff4444" length={arrowLength} />
+      <Arrow dir={dirs.y} color="#44ff44" length={arrowLength} />
+      <Arrow dir={dirs.z} color="#4488ff" length={arrowLength} />
       <mesh>
         <sphereGeometry args={[0.12, 16, 16]} />
         <meshStandardMaterial color="#ffffff" emissive="#ffffff" emissiveIntensity={0.2} />
       </mesh>
-      {sun && (
-        <group position={sunAt} ref={(g) => { sunParts.current.group = g }}>
-          {/* Unlit and untone-mapped, so the violet is the scene sun's own. Front faces only: turned to the camera on every drawn frame, they are never seen from behind. */}
-          <group position={[0, 0, -SUN_BACK]}>
-            <mesh renderOrder={1}>
-              <circleGeometry args={[SUN_DISC, 32]} />
-              <meshBasicMaterial ref={(m) => { sunParts.current.disc = m }} color={SUN_DARK} transparent opacity={SUN_NEAR[0]} depthWrite={false} toneMapped={false} />
-            </mesh>
-            <mesh renderOrder={2}>
-              <ringGeometry args={[SUN_HALO[0], SUN_HALO[1], 48]} />
-              <meshBasicMaterial ref={(m) => { sunParts.current.halo = m }} color={BLACK_SUN} transparent opacity={SUN_NEAR[2]} depthWrite={false} toneMapped={false} />
-            </mesh>
-            <mesh renderOrder={3}>
-              <ringGeometry args={[SUN_RING[0], SUN_RING[1], 48]} />
-              <meshBasicMaterial ref={(m) => { sunParts.current.ring = m }} color={BLACK_SUN} transparent opacity={SUN_NEAR[1]} depthWrite={false} toneMapped={false} />
-            </mesh>
-          </group>
+      {sun && corona && (
+        // Placed, turned and dimmed on each drawn frame (placeSun). Unlit and
+        // untone-mapped, so the violet is the one authored. Front faces only:
+        // turned to the camera on every drawn frame, they are never seen from behind.
+        <group ref={(g) => { sunParts.current.group = g }}>
+          <mesh renderOrder={1}>
+            <circleGeometry args={[SUN_DISC, 32]} />
+            <meshBasicMaterial ref={(m) => { sunParts.current.disc = m }} color={SUN_DARK} transparent opacity={SUN_NEAR[0]} depthWrite={false} toneMapped={false} />
+          </mesh>
+          <mesh renderOrder={2} geometry={corona}>
+            <meshBasicMaterial ref={(m) => { sunParts.current.ring = m }} vertexColors transparent opacity={SUN_NEAR[1]} depthWrite={false} toneMapped={false} />
+          </mesh>
         </group>
       )}
     </group>
@@ -326,7 +445,7 @@ function CompassScene({ onLabelsUpdate, onSun, pose, given, sun }: { onLabelsUpd
  * By default the main camera's pose and the cyberspace axes. The workshop
  * passes the bench camera's pose and its own axis directions, and `bench`
  * takes the compass out of its fixed spot so the corner can hold it. `sun`
- * draws the black sun on the Z arrow: on by default, which is every mode that
+ * draws the black sun out past the Z arrow: on by default, which is every mode that
  * shows the cyberspace axes, and off on the bench, where Z is not +Z_cs.
  */
 export function Compass3D({ onTap, pose = cameraPose, dirs, bench = false, hidden = false, sun = !bench }: { onTap?: () => void; pose?: Quaternion; dirs?: Dirs; bench?: boolean; hidden?: boolean; sun?: boolean } = {}): JSX.Element {

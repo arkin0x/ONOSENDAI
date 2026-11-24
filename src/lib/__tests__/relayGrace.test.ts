@@ -55,7 +55,10 @@ describe('a read with graceMs', () => {
   it('settles graceMs after a pinned relay answers, keeping what the slow relay sent, as no answer in time', async () => {
     relays([[CANON, 5], [SECOND, 3_000]])
     const began = Date.now()
-    const answers = await queryEach({ kinds: [3333] }, 8_000, { graceMs: 100 })
+    // SECOND gates reads (the read-only former canonical relay), so its question goes out after
+    // its own sign-in wait (up to 400 ms for a challenge this fake never sends); the canonical
+    // relay's does not wait for it. The grace outlasts that, and the slow relay's event lands in it.
+    const answers = await queryEach({ kinds: [3333] }, 8_000, { graceMs: 600 })
     expect(Date.now() - began).toBeLessThan(1_000)
     const slow = answers.find((a) => a.url === SECOND)!
     expect(answers.find((a) => a.url === CANON)!.outcome).toBe('answered')

@@ -121,6 +121,10 @@ describe('the mode button', () => {
     expect(useScan.getState().active).toBe(false)
     expect(S().focus).toBeNull()
     expect(S().atHead()).toBe(true)
+    // Into HOP the cursor stays where it was, as every other switch leaves it (owner, 2026-11-24).
+    expect(S().cursor).toEqual(built)
+    // RECALL brings it home on demand.
+    recall()
     expect(S().cursor).toEqual(home)
   })
 
@@ -153,14 +157,18 @@ describe('the mode button', () => {
     expect(S().focus).toBeNull()
     expect(currentPadMode()).toBe('hop')
 
+    expect(S().cursor).toEqual(home)
+
     B().enter('build')
     S().moveCursor({ axis: 'x', dir: 1 })
+    const built = { ...S().cursor }
     cycleMode()
     expect(B().active).toBe(false)
     expect(currentPadMode()).toBe('scan')
     cycleMode()
     expect(S().focus).toBeNull()
-    expect(S().cursor).toEqual(home)
+    // The ring into HOP keeps the cursor; EXIT above brought it home.
+    expect(S().cursor).toEqual(built)
     expect(currentPadMode()).toBe('hop')
     // A mode ended on purpose is no BUILD MODE ENDED.
     expect(useToast.getState().toast?.label).not.toBe('BUILD MODE ENDED')

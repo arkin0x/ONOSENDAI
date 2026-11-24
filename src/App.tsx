@@ -98,7 +98,7 @@ import { setMenuCovering, useKeyboard } from './hooks/useKeyboard'
 import { useEscape, useModalUp } from './hooks/useEscape'
 import { useProofListener } from './hooks/useProofListener'
 import { useIsMobile } from './hooks/useIsMobile'
-import { useMenuOpen } from './hooks/useMenuOpen'
+import { useMenuIsOpen, useMenuOpen } from './hooks/useMenuOpen'
 import { armMenuSlide } from './hooks/useMenuInset'
 import { useTargets } from './hooks/useTargets'
 import { startCalibration } from './lib/calibration'
@@ -184,7 +184,7 @@ export default function App(): JSX.Element {
   useEffect(() => watchArrivalMode(), [])
   // MODES (store/modeOrder.ts): the player's list follows the identity, the
   // dim mode button remembers the last ring mode, and the app starts in the
-  // list's first mode on a plain load (store/startMode.ts).
+  // list's Default Mode on a plain load (store/startMode.ts).
   useEffect(() => { startModes() }, [])
   useEffect(() => watchLastRing(), [])
   useEffect(() => watchStartMode(), [])
@@ -259,6 +259,9 @@ export default function App(): JSX.Element {
   const veil = useRevealClass()
   const shows = (id: Parameters<typeof veil>[0]): boolean => veil(id) !== ' nc-veiled'
   const showPanels = panelsOpen && !spectating && shows('menu')
+  // M opens and shuts the menu only where the hamburger can (hooks/useMenuOpen.ts toggleMenuOpen).
+  const menuToggleable = !spectating && shows('menu')
+  useEffect(() => { useMenuIsOpen.setState({ toggleable: menuToggleable }) }, [menuToggleable])
 
   // Reading a hidden thing owns the screen: the top-aligned modal sits where
   // the instrument stack lives, so the stack stands aside and the hamburger
@@ -562,7 +565,11 @@ export default function App(): JSX.Element {
         disabled={spectating}
         aria-expanded={showPanels}
         aria-label={spectating ? 'Panels locked while spectating' : panelsOpen ? 'Hide panels' : 'Show panels'}
+        aria-keyshortcuts="M"
+        title={panelsOpen ? 'Hide panels (M)' : 'Show panels (M)'}
       >
+        {/* M opens and shuts it (hooks/useKeyboard.ts), shown with a mouse only (styles.css). */}
+        <kbd className="hamburger-key" aria-hidden>M</kbd>
         <span className={`hamburger-icon ${panelsOpen ? 'hamburger-icon--open' : ''}`}>
           <span></span>
           <span></span>

@@ -27,16 +27,22 @@
  *
  * MODES (owner, 2026-11-24; store/modeOrder.ts) makes all of this the
  * default list: the player can put the modes in any order and switch some
- * off. The first is where the app starts (watchStartMode), the first on
- * after it is the second button in RECALL's slot (WALK's place above), and
- * the ring is the first and every other mode on. A mode not in the ring (the
- * second button's, or one switched off and asked for by name, as B asks for
+ * off. The first place is the Toggle Mode, the second button in RECALL's
+ * slot (WALK's place above). Below it is the ring: the Default Mode, where
+ * the app starts (watchStartMode), and every other mode on after it, which
+ * the mode button goes down through. A mode not in the ring (the toggle's,
+ * or one switched off and asked for by name, as B asks for
  * BUILD) is a visit: the mode button is the way back, dim, as in WALK.
  * Going between two modes keeps the hand-offs above where the default ring
  * has them (BUILD where VIEW looked, SCAN where BUILD's cursor was), and
  * otherwise leaves the one mode for HOP at your head and enters the other
  * from there (switchMode). With the default list every press does exactly
  * what it did before.
+ *
+ * A switch into HOP keeps the cursor where it is, as every other switch does
+ * (owner, 2026-11-24). It used to come home, a leftover of RETURN ending the
+ * free view (#102), which the ring took over when it ended VIEW, BUILD and
+ * SCAN for HOP. RECALL (or X) brings it home on demand.
  */
 
 import { samePosition, useCyberspace, VIEW_FOCUS_LABEL } from './useCyberspace'
@@ -84,13 +90,15 @@ export function buildHeld(shards = useShards.getState()): boolean {
 
 /**
  * Out of BUILD and back to HOP: the mode ends, and the view it rode ends too,
- * so the cursor and the camera are home at your head.
- * Every way out of BUILD does this now (arkinox, 2026-11-17; useBuilder
- * `exit`). Spectating, there is no HOP to go to: the scene goes back to
- * watching them. Nothing while a deploy is lined up.
+ * so the camera is at your head (arkinox, 2026-11-17; useBuilder `exit`).
+ * The build cursor stays where it is as HOP's cursor, as every other switch
+ * of mode leaves it (owner, 2026-11-24: "when I switch to hop mode, the
+ * cursor is recalled, but that isn't helpful"); RECALL brings it home.
+ * Spectating, there is no HOP to go to: the scene goes back to watching
+ * them. Nothing while a deploy is lined up.
  */
 export function buildToHop(): void {
-  useBuilder.getState().exit()
+  useBuilder.getState().exit({ keepCursor: true })
 }
 
 /**
@@ -113,12 +121,13 @@ export function buildToScan(): void {
 
 /**
  * SCAN to HOP: the mode ends, and the view it rode ends too, at the zoom you
- * are at, so the cursor and the camera are home at your head, as BUILD's
- * turn of the ring does. A scan under way keeps running (store/useScan.ts).
+ * are at, so the camera is at your head and the cursor stays where it is, as
+ * BUILD's turn of the ring leaves it. A scan under way keeps running
+ * (store/useScan.ts).
  */
 export function scanToHop(): void {
   if (!useScan.getState().active) return
-  useScan.getState().exit()
+  useScan.getState().exit(false, true)
 }
 
 /**
@@ -150,18 +159,40 @@ function buildToView(): void {
   useCyberspace.getState().focusOn(at, plane, VIEW_FOCUS_LABEL, undefined, true, false, { view: true })
 }
 
-/** VIEW ended, back to HOP at your head at the zoom you are at. */
+/**
+ * VIEW ended, back to HOP at your head at the zoom you are at, the cursor
+ * kept where it is (and where a fly not yet landed has taken it), as VIEW to
+ * BUILD keeps it.
+ */
 function viewToHop(): void {
   const cs = useCyberspace.getState()
   if (!cs.viewing()) return
-  landFly(true)
+  landFly()
   leaveViewForMode()
   useRegion.getState().exit()
-  useCyberspace.getState().clearFocus(true)
+  useCyberspace.getState().clearFocus(true, true)
+}
+
+/**
+ * How long COMMIT ignores a press after a switch into HOP. The cursor is kept
+ * now, so a switch into HOP with it off your avatar puts COMMIT in the slot
+ * the mode button just stood in (hud/TouchControls.tsx). A quick second tap
+ * meant to go on round the ring would land on COMMIT and sign a hop nobody
+ * asked for; for this long it lands on nothing.
+ */
+export const HOP_COMMIT_SETTLE_MS = 600
+
+/** When the pad last switched into HOP (switchMode). */
+let hopAt = -Infinity
+
+/** Whether a switch into HOP was too recent for a press on COMMIT to be meant for it (HOP_COMMIT_SETTLE_MS). */
+export function commitSettling(now: number = Date.now()): boolean {
+  return now - hopAt < HOP_COMMIT_SETTLE_MS
 }
 
 /** Out of `from` to HOP at your head. False when it could not (a deploy lined up in BUILD). */
 function toHop(from: PadMode): boolean {
+  if (from !== 'hop') hopAt = Date.now()
   switch (from) {
     case 'hop': return true
     case 'walk':
@@ -231,7 +262,7 @@ export function switchMode(to: PadMode, opts?: { noFall?: boolean }): void {
 /**
  * Where the dim mode button goes back to from a mode not in the ring: WALK's
  * own `from` (enterWalk), else the mode the second button was pressed from,
- * else the last ring mode the pad was in, else the first mode.
+ * else the last ring mode the pad was in, else the default mode.
  */
 export function backOf(current: PadMode = currentPadMode()): ModeId {
   if (current === 'walk') return useWalk.getState().from
@@ -272,7 +303,7 @@ export function cycleMode(): void {
 /**
  * Out of a mode not in the ring, back to where it came from (backOf). WALK
  * the pad's way (leaveWalk). A way back that will not open here falls back
- * to the first mode, then to HOP, so the dim button never does nothing.
+ * to the default mode, then to HOP, so the dim button never does nothing.
  */
 export function goBack(): void {
   const cur = currentPadMode()
@@ -323,6 +354,59 @@ export function watchLastRing(): () => void {
   const offs = [useCyberspace.subscribe(note), useBuilder.subscribe(note), useScan.subscribe(note), useTerrain.subscribe(note)]
   note()
   return () => { for (const off of offs) off() }
+}
+
+/**
+ * The keys that go straight to a mode (owner, 2026-11-24: "H = HOP, V = VIEW,
+ * Y = WALK"), beside B (BUILD) and N (SCAN). By event code, so a keyboard
+ * layout's letters do not move them.
+ */
+export const MODE_HOTKEYS: Readonly<Record<string, ModeId>> = { KeyH: 'hop', KeyV: 'view', KeyY: 'walk' }
+
+/**
+ * Whether a key may open `to` by name now. A mode the player switched off in
+ * MODES is only out of the turns (owner, 2026-11-24: "so they aren't part of
+ * the rotation"), so its key still opens it, as B and N always have. Only
+ * where the player's list does not apply (the newcomer view, a tour run,
+ * /demo) does the list taught there decide: a mode off in it is not yet
+ * allowed. TV hears no keys at all.
+ */
+export function modeKeyAllowed(to: ModeId): boolean {
+  return customModesApply() || !effectiveModes().off.includes(to)
+}
+
+/**
+ * H, V or Y: straight into that mode, switched off in MODES or not, as B and
+ * N go (modeKeyAllowed). In it already: nothing.
+ * WALK goes in the pad's way (enterWalk, which keeps where it came from),
+ * the others through switchMode, so the ring and the toggle slot are moved
+ * no more than B or N moves them: the dim way back is what watchLastRing
+ * kept. Into VIEW or WALK only at rest, as the pad offers them and N goes;
+ * out of WALK with steps still to prove, the first press stops them and the
+ * second leaves, as X does. True when the pad is in that mode after.
+ */
+export function hotkeyMode(to: ModeId): boolean {
+  if (!modeKeyAllowed(to)) return false
+  const cur = currentPadMode()
+  if (cur === to) return true
+  const cs = useCyberspace.getState()
+  // Out of WALK as X leaves it: steps still to prove (or a fall in the air)
+  // are stopped by the first press, and the second leaves; a slip of a key
+  // never drops a walk's unproved steps.
+  if (cur === 'walk') {
+    const walk = useWalk.getState()
+    if (walk.behind > 0 || walk.open !== null || walk.falling || cs.proof.status === 'computing') { walk.stop(); return false }
+  }
+  // Into a mode other than HOP only at rest, as the pad offers it and N goes:
+  // nothing being placed, no proof computing, and from HOP nothing lined up
+  // and the cursor on your avatar. HOP itself is always the way back.
+  if (to !== 'hop') {
+    if (useShards.getState().pending || cs.proof.status === 'computing') return false
+    if (cur === 'hop' && !(cs.atHead() && cs.plan === null && samePosition(cs.cursor, cs.position))) return false
+  }
+  if (to === 'walk') enterWalk()
+  else switchMode(to)
+  return currentPadMode() === to
 }
 
 /**

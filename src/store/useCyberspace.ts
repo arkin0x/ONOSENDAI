@@ -1176,9 +1176,13 @@ export interface CyberspaceState {
    * Stop looking; the scene returns to your avatar. With `keepScale` the zoom
    * stays where it is instead of going back to the one the look began at:
    * leaving build mode on your avatar ends its view this way, so nothing
-   * changes on screen (useBuilder `exit`).
+   * changes on screen (useBuilder `exit`). With `keepCursor` a cursor that
+   * went out with the view stays where it is, at your own head, as a switch
+   * of mode into HOP leaves it (store/padMode.ts toHop; owner, 2026-11-24:
+   * "when I switch to hop mode, the cursor is recalled, but that isn't
+   * helpful"). RETURN, RECALL and X still bring it home.
    */
-  clearFocus: (keepScale?: boolean) => void
+  clearFocus: (keepScale?: boolean, keepCursor?: boolean) => void
   /** Hyperspace transit: non-null from boarding until arrival (DECK-0001 v3). */
   transit: TransitState | null
   /**
@@ -7448,7 +7452,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
 
   focusItem: (position, plane, label, scaleExp) => get().focusOn(position, plane, label, scaleExp, false, false, { item: true }),
 
-  clearFocus: (keepScale = false) => {
+  clearFocus: (keepScale = false, keepCursor = false) => {
     // Home is your position in the plane you have lined up, which is what
     // the scene showed before the focus began.
     const { position, plane, focusReturnScale, scaleExp, focus, spectate } = get()
@@ -7462,8 +7466,11 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       pin: null,
       anchor: watched ? { ...watched.position } : position,
       anchorPlane: watched ? watched.plane : plane,
-      // A cursor that went out with the view comes home with it.
-      ...(focus?.drive ? { cursor: { ...position } } : {}),
+      // A cursor that went out with the view comes home with it, unless a
+      // switch into HOP keeps it (`keepCursor`): there it is HOP's cursor,
+      // lined up as any cursor moved off your avatar is. Watching someone,
+      // there is no HOP for it to stay in.
+      ...(focus?.drive && !(keepCursor && !watched) ? { cursor: { ...position } } : {}),
       // Back at the zoom the user left, not whatever the viewed thing chose.
       scaleExp: keepScale ? scaleExp : focusReturnScale ?? scaleExp,
       focusReturnScale: null,

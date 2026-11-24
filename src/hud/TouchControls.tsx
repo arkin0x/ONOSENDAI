@@ -82,7 +82,7 @@ import { moveUnderWay } from '../lib/buildCursor'
 import { useTerrain } from '../store/useTerrain'
 import { useWalk } from '../store/useWalk'
 import { onAvatar, useBuilder } from '../store/useBuilder'
-import { buildHeld, cycleMode, goBack, leaveWalk, padMode, pressSecond, recall, type PadMode } from '../store/padMode'
+import { buildHeld, commitSettling, cycleMode, goBack, leaveWalk, padMode, pressSecond, recall, type PadMode } from '../store/padMode'
 import { DEFAULT_MODES, modeInfo, nextInRing, useEffectiveModes, useModeRoles, useModes } from '../store/modeOrder'
 import { useCover } from '../hooks/useCover'
 import { ForwardArrow3D, ReverseArrow3D } from './ui/FlyArrows'
@@ -172,8 +172,8 @@ export interface PadKey {
  * | FORWARD, one large key | W | FAR, up and NEAR |
  * | BACKWARD | S | down |
  * | left, right | A, D | the same |
- * | JUMP | Space or R | + and the 2^ readout |
- * | DOWN | C or F | - |
+ * | JUMP | Space (R too under GRAVITY) | + and the 2^ readout |
+ * | DOWN | C (F too under GRAVITY) | - |
  *
  * Under GRAVITY JUMP is a jump, and DOWN moves nothing but absorbs a bounce
  * pressed just before the landing, or every landing while held
@@ -189,14 +189,15 @@ export interface PadKey {
  * Each key holds its direction while pressed (store/walkHold.ts).
  */
 export function walkPad(gravity: boolean, move: (name: MoveName) => () => void): PadKey[] {
-  const key = (name: MoveName): Pick<PadKey, 'act' | 'hold'> => ({ act: move(name), hold: walkHeldDir(name) })
+  // JUMP and DOWN are Space and C: up and down as you see the world, not tipped by LOOK (lib/walkKeys.ts).
+  const key = (name: MoveName, view = false): Pick<PadKey, 'act' | 'hold'> => ({ act: move(name), hold: walkHeldDir(name, view) })
   return [
     { cell: 'forward', glyph: <ForwardArrow3D size={26} />, sub: 'FORWARD', title: 'Forward (W)', keyHint: 'W', ...key('away') },
     { cell: 'left', glyph: '◀', title: 'Left (A)', keyHint: 'A', ...key('left') },
     { cell: 'backward', glyph: <ReverseArrow3D size={20} />, sub: 'BACK', title: 'Backward (S)', keyHint: 'S', ...key('toward') },
     { cell: 'right', glyph: '▶', title: 'Right (D)', keyHint: 'D', ...key('right') },
-    { cell: 'jump', glyph: 'JUMP', title: gravity ? 'Jump (Space or R). Press again in the air to double jump.' : 'Jump: up one cell (Space or R)', keyHint: 'SPACE', ...key('up'), side: true },
-    { cell: 'down', glyph: '▼', title: gravity ? 'Down: hold to absorb a bounce (C or F)' : 'Down one cell (C or F)', keyHint: 'C', ...key('down'), side: true },
+    { cell: 'jump', glyph: 'JUMP', title: gravity ? 'Jump (Space or R). Press again in the air to double jump.' : 'Jump: up one cell (Space)', keyHint: 'SPACE', ...key('up', true), side: true },
+    { cell: 'down', glyph: '▼', title: gravity ? 'Down: hold to absorb a bounce (C or F)' : 'Down one cell (C)', keyHint: 'C', ...key('down', true), side: true },
   ]
 }
 
@@ -320,6 +321,11 @@ export function TouchControls(): JSX.Element {
   const veil = useRevealClass()
   // A slot's word, with its key printed under it in the newcomer view; outside it the word alone, as it always was.
   const withKey = (word: string, key: string): ReactNode => (plain ? <>{word}<span className="touchops__keyhint" aria-hidden>{key}</span></> : word)
+  // A mode's own key (store/modeOrder.ts MODES: H, Y, V, B, N) in the corner
+  // of a button that goes to it (the dim way back and the Toggle Mode, not
+  // the lit ring button, which goes on to the next mode): `data-key`, drawn
+  // by styles.css with a mouse only, so it is no part of the button's words.
+  const modeKey = (m: PadMode): { 'data-key'?: string } => { const k = modeInfo(m).key; return k ? { 'data-key': k } : {} }
   const opsUp = home || viewing || (building && !spectating)
 
   const computing = proof.status === 'computing'
@@ -330,10 +336,11 @@ export function TouchControls(): JSX.Element {
   // it, disabled); lit in WALK; STOP in WALK while steps wait on their
   // proofs; RECALL with the cursor off your avatar.
   //
-  // MODES (store/modeOrder.ts) makes WALK the default list's second button:
-  // the slot holds whichever mode the player's list puts second, the same
-  // way, dim to go in and lit to go back, and RECALL or STOP otherwise. With
-  // only one mode on there is no second button, and the slot is RECALL's.
+  // MODES (store/modeOrder.ts) makes WALK the default list's Toggle Mode:
+  // the slot holds whichever mode the player's list puts in the toggle slot,
+  // the same way, dim to go in and lit to go back, and RECALL or STOP
+  // otherwise. With the toggle switched off there is no second button, and
+  // the slot is RECALL's.
   const stopping = walking && (computing || behind > 0)
   const roles = useModeRoles()
   const modes = useEffectiveModes()
@@ -450,6 +457,7 @@ export function TouchControls(): JSX.Element {
         title={title}
         {...noCallout}
         onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); if (wait) return; if (on) cycleMode(); else goBack() }}
+        {...(on ? {} : modeKey(m))}
       >{m === roles.start ? <>{say(MODE_WORD[m], plain)}<span className="touchops__sub">(MODES)</span></> : say(MODE_WORD[m], plain)}</button>
     )
   }
@@ -527,7 +535,7 @@ export function TouchControls(): JSX.Element {
             aria-label="Gravity"
             {...noCallout}
             onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); useWalk.getState().setGravity(!gravity) }}
-          >{plain ? <>GRAVITY<span className="touchpad__keyhint" aria-hidden>Z</span></> : 'GRAVITY'}</button>
+          >GRAVITY<span className="touchpad__keyhint" aria-hidden>Z</span></button>
         )}
         {pad.filter((b) => !b.side).map(padKey)}
         {/* The hub doubles as the scale readout and its reset: a tap returns
@@ -573,6 +581,7 @@ export function TouchControls(): JSX.Element {
             disabled={walkHeld}
             {...noCallout}
             onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); if (walkHeld) return; pressSecond() }}
+            {...modeKey('walk')}
           >WALK</button>
         ) : walkSlot && second !== null ? (
           // Another mode as the second button (MODES): the same slot, dim to
@@ -588,6 +597,7 @@ export function TouchControls(): JSX.Element {
             disabled={walkHeld}
             {...noCallout}
             onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); if (walkHeld) return; pressSecond() }}
+            {...modeKey(second)}
           >{say(MODE_WORD[second], plain)}</button>
         ) : <button
           key="cancel"
@@ -638,6 +648,9 @@ export function TouchControls(): JSX.Element {
           {...noCallout}
           onPointerDown={(e) => {
             e.preventDefault(); e.stopPropagation()
+            // Just switched into HOP with the cursor kept off your avatar: a
+            // second tap meant for the mode button is not a commit (padMode commitSettling).
+            if (!deploying && commitSettling()) return
             if (deploying) void useShards.getState().deploy()
             else if (offload && next && useOffer.getState().requestedFor !== next.cursorKey) useOffer.getState().request(next.cursorKey)
             else useCyberspace.getState().commit()

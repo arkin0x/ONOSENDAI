@@ -11,7 +11,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
-  DEFAULT_ORDER, LAYOUT_VERSION, PANEL_IDS, PANEL_LAYOUT_KEY, columnOf, tutorialWrote, defaultOrder, mergeOrder, moveBefore, normalizeLayout, toggleCollapsed,
+  DEFAULT_ORDER, LAYOUT_VERSION, PANEL_IDS, PANEL_LAYOUT_KEY, RIGHT_TOP, columnOf, menuOf20261124, tutorialWrote, defaultOrder, mergeOrder, moveBefore, normalizeLayout, toggleCollapsed,
   type PanelId, type PanelOrder,
 } from '../usePanelLayout'
 import { CONTROL, foldsAt, type ElementLike } from '../../hud/PanelSlot'
@@ -46,9 +46,9 @@ describe('the default order', () => {
   it('leads with IDENTITY, then ITEMS right under it (owner, 2026-11-15), every panel once, in one column', () => {
     // GAMES right under ITEMS (owner, 2026-11-13), then the rest of 2026-11-11's lead: AGENTS, AVATARS, CREATE.
     expect(DEFAULT_ORDER.left).toEqual(['identity', 'items', 'games', 'agents', 'avatars', 'create', 'hidden', 'discovered', 'targets', 'links'])
-    // TUTORIAL last of all: the foot of the right column, which a phone stacks under the left (item 17).
-    // MODES under the Legend (owner, 2026-11-24), so Settings stays just above it.
-    expect(DEFAULT_ORDER.right).toEqual(['scale', 'position', 'viewat', 'proof', 'cloud', 'chain', 'hyperspace', 'view', 'legend', 'modes', 'controls', 'derezz', 'relays', 'tutorial'])
+    // The right column (owner, 2026-11-24): MODES, TUTORIAL, POSITION, SCALE on top, the rest in their old
+    // order, DEREZZ last of all: the foot of the right column, which a phone stacks under the left.
+    expect(DEFAULT_ORDER.right).toEqual(['modes', 'tutorial', 'position', 'scale', 'viewat', 'proof', 'cloud', 'chain', 'hyperspace', 'view', 'legend', 'controls', 'relays', 'derezz'])
     expect(new Set(PANEL_IDS).size).toBe(PANEL_IDS.length)
     expect(PANEL_IDS).toHaveLength(24)
   })
@@ -132,14 +132,14 @@ describe('mergeOrder: a saved order against the defaults', () => {
     const o = defaultOrder()
     o.right = o.right.filter((id) => id !== 'view' && id !== 'hyperspace')
     o.left.push('hyperspace')
-    expect(mergeOrder(o).right).toEqual(['scale', 'position', 'viewat', 'proof', 'cloud', 'chain', 'view', 'legend', 'modes', 'controls', 'derezz', 'relays', 'tutorial'])
+    expect(mergeOrder(o).right).toEqual(['modes', 'tutorial', 'position', 'scale', 'viewat', 'proof', 'cloud', 'chain', 'view', 'legend', 'controls', 'relays', 'derezz'])
   })
 
   it('puts a missing panel at the top of its column when nothing above it in the defaults is there', () => {
     const o = defaultOrder()
-    o.right = o.right.filter((id) => id !== 'scale')
+    o.right = o.right.filter((id) => id !== 'modes')
     o.right.reverse()
-    expect(mergeOrder(o).right[0]).toBe('scale')
+    expect(mergeOrder(o).right[0]).toBe('modes')
   })
 
   it('keeps two missing panels in their default order', () => {
@@ -190,32 +190,20 @@ describe('a layout saved before the View panel (viewat)', () => {
     right: ['scale', 'position', 'proof', 'cloud', 'chain', 'hyperspace', 'view', 'legend', 'controls', 'derezz', 'relays', 'tutorial'],
   })
 
-  it('gets the View panel right under Position, and Settings (view) where it was', () => {
-    const merged = mergeOrder(before())
-    expect(merged.right).toEqual(['scale', 'position', 'viewat', 'proof', 'cloud', 'chain', 'hyperspace', 'view', 'legend', 'modes', 'controls', 'derezz', 'relays', 'tutorial'])
+  it('loads with the View panel under SCALE in the new right column, and Settings (view) where it was', () => {
+    const { order } = normalizeLayout({ order: before() })
+    expect(order.right).toEqual(DEFAULT_ORDER.right)
     // GAMES came later still (a layout saved before it: below).
-    expect(merged.left.filter((id) => id !== 'games')).toEqual(before().left)
+    expect(order.left.filter((id) => id !== 'games')).toEqual(before().left)
   })
 
-  it('follows Position wherever it was dragged in the right column, and keeps every other saved place', () => {
-    const o = before()
-    o.right = ['tutorial', 'relays', 'view', 'scale', 'legend', 'proof', 'cloud', 'chain', 'hyperspace', 'controls', 'derezz', 'position']
-    // MODES came later still: under the Legend wherever it was dragged.
-    const withModes = [...o.right]
-    withModes.splice(withModes.indexOf('legend') + 1, 0, 'modes')
-    expect(mergeOrder(o).right).toEqual([...withModes, 'viewat'])
-    const o2 = before()
-    o2.right = ['view', 'position', 'relays', 'scale', 'legend', 'proof', 'cloud', 'chain', 'hyperspace', 'controls', 'derezz']
-    expect(mergeOrder(o2).right.slice(0, 3)).toEqual(['view', 'position', 'viewat'])
-  })
-
-  it('with Position dragged to the left column, goes to its own column under the nearest panel above it there', () => {
+  it('with Position dragged to the left column, Position goes back to the head of the right column', () => {
     const o = before()
     o.right = o.right.filter((id) => id !== 'position')
     o.left.push('position')
-    const merged = mergeOrder(o)
-    expect(merged.left.filter((id) => id !== 'games')).toEqual(o.left)
-    expect(merged.right.slice(0, 2)).toEqual(['scale', 'viewat'])
+    const { order } = normalizeLayout({ order: o })
+    expect(order.left).not.toContain('position')
+    expect(order.right.slice(0, 5)).toEqual([...RIGHT_TOP, 'viewat'])
   })
 
   it('keeps a fold saved on Settings (view) on Settings, and the View panel opens', async () => {
@@ -223,7 +211,7 @@ describe('a layout saved before the View panel (viewat)', () => {
     g.localStorage = working
     mem.set(PANEL_LAYOUT_KEY, JSON.stringify({ order: before(), collapsed: { view: true, position: true } }))
     const S = await load()
-    expect(S.getState().order.right.slice(1, 3)).toEqual(['position', 'viewat'])
+    expect(S.getState().order.right.slice(2, 5)).toEqual(['position', 'scale', 'viewat'])
     expect(S.getState().order.right.indexOf('view')).toBe(S.getState().order.right.indexOf('hyperspace') + 1)
     expect(S.getState().collapsed).toEqual({ view: true, position: true })
     expect(S.getState().collapsed.viewat).toBeUndefined()
@@ -392,11 +380,46 @@ describe('the store over localStorage', () => {
 })
 
 describe('a layout saved before the TUTORIAL panel (item 17)', () => {
-  it('gets TUTORIAL at the foot of the right column, the bottom of the menu', () => {
+  it('gets TUTORIAL right under MODES', () => {
     const o = defaultOrder()
     o.right = o.right.filter((id) => id !== 'tutorial')
-    expect(mergeOrder(o).right.at(-1)).toBe('tutorial')
+    expect(mergeOrder(o).right.slice(0, 2)).toEqual(['modes', 'tutorial'])
     expect(mergeOrder(o).left).not.toContain('tutorial')
+  })
+})
+
+/**
+ * The right column's new head and foot (owner, 2026-11-24: "make the MODES
+ * panel the top panel on the righthand side of the menu ... DEREZZ should be
+ * at the very bottom"). A layout saved before is moved to it once.
+ */
+describe('a layout saved before 2026-11-24 (the right column\'s new head and foot)', () => {
+  /** The right column's default the day before. */
+  const oldRight: PanelId[] = ['scale', 'position', 'viewat', 'proof', 'cloud', 'chain', 'hyperspace', 'view', 'legend', 'modes', 'controls', 'derezz', 'relays', 'tutorial']
+
+  beforeEach(() => { mem.clear(); g.localStorage = working })
+
+  it('the old default right column, saved by a fold, loads as the new one, the fold kept', async () => {
+    mem.set(PANEL_LAYOUT_KEY, JSON.stringify({ v: 2, order: { left: defaultOrder().left, right: oldRight }, collapsed: { legend: true } }))
+    const S = await load()
+    expect(S.getState().order).toEqual(defaultOrder())
+    expect(S.getState().collapsed).toEqual({ legend: true })
+  })
+
+  it('MODES, TUTORIAL, POSITION and SCALE head the right column and DEREZZ is last, wherever they were kept; every other place is kept', () => {
+    const left: PanelId[] = ['derezz', 'identity', 'items', 'games', 'agents', 'avatars', 'create', 'hidden', 'discovered', 'targets', 'links', 'scale']
+    const right: PanelId[] = ['relays', 'legend', 'tutorial', 'viewat', 'proof', 'position', 'cloud', 'chain', 'modes', 'hyperspace', 'view', 'controls']
+    const { order } = normalizeLayout({ v: 2, order: { left, right } })
+    expect(order.left).toEqual(['identity', 'items', 'games', 'agents', 'avatars', 'create', 'hidden', 'discovered', 'targets', 'links'])
+    expect(order.right).toEqual(['modes', 'tutorial', 'position', 'scale', 'relays', 'legend', 'viewat', 'proof', 'cloud', 'chain', 'hyperspace', 'view', 'controls', 'derezz'])
+    expect(menuOf20261124(order)).toEqual(order)
+  })
+
+  it('once: a layout saved since is the player\'s, MODES dragged down or not', async () => {
+    const S = await load()
+    S.getState().move('modes', null, 'right')
+    expect(JSON.parse(mem.get(PANEL_LAYOUT_KEY)!).v).toBe(LAYOUT_VERSION)
+    expect((await load()).getState().order.right.at(-1)).toBe('modes')
   })
 })
 
@@ -472,7 +495,8 @@ describe('the order the tutorial wrote (2026-11-11 to 2026-11-15)', () => {
       const S = await load()
       expect(S.getState().order.left, day.join()).toEqual(defaultOrder().left)
       expect(S.getState().order.left.slice(0, 2)).toEqual(['identity', 'items'])
-      expect(S.getState().order.right).toEqual(customRight)
+      // The right column moved to its new head and foot once (2026-11-24), the player's other places kept.
+      expect(S.getState().order.right).toEqual(menuOf20261124({ left: [], right: customRight }).right)
       expect(S.getState().collapsed).toEqual({ avatars: true })
     }
   })
@@ -490,7 +514,7 @@ describe('the order the tutorial wrote (2026-11-11 to 2026-11-15)', () => {
       const r = left.includes('links') ? right() : [...right(), 'links' as PanelId]
       mem.set(PANEL_LAYOUT_KEY, JSON.stringify({ order: { left, right: r }, collapsed: {} }))
       const S = await load()
-      expect(S.getState().order, left.join()).toEqual({ left, right: r })
+      expect(S.getState().order, left.join()).toEqual({ left, right: menuOf20261124({ left: [], right: r }).right })
     }
   })
 

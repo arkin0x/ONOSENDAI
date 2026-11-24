@@ -102,7 +102,10 @@ but have 2 GB of memory, which may be too little for the 3D view.
 | `P` | toggle dataspace and ideaspace |
 | `[` / `]` | chain explorer: one action back / forward (hold to repeat) |
 | `Home` / `End` | chain explorer: the spawn / the live head |
-| `H` | hyperspace line scrubber: browse the block line, set a destination |
+| `H` / `V` / `Y` | straight into HOP / VIEW / WALK, turned off in MODES or not (off is only out of the turns) |
+| `B` / `N` | BUILD / SCAN in and out |
+| `M` | menu open / closed |
+| `L` | hyperspace line scrubber: browse the block line, set a destination |
 
 Movement is expressed in screen directions and resolved to world axes through
 the current view, so `W` is always "away from you" in any of the 24 reachable

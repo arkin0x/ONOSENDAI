@@ -611,7 +611,7 @@ body {
   text-shadow: 0 0 3px rgba(0, 0, 0, 0.8);
 }
 
-/* Scale & view in two columns: the key and the view facts beside the ladder,
+/* Scale in two columns: the key and the view facts beside the ladder,
  * which is as tall as both of them together. */
 .scale__cols {
   display: grid;
@@ -5352,6 +5352,24 @@ select.avatars__input option:checked {
   z-index: 100;
   transition: background 0.2s ease, transform 0.2s ease;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+/* Its key (M), small under the lines, with a mouse only: a phone has no M. */
+.hamburger-key { display: none; }
+@media (hover: hover) and (pointer: fine) {
+  .hamburger-key {
+    display: block;
+    position: absolute;
+    left: 50%;
+    bottom: 3px;
+    transform: translateX(-50%);
+    font-size: 7px;
+    line-height: 1;
+    padding: 1px 3px;
+    color: #fff;
+    opacity: 0.75;
+    pointer-events: none;
+  }
 }
 
 .hamburger-menu:hover {
@@ -13657,6 +13675,22 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
 /* The commit slot's key hints in the newcomer view: SPACE under GO, X under
  * BACK TO ME, as the pad prints its keys (.touchpad__keyhint). */
 .touchops__cancel, .touchops__commit { position: relative; }
+/* A mode's own key in the corner of a button that goes to it (H, Y, V, B, N; its data-key), with a mouse only. */
+@media (hover: hover) and (pointer: fine) {
+  .touchops__cancel[data-key]::after,
+  .touchops__commit[data-key]::after {
+    content: attr(data-key);
+    position: absolute;
+    top: 3px;
+    right: 4px;
+    font-size: 8px;
+    line-height: 1;
+    padding: 1px 3px;
+    color: #fff;
+    opacity: 0.7;
+    pointer-events: none;
+  }
+}
 .touchops__keyhint {
   position: absolute;
   left: 0;
@@ -14051,7 +14085,8 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
    just over the walk pad and the LOOK ball. */
 @media (min-width: 700px), (max-height: 520px) {
   .terrainview .terrain-hotbar { bottom: max(14px, calc(env(safe-area-inset-bottom, 0px) + 6px)); }
-  .terrainview .terrain-hint { bottom: calc(max(14px, calc(env(safe-area-inset-bottom, 0px) + 6px)) + 8px + var(--terrain-slot)); }
+  /* Level with the top of the walk pad, so PLACE and SURVEY beside it are always clear, the menu open or not. */
+  .terrainview .terrain-hint { bottom: calc(var(--walkside-bottom) + 132px); }
 }
 @media (max-height: 520px) {
   .terrainview { --terrain-slot: 30px; }
@@ -14438,6 +14473,15 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
   touch-action: pan-y;
 }
 .modes__list.is-dragging { cursor: grabbing; user-select: none; -webkit-user-select: none; }
+/* The rule under the Toggle Mode slot: the slot is its own, the ring below it. */
+.modes__rule { display: flex; align-items: center; height: 9px; }
+.modes__rule hr {
+  flex: 1;
+  margin: 0;
+  border: 0;
+  height: 1px;
+  background: linear-gradient(90deg, rgba(0, 229, 255, 0.55), rgba(0, 229, 255, 0.12));
+}
 .modes__row {
   --cham-cut: 10px;
   --cham-line-w: 1px;
@@ -14675,3 +14719,87 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
 .terrain-hotbar,
 .terrain-hint { translate: var(--hud-skew) 0; }
 :root[data-hud-slide] :is(.terrain-tools, .terrain-hotbar, .terrain-hint) { transition: var(--hud-slide); }
+
+/* TERRAIN on a phone held upright (owner, 2026-11-24: "On portrait, put the hot bar just below the left back right survey
+   down jump buttons"): from the bottom, the bottom row (menu, CHAT, the commit block), then the hotbar across the screen,
+   then WALK's pad cluster, lifted by the hotbar's row and nothing else. WALK, with no hotbar, stays exactly as it is. */
+@media (max-width: 699px) and (min-height: 521px) {
+  .app:has(.terrainview) {
+    /* Ten slots and their gaps between the 16px gutters, never more than 32px a slot. */
+    --terrain-row-slot: min(32px, calc((100vw - 32px - 27px) / 10));
+    --terrain-lift: calc(var(--terrain-row-slot) + 8px);
+    --walkside-bottom: calc(92px + var(--terrain-lift));
+  }
+  .app:has(.terrainview):has(.touchpad.is-lifted) { --walkside-bottom: calc(116px + var(--terrain-lift)); }
+  .app:has(.terrainview) .touchpad { bottom: calc(92px + var(--terrain-lift)); }
+  .app:has(.terrainview) .touchpad.is-lifted { bottom: calc(116px + var(--terrain-lift)); }
+  .terrainview { --terrain-slot: var(--terrain-row-slot); }
+  /* The hotbar 4px under the lifted row, the row's own gap, where the row stood. */
+  .terrainview .terrain-hotbar { bottom: calc(var(--walkside-bottom) - var(--terrain-lift) + 4px); }
+  /* Over the carried block, which stands over the LOOK ball. */
+  .terrainview .terrain-hint { bottom: calc(var(--terrain-orb-bottom) + var(--terrain-orb) + 80px); }
+}
+
+/* The chosen hotbar slot, clearly green (owner, 2026-11-24: "can the selected item be more green - the bg doesnt quite
+   change enough"): mint laid over the slot's ground at about a third, a brighter mint edge, the number in mint. */
+.terrain-slot.is-on { --terrain-line: #b8ffe1; }
+.terrain-slot.is-on::before { background: linear-gradient(rgba(124, 255, 196, 0.36), rgba(124, 255, 196, 0.36)), var(--terrain-fill); }
+.terrain-slot.is-on .terrain-slot__num { color: var(--terrain); opacity: 1; font-weight: 700; }
+
+/* The chosen block, carried (terrain/TerrainView.tsx HeldBlock): a small tilted cube of its tiles just above the LOOK
+   ball, in the HUD, so it never clips into the world and never blooms. Left of the ball on a short screen, where the
+   compass stands above it. */
+.terrain-held {
+  --held: 52px;
+  position: fixed;
+  right: calc(var(--controls-right) + (var(--terrain-orb) - var(--held)) / 2);
+  bottom: calc(var(--terrain-orb-bottom) + var(--terrain-orb) + 18px);
+  width: var(--held);
+  height: var(--held);
+  perspective: 260px;
+  pointer-events: none;
+  translate: calc(-1 * var(--hud-shift-r)) 0;
+}
+@media (max-height: 520px) {
+  .terrain-held {
+    --held: 44px;
+    right: calc(var(--controls-right) + var(--terrain-orb) + 16px);
+    bottom: calc(var(--terrain-orb-bottom) + (var(--terrain-orb) - var(--held)) / 2);
+  }
+}
+@media (min-width: 1101px) {
+  .terrain-held { --held: 64px; }
+}
+.terrain-held__dip { width: 100%; height: 100%; transform-style: preserve-3d; }
+.terrain-held__dip.is-dipping { animation: terrain-held-dip 220ms ease-out; }
+@keyframes terrain-held-dip { 40% { transform: translateY(8px) rotate(6deg); } }
+.terrain-held__cube {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  transform-style: preserve-3d;
+  transform: rotateX(-24deg) rotateY(-38deg) rotateZ(-4deg);
+}
+.terrain-held.is-walking .terrain-held__cube { animation: terrain-held-sway 900ms ease-in-out infinite alternate; }
+@keyframes terrain-held-sway {
+  from { transform: translate(-2px, 0) rotateX(-24deg) rotateY(-38deg) rotateZ(-4deg); }
+  to { transform: translate(2px, -3px) rotateX(-22deg) rotateY(-34deg) rotateZ(-2deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .terrain-held.is-walking .terrain-held__cube,
+  .terrain-held__dip.is-dipping { animation: none; }
+}
+.terrain-held__face {
+  position: absolute;
+  inset: 0;
+  background-size: 100% 100%;
+  image-rendering: pixelated;
+  backface-visibility: hidden;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.35);
+}
+.terrain-held__face--front { transform: translateZ(calc(var(--held) / 2)); filter: brightness(0.86); }
+.terrain-held__face--back { transform: rotateY(180deg) translateZ(calc(var(--held) / 2)); }
+.terrain-held__face--right { transform: rotateY(90deg) translateZ(calc(var(--held) / 2)); filter: brightness(0.7); }
+.terrain-held__face--left { transform: rotateY(-90deg) translateZ(calc(var(--held) / 2)); filter: brightness(0.7); }
+.terrain-held__face--top { transform: rotateX(90deg) translateZ(calc(var(--held) / 2)); }
+.terrain-held__face--bottom { transform: rotateX(-90deg) translateZ(calc(var(--held) / 2)); filter: brightness(0.5); }

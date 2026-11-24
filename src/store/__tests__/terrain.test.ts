@@ -32,7 +32,7 @@ import { useWalk } from '../useWalk'
 import { useTutorial } from '../useTutorial'
 import { OUT_OF_REACH, setTerrainSession, syncTerrain, terrainSession, useTerrain } from '../useTerrain'
 import { switchMode, currentPadMode, enterTerrainMode, leaveTerrain, pressSecond, backOf, watchLastRing } from '../padMode'
-import { DEFAULT_MODES, modeRoles, moveModeTo, resetModes, updateModes, useModes, type ModeId, type ModeSettings } from '../modeOrder'
+import { DEFAULT_MODES, modeRoles, resetModes, updateModes, useModes, type ModeId, type ModeSettings } from '../modeOrder'
 import { chunkKey, chunkOf, CELLS } from '../../lib/terrain/coords'
 import { FOLD_AT, openTerrainDb, readKept } from '../../lib/terrain/terrainDb'
 import { applyLayer } from '../../lib/terrain/layer'
@@ -327,12 +327,9 @@ describe('TERRAIN as the second button', () => {
   // when it wasnt hop before. it should remain what it was before."
   for (const start of ['walk', 'view', 'build'] as const) {
     it(`with the ring on ${start.toUpperCase()}: in and out by the second button, EXIT, T or Esc, back to ${start.toUpperCase()}, the ring's place kept`, async () => {
-      const order: ModeId[] = [start, 'terrain', ...DEFAULT_MODES.order.filter((m) => m !== start && m !== 'terrain')]
-      updateModes((): ModeSettings => {
-        let s: ModeSettings = { order: DEFAULT_MODES.order, off: [] }
-        order.forEach((id, i) => { s = moveModeTo(s, id, i) })
-        return s
-      })
+      // TERRAIN in the Toggle Mode slot, `start` the Default Mode, the rest of the ring after it.
+      const order: ModeId[] = ['terrain', start, ...DEFAULT_MODES.order.filter((m) => m !== start && m !== 'terrain')]
+      updateModes((): ModeSettings => ({ order, off: [] }))
       const stop = watchLastRing()
       try {
         expect(modeRoles().second).toBe('terrain')

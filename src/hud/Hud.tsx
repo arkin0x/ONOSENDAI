@@ -445,7 +445,7 @@ function ScalePanel(): JSX.Element {
   return (
     <section className="panel">
       <header className="panel__head">
-        <h2>Scale &amp; view</h2>
+        <h2>Scale</h2>
         <span className="scale-exp">2^{scaleExp}</span>
       </header>
 
@@ -508,13 +508,15 @@ function ScalePanel(): JSX.Element {
  * The keys for the mode the pad is in (arkinox, 2026-11-11: the Controls panel
  * always showed HOP's; it shows the current mode's now). HOP lines up a move,
  * VIEW is a free look that flies, WALK is first person, BUILD places things.
- * Shared keys (Tab, Esc, P, H, the chain explorer) sit under every mode.
+ * Shared keys (H, V, Y, M, Tab, Esc, P, L, the chain explorer) sit under every mode.
  */
 const SHARED_ROWS: Array<[string, string]> = [
+  ['H / V / Y', 'HOP / VIEW / WALK (turned off in MODES too)'],
+  ['M', 'menu open / closed'],
   ['Tab', 'previous view'],
   ['C', 'canonical view (facing the black sun)'],
   ['P', 'toggle plane'],
-  ['H', 'hyperspace line scrubber'],
+  ['L', 'hyperspace line scrubber'],
   ['[ / ]', 'chain explorer: back / forward one action'],
   ['Home / End', 'chain explorer: spawn / live head'],
   ['Esc', 'close: dialog, then menu, then the latest chip'],
@@ -716,12 +718,12 @@ export function Hud({ menuOpen = false }: { menuOpen?: boolean }): JSX.Element {
   // HOSAKA outranks even that: while a payment is awaited or a job is under
   // way the cloud panel takes the first panel position, under the brand.
   const cloudLeads = useCyberspace((s) => s.cloud.status === 'awaiting_payment' || jobInProgress(s.cloud.status))
-  // A move being computed outranks everything: wherever the work is happening,
-  // the proof panel is the thing you are watching, so it takes the first
-  // position and HOSAKA falls in behind it rather than above it.
-  const proofLeads = useCyberspace((s) => s.proof.status === 'computing')
-  // A free view puts the View panel first, above even a move under way
-  // (arkinox, 2026-11-02: "rises to position 1 while VIEW mode is active"):
+  // A move being computed does not move the proof panel: it stays in its own
+  // place while it works (owner, 2026-11-24: "currently when a proof is in
+  // progress the movement proof panel is promoted to the top of the menu.
+  // this was a mistake").
+  // A free view puts the View panel first (arkinox, 2026-11-02: "rises to
+  // position 1 while VIEW mode is active"):
   // its figures are the view's cursor. BUILD mode does too: it put the
   // Position panel first (arkinox, 2026-10-08) because VIEW, RECENT and the
   // starred places there are how the build cursor jumps, and those moved to
@@ -755,7 +757,6 @@ export function Hud({ menuOpen = false }: { menuOpen?: boolean }): JSX.Element {
   const leads: PanelId[] = front ? [front] : []
   const lead = (id: PanelId): void => { if (!leads.includes(id)) leads.push(id) }
   if (building || freeView) lead('viewat')
-  if (proofLeads) lead('proof')
   if (cloudLeads) lead('cloud')
   if (rideSet) lead('hyperspace')
   // AGENTS is drawn for everyone, as a BETA (arkinox, 2026-10-13: "ship it

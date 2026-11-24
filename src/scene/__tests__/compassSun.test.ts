@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { Euler, Group, MeshBasicMaterial, Quaternion, Vector3 } from 'three'
-import { SUN_WORDS, placeSun, sunBearing, sunInView, sunNearness, type SunParts } from '../Compass3D'
+import { SUN_LAYOUT, SUN_WORDS, placeSun, sunBearing, sunInView, sunNearness, sunOnScreen, sunReach, sunScale, type SunParts } from '../Compass3D'
 import { canonicalQuaternion, renderDirection, topDownQuaternion, viewAxes } from '../../lib/space'
 
 /**
@@ -108,7 +108,7 @@ describe('sunBearing', () => {
 })
 
 describe('placeSun', () => {
-  const parts = (): SunParts => ({ group: new Group(), disc: new MeshBasicMaterial(), ring: new MeshBasicMaterial(), halo: new MeshBasicMaterial() })
+  const parts = (): SunParts => ({ group: new Group(), disc: new MeshBasicMaterial(), ring: new MeshBasicMaterial() })
   const dir = new Vector3(0, 0, -1)
 
   it('turns the sun to the compass camera', () => {
@@ -123,22 +123,127 @@ describe('placeSun', () => {
     expect(placeSun(p, dir, yaw(180))).toBe('behind')
     expect(p.ring!.opacity).toBe(1)
     expect(p.ring!.depthTest).toBe(true)
-    expect(p.halo!.depthTest).toBe(true)
-    expect(p.disc!.opacity).toBeGreaterThan(p.halo!.opacity)
+    expect(p.disc!.opacity).toBeLessThan(1)
   })
 
-  it('past the centre: dimmed, and the rings draw through what is in front so it is never hidden', () => {
+  it('past the centre: dimmed, and the corona draws through what is in front so it is never hidden', () => {
     const p = parts()
     expect(placeSun(p, dir, SNAPPED)).toBe('ahead')
     expect(p.ring!.opacity).toBeLessThan(1)
     expect(p.ring!.opacity).toBeGreaterThan(0.5)
     expect(p.ring!.depthTest).toBe(false)
-    expect(p.halo!.depthTest).toBe(false)
     // The disc stays depth tested, so the centre of the ball reads as in front of it.
     expect(p.disc!.depthTest).toBe(true)
   })
 
+  it('stands the sun out along the Z arrow, on its line', () => {
+    const p = parts()
+    const pose = new Quaternion().setFromEuler(new Euler(0.3, 1.2, 0, 'YXZ'))
+    placeSun(p, dir, pose)
+    const at = p.group!.position
+    expect(at.length()).toBeGreaterThan(SUN_LAYOUT.label)
+    expect(at.clone().normalize().distanceTo(dir)).toBeCloseTo(0)
+  })
+
+  it('end on and on your side, the disc fades so the centre dot shows through the ring', () => {
+    const p = parts()
+    placeSun(p, dir, yaw(180))
+    expect(p.disc!.opacity).toBeCloseTo(0)
+    expect(p.ring!.opacity).toBe(1)
+    // Off end on, the disc is back.
+    placeSun(p, dir, yaw(120))
+    expect(p.disc!.opacity).toBeGreaterThan(0.5)
+    // Past the centre, end on, it stays: there it is behind the dot.
+    placeSun(p, dir, SNAPPED)
+    expect(p.disc!.opacity).toBeGreaterThan(0.5)
+  })
+
   it('copes with parts not yet mounted', () => {
-    expect(placeSun({ group: null, disc: null, ring: null, halo: null }, dir, yaw(90))).toBe('right')
+    expect(placeSun({ group: null, disc: null, ring: null }, dir, yaw(90))).toBe('right')
+  })
+})
+
+/**
+ * The owner, 2026-11-24: "it should be beyond the Z+ arrow, not on top of the
+ * arrow. make it be past the letter Z on that axis". Measured on the screen,
+ * in the phone's 84px panel (42px from centre to edge), over every turn of
+ * the camera in 3 degree steps.
+ */
+describe('the sun beyond the Z label', () => {
+  const HALF_PX = 42
+  const dir = new Vector3(0, 0, -1)
+  const seen = new Vector3()
+  const each = (fn: (lateral: number) => void): void => {
+    for (let yawDeg = -180; yawDeg < 180; yawDeg += 3) {
+      for (let pitchDeg = -88; pitchDeg <= 88; pitchDeg += 4) {
+        const pose = new Quaternion().setFromEuler(new Euler((pitchDeg * Math.PI) / 180, (yawDeg * Math.PI) / 180, 0, 'YXZ'))
+        sunInView(dir, pose, seen)
+        fn(Math.hypot(seen.x, seen.y))
+      }
+    }
+  }
+  /** How far a radius r of the sun reaches on screen, in the same units, at its depth and scale. */
+  const across = (reach: number, r: number): number => (r * sunScale(seen, reach)) / ((SUN_LAYOUT.cameraDistance - reach * seen.z) * SUN_LAYOUT.halfFovTan)
+
+  it('keeps the whole corona inside the panel at every orientation', () => {
+    let checked = 0
+    each(() => {
+      const reach = sunReach(seen)
+      expect(sunOnScreen(seen, reach)).toBeLessThanOrEqual(SUN_LAYOUT.edge + 1e-9)
+      expect(sunOnScreen(seen, reach) + across(reach, SUN_LAYOUT.coronaOuter)).toBeLessThan(1)
+      checked++
+    })
+    expect(checked).toBeGreaterThan(5000)
+  })
+
+  it('goes arrow, then Z, then the sun, with the sun clear of the letter wherever the axis is not end on', () => {
+    each((lateral) => {
+      if (lateral < 0.6) return
+      const reach = sunReach(seen)
+      const tip = sunOnScreen(seen, SUN_LAYOUT.arrowTip) * HALF_PX
+      const label = sunOnScreen(seen, SUN_LAYOUT.label) * HALF_PX
+      const sun = sunOnScreen(seen, reach) * HALF_PX
+      // The label lies toward the centre, so the ring's edges nearest it are
+      // its outer radii: the bright band's, then the glow's.
+      const band = sun - across(reach, SUN_LAYOUT.coronaCoreOuter) * HALF_PX
+      const glow = sun - across(reach, SUN_LAYOUT.coronaOuter) * HALF_PX
+      expect(label).toBeGreaterThan(tip)
+      expect(sun).toBeGreaterThan(label)
+      // A 10px bold Z is about 6.5px across with a 3px shadow, so its far
+      // edge is about 5px from its centre: the ring's bright band starts
+      // past that.
+      expect(band - label).toBeGreaterThan(5)
+      // The soft glow round the ring starts past the letter itself, at
+      // most reaching into its shadow.
+      expect(glow - label).toBeGreaterThan(3.25)
+    })
+  })
+
+  it('in the plane of the screen: the sun stands near the edge, past the label', () => {
+    sunInView(dir, yaw(90), seen)
+    const reach = sunReach(seen)
+    expect(reach).toBeLessThan(SUN_LAYOUT.at)
+    expect(sunOnScreen(seen, reach)).toBeCloseTo(SUN_LAYOUT.edge)
+    expect(sunOnScreen(seen, SUN_LAYOUT.label)).toBeLessThan(sunOnScreen(seen, reach))
+  })
+
+  it('end on, either way, collapses to the centre: the reticle, its ring clear round the centre dot', () => {
+    const DOT = 0.12
+    for (const pose of [SNAPPED, yaw(180)]) {
+      sunInView(dir, pose, seen)
+      const reach = sunReach(seen)
+      expect(sunOnScreen(seen, reach)).toBeCloseTo(0)
+      expect(across(reach, SUN_LAYOUT.coronaCore)).toBeGreaterThan(1.5 * DOT / (SUN_LAYOUT.cameraDistance * SUN_LAYOUT.halfFovTan))
+      expect(across(reach, SUN_LAYOUT.coronaOuter)).toBeLessThan(0.35)
+    }
+  })
+
+  it('keeps the same size on screen as it swings round, like a thing at infinity', () => {
+    const sizes: number[] = []
+    each((lateral) => {
+      if (lateral < 0.5) return
+      sizes.push(across(sunReach(seen), SUN_LAYOUT.coronaOuter))
+    })
+    expect(Math.max(...sizes) - Math.min(...sizes)).toBeLessThan(1e-9)
   })
 })

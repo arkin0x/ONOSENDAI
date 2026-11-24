@@ -189,10 +189,13 @@ export interface BuilderState {
    * view of its own up at once (SCAN, MOVE, ADD). Refused while a deploy is
    * lined up: leaving would cancel it, which is CANCEL's (or Escape's) to
    * do, so the B key, EXIT BUILD and EXIT all agree. A copy lined up after a
-   * placement (useShards `copyLinedUp`) is stood down instead.
+   * placement (useShards `copyLinedUp`) is stood down instead. With
+   * `keepCursor` (a switch of mode: the pad, B) the build cursor stays where
+   * it is as HOP's cursor (useCyberspace `clearFocus`); EXIT and Esc still
+   * bring it home.
    */
-  exit: (opts?: { handoff?: boolean }) => void
-  /** On, or off. The B key and the BUILD control. */
+  exit: (opts?: { handoff?: boolean; keepCursor?: boolean }) => void
+  /** On, or off. The B key and the BUILD control: off is a switch into HOP, keeping the cursor. */
   toggle: () => void
   /** Bring the build cursor, and the view with it, back to your avatar. Still building. */
   toAvatar: () => void
@@ -242,10 +245,11 @@ export function dropViewReturns(): void {
  * back to watching them, at the action last aimed at (`scrub`). A free view
  * on your avatar shows what your head shows: it ends, keeping the zoom.
  * Left the usual way (`home`), any other ends too, back at the zoom you had
- * before it began: HOP at your head. Otherwise (a hand-off, or the mode
- * ended under it) it stays for whatever comes next.
+ * before it began: HOP at your head, the cursor kept where it is when
+ * `keepCursor` (a switch of mode). Otherwise (a hand-off, or the mode ended
+ * under it) it stays for whatever comes next.
  */
-function settleView(scrub: number | null, home = false): void {
+function settleView(scrub: number | null, home = false, keepCursor = false): void {
   const cs = useCyberspace.getState()
   if (!cs.focus?.drive) return
   if (home) dropViewReturns()
@@ -255,7 +259,7 @@ function settleView(scrub: number | null, home = false): void {
     return
   }
   if (onAvatar(cs)) cs.clearFocus(true)
-  else if (home) cs.clearFocus()
+  else if (home) cs.clearFocus(false, keepCursor)
 }
 
 export const useBuilder = create<BuilderState>((set, get) => ({
@@ -341,10 +345,10 @@ export const useBuilder = create<BuilderState>((set, get) => ({
     // Off first, so the view change below is not read as the view ending
     // under a live build mode.
     set({ active: false, via: null, leftAvatar: false, scrub: null })
-    settleView(scrub, opts?.handoff !== true)
+    settleView(scrub, opts?.handoff !== true, opts?.keepCursor === true)
   },
 
-  toggle: () => { if (get().active) get().exit(); else get().enter('build') },
+  toggle: () => { if (get().active) get().exit({ keepCursor: true }); else get().enter('build') },
 
   toAvatar: () => {
     if (!get().active) return

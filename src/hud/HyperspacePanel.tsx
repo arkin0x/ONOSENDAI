@@ -553,7 +553,7 @@ export function HyperspacePanel(): JSX.Element {
         {ready ? (
           <button
             className="tag tag--tap"
-            title="Open the Hyperspace overlay (H)"
+            title="Open the Hyperspace overlay (L)"
             onClick={() => { const hs = useHyperspace.getState(); if (hs.scrubHeight === null) hs.setScrubHeight(hs.viewedStop ?? hs.tipHeight ?? 0); else closeScrubber() }}
           >{tag}</button>
         ) : (

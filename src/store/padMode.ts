@@ -27,10 +27,11 @@
  *
  * MODES (owner, 2026-11-24; store/modeOrder.ts) makes all of this the
  * default list: the player can put the modes in any order and switch some
- * off. The first is where the app starts (watchStartMode), the first on
- * after it is the second button in RECALL's slot (WALK's place above), and
- * the ring is the first and every other mode on. A mode not in the ring (the
- * second button's, or one switched off and asked for by name, as B asks for
+ * off. The first place is the Toggle Mode, the second button in RECALL's
+ * slot (WALK's place above). Below it is the ring: the Default Mode, where
+ * the app starts (watchStartMode), and every other mode on after it, which
+ * the mode button goes down through. A mode not in the ring (the toggle's,
+ * or one switched off and asked for by name, as B asks for
  * BUILD) is a visit: the mode button is the way back, dim, as in WALK.
  * Going between two modes keeps the hand-offs above where the default ring
  * has them (BUILD where VIEW looked, SCAN where BUILD's cursor was), and
@@ -253,7 +254,7 @@ export function switchMode(to: PadMode, opts?: { noFall?: boolean }): void {
 /**
  * Where the dim mode button goes back to from a mode not in the ring: WALK's
  * own `from` (enterWalk), else the mode the second button was pressed from,
- * else the last ring mode the pad was in, else the first mode.
+ * else the last ring mode the pad was in, else the default mode.
  */
 export function backOf(current: PadMode = currentPadMode()): ModeId {
   if (current === 'walk') return useWalk.getState().from
@@ -293,7 +294,7 @@ export function cycleMode(): void {
 /**
  * Out of a mode not in the ring, back to where it came from (backOf). WALK
  * the pad's way (leaveWalk). A way back that will not open here falls back
- * to the first mode, then to HOP, so the dim button never does nothing.
+ * to the default mode, then to HOP, so the dim button never does nothing.
  */
 export function goBack(): void {
   const cur = currentPadMode()
@@ -341,6 +342,49 @@ export function watchLastRing(): () => void {
   const offs = [useCyberspace.subscribe(note), useBuilder.subscribe(note), useScan.subscribe(note)]
   note()
   return () => { for (const off of offs) off() }
+}
+
+/**
+ * The keys that go straight to a mode (owner, 2026-11-24: "H = HOP, V = VIEW,
+ * Y = WALK"), beside B (BUILD) and N (SCAN). By event code, so a keyboard
+ * layout's letters do not move them.
+ */
+export const MODE_HOTKEYS: Readonly<Record<string, ModeId>> = { KeyH: 'hop', KeyV: 'view', KeyY: 'walk' }
+
+/**
+ * H, V or Y: straight into that mode. They follow MODES: a mode switched off
+ * in the list the pad follows now (effectiveModes: the default list in the
+ * newcomer view, a tour run and /demo; TV hears no keys at all) does nothing,
+ * unlike B and N, which open their mode by name. In it already: nothing.
+ * WALK goes in the pad's way (enterWalk, which keeps where it came from),
+ * the others through switchMode, so the ring and the toggle slot are moved
+ * no more than B or N moves them: the dim way back is what watchLastRing
+ * kept. Into VIEW or WALK only at rest, as the pad offers them and N goes;
+ * out of WALK with steps still to prove, the first press stops them and the
+ * second leaves, as X does. True when the pad is in that mode after.
+ */
+export function hotkeyMode(to: ModeId): boolean {
+  if (effectiveModes().off.includes(to)) return false
+  const cur = currentPadMode()
+  if (cur === to) return true
+  const cs = useCyberspace.getState()
+  // Out of WALK as X leaves it: steps still to prove (or a fall in the air)
+  // are stopped by the first press, and the second leaves; a slip of a key
+  // never drops a walk's unproved steps.
+  if (cur === 'walk') {
+    const walk = useWalk.getState()
+    if (walk.behind > 0 || walk.open !== null || walk.falling || cs.proof.status === 'computing') { walk.stop(); return false }
+  }
+  // Into a mode other than HOP only at rest, as the pad offers it and N goes:
+  // nothing being placed, no proof computing, and from HOP nothing lined up
+  // and the cursor on your avatar. HOP itself is always the way back.
+  if (to !== 'hop') {
+    if (useShards.getState().pending || cs.proof.status === 'computing') return false
+    if (cur === 'hop' && !(cs.atHead() && cs.plan === null && samePosition(cs.cursor, cs.position))) return false
+  }
+  if (to === 'walk') enterWalk()
+  else switchMode(to)
+  return currentPadMode() === to
 }
 
 /**

@@ -28,6 +28,7 @@ import {
   FLUID_WALL_REACH, accelerate, dueCrossing, len, wishOf, zero, type Vec,
 } from '../lib/fluidWalk'
 import { moveDirection } from '../lib/moves'
+import { verticalAlong } from '../lib/walkKeys'
 import { walkFacing, walkFall, walkFallUp, walkGlide, walkRise } from '../lib/walkEye'
 import { WORLD_DOWN, heightOf, raised, upOf } from '../lib/walkDown'
 import { useCyberspace } from './useCyberspace'
@@ -862,12 +863,15 @@ function wishNow(now: number, gravity: boolean, g: AxisDirection): Vec {
   if (!walkInputOpen()) return zero()
   let d = heldNow()
   const pushes = (x: { fwd: number; strafe: number; vert: number }): boolean => x.fwd !== 0 || x.strafe !== 0 || (!gravity && x.vert !== 0)
-  if (!pushes(d) && now < fluidNudge.until) d = { fwd: sgn(fluidNudge.fwd), strafe: sgn(fluidNudge.strafe), vert: sgn(fluidNudge.vert) }
+  if (!pushes(d) && now < fluidNudge.until) d = { fwd: sgn(fluidNudge.fwd), strafe: sgn(fluidNudge.strafe), vert: sgn(fluidNudge.vert), view: fluidNudge.view }
   if (!pushes(d)) return zero()
   const cs = useCyberspace.getState()
   const axes = cs.screenAxes ?? cs.axes()
   const up: AxisName = gravity ? g.axis : axes.up.axis
-  const vertical = gravity ? null : moveDirection(axes, 'up')
+  // Gravity off, Space and C push along the view's up (against walkDown,
+  // which follows the view whether gravity is on or not), R and F the
+  // camera's (lib/walkKeys.ts).
+  const vertical = gravity ? null : verticalAlong('up', d.view === true, axes, walkDown())
   // With no facing to go by (the first frame), the screen's axes, as a press took.
   const forward: Vec = walkFacing.valid ? walkFacing.forward : axisVec(moveDirection(axes, 'away'))
   const right: Vec = walkFacing.valid ? walkFacing.right : axisVec(moveDirection(axes, 'right'))

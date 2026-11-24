@@ -26,11 +26,14 @@ export type Borders = [Uint8Array | null, Uint8Array | null, Uint8Array | null, 
 
 /** One chunk's mesh, ready for a BufferGeometry. */
 export interface ChunkMesh {
-  /** 10 floats a vertex (see above). */
+  /** 5 floats a vertex (see above): the solid blocks. */
   vertices: Float32Array
   indices: Uint32Array
-  /** Rectangles drawn: two triangles each. */
+  /** Rectangles drawn, both passes: two triangles each. */
   quads: number
+  /** The see-through blocks (Rimeglass, Tidewater, Canopy glass), drawn in a pass of their own. */
+  clearVertices: Float32Array
+  clearIndices: Uint32Array
 }
 
 export const FLOATS_PER_VERTEX = 5
@@ -59,13 +62,26 @@ export function borderSlab(blocks: Uint8Array, face: number): Uint8Array {
 
 /**
  * Greedy mesh of one chunk. `tiles` maps each id 0 to 255 to its kind's tile
- * row (blocks.ts tileTable).
+ * row (blocks.ts tileTable); `clear` marks the ids a block behind shows
+ * through (blocks.ts clearTable: the see-through and the walk-through). A
+ * solid face shows where its neighbour is open or clear; a see-through face
+ * shows where its neighbour is open or another clear kind, and goes to the
+ * see-through pass.
  */
-export function meshChunk(blocks: Uint8Array, borders: Borders, tiles: Uint8Array): ChunkMesh {
+export function meshChunk(blocks: Uint8Array, borders: Borders, tiles: Uint8Array, clear: Uint8Array = new Uint8Array(256), seeThrough: Uint8Array = clear): ChunkMesh {
+  const solidPass = pass(blocks, borders, tiles, clear, (id) => seeThrough[id] === 0)
+  const clearPass = pass(blocks, borders, tiles, clear, (id) => seeThrough[id] === 1)
+  return { vertices: solidPass.vertices, indices: solidPass.indices, quads: solidPass.quads + clearPass.quads, clearVertices: clearPass.vertices, clearIndices: clearPass.indices }
+}
+
+/** One pass of the greedy mesh, over the cells `include` takes. */
+function pass(blocks: Uint8Array, borders: Borders, tiles: Uint8Array, clear: Uint8Array, include: (id: number) => boolean): { vertices: Float32Array; indices: Uint32Array; quads: number } {
   let verts = new Float32Array(4096 * FLOATS_PER_VERTEX)
   let inds = new Uint32Array(6144)
   let nv = 0, ni = 0, quads = 0
   const rowAt = (o: number): number => tiles[blocks[o]]
+  // Whether a face of `here` toward `across` is seen.
+  const shows = (here: number, across: number): boolean => across === 0 || (clear[across] === 1 && (clear[here] === 0 || across !== here))
   const mask = new Int32Array(1024)
   const x = [0, 0, 0], q = [0, 0, 0], du = [0, 0, 0], dv = [0, 0, 0]
 
@@ -87,17 +103,17 @@ export function meshChunk(blocks: Uint8Array, borders: Borders, tiles: Uint8Arra
       q[0] = q[1] = q[2] = 0
       q[d] = side ? 1 : -1
       for (x[d] = 0; x[d] < 32; x[d]++) {
-        // The face mask of this slice: the tile (plus one) where the block's face toward `side` is open.
+        // The face mask of this slice: the tile (plus one) where the block's face toward `side` is seen.
         let n = 0
         for (x[v] = 0; x[v] < 32; x[v]++) for (x[u] = 0; x[u] < 32; x[u]++, n++) {
           const o = idx(x[0], x[1], x[2])
           const here = blocks[o]
-          if (here === 0) { mask[n] = 0; continue }
+          if (here === 0 || !include(here)) { mask[n] = 0; continue }
           const nd = x[d] + q[d]
           let across: number
           if (nd < 0 || nd > 31) across = border ? border[slabIndex(x[a], x[b])] : 0
           else { const save = x[d]; x[d] = nd; across = blocks[idx(x[0], x[1], x[2])]; x[d] = save }
-          mask[n] = across === 0 ? rowAt(o) * 3 + face + 1 : 0
+          mask[n] = shows(here, across) ? rowAt(o) * 3 + face + 1 : 0
         }
         // Merge the mask into rectangles of one tile.
         n = 0

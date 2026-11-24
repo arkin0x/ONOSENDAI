@@ -79,6 +79,7 @@ import { useUiHints } from '../store/useUiHints'
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 import { ChainStatusStrip, useChainStatus } from './ChainStatus'
 import { moveUnderWay } from '../lib/buildCursor'
+import { useTerrain } from '../store/useTerrain'
 import { useWalk } from '../store/useWalk'
 import { onAvatar, useBuilder } from '../store/useBuilder'
 import { buildHeld, cycleMode, goBack, leaveWalk, padMode, pressSecond, recall, type PadMode } from '../store/padMode'
@@ -300,7 +301,10 @@ export function TouchControls(): JSX.Element {
   const held = useShards((s) => buildHeld(s))
   // SCAN mode (store/useScan.ts): VIEW's view, made SCAN's.
   const scanning = useScan((s) => s.active)
+  // TERRAIN is WALK with block tools (store/useTerrain.ts): WALK's pad, and its own mode on the mode button.
+  const terrainOn = useTerrain((t) => t.active)
   const mode = padMode(walking, building, viewing, scanning)
+  const ringMode: PadMode = terrainOn ? 'terrain' : mode
   // The commit block under the pad: at your head, in VIEW, and in BUILD, but
   // not while spectating, where the SPECTATING bar holds that corner (BUILD
   // is left there by EXIT, B or Esc, as before). Whenever it is drawn with
@@ -344,7 +348,7 @@ export function TouchControls(): JSX.Element {
   // A mode not in the ring (the second button's, or one MODES switched off
   // and asked for by name): the mode button is the way back, dim, naming
   // where it goes (padMode backOf), as it has been in WALK.
-  const visiting = !roles.ring.includes(mode)
+  const visiting = !roles.ring.includes(ringMode)
   // padMode backOf's rule, from what this render already reads (no store read during render).
   const back = useModes((s) => s.back)
   const lastRing = useModes((s) => s.lastRing)
@@ -556,8 +560,8 @@ export function TouchControls(): JSX.Element {
         {walkSlot && second === 'walk' ? (
           <button
             key="walk"
-            className={`touchops__cancel touchops__walk ${walking ? 'is-on' : 'is-dim'}${veil('pad.recall')}`}
-            aria-pressed={walking}
+            className={`touchops__cancel touchops__walk ${walking && !terrainOn ? 'is-on' : 'is-dim'}${veil('pad.recall')}`}
+            aria-pressed={walking && !terrainOn}
             title={walking
               ? `Walking: every press is a step, proved behind you. Keys: W forward, S back, A and D sideways, Space or R jump, C or F down. Press to go back to ${MODE_WORD[walkFrom]} (X)`
               : walkHeld ? 'Place or cancel what is lined up first'
@@ -616,7 +620,8 @@ export function TouchControls(): JSX.Element {
             moving the cursor to look around without planning a hop; BUILD
             (2026-11-02 in the ring) places things and never moves you. Keyed
             by the mode it names, so only its own dim to lit eases. */}
-        {walking ? ring('walk')
+        {terrainOn ? ring('terrain')
+          : walking ? ring('walk')
           : building ? ring('build')
           : viewing && scanning ? ring('scan')
           : viewing ? ring('view')

@@ -55,6 +55,7 @@ import { useToast } from '../useToast'
 import { useRegion } from '../useRegion'
 import { buildHeld, buildToHop, currentPadMode, cycleMode, enterWalk, leaveWalk, padMode, recall } from '../padMode'
 import { useScan } from '../useScan'
+import { resetModes, setModeOn, updateModes } from '../modeOrder'
 import { walkCancel } from '../../hooks/useKeyboard'
 import { escapeTop } from '../../hooks/useEscape'
 import { spectate, stopSpectating } from '../../lib/spectator'
@@ -74,10 +75,21 @@ beforeEach(async () => {
   await placeSpawn()
   S().cancel()
   useCyberspace.setState({ scaleExp: 0 })
+  // These walk the ring as it was before TERRAIN joined it (after WALK, on by default); the default ring is its own test.
+  resetModes()
+  updateModes((s) => setModeOn(s, 'terrain', false))
   expect(currentPadMode()).toBe('hop')
 })
 
 describe('the mode button', () => {
+  it('with the default list goes HOP, TERRAIN, VIEW: TERRAIN is on, after WALK', () => {
+    resetModes()
+    cycleMode()
+    expect(currentPadMode()).toBe('terrain')
+    cycleMode()
+    expect(currentPadMode()).toBe('view')
+  })
+
   it('goes HOP, VIEW, BUILD, SCAN and back to HOP, one press each', () => {
     const home = { ...S().position }
     cycleMode()

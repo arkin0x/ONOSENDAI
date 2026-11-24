@@ -69,12 +69,12 @@ import { placeSpawn } from '../fixtures/placeSpawn'
 const S = () => useCyberspace.getState()
 const B = () => useBuilder.getState()
 
-/** Keep a list for the identity on screen. */
+/** Keep a list for the identity on screen. TERRAIN, on by default, is off unless the list names it (these lists predate it). */
 function setList(order: ModeId[], off: ModeId[] = []): void {
   updateModes((): ModeSettings => {
     let s: ModeSettings = { order: DEFAULT_MODES.order, off: [] }
     order.forEach((id, i) => { s = moveModeTo(s, id, i) })
-    for (const id of off) s = setModeOn(s, id, false)
+    for (const id of order.includes('terrain') ? off : [...off, 'terrain' as ModeId]) s = setModeOn(s, id, false)
     return s
   })
 }

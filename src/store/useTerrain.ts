@@ -39,7 +39,7 @@ import { chunkOf, chunkKey, type ChunkBase } from '../lib/terrain/coords'
 import { RING, TerrainWorld, REACH, type Change, type ChunkSlot } from '../lib/terrain/world'
 import { applyLayer, encodeLayer, isLayer, type Layer } from '../lib/terrain/layer'
 import { generateChunk } from '../lib/terrain/blocksClient'
-import { EMPTY, blockName, kindId } from '../lib/terrain/blocks'
+import { EMPTY, blockName, kindId, solid as isSolid } from '../lib/terrain/blocks'
 import { terrainWallItems } from '../lib/terrain/walls'
 import {
   FOLD_AT, HOTBAR_SLOTS, emptyInventory, foldChunk, openTerrainDb, opKey, readKept, readOwner, writeHint, writeInventory, writeOps, writeSurveyed,
@@ -280,7 +280,8 @@ export const useTerrain = create<TerrainState>((set, get) => ({
     const cell: [number, number, number] = [hit.cell[0] + hit.normal[0], hit.cell[1] + hit.normal[1], hit.cell[2] + hit.normal[2]]
     if (!cellInReach(s, cell)) { get().say(OUT_OF_REACH); return false }
     const [dx, dy, dz] = cell
-    if (s.world.blockCs(dx, dy, dz) !== EMPTY) return false
+    // Open space, or a liquid, which a placed block takes the place of.
+    if (isSolid(s.world.blockCs(dx, dy, dz))) return false
     const slot = s.world.slotAtCs(dx, dy, dz)
     if (!slot?.blocks) { get().say('Survey this chunk before building in it.'); return false }
     // Never where you stand: the walk's own gibson.
@@ -346,7 +347,7 @@ function clearWalker(s: TerrainSession, surveyed: string): void {
   const w = offsetOf(s, headNow())
   // Only in the chunk just surveyed: a survey never touches another chunk's blocks.
   if (s.world.slotAtCs(w[0], w[1], w[2])?.key !== surveyed) return
-  if (s.world.blockCs(w[0], w[1], w[2]) === EMPTY) return
+  if (!isSolid(s.world.blockCs(w[0], w[1], w[2]))) return
   const change = s.world.setCs(w[0], w[1], w[2], EMPTY)
   if (change) record(s, change)
 }

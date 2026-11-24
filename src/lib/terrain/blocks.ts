@@ -26,6 +26,10 @@ export interface BlockKind {
   edge: string
   /** Glows by itself. */
   glow?: boolean
+  /** Seen through: drawn in the scene's see-through pass, and a block behind it shows. */
+  clear?: boolean
+  /** Walked through, not on: WALK's walls leave it out (a liquid). */
+  passable?: boolean
 }
 
 export const KINDS: readonly BlockKind[] = [
@@ -42,6 +46,18 @@ export const KINDS: readonly BlockKind[] = [
   { id: 42, index: 10, name: 'Glowcore', color: '#15191a', edge: '#00e5ff', glow: true },
   { id: 43, index: 11, name: 'Gibsonite', color: '#4b0058', edge: '#ff00ff', glow: true },
   { id: 192, index: 12, name: 'Relic shard', color: '#5c0010', edge: '#ff3b6b', glow: true },
+  // Revision 2 (owner, 2026-11-24: "lets ship it"): eleven more, our own names, the same 16 by 16 tile style.
+  { id: 9, index: 13, name: 'Basaltine', color: '#22232b', edge: '#5b6070' },
+  { id: 10, index: 14, name: 'Rimeglass', color: '#a9e8ff', edge: '#e6fbff', clear: true },
+  { id: 11, index: 15, name: 'Tidewater', color: '#1d5fd6', edge: '#6fb4ff', clear: true, passable: true },
+  { id: 12, index: 16, name: 'Magmaflow', color: '#ff5a00', edge: '#ffd040', glow: true, passable: true },
+  { id: 13, index: 17, name: 'Lumenwood', color: '#4a3020', edge: '#7dffcf', glow: true },
+  { id: 14, index: 18, name: 'Canopy glass', color: '#1fa860', edge: '#9dffc8', clear: true },
+  { id: 193, index: 19, name: 'Voidpearl', color: '#0a0614', edge: '#b48cff', glow: true },
+  { id: 194, index: 20, name: 'Auroric', color: '#103040', edge: '#6dffd8', glow: true },
+  { id: 195, index: 21, name: 'Chronite', color: '#202836', edge: '#ffe08a', glow: true },
+  { id: 196, index: 22, name: 'Singularity core', color: '#000000', edge: '#ffffff', glow: true },
+  { id: 197, index: 23, name: 'Genesis shard', color: '#fff4d6', edge: '#ffc23a', glow: true },
 ]
 
 /** A block this client has no kind for (a later revision's id): a neutral look that says it is unknown (DECK §2.3). */
@@ -66,9 +82,28 @@ export function kindId(id: number): number {
   return blockKind(id)?.id ?? EMPTY
 }
 
-/** Whether a cell with this id stops a body and takes a face. */
+/** Whether a cell with this id stops a walker and holds its faces (a liquid does neither). */
 export function solid(id: number): boolean {
-  return id !== EMPTY
+  return id !== EMPTY && !DECK_TO_KIND[id]?.passable
+}
+
+/** Whether a cell with this id is seen through (drawn in the see-through pass). */
+export function clear(id: number): boolean {
+  return !!DECK_TO_KIND[id]?.clear
+}
+
+/** For the mesher: 1 for every id drawn in the see-through pass. */
+export function seeThroughTable(): Uint8Array {
+  const t = new Uint8Array(256)
+  for (const k of KINDS) if (k.clear) t[k.id] = 1
+  return t
+}
+
+/** For the mesher: 1 for every id that is seen through or walked through (a block behind shows). */
+export function clearTable(): Uint8Array {
+  const t = new Uint8Array(256)
+  for (const k of KINDS) if (k.clear || k.passable) t[k.id] = 1
+  return t
 }
 
 /** The tile row of every id 0 to 255, for the mesher: the kind's index, 255 for open space. */

@@ -14030,7 +14030,7 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
   --terrain-fill: rgba(4, 10, 14, 0.82);
   --terrain-cut: 8px;
   /* Ten slots and their gaps across a phone, never wider than the screen. */
-  --terrain-slot: min(36px, calc((100vw - 32px - 27px) / 10));
+  --terrain-slot: min(32px, calc((100vw - 32px - 27px) / 10));
   /* Over the cyberspace scene, under the compass and the menu: TERRAIN is drawn in the scene itself. */
   position: fixed;
   inset: 0;
@@ -14044,7 +14044,15 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
   -webkit-touch-callout: none;
 }
 @media (min-width: 700px) {
-  .terrainview { --terrain-slot: 46px; }
+  .terrainview { --terrain-slot: 40px; }
+}
+/* Wide or short screens have room along the bottom, between the walk pad and WALK's right column, over CHAT. */
+@media (min-width: 700px), (max-height: 520px) {
+  .terrainview .terrain-hotbar { bottom: calc(max(14px, env(safe-area-inset-bottom)) + 44px); }
+  .terrainview .terrain-hint { bottom: calc(max(14px, env(safe-area-inset-bottom)) + 52px + var(--terrain-slot)); }
+}
+@media (max-height: 520px) {
+  .terrainview { --terrain-slot: 30px; }
 }
 .terrain-hotbar, .terrain-sheet { pointer-events: auto; }
 .terrainview .terrain-key {
@@ -14140,8 +14148,8 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
 
 /* The first visit's steps and SURVEY: each in a slot of its own, so the bar and the scene never move when they come and go. */
 .terrain-hint {
-  position: absolute;
-  top: calc(max(12px, env(safe-area-inset-top)) + 54px + var(--terrain-slot));
+  position: fixed;
+  bottom: calc(var(--terrain-orb-bottom) + var(--terrain-orb) + 18px + var(--terrain-slot));
   left: 16px;
   right: 16px;
   height: 44px;
@@ -14233,11 +14241,11 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
 .terrain-crosshair::before { left: 8px; top: 0; width: 2px; height: 18px; }
 .terrain-crosshair::after { top: 8px; left: 0; height: 2px; width: 18px; }
 
-/* The hotbar: nine slots and the bag, centred under the bar, so WALK's pad keeps the bottom. */
+/* The hotbar: nine slots and the bag, a slim row just over WALK's LOOK ball and pad. */
 .terrain-hotbar {
-  position: absolute;
+  position: fixed;
   left: 50%;
-  top: calc(max(12px, env(safe-area-inset-top)) + 46px);
+  bottom: calc(var(--terrain-orb-bottom) + var(--terrain-orb) + 10px);
   transform: translateX(-50%);
   display: flex;
   gap: 3px;
@@ -14287,31 +14295,42 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
 .terrain-swatch--glow { filter: drop-shadow(0 0 4px var(--sw-edge)); }
 .terrain-slot .terrain-swatch { width: calc(var(--terrain-slot) * 0.56) !important; height: calc(var(--terrain-slot) * 0.56) !important; }
 
-/* MINE and PLACE: a pair on the left, half way down, clear of WALK's pad below and the hotbar above. */
+/* TERRAIN's few controls fit WALK's own layout (owner, 2026-11-24: "it should just borrow walk's layout"):
+   PLACE, and SURVEY while one is offered, in a column just left of WALK's LOOK ball, at the ball's height;
+   the hotbar a slim row just over the LOOK ball and the walk pad. WALK's controls stay where they are. */
+.terrainview {
+  --terrain-orb: 112px;
+  --terrain-orb-bottom: calc(var(--walkside-bottom) + var(--walkside-key) + var(--routeov-gap));
+}
+@media (max-height: 520px) {
+  .terrainview { --terrain-orb: 88px; }
+}
 .terrain-tools {
-  position: absolute;
-  left: 16px;
-  top: 42%;
+  position: fixed;
+  right: calc(var(--controls-right) + var(--terrain-orb) + 8px);
+  bottom: var(--terrain-orb-bottom);
   display: flex;
   flex-direction: column;
   gap: 6px;
   pointer-events: auto;
 }
+.terrain-tools__slot { display: block; height: 34px; }
 .terrain-act {
-  width: 96px;
-  height: 36px;
+  width: 92px;
+  height: 34px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 5px;
+  gap: 4px;
   color: #fff;
   font: inherit;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.08em;
   touch-action: none;
   cursor: pointer;
 }
+.terrain-act--survey { --terrain-line: var(--terrain); color: var(--terrain); }
 .terrain-act:active::before { background: rgba(124, 255, 196, 0.22); }
 .terrain-act .terrain-key { margin-left: 2px; }
 

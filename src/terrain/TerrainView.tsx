@@ -7,7 +7,7 @@
  * - SURVEY (G) fills the chunk you stand in, or the next one in reach the way
  *   you look, with its generated ground.
  * - MINE (Q, a click or a tap on a block) and PLACE (E, a right click or a
- *   long press) act on the block under the cross, or under the pointer.
+ *   act on the block under the cross, or under the pointer: a tap mines, PLACE places.
  * - The hotbar, 1 to 9, and the bag (I): what you carry, on this device.
  * - T or Esc goes back to the mode you came from; the mode button goes on
  *   round the ring.
@@ -18,10 +18,10 @@
  */
 
 import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
-import { Backpack, Blocks, Box, Pickaxe, Radar } from 'lucide-react'
+import { Backpack, Box, Radar } from 'lucide-react'
 import { HINT_DONE, headNow, offsetOf, surveyTarget as targetNow, terrainSession, useTerrain } from '../store/useTerrain'
 import { terrainCursor } from '../scene/TerrainLayer'
-import { cycleMode, leaveTerrain, nextModeWord } from '../store/padMode'
+import { leaveTerrain } from '../store/padMode'
 import { resetTerrainInput, slotKey, terrainInput } from './terrainInput'
 import { blockKind, blockName } from '../lib/terrain/blocks'
 import { tileUrl } from '../lib/terrain/tiles'
@@ -36,9 +36,9 @@ const TAP_SLOP = 8
 
 /** The first-visit hint's three steps, in plain words. */
 export const HINT_STEPS = [
-  'Mine a block: tap or click it, or press MINE (Q).',
-  'Place it back: long press or right click, or press PLACE (E).',
-  'Open your inventory: the bag at the end of the bar (I).',
+  'Mine a block: tap or click it (Q).',
+  'Place it back: PLACE, or right click (E).',
+  'Open your bag: the last slot of the bar (I).',
 ] as const
 
 /** The chunk you stand in, or null. */
@@ -178,7 +178,8 @@ function TerrainScreen(): JSX.Element {
   const surveying = useTerrain((s) => s.surveying.length > 0)
   const target = useSurveyTarget()
   const standing = standingWords(loading, surveying, target)
-  const nextWord = nextModeWord()
+  // Loading or surveying is said under the cross while it lasts; nothing else is, so the scene stays clear.
+  const catching = loading || surveying
 
   // A fresh cursor at every visit.
   useEffect(() => { resetTerrainInput() }, [])
@@ -212,7 +213,7 @@ function TerrainScreen(): JSX.Element {
   }, [])
 
   // The scene's pointer, heard alongside WALK's (which still looks on a drag): a tap or a click mines at the point,
-  // a long press or the second button places, the mouse resting aims the cursor.
+  // the mouse's second button places, the mouse resting aims the cursor (owner: "Tap to mine, place with a button").
   useEffect(() => {
     let press: { id: number; x: number; y: number; moved: number; t: number; done: boolean; timer: number; canvas: HTMLCanvasElement } | null = null
     const ndc = (c: HTMLCanvasElement, x: number, y: number): { x: number; y: number } => {
@@ -227,14 +228,6 @@ function TerrainScreen(): JSX.Element {
       if (e.pointerType === 'mouse' && e.button !== 0) return
       end()
       const p = { id: e.pointerId, x: e.clientX, y: e.clientY, moved: 0, t: performance.now(), done: false, timer: 0, canvas: c }
-      if (e.pointerType !== 'mouse') {
-        p.timer = window.setTimeout(() => {
-          if (press !== p || p.moved > TAP_SLOP) return
-          p.done = true
-          terrainInput.action = { kind: 'place', at: ndc(c, p.x, p.y) }
-          navigator.vibrate?.(12)
-        }, LONG_MS)
-      }
       press = p
     }
     const move = (e: PointerEvent): void => {
@@ -270,35 +263,26 @@ function TerrainScreen(): JSX.Element {
     <div className="terrainview" role="group" aria-label="TERRAIN: block tools">
       <span className="terrain-crosshair" aria-hidden />
 
-      <div className="terrain-bar">
-        <span className="terrain-bar__title"><Blocks size={14} strokeWidth={2.25} aria-hidden />TERRAIN</span>
-        {/* One line, always there, so nothing below it moves when it changes. */}
-        <span className="terrain-bar__status">{standing}</span>
-        <button className="terrain-bar__exit terrain-bar__mode" onClick={(e) => { e.currentTarget.blur(); cycleMode() }} title={`On to ${nextWord}, the next mode of the pad`}>{nextWord}</button>
-        <button className="terrain-bar__exit" onClick={(e) => { e.currentTarget.blur(); leaveTerrain() }} title="Back to the mode you came from (T or Esc)">EXIT<Key>T</Key></button>
-      </div>
-
       {/* What just happened (a refusal, a survey), under the cross, in a slot of its own: up to two lines, nothing moves. */}
-      <div className="terrain-message" role="status" aria-live="polite">{message && <span className="terrain-message__text">{message}</span>}</div>
+      <div className="terrain-message" role="status" aria-live="polite">{message ? <span className="terrain-message__text">{message}</span> : catching ? <span className="terrain-message__text">{standing}</span> : null}</div>
 
-      {/* The first visit's three steps, in a slot of its own under the bar. */}
+      {/* The first visit's three steps, just over the hotbar, in a slot of its own. */}
       <div className="terrain-hint" aria-live="polite">
         {!loading && hint < HINT_DONE && (
           <span className="terrain-hint__box"><span className="terrain-hint__step">{hint + 1} of 3</span>{HINT_STEPS[hint]}</span>
         )}
       </div>
 
-      <div className="terrain-survey">
-        {(target || surveying) && (
-          <button className="terrain-survey__btn" disabled={surveying} onClick={(e) => { e.currentTarget.blur(); doSurvey() }} title="Fill this chunk with the ground everyone computes the same (G)">
-            <Radar size={16} strokeWidth={2.25} aria-hidden />{surveying ? 'SURVEYING' : 'SURVEY'}<Key>G</Key>
-          </button>
-        )}
-      </div>
-
-      <div className="terrain-tools" aria-label="Mine and place">
-        <button className="terrain-act" {...noCallout} onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); terrainInput.action = { kind: 'mine', at: null } }} aria-label="Mine the block at the cross (Q)"><Pickaxe size={16} strokeWidth={2.25} aria-hidden />MINE<Key>Q</Key></button>
-        <button className="terrain-act" {...noCallout} onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); terrainInput.action = { kind: 'place', at: null } }} aria-label="Place a block at the cross (E)"><Box size={16} strokeWidth={2.25} aria-hidden />PLACE<Key>E</Key></button>
+      {/* PLACE, and SURVEY while one is offered: a column beside WALK's LOOK ball, in WALK's layout. Mining is a tap on the scene. */}
+      <div className="terrain-tools" aria-label="Place and survey">
+        <span className="terrain-tools__slot">
+          {(target || surveying) && (
+            <button className="terrain-act terrain-act--survey" disabled={surveying} {...noCallout} onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); if (!surveying) doSurvey() }} title="Fill this chunk with the ground everyone computes the same (G)" aria-label="Survey (G)">
+              <Radar size={15} strokeWidth={2.25} aria-hidden />{surveying ? '...' : 'SURVEY'}<Key>G</Key>
+            </button>
+          )}
+        </span>
+        <button className="terrain-act" {...noCallout} onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); terrainInput.action = { kind: 'place', at: null } }} title="Place the chosen block on the face at the cross (E, or right click)" aria-label="Place (E)"><Box size={15} strokeWidth={2.25} aria-hidden />PLACE<Key>E</Key></button>
       </div>
 
       <Hotbar />

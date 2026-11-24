@@ -43,7 +43,6 @@ import './tutorial/straylight'
 import './tutorial/dungeon'
 import { GameView } from './game/GameView'
 import { TerrainView } from './terrain/TerrainView'
-import { useTerrain } from './store/useTerrain'
 import { GameChip } from './hud/GameChip'
 import { TvScreen } from './hud/TvScreen'
 import { isTvPath, useTv } from './store/useTv'
@@ -363,7 +362,6 @@ export default function App(): JSX.Element {
   // body, so a hidden pad still shows it; the pad's open state is kept, so
   // it is back the moment the last modal closes.
   const modalUp = useModalUp()
-  const terrainOn = useTerrain((t) => t.active)
   const showPad = padOpen && !crowded
 
   const onSceneTap = useCallback(() => {
@@ -478,7 +476,7 @@ export default function App(): JSX.Element {
       <StarNickname />
       {!crowded && !offerUp && !deploying && viewMenuOpen && <ViewMenu onClose={() => setViewMenuOpen(false)} />}
       <div hidden={modalUp}>
-        {showPad && !offerUp && !terrainOn && <TouchControls />}
+        {showPad && !offerUp && <TouchControls />}
         {/* Not while placing: the deploy bar docks in this same corner
             (arkinox, 2026-10-12), and placing moves no avatar, so there is
             no route to show. */}

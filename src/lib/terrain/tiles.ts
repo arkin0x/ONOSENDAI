@@ -5,7 +5,7 @@
  * art: no texture from any other block game. Alpha carries the glow (255 is
  * none, 0 glows fully), as the previews' atlas does.
  *
- * The atlas is 8 by 8 cells of 32 pixels, each tile in the middle of its
+ * The atlas is 16 by 16 cells of 32 pixels, each tile in the middle of its
  * cell with its edge pixels repeated outward, so a mipmap never bleeds one
  * tile into the next. Tile `kind * 3 + face`, face 0 top (cyberspace +Y), 1
  * side, 2 bottom.
@@ -16,9 +16,11 @@ import { KINDS, UNKNOWN_KIND, type BlockKind } from './blocks'
 type Px = [number, number, number, number]
 type Rgb = [number, number, number]
 
-export const ATLAS = 256
+export const ATLAS = 512
 export const CELL = 32
 export const TILE = 16
+/** Atlas cells a row. */
+export const PER_ROW = 16
 
 function hex(h: string): Rgb { return [parseInt(h.substr(1, 2), 16), parseInt(h.substr(3, 2), 16), parseInt(h.substr(5, 2), 16)] }
 function H(x: number, y: number, s: number): number { let h = Math.imul((x * 374761393 + y * 668265263 + s * 1442695041) | 0, 1274126177); h ^= h >>> 13; h = Math.imul(h, 1103515245); return ((h ^ (h >>> 16)) >>> 0) / 4294967296 }
@@ -173,6 +175,92 @@ export function makeTile(kind: BlockKind, face: number): Px[] {
         put(x, y, c, e)
       }
       break
+    case 9: // Basaltine: dark columns, light seams between them
+      for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+        const col = face === 0 ? (Math.abs(((x + y) % 6) - 3) < 1 || Math.abs(((x - y + 48) % 6) - 3) < 1) : x % 4 === 0
+        put(x, y, col ? mix(base, acc, 0.55) : sh(base, 0.85 + 0.25 * H(x >> 2, y >> 3, s)))
+      }
+      bevel(1); break
+    case 10: // Rimeglass: pale ice, frosted, with fine cracks; partly clear (alpha in the material)
+      for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+        let c = sh(base, 0.9 + 0.12 * H(x >> 1, y >> 1, s))
+        if (H(x, y, s + 4) < 0.08) c = mix(base, WHITE, 0.7)
+        if ((x * 3 + y * 5) % 17 === 0) c = mix(base, acc, 0.8)
+        put(x, y, c)
+      }
+      bevel(1.2); break
+    case 11: // Tidewater: deep blue with drifting light lines
+      for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+        const wave = Math.sin((x + 2 * Math.sin(y / 2.5)) * 0.9 + y * 0.35) > 0.82
+        put(x, y, wave ? mix(base, acc, 0.75) : sh(base, 0.8 + 0.2 * H(x >> 2, y >> 1, s)))
+      }
+      break
+    case 12: // Magmaflow: glowing orange under a cracked dark crust
+      for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+        const crust = H(x >> 1, y >> 1, s + 2) > 0.62
+        put(x, y, crust ? sh(base, 0.28) : mix(base, acc, 0.35 + 0.4 * H(x, y, s)), crust ? 0 : 0.9)
+      }
+      break
+    case 13: // Lumenwood: dark bark with glowing grain; rings on the top
+      for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+        if (face === 0) {
+          const r = Math.hypot(x - 7.5, y - 7.5)
+          const ring = Math.abs((r % 3) - 1.5) < 0.45
+          put(x, y, ring ? mix(base, acc, 0.6) : sh(base, 1.1), ring ? 0.45 : 0)
+        } else {
+          const grain = (x + Math.round(2 * Math.sin(y / 3 + x))) % 5 === 0
+          put(x, y, grain ? mix(base, acc, 0.7) : sh(base, 0.8 + 0.3 * H(x, y >> 2, s)), grain ? 0.6 : 0)
+        }
+      }
+      break
+    case 14: // Canopy glass: clear green leaves, lighter veins
+      for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+        const leaf = H(x >> 1, y >> 1, s) > 0.25
+        const vein = (x + y) % 7 === 0 || (x - y + 49) % 7 === 0
+        put(x, y, vein ? mix(base, acc, 0.6) : leaf ? sh(base, 0.8 + 0.3 * H(x, y, s + 1)) : sh(base, 0.45))
+      }
+      break
+    case 193: // Voidpearl: a dark orb with a bright ring round it
+      for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+        const r = Math.hypot(x - 7.5, y - 7.5)
+        let c = sh(base, 1 + 0.6 * H(x, y, s)); let e = 0
+        if (r > 5.2 && r < 6.6) { c = acc; e = 0.9 } else if (r < 4) { c = mix(base, acc, 0.12 * (4 - r)); e = 0.1 }
+        put(x, y, c, e)
+      }
+      break
+    case 194: // Auroric: shifting bands of colour
+      for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+        const t = (x + y * 0.6 + 3 * Math.sin(x / 3)) / 16
+        const hue: Rgb = [128 + 127 * Math.sin(6.28 * t), 128 + 127 * Math.sin(6.28 * t + 2.1), 128 + 127 * Math.sin(6.28 * t + 4.2)]
+        put(x, y, mix(sh(base, 1.5), hue, 0.7), 0.7)
+      }
+      break
+    case 195: // Chronite: a ticking light pattern, a ring of points with one lit hand
+      for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+        let c = sh(base, 0.9 + 0.2 * H(x, y, s)); let e = 0
+        const a = Math.atan2(y - 7.5, x - 7.5), r = Math.hypot(x - 7.5, y - 7.5)
+        if (Math.abs(r - 5.5) < 0.6 && Math.abs(((a + 3.1416) / 0.5236) % 1 - 0.5) < 0.2) { c = acc; e = 0.8 }
+        if (Math.abs(x - 7.5) < 0.6 && y < 8 && y > 2) { c = mix(acc, WHITE, 0.5); e = 1 }
+        put(x, y, c, e)
+      }
+      bevel(0.6); break
+    case 196: // Singularity core: a black core with a bright rim that bends round it
+      for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+        const r = Math.hypot(x - 7.5, y - 7.5)
+        let c: Rgb = [0, 0, 0]; let e = 0
+        if (r > 3.6 && r < 5) { const k = 1 - Math.abs(r - 4.3) / 0.7; c = mix([40, 0, 80], acc, k); e = k }
+        else if (r >= 5) { const swirl = Math.sin(Math.atan2(y - 7.5, x - 7.5) * 3 + r) > 0.6; c = swirl ? [70, 40, 120] : [12, 6, 24]; e = swirl ? 0.25 : 0 }
+        put(x, y, c, e)
+      }
+      break
+    case 197: // Genesis shard: a white-gold crystal, faceted
+      for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+        const f = (x > y ? 1 : 0) + (x + y > 15 ? 2 : 0)
+        let c = sh(base, [1, 0.9, 0.78, 0.85][f]); let e = 0.6
+        if (x === y || x + y === 15 || x === 7 || x === 8) { c = mix(acc, WHITE, 0.4); e = 1 }
+        put(x, y, c, e)
+      }
+      break
     default:
       // A block this client does not know: plain, with a hatched border, so it reads as unknown.
       for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
@@ -192,7 +280,7 @@ export function buildAtlas(): Uint8Array<ArrayBuffer> {
   TILE_KINDS.forEach((kind) => {
     for (let face = 0; face < 3; face++) {
       const t = makeTile(kind, face), ti = kind.index * 3 + face
-      const ox = (ti % 8) * CELL, oy = Math.floor(ti / 8) * CELL
+      const ox = (ti % PER_ROW) * CELL, oy = Math.floor(ti / PER_ROW) * CELL
       for (let y = 0; y < CELL; y++) for (let x = 0; x < CELL; x++) {
         const sx = Math.min(15, Math.max(0, x - 8)), sy = Math.min(15, Math.max(0, y - 8)), p = t[sy * 16 + sx]
         const o = ((oy + y) * ATLAS + ox + x) * 4

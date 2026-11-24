@@ -18,7 +18,7 @@
 
 import { newShard, type ShardModel, type ShardVertex } from 'sno-core/shards'
 import type { WallItem } from '../../store/walkWalls'
-import { EMPTY } from './blocks'
+import { solid } from './blocks'
 import type { ChunkSlot, TerrainWorld } from './world'
 
 const CUBE = 8
@@ -48,9 +48,9 @@ function cubeShard(world: TerrainWorld, slot: ChunkSlot, cx: number, cy: number,
   }
   for (let y = 0; y < CUBE; y++) for (let z = 0; z < CUBE; z++) for (let x = 0; x < CUBE; x++) {
     const lx = CUBE * cx + x, ly = CUBE * cy + y, lz = CUBE * cz + z
-    if (blocks[lx | (lz << 5) | (ly << 10)] === EMPTY) continue
+    if (!solid(blocks[lx | (lz << 5) | (ly << 10)])) continue
     const gx = ox + x, gy = oy + y, gz = oz + z
-    const open = (dx: number, dy: number, dz: number): boolean => world.blockCs(gx + dx, gy + dy, gz + dz) === EMPTY
+    const open = (dx: number, dy: number, dz: number): boolean => !solid(world.blockCs(gx + dx, gy + dy, gz + dz))
     // Model coordinates from the cube's corner: the cell (x, y, z) spans x - 0.5 .. x + 0.5.
     const x0 = x - 0.5, x1 = x + 0.5, y0 = y - 0.5, y1 = y + 0.5, z0 = z - 0.5, z1 = z + 0.5
     if (open(-1, 0, 0)) quad([x0, y0, z0], [x0, y0, z1], [x0, y1, z1], [x0, y1, z0])

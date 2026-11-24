@@ -41,7 +41,7 @@ import { raycast, type RayHit } from '../lib/terrain/raycast'
 import { CURSOR_REACH, TerrainWorld, type ChunkSlot } from '../lib/terrain/world'
 import { borderSlab, FLOATS_PER_VERTEX, type Borders } from '../lib/terrain/mesh'
 import { meshChunkAsync } from '../lib/terrain/blocksClient'
-import { EMPTY, blockKind } from '../lib/terrain/blocks'
+import { blockKind, solid as isSolid } from '../lib/terrain/blocks'
 import { terrainInput } from '../terrain/terrainInput'
 import { makeTerrainMaterial } from '../terrain/terrainMaterial'
 import { BUILD, DANGER } from '../lib/palette'
@@ -96,13 +96,13 @@ function bordersOf(world: TerrainWorld, slot: ChunkSlot): Borders {
 function Chunks({ axes }: { axes: ViewAxes }): JSX.Element {
   const group = useRef<Group>(null)
   const made = useMemo(() => makeTerrainMaterial(), [])
-  const meshes = useRef(new Map<ChunkSlot, Mesh>())
+  const meshes = useRef(new Map<ChunkSlot, Mesh[]>())
   const inFlight = useRef(new Set<ChunkSlot>())
   const seen = useRef(-1)
   const placedFor = useRef('')
   const field = useRef<TerrainSession | null>(null)
   useEffect(() => () => {
-    for (const m of meshes.current.values()) m.geometry.dispose()
+    for (const ms of meshes.current.values()) for (const m of ms) m.geometry.dispose()
     meshes.current.clear()
     made.dispose()
   }, [made])
@@ -113,7 +113,7 @@ function Chunks({ axes }: { axes: ViewAxes }): JSX.Element {
     const cs = useCyberspace.getState()
     // A new field (another identity, another plane): what the old one drew goes.
     if (field.current !== s) {
-      for (const m of meshes.current.values()) { g.remove(m); m.geometry.dispose() }
+      for (const ms of meshes.current.values()) for (const m of ms) { g.remove(m); m.geometry.dispose() }
       meshes.current.clear()
       field.current = s
       seen.current = -1
@@ -129,11 +129,12 @@ function Chunks({ axes }: { axes: ViewAxes }): JSX.Element {
     const replace = place !== placedFor.current
     placedFor.current = place
     // Chunks let go: their meshes go.
-    for (const [slot, m] of meshes.current) {
+    for (const [slot, ms] of meshes.current) {
       if (s.world.chunks.get(slot.off.join(',')) === slot && slot.blocks) continue
-      g.remove(m); m.geometry.dispose(); meshes.current.delete(slot)
+      for (const m of ms) { g.remove(m); m.geometry.dispose() }
+      meshes.current.delete(slot)
     }
-    if (replace) for (const [slot, m] of meshes.current) { fieldMatrix(s, axes, cs.scaleExp, m.matrix, [32 * slot.off[0], 32 * slot.off[1], 32 * slot.off[2]]); m.matrixWorldNeedsUpdate = true }
+    if (replace) for (const [slot, ms] of meshes.current) for (const m of ms) { fieldMatrix(s, axes, cs.scaleExp, m.matrix, [32 * slot.off[0], 32 * slot.off[1], 32 * slot.off[2]]); m.matrixWorldNeedsUpdate = true }
     if (s.version === seen.current && inFlight.current.size === 0) return
     seen.current = s.version
     for (const slot of s.world.slots) {
@@ -146,21 +147,28 @@ function Chunks({ axes }: { axes: ViewAxes }): JSX.Element {
         seen.current = -1
         if (terrainSession !== s || s.world.chunks.get(slot.off.join(',')) !== slot) return
         const old = meshes.current.get(slot)
-        if (old) { g.remove(old); old.geometry.dispose(); meshes.current.delete(slot) }
+        if (old) { for (const o of old) { g.remove(o); o.geometry.dispose() } meshes.current.delete(slot) }
         if (m.quads === 0) return
-        const geo = new BufferGeometry()
-        const ib = new InterleavedBuffer(m.vertices, FLOATS_PER_VERTEX)
-        geo.setAttribute('position', new InterleavedBufferAttribute(ib, 3, 0))
-        geo.setAttribute('tile', new InterleavedBufferAttribute(ib, 1, 3))
-        geo.setAttribute('shade', new InterleavedBufferAttribute(ib, 1, 4))
-        geo.setIndex(new BufferAttribute(m.indices, 1))
-        geo.computeBoundingSphere()
-        const mesh = new Mesh(geo, made.material)
-        mesh.matrixAutoUpdate = false
-        fieldMatrix(s, axes, useCyberspace.getState().scaleExp, mesh.matrix, [32 * slot.off[0], 32 * slot.off[1], 32 * slot.off[2]])
-        mesh.name = `terrain-chunk-${slot.key}`
-        g.add(mesh)
-        meshes.current.set(slot, mesh)
+        const made2: Mesh[] = []
+        // The solid blocks, then the see-through ones (drawn after, blended over what is behind).
+        for (const [vertices, indices, material, order] of [[m.vertices, m.indices, made.material, 0], [m.clearVertices, m.clearIndices, made.clearMaterial, 1]] as const) {
+          if (indices.length === 0) continue
+          const geo = new BufferGeometry()
+          const ib = new InterleavedBuffer(vertices, FLOATS_PER_VERTEX)
+          geo.setAttribute('position', new InterleavedBufferAttribute(ib, 3, 0))
+          geo.setAttribute('tile', new InterleavedBufferAttribute(ib, 1, 3))
+          geo.setAttribute('shade', new InterleavedBufferAttribute(ib, 1, 4))
+          geo.setIndex(new BufferAttribute(indices, 1))
+          geo.computeBoundingSphere()
+          const mesh = new Mesh(geo, material)
+          mesh.matrixAutoUpdate = false
+          mesh.renderOrder = order
+          fieldMatrix(s, axes, useCyberspace.getState().scaleExp, mesh.matrix, [32 * slot.off[0], 32 * slot.off[1], 32 * slot.off[2]])
+          mesh.name = `terrain-chunk-${slot.key}${order ? '-clear' : ''}`
+          g.add(mesh)
+          made2.push(mesh)
+        }
+        meshes.current.set(slot, made2)
       }, () => { inFlight.current.delete(slot); slot.dirty = true; seen.current = -1 })
     }
   })
@@ -210,7 +218,7 @@ function Marks({ axes }: { axes: ViewAxes }): JSX.Element {
       ray.setFromCamera(ndc, state.camera)
       from.copy(ray.ray.origin).applyMatrix4(inverse)
       toward.copy(ray.ray.origin).add(ray.ray.direction).applyMatrix4(inverse).sub(from)
-      const solid = (i: number, j: number, k: number): boolean => s.world.blockCs(i, j, k) > EMPTY
+      const solid = (i: number, j: number, k: number): boolean => isSolid(s.world.blockCs(i, j, k))
       return raycast([from.x - 0.5, from.y - 0.5, from.z - 0.5], [toward.x, toward.y, toward.z], CURSOR_REACH, solid)
     }
     terrainCursor.hit = aim(terrainInput.hover)

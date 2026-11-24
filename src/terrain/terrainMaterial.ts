@@ -8,9 +8,9 @@
  * and fogged into the scene's black. One material for every chunk.
  */
 
-import { Color, DataTexture, LinearMipmapLinearFilter, NearestFilter, RGBAFormat, ShaderMaterial } from 'three'
+import { Color, CustomBlending, DataTexture, LinearMipmapLinearFilter, NearestFilter, OneFactor, OneMinusSrcAlphaFactor, RGBAFormat, ShaderMaterial, SrcAlphaFactor, ZeroFactor } from 'three'
 import { BG } from '../lib/palette'
-import { ATLAS, CELL, buildAtlas } from '../lib/terrain/tiles'
+import { ATLAS, CELL, PER_ROW, buildAtlas } from '../lib/terrain/tiles'
 
 /** Where the fog starts and is whole, in blocks from the eye. The box is 96 blocks across. */
 export const FOG_NEAR = 24
@@ -42,6 +42,8 @@ uniform float fogFar;
 uniform float unit;
 /** GLOW in Settings: 1 lets the glowing texels feed the world bloom. */
 uniform float glow;
+/** 1 for the see-through pass: drawn part clear, never blooming. */
+uniform float seeThrough;
 varying vec3 vLocal;
 varying float vTile;
 varying float vShade;
@@ -54,7 +56,7 @@ void main() {
   if (n.y > 0.5) c = vec2(vLocal.x, vLocal.z);
   else if (n.x > 0.5) c = vec2(vLocal.z, -vLocal.y);
   else c = vec2(vLocal.x, -vLocal.y);
-  vec2 cell = vec2(mod(t, 8.0), floor(t / 8.0)) * ${CELL.toFixed(1)};
+  vec2 cell = vec2(mod(t, ${PER_ROW.toFixed(1)}), floor(t / ${PER_ROW.toFixed(1)})) * ${CELL.toFixed(1)};
   vec2 uv = (cell + 8.0 + fract(c) * 16.0) / ${ATLAS.toFixed(1)};
   vec2 g = vec2(16.0 / ${ATLAS.toFixed(1)});
   vec4 tex = textureGrad(atlas, uv, dFdx(c) * g, dFdy(c) * g);
@@ -67,7 +69,7 @@ void main() {
   // Rock writes the world's untagged colour (alpha 0): the world bloom passes it by, as it passes a shard's face.
   // A glowing texel writes alpha 1 while GLOW is on, and blooms.
   float lit = step(0.35, em) * glow * (1.0 - fog);
-  gl_FragColor = vec4(col, lit);
+  gl_FragColor = seeThrough > 0.5 ? vec4(col, 0.55) : vec4(col, lit);
 }
 `
 
@@ -79,6 +81,8 @@ export function rawColor(hex: string): Color {
 
 export interface TerrainMaterial {
   material: ShaderMaterial
+  /** The see-through pass: blended over what is behind, keeping its bloom tag (alpha) as it was, so water never blooms. */
+  clearMaterial: ShaderMaterial
   /** The zoom (render units per gibson) and GLOW, each frame. */
   setView: (unit: number, glow: boolean) => void
   dispose: () => void
@@ -102,9 +106,20 @@ export function makeTerrainMaterial(): TerrainMaterial {
       glow: { value: 1 },
     },
   })
+  material.uniforms.seeThrough = { value: 0 }
+  const clearMaterial = material.clone()
+  clearMaterial.uniforms = { ...material.uniforms, seeThrough: { value: 1 } }
+  clearMaterial.transparent = true
+  clearMaterial.depthWrite = false
+  clearMaterial.blending = CustomBlending
+  clearMaterial.blendSrc = SrcAlphaFactor
+  clearMaterial.blendDst = OneMinusSrcAlphaFactor
+  clearMaterial.blendSrcAlpha = ZeroFactor
+  clearMaterial.blendDstAlpha = OneFactor
   return {
     material,
+    clearMaterial,
     setView: (unit, glow) => { material.uniforms.unit.value = unit; material.uniforms.glow.value = glow ? 1 : 0 },
-    dispose: () => { material.dispose(); atlas.dispose() },
+    dispose: () => { material.dispose(); clearMaterial.dispose(); atlas.dispose() },
   }
 }

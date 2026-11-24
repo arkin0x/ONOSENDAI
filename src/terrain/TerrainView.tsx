@@ -17,9 +17,10 @@
  * key hints, the shared ✕, colons in copy.
  */
 
-import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { Backpack, Box, Radar } from 'lucide-react'
 import { HINT_DONE, headNow, offsetOf, surveyTarget as targetNow, terrainSession, useTerrain } from '../store/useTerrain'
+import { useWalk } from '../store/useWalk'
 import { terrainCursor } from '../scene/TerrainLayer'
 import { cancelSurveyHold, startSurveyHold, useSurveyHold } from './surveyHold'
 import { walkLookBy } from '../lib/walkLook'
@@ -62,6 +63,77 @@ function Swatch({ id, size = 22 }: { id: number; size?: number }): JSX.Element {
   const url = k ? tileUrl(k) : ''
   const style = { '--sw-face': k?.color ?? 'transparent', '--sw-edge': k?.edge ?? 'transparent', width: size, height: size, ...(url ? { backgroundImage: `url(${url})` } : {}) } as CSSProperties
   return <span className={`terrain-swatch${k?.glow ? ' terrain-swatch--glow' : ''}`} style={style} aria-hidden />
+}
+
+/**
+ * The chosen block, carried (owner, 2026-11-24: "whatever item you have
+ * selected, can we carry a small tilted version of it on the lower right side
+ * of the screen?"): a small cube of its own tiles, tilted, drawn in the HUD
+ * over the scene (CSS 3D, so it never clips into the world and never blooms),
+ * just above the LOOK ball (left of it on a short screen). It sways while a
+ * walk is under way and dips when a block is mined or placed. Hidden with an
+ * empty slot or none left.
+ */
+function HeldBlock(): JSX.Element | null {
+  const inv = useTerrain((s) => s.inventory)
+  const walking = useWalk((w) => w.behind > 0 || w.open !== null)
+  const id = inv.hotbar[inv.slot]
+  const k = id && (inv.counts[id] ?? 0) > 0 ? blockKind(id) : null
+  // A dip each time what you carry changes by a mine or a place (the counts change; choosing a slot does not).
+  const [dip, setDip] = useState(0)
+  const counts = useRef(inv.counts)
+  useEffect(() => {
+    if (counts.current === inv.counts) return
+    counts.current = inv.counts
+    setDip((d) => d + 1)
+  }, [inv.counts])
+  if (!k) return null
+  const face = (f: number): CSSProperties => ({ backgroundColor: k.color, backgroundImage: `url(${tileUrl(k, f)})` })
+  return (
+    <div className={`terrain-held${walking ? ' is-walking' : ''}`} aria-hidden>
+      <div key={dip} className={`terrain-held__dip${dip > 0 ? ' is-dipping' : ''}`}>
+        <div className="terrain-held__cube">
+          <span className="terrain-held__face terrain-held__face--top" style={face(0)} />
+          <span className="terrain-held__face terrain-held__face--front" style={face(1)} />
+          <span className="terrain-held__face terrain-held__face--right" style={face(1)} />
+          <span className="terrain-held__face terrain-held__face--left" style={face(1)} />
+          <span className="terrain-held__face terrain-held__face--back" style={face(1)} />
+          <span className="terrain-held__face terrain-held__face--bottom" style={face(2)} />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/** Wheel steps: a notch (this many pixels or more in one event) or small scrolls adding up to it choose the next slot. */
+export const WHEEL_STEP = 40
+
+/**
+ * The wheel chooses the hotbar slot in TERRAIN (owner, 2026-11-24: "can the
+ * scroll wheel change the hotbar selection?"): down the next, up the one
+ * before, round the nine, while the pointer is over the scene or captured.
+ * Over a menu or a panel the wheel scrolls as ever. The scene's own wheel
+ * zoom is already off while walking (scene/Scene.tsx enableZoom), so nothing
+ * else hears it here. Returns what stops it.
+ */
+export function terrainWheel(on: EventTarget): () => void {
+  let acc = 0
+  const wheel = (ev: Event): void => {
+    const e = ev as WheelEvent
+    if (!mouseLocked() && !onScene(e)) return
+    const st = useTerrain.getState()
+    if (st.sheet) return
+    const d = e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1)
+    // A mouse's notch is one slot, however many pixels it says; a trackpad's small deltas add up to one.
+    acc = Math.abs(d) >= WHEEL_STEP ? Math.sign(d) * WHEEL_STEP : acc + d
+    const n = st.inventory.hotbar.length
+    let slot = st.inventory.slot
+    if (acc >= WHEEL_STEP) { slot = (slot + 1) % n; acc = 0 }
+    else if (acc <= -WHEEL_STEP) { slot = (slot + n - 1) % n; acc = 0 }
+    if (slot !== st.inventory.slot) st.selectSlot(slot)
+  }
+  on.addEventListener('wheel', wheel, { passive: true })
+  return () => on.removeEventListener('wheel', wheel)
 }
 
 function Key({ children }: { children: ReactNode }): JSX.Element {
@@ -383,6 +455,7 @@ function TerrainScreen(): JSX.Element {
   // The scene's pointer, heard alongside WALK's (which still looks on a drag), and the mouse captured on a desktop.
   useEffect(() => terrainPointer(window), [])
   useEffect(() => terrainMouseLock(), [])
+  useEffect(() => terrainWheel(window), [])
 
   return (
     <div className="terrainview" role="group" aria-label="TERRAIN: block tools">
@@ -427,6 +500,7 @@ function TerrainScreen(): JSX.Element {
         </span>
       </div>
 
+      <HeldBlock />
       <Hotbar />
       <InventorySheet />
     </div>

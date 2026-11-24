@@ -14085,7 +14085,8 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
    just over the walk pad and the LOOK ball. */
 @media (min-width: 700px), (max-height: 520px) {
   .terrainview .terrain-hotbar { bottom: max(14px, calc(env(safe-area-inset-bottom, 0px) + 6px)); }
-  .terrainview .terrain-hint { bottom: calc(max(14px, calc(env(safe-area-inset-bottom, 0px) + 6px)) + 8px + var(--terrain-slot)); }
+  /* Level with the top of the walk pad, so PLACE and SURVEY beside it are always clear, the menu open or not. */
+  .terrainview .terrain-hint { bottom: calc(var(--walkside-bottom) + 132px); }
 }
 @media (max-height: 520px) {
   .terrainview { --terrain-slot: 30px; }
@@ -14735,5 +14736,70 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
   .terrainview { --terrain-slot: var(--terrain-row-slot); }
   /* The hotbar 4px under the lifted row, the row's own gap, where the row stood. */
   .terrainview .terrain-hotbar { bottom: calc(var(--walkside-bottom) - var(--terrain-lift) + 4px); }
-  .terrainview .terrain-hint { bottom: calc(var(--terrain-orb-bottom) + var(--terrain-orb) + 10px); }
+  /* Over the carried block, which stands over the LOOK ball. */
+  .terrainview .terrain-hint { bottom: calc(var(--terrain-orb-bottom) + var(--terrain-orb) + 80px); }
 }
+
+/* The chosen hotbar slot, clearly green (owner, 2026-11-24: "can the selected item be more green - the bg doesnt quite
+   change enough"): mint laid over the slot's ground at about a third, a brighter mint edge, the number in mint. */
+.terrain-slot.is-on { --terrain-line: #b8ffe1; }
+.terrain-slot.is-on::before { background: linear-gradient(rgba(124, 255, 196, 0.36), rgba(124, 255, 196, 0.36)), var(--terrain-fill); }
+.terrain-slot.is-on .terrain-slot__num { color: var(--terrain); opacity: 1; font-weight: 700; }
+
+/* The chosen block, carried (terrain/TerrainView.tsx HeldBlock): a small tilted cube of its tiles just above the LOOK
+   ball, in the HUD, so it never clips into the world and never blooms. Left of the ball on a short screen, where the
+   compass stands above it. */
+.terrain-held {
+  --held: 52px;
+  position: fixed;
+  right: calc(var(--controls-right) + (var(--terrain-orb) - var(--held)) / 2);
+  bottom: calc(var(--terrain-orb-bottom) + var(--terrain-orb) + 18px);
+  width: var(--held);
+  height: var(--held);
+  perspective: 260px;
+  pointer-events: none;
+  translate: calc(-1 * var(--hud-shift-r)) 0;
+}
+@media (max-height: 520px) {
+  .terrain-held {
+    --held: 44px;
+    right: calc(var(--controls-right) + var(--terrain-orb) + 16px);
+    bottom: calc(var(--terrain-orb-bottom) + (var(--terrain-orb) - var(--held)) / 2);
+  }
+}
+@media (min-width: 1101px) {
+  .terrain-held { --held: 64px; }
+}
+.terrain-held__dip { width: 100%; height: 100%; transform-style: preserve-3d; }
+.terrain-held__dip.is-dipping { animation: terrain-held-dip 220ms ease-out; }
+@keyframes terrain-held-dip { 40% { transform: translateY(8px) rotate(6deg); } }
+.terrain-held__cube {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  transform-style: preserve-3d;
+  transform: rotateX(-24deg) rotateY(-38deg) rotateZ(-4deg);
+}
+.terrain-held.is-walking .terrain-held__cube { animation: terrain-held-sway 900ms ease-in-out infinite alternate; }
+@keyframes terrain-held-sway {
+  from { transform: translate(-2px, 0) rotateX(-24deg) rotateY(-38deg) rotateZ(-4deg); }
+  to { transform: translate(2px, -3px) rotateX(-22deg) rotateY(-34deg) rotateZ(-2deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .terrain-held.is-walking .terrain-held__cube,
+  .terrain-held__dip.is-dipping { animation: none; }
+}
+.terrain-held__face {
+  position: absolute;
+  inset: 0;
+  background-size: 100% 100%;
+  image-rendering: pixelated;
+  backface-visibility: hidden;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.35);
+}
+.terrain-held__face--front { transform: translateZ(calc(var(--held) / 2)); filter: brightness(0.86); }
+.terrain-held__face--back { transform: rotateY(180deg) translateZ(calc(var(--held) / 2)); }
+.terrain-held__face--right { transform: rotateY(90deg) translateZ(calc(var(--held) / 2)); filter: brightness(0.7); }
+.terrain-held__face--left { transform: rotateY(-90deg) translateZ(calc(var(--held) / 2)); filter: brightness(0.7); }
+.terrain-held__face--top { transform: rotateX(90deg) translateZ(calc(var(--held) / 2)); }
+.terrain-held__face--bottom { transform: rotateX(-90deg) translateZ(calc(var(--held) / 2)); filter: brightness(0.5); }

@@ -5,8 +5,8 @@
  * Opens TERRAIN in a browser at each size, with the menu closed and (on a
  * wide screen, where the scene stays beside it) open, and checks that the
  * boxes of the hotbar, SURVEY (with its hold bar), PLACE, CHAT, the walk
- * pad, the menu button, JUMP and DOWN, the LOOK ball and the commit block
- * do not intersect. Nothing reaches a relay: every socket is answered here.
+ * pad, the menu button, JUMP and DOWN, the LOOK ball, the commit block, the
+ * carried block and the first-visit hint do not intersect. Nothing reaches a relay: every socket is answered here.
  *
  * Usage: start the dev server (npm run dev -- --port 5197), then
  *   node scripts/terrain-layout.mjs [http://localhost:5197/]
@@ -33,6 +33,8 @@ const BOXES = {
   jump: '.walkside',
   look: '.orbsquare',
   commit: '.touchops',
+  held: '.terrain-held',
+  hint: '.terrain-hint__box',
 }
 
 const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] })
@@ -50,6 +52,9 @@ for (const size of SIZES) {
     await page.keyboard.press('Escape')
     await page.evaluate(async () => { const pm = await import('/src/store/padMode.ts'); pm.enterTerrainMode() })
     await page.waitForTimeout(3500)
+    // A block in hand, so the carried block is drawn and measured too.
+    await page.evaluate(async () => { const m = await import('/src/store/useTerrain.ts'); const inv = m.useTerrain.getState().inventory; m.useTerrain.setState({ inventory: { ...inv, hotbar: [8, ...inv.hotbar.slice(1)], counts: { ...inv.counts, 8: 5 }, slot: 0 } }) })
+    await page.waitForTimeout(500)
     if (menu) { await page.evaluate(() => document.querySelector('.hamburger-menu')?.click()); await page.waitForTimeout(1500) }
     const rects = await page.evaluate((boxes) => Object.fromEntries(Object.entries(boxes).map(([k, sel]) => {
       const e = document.querySelector(sel)

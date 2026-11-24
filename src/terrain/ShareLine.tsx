@@ -12,7 +12,7 @@ import { retireDeviceKey, useShare } from '../store/terrainShare'
 const CONFIRM_MS = 4000
 
 export function ShareLine(): JSX.Element {
-  const { state, words } = useShare()
+  const { state, words, note } = useShare()
   const [asking, setAsking] = useState(false)
   useEffect(() => {
     if (!asking) return
@@ -39,6 +39,7 @@ export function ShareLine(): JSX.Element {
       >
         {asking ? 'TAP AGAIN TO RETIRE' : 'RETIRE KEY'}
       </button>
+      {note ? <span className="terrain-share__note" style={{ flexBasis: '100%', opacity: 0.85 }}>{note}</span> : null}
     </p>
   )
 }

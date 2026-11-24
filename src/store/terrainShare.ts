@@ -194,9 +194,14 @@ export interface ShareView {
   state: ShareState
   /** Plain words for the bag. */
   words: string
+  /** A second line, only while it is true: blocks near you built with a retired key that the witness could not yet judge (§4.4 rule 4). */
+  note?: string
 }
 
 export const useShare = create<ShareView>(() => ({ state: 'saved', words: 'Saved on this device.' }))
+
+/** The bag's second line while rule 4 of §4.4 cannot run for a layer drawn near you. */
+export const RETIRED_UNCHECKED = 'Some blocks near you were built with a key its owner retired. They still show, because the witness cannot be asked yet whether they came before that.'
 
 // ---------------------------------------------------------------------------------------------------------------
 // Per chunk, kept on the device beside its layer (the terrain database's meta store).
@@ -261,6 +266,8 @@ interface Session {
   failed: string | null
   sending: boolean
   readKey: string
+  /** Chunks drawn now with a layer whose key is retired and that rule 4 of §4.4 could not judge (the witness gave no answer). */
+  unchecked: Set<string>
   closed: boolean
 }
 
@@ -280,7 +287,7 @@ function sessionFor(): Session | null {
     if (session) closeSession(session)
     session = {
       owner: f.owner, plane: f.plane, rows: new Map(), loading: new Map(), waiting: new Map(), touched: new Map(), others: new Map(), seen: new Map(),
-      idle: null, retry: null, flushing: null, again: false, failed: null, sending: false, readKey: '', closed: false,
+      idle: null, retry: null, flushing: null, again: false, failed: null, sending: false, readKey: '', unchecked: new Set(), closed: false,
     }
   }
   return session
@@ -450,8 +457,9 @@ function say(s: Session | null): void {
   } else {
     v = { state: 'sharing', words: 'Sharing your blocks.' }
   }
+  if (s.unchecked.size > 0) v = { ...v, note: RETIRED_UNCHECKED }
   const was = useShare.getState()
-  if (was.state !== v.state || was.words !== v.words) useShare.setState(v)
+  if (was.state !== v.state || was.words !== v.words || was.note !== v.note) useShare.setState({ state: v.state, words: v.words, note: v.note })
 }
 
 function near(): boolean {
@@ -899,6 +907,12 @@ export function witnessAllows(d: Pick<ShareDeps, 'witness'>, eventId: string, re
   return true
 }
 
+/** Whether rule 4 could not judge a layer whose key is retired: the witness gave no answer for the layer or for a retirement (§4.4: the reader SHOULD say so). */
+export function ruleFourCannotRun(d: Pick<ShareDeps, 'witness'>, eventId: string, ret: Retirements): boolean {
+  if (ret.ids.length === 0) return false
+  return d.witness.status(eventId) === null || ret.ids.some((id) => d.witness.status(id) === null)
+}
+
 const retirements = new Map<string, { r: Retirements; at: number }>()
 
 /** A key's retirements by its author, on any chain, from the canonical relay with `#R` (§4.3), read fresh enough. A read that fails finds none, for now. */
@@ -997,6 +1011,10 @@ export async function readChunks(bases: ChunkBase[]): Promise<void> {
     s.seen.set(shape.lookupId, list)
   }
   for (const [lookupId, base] of byLookup) await mergeChunk(s, base, lookupId)
+  // Only chunks read now can say so: the note goes with them.
+  const now = new Set(bases.map(chunkKey))
+  for (const k of [...s.unchecked]) if (!now.has(k)) s.unchecked.delete(k)
+  say(s)
 }
 
 async function mergeChunk(s: Session, base: ChunkBase, lookupId: string): Promise<void> {
@@ -1017,11 +1035,13 @@ async function mergeChunk(s: Session, base: ChunkBase, lookupId: string): Promis
     ...shaped.map((x) => ({ id: x.ev.id, settles: x.shape!.settleIds })),
     ...[...retired.values()].flatMap((r) => r.ids.map((id) => ({ id }))),
   ]).catch(() => undefined)
+  let unchecked = false
   for (const { ev, shape } of shaped) {
     if (!shape) continue
     const ret = retired.get(ev.pubkey) ?? { all: false, ids: [] }
     if (ret.all) continue
     if (!witnessAllows(d, ev.id, ret)) continue
+    const blind = ruleFourCannotRun(d, ev.id, ret)
     const r = await readLayer(ev, {
       verify: d.verify,
       key: rkey,
@@ -1038,8 +1058,11 @@ async function mergeChunk(s: Session, base: ChunkBase, lookupId: string): Promis
     }).catch(() => null)
     if (!r || r.status !== 'counted') continue
     counted.push({ ...r.layer, retiredKey: ret.ids.length > 0 || chainsOf(shape.author).some((c) => retiredAnywhere(c, ev.pubkey)) })
+    if (blind && r.layer.planes.length > 0) unchecked = true
   }
   if (s.closed) return
+  if (unchecked) s.unchecked.add(key)
+  else s.unchecked.delete(key)
   const before = s.others.get(key)
   if (counted.length === 0) {
     if (before) { s.others.delete(key); host?.redisplay(key) }

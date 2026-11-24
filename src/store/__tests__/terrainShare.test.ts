@@ -46,7 +46,7 @@ import { useCyberspace } from '../useCyberspace'
 import { useWalk } from '../useWalk'
 import { setTerrainSession, terrainSession, useTerrain } from '../useTerrain'
 import {
-  BATCH_NEAR, chunkRegionKey, confirmTags, flush, liveChanged, readChunks, resetShare, retireDeviceKey, setShareDeps, useShare, LAYER_CONTENT,
+  BATCH_NEAR, RETIRED_UNCHECKED, chunkRegionKey, confirmTags, flush, liveChanged, readChunks, resetShare, retireDeviceKey, setShareDeps, useShare, LAYER_CONTENT,
 } from '../terrainShare'
 import { builderRecord, forgetBuilderRecords, namedKey } from '../../lib/terrain/builderKey'
 import { fixTags, onActionSigned } from '../../lib/terrain/builderTags'
@@ -425,7 +425,7 @@ describe('a new key at a chunk where another key of yours built (§5.7)', () => 
 
 describe('reading another builder\'s layer', () => {
   /** A throwaway builder whose chain hops to `to`, with their builder key named on the spawn. */
-  function stranger(to: { x: bigint; y: bigint; z: bigint }, plane: 0 | 1): { pubkey: string; builder: Uint8Array; hop: NostrEvent } {
+  function stranger(to: { x: bigint; y: bigint; z: bigint }, plane: 0 | 1): { pubkey: string; builder: Uint8Array; hop: NostrEvent; sk: Uint8Array } {
     let sk = generateSecretKey()
     let pubkey = getPublicKey(sk)
     while ((parseInt(pubkey.slice(-1), 16) & 1) !== plane) { sk = generateSecretKey(); pubkey = getPublicKey(sk) }
@@ -435,7 +435,7 @@ describe('reading another builder\'s layer', () => {
     const hop = finalizeEvent(hopTemplate({ createdAt: 1_790_000_001, genesisId: spawn.id, previousId: spawn.id, prevCoordHex: pubkey, to: { ...to }, plane, proofHash: 'ab'.repeat(32), mn: '0'.repeat(16), mp: '00'.repeat(32) }), sk) as unknown as NostrEvent
     hold(spawn)
     hold(hop)
-    return { pubkey, builder, hop }
+    return { pubkey, builder, hop, sk }
   }
 
   async function strangerLayer(who: { pubkey: string; builder: Uint8Array; hop: NostrEvent }, base: ChunkBase, cells: Record<number, number>): Promise<void> {
@@ -448,6 +448,41 @@ describe('reading another builder\'s layer', () => {
     const encrypted = await encryptForRegion(key, plaintextJson(plain))
     hold(finalizeEvent({ kind: LAYER_KIND, created_at: 1_790_000_100, tags: layerTags({ lookupId, author: who.pubkey, reach: [who.hop.id], settleIds: ids, encrypted }), content: '' }, who.builder) as unknown as NostrEvent)
   }
+
+  it('a retired key the witness cannot judge yet: the bag says so, and only while that is true', async () => {
+    const HEAD = { x: 0x2234567890abcdef12350n, y: 0xfedcba0987654321fed90n, z: 0x0f0f0f0f0f0f0f0f0f0f0n, plane: 0 as const }
+    standAt(HEAD)
+    await T().enter()
+    const base = chunkOf(HEAD.x, HEAD.y, HEAD.z, 0)
+    const g = generate(base).blocks
+    let air = -1
+    for (let c = 0; c < 32768 && air < 0; c++) if (g[c] === EMPTY) air = c
+    const who = stranger({ x: HEAD.x + 1n, y: HEAD.y, z: HEAD.z }, 0)
+    await strangerLayer(who, base, { [air]: 8 })
+    // Later on their chain they retire that key, from here on: the layer's reach came before it, so it still counts.
+    const authorSk = who.sk
+    const bpub = getPublicKey(who.builder)
+    const retire = (hopTemplate({ createdAt: 1_790_000_200, genesisId: who.hop.tags.find((t) => t[3] === 'genesis')![1], previousId: who.hop.id, prevCoordHex: who.hop.tags.find((t) => t[0] === 'C')![1], to: { x: HEAD.x + 2n, y: HEAD.y, z: HEAD.z }, plane: 0, proofHash: 'ab'.repeat(32), mn: '0'.repeat(16), mp: '00'.repeat(32) }))
+    const retired = finalizeEvent({ ...retire, tags: [...retire.tags, ['builder-retire', bpub], ['R', bpub]] }, authorSk) as unknown as NostrEvent
+    hold(retired)
+    await readChunks([base])
+    await settle(100)
+    // The witness gave no answer (it does not serve its query yet): their block shows, and the bag says why.
+    expect(terrainSession!.world.blockCs(...[Number(base.x - terrainSession!.world.origin.x) + (air & 31), Number(base.y - terrainSession!.world.origin.y) + (air >> 10), Number(base.z - terrainSession!.world.origin.z) + ((air >> 5) & 31)] as [number, number, number])).toBe(8)
+    expect(useShare.getState().note).toBe(RETIRED_UNCHECKED)
+    // The witness answers: it recorded the layer before the retirement. Judged, so the note goes.
+    const layerEv = held.find((e) => e.kind === LAYER_KIND && e.pubkey === bpub)!
+    setShareDeps({ witness: { learn: async () => undefined, settle: () => null, status: (id) => (id === layerEv.id ? { recorded: true, height: 925_000 } : id === retired.id ? { recorded: true, height: 925_010 } : null) } })
+    await readChunks([base])
+    await settle(100)
+    expect(useShare.getState().note).toBeUndefined()
+    // Recorded after the retirement: rule 4 drops it, and there is nothing left to say.
+    setShareDeps({ witness: { learn: async () => undefined, settle: () => null, status: (id) => (id === layerEv.id ? { recorded: true, height: 925_020 } : id === retired.id ? { recorded: true, height: 925_010 } : null) } })
+    await readChunks([base])
+    await settle(100)
+    expect(useShare.getState().note).toBeUndefined()
+    expect(terrainSession!.world.blockCs(...[Number(base.x - terrainSession!.world.origin.x) + (air & 31), Number(base.y - terrainSession!.world.origin.y) + (air >> 10), Number(base.z - terrainSession!.world.origin.z) + ((air >> 5) & 31)] as [number, number, number])).toBe(EMPTY)
+  })
 
   it('drawn and walked on like yours; your own change shows over it for you; a mute hides them', async () => {
     const HEAD = { x: 0x1234567890abcdef12350n, y: 0xfedcba0987654321fed90n, z: 0x0f0f0f0f0f0f0f0f0f0f0n, plane: 0 as const }

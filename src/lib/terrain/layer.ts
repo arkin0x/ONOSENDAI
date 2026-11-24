@@ -19,6 +19,9 @@
 import { CELLS } from './coords'
 import { GENERATOR_VERSION } from './generate'
 
+/** The ground revision written (DECK §3.10: absent means 1). */
+const GROUND: number = GENERATOR_VERSION
+
 export interface Layer {
   plane: 0 | 1
   /** Surveyed: the base is the generated ground (DECK §3.1). Always true here: a chunk is changed only once surveyed. */
@@ -76,7 +79,7 @@ function plane(form: 'diff' | 'whole', p: 0 | 1, generated: Uint8Array, current:
     if (i === undefined) { i = pal.length; at.set(c, i); pal.push(c) }
     cells[o] = i
   }
-  return { plane: p, survey: true, ...(GENERATOR_VERSION !== 1 ? { ground: GENERATOR_VERSION } : {}), form, pal, cells: runs(cells) }
+  return { plane: p, survey: true, ...(GROUND !== 1 ? { ground: GROUND } : {}), form, pal, cells: runs(cells) }
 }
 
 /** The diff of `current` from `generated`. */

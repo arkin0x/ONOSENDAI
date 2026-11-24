@@ -1,17 +1,18 @@
 /**
- * terrainGenerate.test.ts - TERRAIN's ground (lib/terrain/generate.ts) is
- * DECK-0009's: the survey seed, the ChaCha20 stream and every block of the
- * DECK's test vector chunks match (fixtures/deck0009-vectors.json, from the
- * draft's blocks-vectors.json); terrain K is the spec's; the veins wait for
- * the cubes their K allows; the reach rule is the DECK's; and a chunk is
- * fast enough for a phone.
+ * terrainGenerate.test.ts - TERRAIN's ground (lib/terrain/generate.ts),
+ * revision 2: the survey seed, the ChaCha20 stream, cube K and the open
+ * space of the DECK's test vector chunks are revision 1's
+ * (fixtures/deck0009-vectors.json, from the draft's blocks-vectors.json),
+ * filled only by features; terrain K is the spec's; every feature and rare
+ * block waits for the K it needs; the reach rule is the DECK's; a pinned
+ * chunk stays block for block; and a chunk is fast enough for a phone.
  */
 
 import { describe, expect, it } from 'vitest'
 import { bigintTo32Bytes, deriveRegionKeys, terrainK, xyzToCoord, coordToXyz } from 'cyberspace-core'
 import { sha256 } from '@noble/hashes/sha2.js'
 import { fastCoordBytes, chunkKey, parseChunkKey, chunkOf, CELLS, type ChunkBase } from '../terrain/coords'
-import { RELIC, RELIC_MIN_K, VEINS, chacha20Keystream, cubeK, fineStream, generate, kAt, surveySeed } from '../terrain/generate'
+import { B, FEATURES, RARE, chacha20Keystream, chunkMaxK, cubeK, fineStream, generate, kAt, surveySeed } from '../terrain/generate'
 import { reachDistance } from '../terrain/world'
 import { EMPTY, KINDS, blockKind, blockName, DECK_TO_KIND } from '../terrain/blocks'
 import { regionKeyAt } from '../shardCrypto'
@@ -29,6 +30,8 @@ function axis(r: () => number): bigint {
 const randomChunk = (r: () => number, plane = 0): ChunkBase => chunkOf(axis(r), axis(r), axis(r), plane)
 const hex = (b: Uint8Array): string => Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('')
 const unhex = (s: string): Uint8Array => Uint8Array.from(s.match(/../g)!.map((h) => parseInt(h, 16)))
+/** sha256 of the first vector chunk's revision 2 ground. */
+const PINNED = 'e5ff10f286cb54015644230673f999ace28fb000cb268aacce577323efe96f16'
 const base = (c: { X: string; Y: string; Z: string; plane: number }): ChunkBase => ({ x: BigInt(c.X), y: BigInt(c.Y), z: BigInt(c.Z), plane: c.plane })
 
 describe('the table-driven coordinate builder', () => {
@@ -65,7 +68,7 @@ describe('DECK-0009 test vectors', () => {
   })
 
   for (const c of VECTORS.chunks) {
-    it(`the ${c.name} chunk: the survey seed, the stream and every block`, () => {
+    it(`the ${c.name} chunk: the survey seed, the stream, cube K, and revision 1's open space filled only by features`, () => {
       const b = base(c)
       const seed = surveySeed(b)
       expect(hex(seed)).toBe(c.survey_seed)
@@ -78,10 +81,16 @@ describe('DECK-0009 test vectors', () => {
       const cubes: number[] = []
       for (let y = 0; y < 4; y++) for (let z = 0; z < 4; z++) for (let x = 0; x < 4; x++) cubes.push(g.kInt[x + 5 * (z + 5 * y)])
       expect(cubes).toEqual(c.cube_K)
-      const counts: Record<string, number> = {}
-      for (const id of g.blocks) counts[id] = (counts[id] ?? 0) + 1
-      expect(counts).toEqual(c.counts)
-      expect(hex(sha256(g.blocks))).toBe(c.ground_sha256)
+      // Revision 2 keeps revision 1's caves: the cells left open are revision 1's open cells, less those features fill.
+      let open = 0, filled = 0
+      for (const id of g.blocks) {
+        if (id === EMPTY) open++
+        else if (id === B.TIDEWATER || id === B.LUMENWOOD || id === B.CANOPY) filled++
+      }
+      expect(open).toBeLessThanOrEqual(c.counts['0'])
+      expect(open + filled).toBeGreaterThanOrEqual(c.counts['0'])
+      expect(g.maxK).toBe(Math.max(...c.cube_K))
+      expect(chunkMaxK(b)).toBe(g.maxK)
     })
   }
 
@@ -105,7 +114,12 @@ describe('the ground', () => {
     expect(hex(sha256(generate({ ...c, plane: 1 }).blocks))).not.toBe(a)
   })
 
-  it('every block it makes has one of the thirteen names, never another game\'s', () => {
+  it('stays block for block on a pinned chunk (a change here is a new revision)', () => {
+    const g = generate(base(VECTORS.chunks[0]))
+    expect(hex(sha256(g.blocks))).toBe(PINNED)
+  })
+
+  it('every block it makes has one of our names, never another game\'s', () => {
     const r = rng(21)
     const names = new Set(KINDS.map((k) => k.name))
     for (let i = 0; i < 4; i++) {
@@ -121,28 +135,30 @@ describe('the ground', () => {
 })
 
 describe('terrain K decides', () => {
-  it('veins appear only in cubes of their K or more, and costlier cubes are more solid', () => {
+  it('the rare band, Cobaltine, Prismite, Glowcore and Magmaflow appear only where K allows, the rare ones as single blocks', () => {
     const r = rng(77)
-    const gate = new Map<number, number>([...VEINS.map((v) => [v[0], v[2]] as [number, number]), [RELIC, RELIC_MIN_K]])
-    const low = { cells: 0, open: 0 }, high = { cells: 0, open: 0 }
+    const gate = new Map<number, number>([[B.COBALTINE, FEATURES.cobaltine.minK], [B.GLOWCORE, FEATURES.glowcore.minK], [B.MAGMAFLOW, FEATURES.magma.minK], ...RARE.map(([id, k]) => [id, k] as [number, number])])
+    const rare = new Set(RARE.map(([id]) => id))
     const chunks = [...VECTORS.chunks.map(base)]
-    for (let i = 0; i < 4; i++) chunks.push(randomChunk(r))
+    for (let i = 0; i < 6; i++) chunks.push(randomChunk(r))
+    // Every chance raised to 1, so the gates are what is tested.
+    const odds = { features: Object.fromEntries(Object.entries(FEATURES).map(([k, v]) => [k, { ...v, p: 1 }])) as unknown as typeof FEATURES, rare: RARE.map(([id, k]) => [id, k, 1] as const) }
+    let seen = 0
     for (const c of chunks) {
-      const g = generate(c)
+      const g = generate(c, odds)
+      const n = new Map<number, number>()
       for (let o = 0; o < CELLS; o++) {
-        const id = g.blocks[o], kc = cubeK(g, o)
-        // Prismite (8) is crystal rock as well as a vein, so only the other veins are gated everywhere.
-        const min = id === 8 ? undefined : gate.get(id)
-        if (min !== undefined) expect(kc).toBeGreaterThanOrEqual(min)
-        const bucket = kc <= 8 ? low : kc >= 12 ? high : null
-        if (!bucket) continue
-        bucket.cells++
-        if (id === EMPTY) bucket.open++
+        const id = g.blocks[o]
+        const min = gate.get(id)
+        if (min === undefined) continue
+        seen++
+        n.set(id, (n.get(id) ?? 0) + 1)
+        // Veins and pockets wait for their cube's K; the rare band for the chunk's costliest cube.
+        expect(rare.has(id) ? g.maxK : cubeK(g, o)).toBeGreaterThanOrEqual(min)
       }
+      for (const id of rare) expect(n.get(id) ?? 0).toBeLessThanOrEqual(1)
     }
-    expect(low.cells).toBeGreaterThan(0)
-    expect(high.cells).toBeGreaterThan(0)
-    expect(high.open / high.cells).toBeLessThan(low.open / low.cells)
+    expect(seen).toBeGreaterThan(0)
   })
 })
 

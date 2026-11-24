@@ -1,9 +1,10 @@
 /**
  * generate.ts - the ground of one chunk, from public facts only: DECK-0009
- * (Blocks, draft, cyberspace PR #122) §3, revision 1, ported from its
- * reference code (decks/blocks-reference.mjs) and checked against its test
- * vectors (lib/__tests__/terrainGenerate.test.ts), so every client draws the
- * same block in every cell.
+ * (Blocks, draft, cyberspace PR #122) §3, revision 2: revision 1 ported
+ * from its reference code (decks/blocks-reference.mjs) and checked against
+ * its test vectors (lib/__tests__/terrainGenerate.test.ts), with the rock
+ * and features of 2026-11-24 on top, so every client draws the same block in
+ * every cell.
  *
  * In short (the DECK says it exactly):
  * - The survey seed is sha256("CYBERSPACE_BLOCKS_SURVEY_V1" || plane ||
@@ -17,10 +18,17 @@
  *   of 8, 4 and 128 gibsons, decides solid or empty. Terrain K (spec §5.2) of
  *   each lattice corner sets the empty threshold, so the costlier the cube,
  *   the more solid, and gates the veins: the rarest only in the costliest cubes.
- * - Materials: the strata of one of six families (from the 2^11 digest, read
- *   at a warped place so family and band borders are soft), a fleck, a skin
- *   on top of open air, veins (Ferrovein, Cobaltine from K 6, Prismite from 9,
- *   Glowcore from 10, Gibsonite from 13) and the Relic shard from 13.
+ * - Rock (revision 2): the weighted strata of one of six families (from the
+ *   2^11 digest, read at a warped place so family and band borders are
+ *   soft), a fleck, and a skin on top of open air.
+ * - Features (revision 2), in a fixed order from the bytes of the same
+ *   ChaCha20 stream after the fine stream, each by a 32-bit draw against a
+ *   chance: Magmaflow pockets with Basaltine round them, Tidewater pools,
+ *   Lumenwood trees crowned with Canopy glass, veins (Ferrovein, Cobaltine,
+ *   Prismite, Glowcore) and the rare band, one block each in the chunk's
+ *   costliest cube (Voidpearl, Auroric, Chronite, Gibsonite, Singularity
+ *   core, Relic shard, Genesis shard). Each waits for the terrain K it needs.
+ *   scripts/terrain-calibrate.mjs measures what they make.
  *
  * Every value that decides a block is an integer below 2^53. Block ids are
  * the DECK's registry, which is the previews' block set (blocks.ts).
@@ -31,11 +39,15 @@ import { regionKeyAt } from '../shardCrypto'
 import { CELLS, fastCoordBytes, idx, type ChunkBase } from './coords'
 
 /** Which ground a layer's diff is against: the DECK's `ground` revision. */
-export const GENERATOR_VERSION = 1
+export const GENERATOR_VERSION = 2
 
 const enc = new TextEncoder()
 const TERRAIN_DOMAIN = enc.encode('CYBERSPACE_TERRAIN_K_V2')
-/** DECK-0009 §3.2. */
+/**
+ * DECK-0009 §3.2. Revision 2 keeps revision 1's seed, stream, lattices and
+ * open space, so caves and K are unchanged; it changes which block fills
+ * the rock and adds the features (layers name it: `ground: 2`).
+ */
 export const SURVEY_DOMAIN = enc.encode('CYBERSPACE_BLOCKS_SURVEY_V1')
 
 const AXIS_MASK = (1n << 85n) - 1n
@@ -47,26 +59,85 @@ const W128 = (f: number): number => 384 * f * f - 2 * f * f * f
 
 // §3.8 Thresholds, revision 1.
 export const EMPTY_THR = [1337, 1323, 1308, 1294, 1280, 1266, 1253, 1239, 1225, 1211, 1196, 1182, 1168, 1153, 1138, 1123, 1108]
-export const VEIN_THR = [3884, 3854, 3827, 3802, 3779, 3757, 3736, 3717, 3698, 3681, 3664, 3648, 3633, 3618, 3603, 3590, 3576]
-export const RELIC_THR = 4508
+
+// Block ids (blocks.ts names them): the DECK's registry, revision 2.
+export const B = {
+  GRIDSTONE: 1, UMBERSLATE: 2, DRIFTSILT: 3, MOSSVEIL: 4, RUSTBAND: 5, FROSTSHALE: 6, CINDERROCK: 7, PRISMITE: 8,
+  BASALTINE: 9, RIMEGLASS: 10, TIDEWATER: 11, MAGMAFLOW: 12, LUMENWOOD: 13, CANOPY: 14,
+  FERROVEIN: 40, COBALTINE: 41, GLOWCORE: 42, GIBSONITE: 43,
+  RELIC: 192, VOIDPEARL: 193, AURORIC: 194, CHRONITE: 195, SINGULARITY: 196, GENESIS: 197,
+} as const
+
+const { GRIDSTONE: G, UMBERSLATE: U, DRIFTSILT: D, RUSTBAND: R, FROSTSHALE: F, CINDERROCK: C, BASALTINE: BA, RIMEGLASS: RI } = B
 
 /**
- * §3.9 Families: strata (a band picked by a hash), the skin on top of open
- * air, the fleck, and the rind, which is not ground: the band rock a client
- * draws on a chunk face bordering an unsurveyed chunk (the drawn-only skin).
+ * §3.9 Families, revision 2 (calibrated 2026-11-24 to the owner's table;
+ * scripts/terrain-calibrate.mjs measures them): the strata as [id, weight]
+ * (a band picks a kind by a hash, so a kind's weight over the total is its
+ * share of bands), the skin on top of open air, the fleck, and the rind (not
+ * ground: kept for readers that draw one). The owner's shares (Gridstone
+ * about 25, Umberslate 18, Rustband 9, Driftsilt 11, Frostshale 15,
+ * Cinderrock 20, Basaltine 6, Rimeglass 5) are kept as ratios inside each
+ * family, since in one family they do not add up to the whole; Mossveil,
+ * a skin only, is outside them.
  */
-export const FAMILIES: ReadonlyArray<{ name: string; strata: readonly number[]; top: number; speckle: number; rind: number }> = [
-  { name: 'temperate', strata: [1, 1, 2, 1, 5, 1, 2, 3], top: 4, speckle: 2, rind: 2 },
-  { name: 'dune', strata: [3, 5, 1, 3, 2, 5], top: 3, speckle: 5, rind: 1 },
-  { name: 'frozen', strata: [6, 6, 1, 6, 2, 1], top: 6, speckle: 2, rind: 2 },
-  { name: 'volcanic', strata: [7, 2, 7, 5, 1, 2, 7], top: 7, speckle: 5, rind: 2 },
-  { name: 'crystal', strata: [6, 1, 6, 2, 8, 1, 6, 2], top: 6, speckle: 8, rind: 2 },
-  { name: 'karst', strata: [1, 3, 1, 2, 1, 3], top: 4, speckle: 3, rind: 2 },
+export const FAMILIES: ReadonlyArray<{ name: string; strata: ReadonlyArray<readonly [number, number]>; top: number; speckle: number; rind: number }> = [
+  { name: 'temperate', strata: [[G, 25], [U, 18], [R, 9]], top: B.MOSSVEIL, speckle: U, rind: U },
+  // The skin over open air is about 14% of a family's rock, so a kind that is also the skin gets less of the bands.
+  { name: 'dune', strata: [[G, 47], [U, 34], [R, 17], [D, 3]], top: D, speckle: R, rind: G },
+  { name: 'frozen', strata: [[G, 40], [U, 29], [R, 15], [F, 8], [RI, 8]], top: F, speckle: U, rind: U },
+  { name: 'volcanic', strata: [[G, 37], [U, 27], [R, 13], [C, 13], [BA, 9]], top: C, speckle: R, rind: U },
+  { name: 'crystal', strata: [[G, 43], [U, 31], [R, 16], [F, 10]], top: F, speckle: B.PRISMITE, rind: U },
+  { name: 'karst', strata: [[G, 25], [U, 18], [R, 9], [D, 11]], top: B.MOSSVEIL, speckle: D, rind: U },
 ]
-/** §3.9 Veins: [id, weight, the least cube K it appears in], in this order. */
-export const VEINS: ReadonlyArray<readonly [number, number, number]> = [[40, 55, 0], [41, 25, 6], [8, 12, 9], [42, 3, 10], [43, 2, 13]]
-export const RELIC = 192
-export const RELIC_MIN_K = 13
+
+/** A band's kind: the hash's high half over the family's total weight. */
+function pickStratum(strata: ReadonlyArray<readonly [number, number]>, h: number): number {
+  let total = 0
+  for (const [, w] of strata) total += w
+  let r = (h >>> 16) % total
+  for (const [id, w] of strata) { if (r < w) return id; r -= w }
+  return strata[0][0]
+}
+
+/**
+ * Features, revision 2: what each is placed by. `p` is the chance an
+ * eligible chunk gets it (a 32-bit draw from the chunk's feature stream
+ * below p times 2^32), `minK` the least K of the chunk's costliest cube for
+ * it to be eligible at all. The rare band's `p` is set so that the chance
+ * per surveyed chunk (eligible share times p) is the owner's target; the
+ * eligible shares are measured (scripts/terrain-calibrate.mjs).
+ */
+export const FEATURES = {
+  ferrovein: { p: 0.9, minK: 0 },
+  cobaltine: { p: 0.52, minK: 6 },
+  prismite: { p: 0.325, minK: 9 },
+  glowcore: { p: 0.1, minK: 10 },
+  trees: { p: 0.34, minK: 0 },
+  pools: { p: 0.25, minK: 0 },
+  magma: { p: 0.125, minK: 11 },
+} as const
+
+/** The rare band, common to rarest (the owner's order): [id, minK, p given eligible]. */
+export const RARE: ReadonlyArray<readonly [number, number]> = [
+  [B.VOIDPEARL, 11], [B.AURORIC, 11], [B.CHRONITE, 12], [B.GIBSONITE, 12], [B.SINGULARITY, 13], [B.RELIC, 13], [B.GENESIS, 14],
+]
+
+/**
+ * The share of chunks whose costliest cube reaches each K (index K, 0..16),
+ * measured over 200,000 random chunks (scripts/terrain-calibrate.mjs): what
+ * turns a target per surveyed chunk into the chance given eligibility.
+ */
+export const MAXK_AT_LEAST: readonly number[] = [1, 1, 1, 1, 0.999995, 0.999705, 0.996205, 0.979775, 0.92474, 0.802875, 0.607995, 0.383905, 0.192085, 0.0728, 0.019475, 0.003215, 0.000215]
+
+/** The rare band's ids. */
+const RARE_IDS: ReadonlySet<number> = new Set([B.RELIC, B.VOIDPEARL, B.AURORIC, B.CHRONITE, B.GIBSONITE, B.SINGULARITY, B.GENESIS])
+
+/** The owner's targets, chance per surveyed chunk, for the rare band. */
+export const RARE_TARGET: Readonly<Record<number, number>> = {
+  [B.VOIDPEARL]: 1 / 500, [B.AURORIC]: 1 / 1000, [B.CHRONITE]: 1 / 2000, [B.GIBSONITE]: 1 / 3000, [B.SINGULARITY]: 1 / 5000, [B.RELIC]: 1 / 7500, [B.GENESIS]: 1 / 10000,
+}
+
 
 const popcount4 = (n: number): number => (n & 1) + ((n >> 1) & 1) + ((n >> 2) & 1) + ((n >> 3) & 1)
 
@@ -273,19 +344,15 @@ export interface Generated {
   /** K at each corner of the coarse lattice, (i + 5 (k + 5 j)): a cell's cube K is its low corner's. */
   kInt: Uint8Array
   meanK: number
+  /** K of the chunk's costliest cube: what gates its rare blocks. */
+  maxK: number
+  /** Places a tree could stand (Mossveil under open air, in temperate and karst ground): the chunks trees are counted over. */
+  treeSites: number
   /** The chunk's own family (its corner's 2^11 digest; cells near a soft border may take a neighbour's). */
   family: string
   /** That family's top (over open air) and its rind (DECK §3.9), for reference: nothing draws a skin. */
   top: number
   rind: number
-}
-
-/** §3.9 The vein field, the vein kind field and its stretch u (0..255). */
-function veinValues(L: Lattices, x: number, y: number, z: number): { vein: number; veinT: number; u: number } {
-  const vein = 11 * tri(L.vein, 8, x, y, z) + 9 * tri(L.veinD, 4, x, y, z)
-  const veinT = tri(L.veinT, 8, x, y, z)
-  const s = 9 * veinT - 512
-  return { vein, veinT, u: s <= 0 ? 0 : Math.min(255, Math.floor(s / 5)) }
 }
 
 /** §3.9 Soft strata borders: the 2^9 and 2^11 digests a cell's band and family come from, read at a warped place. */
@@ -297,10 +364,31 @@ function strataAt(L: Lattices, x: number, y: number, z: number, fineByte: number
   return { d9: L.digestAt(9, x + w9[0], y + w9[1], z + w9[2]), d11: L.digestAt(11, x + w11[0], y + w11[1], z + w11[2]) }
 }
 
-/** §3 The ground of one chunk: one block id per cell, idx order (coords.ts idx). */
-export function generate(base: ChunkBase): Generated {
+/** The rare band with its chance given eligibility: target over the eligible share, so target = share times chance. */
+export const RARE_ODDS: ReadonlyArray<readonly [number, number, number]> = RARE.map(([id, minK]) => [id, minK, Math.min(1, RARE_TARGET[id] / MAXK_AT_LEAST[minK])] as const)
+
+/** Bytes of the chunk's feature stream after its fine stream, read in order. */
+export const FEATURE_BYTES = 8192
+
+/** The feature stream, read in a fixed order: a draw past its end reads 0 (never reached in practice). */
+class Draws {
+  private i = 0
+  constructor(private readonly b: Uint8Array) {}
+  u8(): number { return this.i < this.b.length ? this.b[this.i++] : 0 }
+  u32(): number { return ((this.u8() << 24) | (this.u8() << 16) | (this.u8() << 8) | this.u8()) >>> 0 }
+  /** Whether a 32-bit draw falls under p (0..1) times 2^32: an exact integer test. */
+  chance(p: number): boolean { return this.u32() < Math.floor(p * 4294967296) }
+}
+
+/** The per-chunk probabilities in force (the rare band's are set by calibration; see RARE). */
+export interface Odds { features: typeof FEATURES; rare: ReadonlyArray<readonly [number, number, number]> }
+
+/** §3 The ground of one chunk, revision 2: one block id per cell, idx order (coords.ts idx). */
+export function generate(base: ChunkBase, odds: Odds = { features: FEATURES, rare: RARE_ODDS }): Generated {
   const L = lattices(base)
-  const fine = fineStream(base)
+  const stream = chacha20Keystream(surveySeed(base), CELLS + FEATURE_BYTES)
+  const fine = stream.subarray(0, CELLS)
+  const draws = new Draws(stream.subarray(CELLS))
   const fineAbove = fineStream({ ...base, y: wrap(base.y + 32n) })
   const solid = new Uint8Array(32 * 33 * 32)
   for (let y = 0; y <= 32; y++) for (let z = 0; z < 32; z++) for (let x = 0; x < 32; x++) {
@@ -309,38 +397,169 @@ export function generate(base: ChunkBase): Generated {
   }
   const yBase = Number(base.y & 0xffffffn)
   const out = new Uint8Array(CELLS)
+  // 1. Rock: the strata of the cell's family, the fleck, and the skin on top of open air.
   for (let y = 0; y < 32; y++) for (let z = 0; z < 32; z++) for (let x = 0; x < 32; x++) {
     const o = idx(x, y, z)
     if (!solid[o]) continue
-    const kc = L.K[(x >> 3) + 5 * ((z >> 3) + 5 * (y >> 3))]
-    const v = veinValues(L, x, y, z)
-    let id = 0
-    if (kc >= RELIC_MIN_K && v.vein >= RELIC_THR) id = RELIC
-    else if (v.vein >= VEIN_THR[kc]) {
-      let total = 0
-      for (const [, w, mk] of VEINS) if (kc >= mk) total += w
-      let r = Math.floor((v.u * total) / 256)
-      for (const [vid, w, mk] of VEINS) { if (kc < mk) continue; if (r < w) { id = vid; break } r -= w }
-    } else {
-      const st = strataAt(L, x, y, z, fine[o])
-      const fam = FAMILIES[st.d11[1] % FAMILIES.length]
-      const T = 3 + (st.d9[2] % 8)
-      const warp = tri128(L.warp, L, x, y, z)
-      const cave4 = tri(L.caveD, 4, x, y, z)
-      const warpOff = Math.floor((warp * 18) / 256) + Math.floor((v.veinT * 8) / 256) + Math.floor((cave4 * 4) / 256)
-      const band = Math.floor((yBase + y + warpOff) / T)
-      const h = Math.imul(band ^ (st.d9[3] << 8), 0x9e3779b1) >>> 0
-      id = fam.strata[(h >>> 16) % fam.strata.length]
-      if (fine[o] < 6) id = fam.speckle
-      if (!solid[x + 32 * z + 1024 * (y + 1)]) id = fam.top
-    }
+    const st = strataAt(L, x, y, z, fine[o])
+    const fam = FAMILIES[st.d11[1] % FAMILIES.length]
+    const T = 3 + (st.d9[2] % 8)
+    const warp = tri128(L.warp, L, x, y, z)
+    const cave4 = tri(L.caveD, 4, x, y, z)
+    const veinT = tri(L.veinT, 8, x, y, z)
+    const warpOff = Math.floor((warp * 18) / 256) + Math.floor((veinT * 8) / 256) + Math.floor((cave4 * 4) / 256)
+    const band = Math.floor((yBase + y + warpOff) / T)
+    const h = Math.imul(band ^ (st.d9[3] << 8), 0x9e3779b1) >>> 0
+    let id = pickStratum(fam.strata, h)
+    if (fine[o] < 6) id = fam.speckle
+    if (!solid[x + 32 * z + 1024 * (y + 1)]) id = fam.top
     out[o] = id
   }
   const fam0 = FAMILIES[L.d11[1] % FAMILIES.length]
-  const kInt = Uint8Array.from(L.K)
-  let sum = 0
-  for (let y = 0; y < 4; y++) for (let z = 0; z < 4; z++) for (let x = 0; x < 4; x++) sum += kInt[x + 5 * (z + 5 * y)]
-  return { blocks: out, kInt, meanK: sum / 64, family: fam0.name, top: fam0.top, rind: fam0.rind }
+  // The chunk's costliest cube: where the rare band is placed, and what gates it.
+  let maxK = -1, maxCube = 0, sum = 0
+  for (let cy = 0; cy < 4; cy++) for (let cz = 0; cz < 4; cz++) for (let cx = 0; cx < 4; cx++) {
+    const k = L.K[cx + 5 * (cz + 5 * cy)]
+    sum += k
+    if (k > maxK) { maxK = k; maxCube = cx + 4 * (cz + 4 * cy) }
+  }
+  const meanK = sum / 64
+  const kOf = (x: number, y: number, z: number): number => L.K[(x >> 3) + 5 * ((z >> 3) + 5 * (y >> 3))]
+  const rock = (o: number): boolean => {
+    const id = out[o]
+    return id !== 0 && id !== B.TIDEWATER && id !== B.MAGMAFLOW && id !== B.LUMENWOOD && id !== B.CANOPY && !RARE_IDS.has(id)
+  }
+  // The first rock from a drawn cell of the costliest cube, round the cube in index order: found whenever the cube has any.
+  const rockInCostliest = (): number => {
+    const cx = 8 * (maxCube & 3), cz = 8 * ((maxCube >> 2) & 3), cy = 8 * (maxCube >> 4)
+    const start = ((draws.u8() << 8) | draws.u8()) & 511
+    for (let i = 0; i < 512; i++) {
+      const c = (start + i) & 511
+      const o = idx(cx + (c & 7), cy + (c >> 6), cz + ((c >> 3) & 7))
+      if (rock(o)) return o
+    }
+    return -1
+  }
+  const f = odds.features
+  // 2. Magmaflow pockets in volcanic ground of K 11 and up, with Basaltine round them.
+  if (fam0.name === 'volcanic' && maxK >= f.magma.minK && draws.chance(f.magma.p)) {
+    const at = rockInCostliest()
+    for (let t = 0; t < 1 && at >= 0; t++) {
+      const cx = at & 31, cz = (at >> 5) & 31, cy = at >> 10
+      const rx = 1 + (draws.u8() % 3), ry = 1 + (draws.u8() % 2), rz = 1 + (draws.u8() % 3)
+      const inside = (dx: number, dy: number, dz: number, ax: number, ay: number, az: number): boolean =>
+        dx * dx * ay * ay * az * az + dy * dy * ax * ax * az * az + dz * dz * ax * ax * ay * ay <= ax * ax * ay * ay * az * az
+      for (let dy = -ry - 2; dy <= ry + 2; dy++) for (let dz = -rz - 2; dz <= rz + 2; dz++) for (let dx = -rx - 2; dx <= rx + 2; dx++) {
+        const x = cx + dx, y = cy + dy, z = cz + dz
+        if (x < 0 || y < 0 || z < 0 || x > 31 || y > 31 || z > 31) continue
+        const o = idx(x, y, z)
+        if (!rock(o)) continue
+        if (inside(dx, dy, dz, rx, ry, rz)) out[o] = kOf(x, y, z) >= f.magma.minK ? B.MAGMAFLOW : B.BASALTINE
+        else if (inside(dx, dy, dz, rx + 2, ry + 2, rz + 2)) out[o] = B.BASALTINE
+      }
+      break
+    }
+  }
+  // 3. Tidewater pools in low places, more where K is low: a basin of open cells over solid floor, 20 to 200 blocks.
+  const poolP = Math.min(0.6, Math.max(0.05, f.pools.p * (1 + (8 - meanK) / 4)))
+  if (draws.chance(poolP)) {
+    for (let t = 0; t < 8; t++) {
+      const px = draws.u8() & 31, pz = draws.u8() & 31, r = 2 + (draws.u8() % 5)
+      let floor = -1
+      for (let y = 31; y > 0; y--) if (out[idx(px, y, pz)] === 0 && out[idx(px, y - 1, pz)] !== 0) { floor = y; break }
+      if (floor < 0) continue
+      const placed: number[] = []
+      for (let y = floor; y >= Math.max(1, floor - 2) && placed.length < 200; y--) {
+        for (let dz = -r; dz <= r; dz++) for (let dx = -r; dx <= r; dx++) {
+          if (dx * dx + dz * dz > r * r || placed.length >= 200) continue
+          const x = px + dx, z = pz + dz
+          if (x < 0 || z < 0 || x > 31 || z > 31) continue
+          const o = idx(x, y, z)
+          if (out[o] === 0 && out[idx(x, y - 1, z)] !== 0 && out[idx(x, y - 1, z)] !== B.LUMENWOOD) { out[o] = B.TIDEWATER; placed.push(o) }
+        }
+      }
+      if (placed.length >= 20) break
+      for (const o of placed) out[o] = 0
+    }
+  }
+  // 4. Lumenwood trees crowned with Canopy glass, on Mossveil with open air above, in temperate and karst ground.
+  //    A site is a Mossveil cell, 2 or more from the chunk's sides, with 8 open cells over it inside the chunk.
+  const sites: number[] = []
+  if (fam0.name === 'temperate' || fam0.name === 'karst') {
+    for (let tz = 2; tz < 30; tz++) for (let tx = 2; tx < 30; tx++) {
+      for (let y = 23; y >= 0; y--) {
+        if (out[idx(tx, y, tz)] !== B.MOSSVEIL) continue
+        let air = true
+        for (let a = 1; a <= 8 && air; a++) if (out[idx(tx, y + a, tz)] !== 0) air = false
+        if (air) { sites.push(idx(tx, y, tz)); break }
+      }
+    }
+  }
+  if (sites.length > 0 && draws.chance(f.trees.p)) {
+    const n = 1 + (draws.u8() % 4)
+    for (let t = 0; t < n; t++) {
+      const site = sites[draws.u32() % sites.length], h = 4 + (draws.u8() % 3)
+      const tx = site & 31, tz = (site >> 5) & 31, ground = site >> 10
+      if (out[idx(tx, ground + 1, tz)] !== 0) continue
+      for (let y = ground + 1; y <= ground + h; y++) out[idx(tx, y, tz)] = B.LUMENWOOD
+      for (let dy = h - 1; dy <= h + 2; dy++) {
+        const rr = dy <= h ? 2 : dy === h + 1 ? 1 : 0
+        for (let dz = -rr; dz <= rr; dz++) for (let dx = -rr; dx <= rr; dx++) {
+          if (rr === 2 && Math.abs(dx) === 2 && Math.abs(dz) === 2) continue
+          const o = idx(tx + dx, ground + dy, tz + dz)
+          if (out[o] === 0) out[o] = B.CANOPY
+        }
+      }
+    }
+  }
+  // 5. Veins: a walk of `size` steps from a start in rock, turning the rock it passes in cubes of K minK and up.
+  const vein = (id: number, size: number, minK: number, inCube: number | null): void => {
+    for (let t = 0; t < 8; t++) {
+      let x: number, y: number, z: number
+      if (inCube === null) { x = draws.u8() & 31; y = draws.u8() & 31; z = draws.u8() & 31 }
+      else { x = 8 * (inCube & 3) + (draws.u8() & 7); z = 8 * ((inCube >> 2) & 3) + (draws.u8() & 7); y = 8 * (inCube >> 4) + (draws.u8() & 7) }
+      if (!rock(idx(x, y, z)) || kOf(x, y, z) < minK) continue
+      for (let i = 0; i < size; i++) {
+        const o = idx(x, y, z)
+        if (rock(o) && kOf(x, y, z) >= minK) out[o] = id
+        const d = draws.u8() % 6
+        const a = d >> 1, sgn = d & 1 ? 1 : -1
+        if (a === 0) x = Math.min(31, Math.max(0, x + sgn))
+        else if (a === 1) y = Math.min(31, Math.max(0, y + sgn))
+        else z = Math.min(31, Math.max(0, z + sgn))
+      }
+      return
+    }
+  }
+  if (draws.chance(f.ferrovein.p)) {
+    const n = 2 + (draws.u8() % 4)
+    for (let i = 0; i < n; i++) vein(B.FERROVEIN, 4 + (draws.u8() % 9), 0, null)
+  }
+  if (maxK >= f.cobaltine.minK && draws.chance(f.cobaltine.p)) {
+    const n = 1 + (draws.u8() % 2)
+    for (let i = 0; i < n; i++) vein(B.COBALTINE, 3 + (draws.u8() % 6), f.cobaltine.minK, null)
+  }
+  if (maxK >= f.prismite.minK && draws.chance(f.prismite.p)) vein(B.PRISMITE, 4 + (draws.u8() % 7), f.prismite.minK, null)
+  if (maxK >= f.glowcore.minK && draws.chance(f.glowcore.p)) vein(B.GLOWCORE, 2 + (draws.u8() % 7), f.glowcore.minK, maxCube)
+  // 6. The rare band: one block (never a vein) in the chunk's costliest cube, rarer kinds needing higher K.
+  for (const [id, minK, p] of odds.rare) {
+    if (maxK < minK || !draws.chance(p)) continue
+    const o = rockInCostliest()
+    if (o >= 0) out[o] = id
+  }
+  return { blocks: out, kInt: Uint8Array.from(L.K), meanK, maxK, treeSites: sites.length, family: fam0.name, top: fam0.top, rind: fam0.rind }
+}
+
+/** K of a chunk's costliest cube, from its 64 cube digests and the three it shares (a chunk lies inside one cell of 2^7 and up). */
+export function chunkMaxK(base: ChunkBase): number {
+  let big = 0
+  for (const b of [7, 9, 11]) big += popcount4(terrainDigest(b, base.x, base.y, base.z, base.plane)[0] & 15)
+  let best = 0
+  for (let c = 0; c < 64; c++) {
+    const d = terrainDigest(3, base.x + BigInt(8 * (c & 3)), base.y + BigInt(8 * (c >> 4)), base.z + BigInt(8 * ((c >> 2) & 3)), base.plane)
+    best = Math.max(best, popcount4(d[0] & 15))
+  }
+  return big + best
 }
 
 /** K of the cube a chunk-local cell sits in (its low lattice corner, as §3.9 reads it). */

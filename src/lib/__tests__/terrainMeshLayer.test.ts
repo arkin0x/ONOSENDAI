@@ -81,7 +81,7 @@ describe('the layer', () => {
   it('of an untouched chunk is a few dozen bytes, and changes nothing', () => {
     const l = encodeLayer(gen, gen.slice())
     expect(emptyLayer(l)).toBe(true)
-    expect(JSON.stringify(l).length).toBeLessThan(80)
+    expect(JSON.stringify(l).length).toBeLessThan(96)
     expect(applyLayer(gen, l)).toEqual(gen)
   })
 

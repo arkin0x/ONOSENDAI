@@ -234,7 +234,8 @@ export const SUN_LAYOUT = {
   label: SUN_ARROW + LABEL_OFFSET,
   at: SUN_AT,
   edge: SUN_EDGE,
-  coronaInner: SUN_CORONA[0],
+  /** The bright band's outer radius: its edge nearest the label, which lies toward the centre. */
+  coronaCoreOuter: SUN_CORONA[2],
   coronaCore: SUN_CORONA[1],
   coronaOuter: SUN_CORONA[3],
 } as const

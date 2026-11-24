@@ -203,15 +203,19 @@ describe('the sun beyond the Z label', () => {
       const tip = sunOnScreen(seen, SUN_LAYOUT.arrowTip) * HALF_PX
       const label = sunOnScreen(seen, SUN_LAYOUT.label) * HALF_PX
       const sun = sunOnScreen(seen, reach) * HALF_PX
-      const core = sun - across(reach, SUN_LAYOUT.coronaCore) * HALF_PX
+      // The label lies toward the centre, so the ring's edges nearest it are
+      // its outer radii: the bright band's, then the glow's.
+      const band = sun - across(reach, SUN_LAYOUT.coronaCoreOuter) * HALF_PX
+      const glow = sun - across(reach, SUN_LAYOUT.coronaOuter) * HALF_PX
       expect(label).toBeGreaterThan(tip)
       expect(sun).toBeGreaterThan(label)
       // A 10px bold Z is about 6.5px across with a 3px shadow, so its far
-      // edge is about 5px from its centre: the ring's bright core starts
+      // edge is about 5px from its centre: the ring's bright band starts
       // past that.
-      expect(core - label).toBeGreaterThan(5)
-      // Even the soft glow inside the ring starts past the letter itself.
-      expect(sun - across(reach, SUN_LAYOUT.coronaInner) * HALF_PX - label).toBeGreaterThan(3.5)
+      expect(band - label).toBeGreaterThan(5)
+      // The soft glow round the ring starts past the letter itself, at
+      // most reaching into its shadow.
+      expect(glow - label).toBeGreaterThan(3.25)
     })
   })
 

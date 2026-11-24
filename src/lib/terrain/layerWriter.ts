@@ -99,7 +99,8 @@ export function nextPlaintext(o: {
 
   // Merging (§5.3): keep the oldest; the newest move to the new settle, only when a new settle is needed and there is no room for it.
   const carried = [...named].sort((a, b) => prevSettles[a][0] - prevSettles[b][0] || a - b)
-  const needsNew = named.size === 0 || [...now.values()].some((t) => t.t0 === NEW || t.t1 === NEW)
+  // Room for the new settle when one is needed, or when more than 32 are carried (they merge into it).
+  const needsNew = named.size === 0 || named.size > SETTLES_MAX || [...now.values()].some((t) => t.t0 === NEW || t.t1 === NEW)
   const keep = new Set(carried.slice(0, needsNew ? SETTLES_MAX - 1 : SETTLES_MAX))
   const move = (i: number): number => (i >= 0 && !keep.has(i) ? NEW : i)
   for (const [c, t] of now) now.set(c, { t0: move(t.t0), t1: move(t.t1) })
@@ -192,7 +193,9 @@ export function combineLayers(olds: readonly OtherKeyLayer[], groundOf: (plane: 
   if (planes.length === 0) return null
   // A layer holds at least one settle (§5.5).
   if (settles.length === 0) settles.push(olds[0].plaintext.settles[0])
-  return { settles, builders: [], planes }
+  // Whom they list is carried too (§5.7).
+  const builders = [...new Set(olds.flatMap((o) => o.plaintext.builders))].slice(0, 64)
+  return { settles, builders, planes }
 }
 
 /**

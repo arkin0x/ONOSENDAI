@@ -135,7 +135,7 @@ export function liveShareDeps(): ShareDeps {
     muted: () => useMutes.getState().muted.pubkeys,
     follows: (me) => followsOf(me),
     othersNear,
-    witness,
+    witness: { learn: (a) => witness.learn(a), status: (id) => witness.status(id), settle: (id, sid) => witness.settle(id, sid), lied: () => witness.lied },
     verify: (ev) => verifyOnce(ev),
     now: () => Date.now(),
   }

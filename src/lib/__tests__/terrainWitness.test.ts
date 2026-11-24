@@ -108,11 +108,12 @@ describe('the witness book', () => {
     }
   })
 
-  it('400 is not retried soon; a null is asked again after a while', async () => {
+  it('400 is not retried soon, and says nothing (not "unrecorded"); a null is asked again after a while', async () => {
     let t = 1
     const m = mockFetch(() => ({ status: 400, text: '' }))
     const book = new WitnessBook(m.fetch, () => t)
     await book.learn(asks)
+    expect(book.status(layer)).toBeNull()
     await book.learn(asks)
     expect(m.calls.filter((u) => u !== WITNESS_INFO_URL)).toHaveLength(1)
     t += 61_000
@@ -186,6 +187,24 @@ describe('a new key at a chunk (§5.7)', () => {
     expect(c.settles).toContainEqual(one.settles[0])
     expect(c.settles).toContainEqual(two.settles[0])
     expect(c.settles[d.t0[d.placements.indexOf(a)]]).toEqual(one.settles[0])
+  })
+
+  it('past 32 carried settles, a forced version merges down to 32', () => {
+    const olds = Array.from({ length: 40 }, (_, i) => {
+      const p = layerWith({ [idx(i % 32, 30, 4 + (i >> 5))]: 196 }, 1000 + i)
+      return { pubkey: id(100 + i), plaintext: p, times: times(p) }
+    })
+    const start = combineLayers(olds, () => ground)!
+    expect(start.settles.length).toBe(40)
+    const d = decodePlane(start.planes[0], ground, start.settles.length)
+    if (!d || d === 'aside') throw new Error('plane')
+    const next = nextPlaintext({ prev: start, plane: 0, values: d.values, ground, block: { height: 2000, hash: H }, force: true })!
+    expect(next.settles.length).toBeLessThanOrEqual(32)
+    const n = decodePlane(next.planes[0], ground, next.settles.length)
+    if (!n || n === 'aside') throw new Error('plane')
+    expect(n.placements.length).toBe(40)
+    // Every placement's first settle claims it.
+    n.placements.forEach((c, k) => expect(expandRuns(next.settles[n.t0[k]][3][0], CELLS, 2)![c]).toBe(1))
   })
 
   it('an emptied old layer keeps survey and ground, no placements, and one fresh settle that claims nothing', () => {

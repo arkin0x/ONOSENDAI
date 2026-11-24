@@ -53,7 +53,7 @@ import {
 import type { Position, ViewAxes } from '../lib/space'
 import type { RayHit } from '../lib/terrain/raycast'
 import {
-  connectShareHost, fieldClosing, liveChanged, noteChange, noteMove, prepareChunk, sharedKeys, terrainClosed, terrainOpened, viewOf,
+  connectShareHost, fieldClosing, liveChanged, noteChange, noteMove, ownFromPublished, prepareChunk, sharedKeys, terrainClosed, terrainOpened, viewOf,
 } from './terrainShare'
 import { loadBuilder, releaseBuilderDb } from '../lib/terrain/builderKey'
 import './terrainShareLive'
@@ -455,6 +455,8 @@ async function build(s: TerrainSession, slot: ChunkSlot): Promise<void> {
     if (terrainSession !== s || s.world.slotByKey(slot.key) !== slot) return
     // Your own blocks where you surveyed, and everyone else's shared layers under them (store/terrainShare.ts).
     const own = s.surveyedKeys.has(slot.key) ? builtBlocks(s, slot.key, g.blocks) : null
+    // Up to what this device last published there (a new key may have carried another key's cells).
+    if (own) ownFromPublished(slot.key, own, g.blocks)
     slot.own = own
     s.world.setBlocks(slot.key, g.blocks, viewOf(slot.key, g.blocks, own))
     s.version++
@@ -672,15 +674,19 @@ connectShareHost({
   active: () => useTerrain.getState().active,
   fold: async (key) => { const s = terrainSession; if (s) await foldKey(s, key) },
   redisplay,
-  adopt: async (key, own) => {
+  adopt: async (key, values, keep) => {
     const s = terrainSession
     const slot = s?.world.slotByKey(key)
     if (!s || !slot?.generated || !slot.own) return
-    // Your other keys' cells become your own here, with every change you made since kept over them (store/terrainShare.ts, §5.7).
-    const next = own.slice()
-    for (const { change } of s.pending.get(key) ?? []) next[change.cell] = change.id
-    slot.own = next
-    const layer = encodeLayer(slot.generated, next, s.plane === 1 ? 1 : 0)
+    // What was published, onto your own blocks, except cells you changed since (store/terrainShare.ts, §5.7).
+    let moved = false
+    for (let c = 0; c < slot.own.length; c++) {
+      if (keep(c)) continue
+      const v = Math.min(values[c], 255)
+      if (slot.own[c] !== v) { slot.own[c] = v; moved = true }
+    }
+    if (!moved) return
+    const layer = encodeLayer(slot.generated, slot.own, s.plane === 1 ? 1 : 0)
     s.layers.set(key, layer)
     if (s.db) await foldChunk(s.db, s.owner, key, layer, [], Date.now()).catch(() => { /* kept in memory */ })
     redisplay(key)

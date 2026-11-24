@@ -77,7 +77,7 @@ export function readWitnessAnswer(text: string, key: string, ids: readonly strin
   for (let i = 0; i < ids.length; i++) {
     const r = b.results[i] as { id?: unknown; height?: unknown; settles?: unknown } | null
     if (!r || r.id !== ids[i] || !Array.isArray(r.settles)) return null
-    if (r.height === null) continue
+    if (r.height === null) { if (r.settles.length !== 0) return null; continue }
     if (!isHeight(r.height)) return null
     const settles = new Map<string, number>()
     const listed: string[] = []
@@ -110,9 +110,13 @@ export class WitnessBook {
   private keyAsked = 0
   private known = new Map<string, WitnessRecord>()
   private unrecorded = new Map<string, number>()
-  private seenW = new Map<string, number>()
+  /** Ids a request was refused for (400): not asked again soon, and nothing known of them. */
+  private refused = new Map<string, number>()
+  private seenW = new Map<string, { w: number; answer: string }>()
   /** Two signed answers disagreed: the witness lied, and is asked nothing more. */
   lied = false
+  /** The two signed answers that disagree, kept as proof (§7.4, Caching and lies). */
+  lieProof: [string, string] | null = null
 
   constructor(private fetchText: FetchText, private now: () => number = () => Date.now(), private pin: KeyPin | null = null) {}
 
@@ -145,7 +149,8 @@ export class WitnessBook {
     const t = this.now()
     const tags = new Map<string, readonly string[]>()
     for (const a of asks) if (a.settles) tags.set(a.id, a.settles)
-    const want = [...new Set(asks.map((a) => a.id))].filter((id) => HEX64.test(id) && !this.known.has(id) && t - (this.unrecorded.get(id) ?? -Infinity) >= WITNESS_RETRY_MS)
+    const want = [...new Set(asks.map((a) => a.id))].filter((id) => HEX64.test(id) && !this.known.has(id)
+      && t - (this.unrecorded.get(id) ?? -Infinity) >= WITNESS_RETRY_MS && t - (this.refused.get(id) ?? -Infinity) >= WITNESS_RETRY_MS)
     if (want.length === 0) return
     const key = await this.witnessKey()
     if (!key) return
@@ -153,7 +158,7 @@ export class WitnessBook {
       const batch = want.slice(i, i + WITNESS_IDS_MAX)
       const got = await this.fetchText(`${WITNESS_URL}?ids=${batch.join(',')}`).catch(() => null)
       // 400: the request was wrong, so it is not asked again soon. 429, a 5xx or nothing: unreachable for now.
-      if (got?.status === 400) { for (const id of batch) this.unrecorded.set(id, t); continue }
+      if (got?.status === 400) { for (const id of batch) this.refused.set(id, t); continue }
       if (!got || got.status !== 200) return
       const read = readWitnessAnswer(got.text, key, batch, tags)
       if (!read) return
@@ -162,8 +167,8 @@ export class WitnessBook {
         if (!r) { this.unrecorded.set(id, t); continue }
         for (const [sid, w] of r.settles) {
           const was = this.seenW.get(sid)
-          if (was !== undefined && was !== w) { this.lied = true; return }
-          this.seenW.set(sid, w)
+          if (was !== undefined && was.w !== w) { this.lied = true; this.lieProof = [was.answer, got.text]; return }
+          this.seenW.set(sid, { w, answer: got.text })
         }
         this.known.set(id, r)
         this.unrecorded.delete(id)

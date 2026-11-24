@@ -53,16 +53,19 @@ import { regionAtOriginalSize, useRegion } from './useRegion'
 import { landFly } from '../lib/viewFly'
 import { buildPlane, placedCursor } from '../lib/buildCursor'
 import { SCAN_FOCUS_LABEL, scanBuying, useScan } from './useScan'
-import { customModesApply, effectiveModes, modeRoles, nextInRing, useModes, type ModeId } from './modeOrder'
+import { customModesApply, effectiveModes, modeInfo, modeRoles, nextInRing, useModes, type ModeId } from './modeOrder'
+import { refuseTerrain, terrainRefusal, useTerrain } from './useTerrain'
 
-export type PadMode = 'hop' | 'view' | 'walk' | 'build' | 'scan'
+export type PadMode = 'hop' | 'view' | 'walk' | 'build' | 'scan' | 'terrain'
 
 /**
  * The mode the pad is in. WALK and BUILD never stand together: BUILD's view
  * takes you off your head, which ends WALK. SCAN is the standard VIEW made
  * SCAN's (store/useScan.ts), so it counts only while that view is up.
  */
-export function padMode(walking: boolean, building: boolean, viewing: boolean, scanning = false): PadMode {
+export function padMode(walking: boolean, building: boolean, viewing: boolean, scanning = false, terrain = false): PadMode {
+  // TERRAIN walks under WALK (store/useTerrain.ts): it is TERRAIN while it is on.
+  if (terrain) return 'terrain'
   if (walking) return 'walk'
   if (building) return 'build'
   if (viewing && scanning) return 'scan'
@@ -73,7 +76,7 @@ export function padMode(walking: boolean, building: boolean, viewing: boolean, s
 /** The pad's mode now, read from the stores. */
 export function currentPadMode(): PadMode {
   const cs = useCyberspace.getState()
-  return padMode(cs.walking, useBuilder.getState().active, cs.viewing(), useScan.getState().active)
+  return padMode(cs.walking, useBuilder.getState().active, cs.viewing(), useScan.getState().active, useTerrain.getState().active)
 }
 
 /**
@@ -202,6 +205,9 @@ function toHop(from: PadMode): boolean {
       return !useBuilder.getState().active
     case 'scan': scanToHop(); return !useScan.getState().active
     case 'view': viewToHop(); return !useCyberspace.getState().viewing()
+    case 'terrain':
+      void useTerrain.getState().exit()
+      return !useTerrain.getState().active && !useCyberspace.getState().walking
   }
 }
 
@@ -213,6 +219,7 @@ function fromHop(to: PadMode): void {
     case 'build': useBuilder.getState().enter('build'); return
     case 'scan': useScan.getState().enter(); return
     case 'walk': enterWalk(); return
+    case 'terrain': openTerrain('hop'); return
   }
 }
 
@@ -230,8 +237,9 @@ export function switchMode(to: PadMode, opts?: { noFall?: boolean }): void {
   if (from === to) return
   if (from === 'build' && buildHeld()) return
   if (to === 'walk') { enterWalk(opts); return }
-  if (from === 'walk') {
-    if (!toHop('walk')) return
+  if (to === 'terrain') { enterTerrainMode(); return }
+  if (from === 'walk' || from === 'terrain') {
+    if (!toHop(from)) return
     fromHop(to)
     return
   }
@@ -258,6 +266,7 @@ export function switchMode(to: PadMode, opts?: { noFall?: boolean }): void {
  */
 export function backOf(current: PadMode = currentPadMode()): ModeId {
   if (current === 'walk') return useWalk.getState().from
+  if (current === 'terrain') { const from = useTerrain.getState().from; if (from !== 'terrain') return from }
   const { start, ring } = modeRoles()
   const { back, lastRing } = useModes.getState()
   // Only a mode still in the ring: one switched off since is no way back.
@@ -299,6 +308,7 @@ export function cycleMode(): void {
 export function goBack(): void {
   const cur = currentPadMode()
   if (cur === 'walk') { leaveWalk(); return }
+  if (cur === 'terrain') { leaveTerrain(); return }
   const back = backOf(cur)
   useModes.setState({ back: null })
   for (const to of [back, modeRoles().start, 'hop' as const]) {
@@ -319,6 +329,8 @@ export function pressSecond(): void {
   const cur = currentPadMode()
   if (cur === second) { goBack(); return }
   if (second === 'walk') { enterWalk(); return }
+  // TERRAIN keeps its own way back (useTerrain `from`, set on the way in), which the mode button names.
+  if (second === 'terrain') { enterTerrainMode(); return }
   // The way back is a ring mode: from a mode outside it, where that one goes back to.
   const back = inRing(cur) ? cur : backOf(cur)
   switchMode(second)
@@ -333,13 +345,13 @@ export function watchLastRing(): () => void {
   let was: PadMode | null = null
   const note = (): void => {
     const now = currentPadMode()
-    if (now === was) return
+    if (now === was || enteringTerrain) return
     was = now
     if (inRing(now) && useModes.getState().lastRing !== now) useModes.setState({ lastRing: now })
     // The second button's way back lasts only while its mode does: left another way (N, B, Esc), it is forgotten.
     if (useModes.getState().back !== null && now !== modeRoles().second) useModes.setState({ back: null })
   }
-  const offs = [useCyberspace.subscribe(note), useBuilder.subscribe(note), useScan.subscribe(note)]
+  const offs = [useCyberspace.subscribe(note), useBuilder.subscribe(note), useScan.subscribe(note), useTerrain.subscribe(note)]
   note()
   return () => { for (const off of offs) off() }
 }
@@ -410,6 +422,8 @@ export function enterWalk(opts?: { noFall?: boolean }): void {
   if (from === 'walk') return
   const cs = useCyberspace.getState()
   if (cs.spectate !== null || cs.exploreIndex !== null || cs.transit !== null) return
+  // From TERRAIN (which walks under WALK): TERRAIN ends first, and WALK goes back to HOP.
+  if (from === 'terrain') { if (!toHop('terrain')) return; useWalk.getState().enter(opts); return }
   if (from === 'build') {
     if (buildHeld()) return
     buildToHop()
@@ -482,4 +496,66 @@ export function recall(): void {
     return
   }
   cs.cancel()
+}
+
+/**
+ * TERRAIN on, remembering `from` (useTerrain `from`): where EXIT, T, Esc and
+ * the lit second button go back to (leaveTerrain), and what the dim mode
+ * button names meanwhile, as WALK keeps its own `from`.
+ */
+function openTerrain(from: PadMode): void {
+  useTerrain.setState({ from })
+  void useTerrain.getState().enter()
+}
+
+/**
+ * TERRAIN from anywhere: the pad's ring or second button, the build bar's
+ * TERRAIN, T while building, MODES. The mode you are in ends the way the
+ * ring ends it (BUILD to HOP, VIEW and SCAN let their view go), and is kept
+ * as the way back. Refused in a short toast where there is no head of yours
+ * to walk from (spectating, in history, in transit) or while something is
+ * lined up to place.
+ */
+export function enterTerrainMode(): boolean {
+  const from = currentPadMode()
+  if (from === 'terrain') return true
+  // Newcomers, the tour, /demo and TV keep to the teaching list, which has TERRAIN off: not by its key or button either.
+  if (!customModesApply()) return false
+  const why = terrainRefusal()
+  if (why) { refuseTerrain(why); return false }
+  if (from === 'build' && buildHeld()) return false
+  // The modes passed through on the way in (HOP, WALK under TERRAIN) are not stops of the ring's (watchLastRing).
+  enteringTerrain = true
+  try {
+    // From WALK the walk goes on (TERRAIN is WALK with tools): its steps waiting on proofs are kept, not dropped.
+    if (from !== 'walk' && !toHop(from)) return false
+    openTerrain(from)
+    return true
+  } finally {
+    enteringTerrain = false
+  }
+}
+
+/** True while TERRAIN is being entered: the pad passes through HOP and WALK, which are not the ring's stops. */
+let enteringTerrain = false
+
+/**
+ * EXIT, T, Esc or the lit second button in TERRAIN: back to the mode it was
+ * entered from, never HOP in its place (owner, 2026-11-24: "the main mode
+ * button turns to hop even when it wasnt hop before. it should remain what it
+ * was before"). From WALK the walk goes on, with WALK's own way back intact;
+ * from VIEW, BUILD or SCAN that mode opens again at your avatar.
+ */
+export function leaveTerrain(): void {
+  const back = useTerrain.getState().from
+  if (back === 'walk') { void useTerrain.getState().exit({ keepWalking: true }); return }
+  if (!toHop('terrain')) return
+  if (back !== 'hop' && back !== 'terrain') fromHop(back)
+}
+
+/** The word of the mode the mode button goes to from TERRAIN: the next in the ring, or the way back when TERRAIN is not in it. */
+export function nextModeWord(): string {
+  const cur: PadMode = 'terrain'
+  const next = inRing(cur) ? nextInRing(effectiveModes(), cur) : backOf(cur)
+  return modeInfo(next).word
 }

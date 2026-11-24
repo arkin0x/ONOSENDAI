@@ -126,8 +126,8 @@ describe('every control slides with its side', () => {
   const right = selectorsWith('translate: calc(-1 * var(--hud-shift-r)) 0;')
   const centre = selectorsWith('translate: var(--hud-skew) 0;')
 
-  it('the left side: the menu button, the instrument chips, the walk pad, the fly and scan docks, the route overlay and deploy bar, the HOSAKA mark', () => {
-    for (const s of ['.hamburger-menu', '.instruments', '.touchpad--mode-walk', '.flyorbs', '.routeov', '.deploybar', '.hosaka-pulse']) expect(left, s).toContain(s)
+  it('the left side: the menu button and CHAT beside it, the instrument chips, the walk pad, the fly and scan docks, the route overlay and deploy bar, the HOSAKA mark', () => {
+    for (const s of ['.hamburger-menu', '.chatdock__chip', '.instruments', '.touchpad--mode-walk', '.flyorbs', '.routeov', '.deploybar', '.hosaka-pulse']) expect(left, s).toContain(s)
   })
 
   it('the right side: the pad in HOP, VIEW, BUILD and SCAN, the commit block, JUMP and DOWN, the LOOK ball, the compass and its menu', () => {
@@ -138,8 +138,8 @@ describe('every control slides with its side', () => {
     expect([...left, ...right, ...centre].some((s) => s.includes('.compass-3d') && !s.includes(':not(.compass-3d--bench)'))).toBe(false)
   })
 
-  it('the chat between them moves its centre by half the difference and gives up half the sum on each side', () => {
-    for (const s of ['.chatdock', '.chatdock__chip', '.starname']) expect(centre, s).toContain(s)
+  it('the open chat between them moves its centre by half the difference and gives up half the sum on each side', () => {
+    for (const s of ['.chatdock', '.starname']) expect(centre, s).toContain(s)
     expect(baseVar('--hud-mid')).toBe('calc((var(--hud-shift-l) + var(--hud-shift-r)) / 2)')
     expect(baseVar('--hud-skew')).toBe('calc((var(--hud-shift-l) - var(--hud-shift-r)) / 2)')
     expect(CSS).toContain('left: calc(var(--menu-left) + var(--menu-size) + 26px + var(--hud-mid));')

@@ -30,7 +30,7 @@ import { useDemo } from '../useDemo'
 import { kvGet, movesToKv } from '../../lib/kvStore'
 import { setHudChoice, useNewcomer } from '../../newcomer/useNewcomer'
 import {
-  canSwitchOff, customModesApply, DEFAULT_AT, DEFAULT_MODE_ORDER, DEFAULT_MODES, effectiveModes, fromV1, MODES, MODES_PREFIX, mergeModes, modeRoles,
+  TEACHING_MODES, canSwitchOff, customModesApply, DEFAULT_AT, DEFAULT_MODE_ORDER, DEFAULT_MODES, effectiveModes, fromV1, MODES, MODES_PREFIX, mergeModes, modeRoles,
   moveModeBy, moveModeTo, nextInRing, readModes, resetModes, rolesOf, setModeOn, storedModes, TOGGLE_AT, updateModes, useModes,
   type ModeId, type ModeSettings,
 } from '../modeOrder'
@@ -49,19 +49,20 @@ beforeEach(() => {
   as(A)
 })
 
-describe('the default list is today\'s pad', () => {
-  it('WALK in the toggle slot, then HOP, VIEW, BUILD, SCAN, all on: start in HOP, WALK the second button, the ring HOP, VIEW, BUILD, SCAN', () => {
-    expect(DEFAULT_MODE_ORDER).toEqual(['walk', 'hop', 'view', 'build', 'scan'])
+describe('the default list is today\'s pad, with TERRAIN in the ring after HOP', () => {
+  it('WALK in the toggle slot, then HOP, TERRAIN, VIEW, BUILD, SCAN, all on: start in HOP, WALK the second button, the ring HOP, TERRAIN, VIEW, BUILD, SCAN', () => {
+    expect(DEFAULT_MODE_ORDER).toEqual(['walk', 'hop', 'terrain', 'view', 'build', 'scan'])
     expect(DEFAULT_MODE_ORDER[TOGGLE_AT]).toBe('walk')
     expect(DEFAULT_MODE_ORDER[DEFAULT_AT]).toBe('hop')
     expect([...DEFAULT_MODE_ORDER].sort()).toEqual(MODES.map((m) => m.id).sort())
-    expect(rolesOf(DEFAULT_MODES)).toEqual({ start: 'hop', second: 'walk', ring: ['hop', 'view', 'build', 'scan'] })
+    expect(rolesOf(DEFAULT_MODES)).toEqual({ start: 'hop', second: 'walk', ring: ['hop', 'terrain', 'view', 'build', 'scan'] })
     expect(storedModes()).toEqual(DEFAULT_MODES)
     expect(modeRoles()).toEqual(rolesOf(DEFAULT_MODES))
   })
 
   it('the ring goes round in order, back to the first', () => {
-    expect(nextInRing(DEFAULT_MODES, 'hop')).toBe('view')
+    expect(nextInRing(DEFAULT_MODES, 'hop')).toBe('terrain')
+    expect(nextInRing(DEFAULT_MODES, 'terrain')).toBe('view')
     expect(nextInRing(DEFAULT_MODES, 'view')).toBe('build')
     expect(nextInRing(DEFAULT_MODES, 'build')).toBe('scan')
     expect(nextInRing(DEFAULT_MODES, 'scan')).toBe('hop')
@@ -77,38 +78,38 @@ describe('reordering', () => {
   it('the owner\'s example: WALK the default mode and BUILD the toggle', () => {
     let s: ModeSettings = DEFAULT_MODES
     s = moveModeTo(s, 'build', TOGGLE_AT)
-    expect(s.order).toEqual(['build', 'hop', 'view', 'walk', 'scan'])
+    expect(s.order).toEqual(['build', 'hop', 'terrain', 'view', 'walk', 'scan'])
     s = moveModeTo(s, 'walk', DEFAULT_AT)
-    expect(s.order).toEqual(['build', 'walk', 'hop', 'view', 'scan'])
-    expect(rolesOf(s)).toEqual({ start: 'walk', second: 'build', ring: ['walk', 'hop', 'view', 'scan'] })
+    expect(s.order).toEqual(['build', 'walk', 'hop', 'terrain', 'view', 'scan'])
+    expect(rolesOf(s)).toEqual({ start: 'walk', second: 'build', ring: ['walk', 'hop', 'terrain', 'view', 'scan'] })
     expect(nextInRing(s, 'scan')).toBe('walk')
   })
 
   it('a mode moved into the toggle slot trades places with the toggle\'s mode', () => {
     const s = moveModeTo(DEFAULT_MODES, 'scan', TOGGLE_AT)
-    expect(s.order).toEqual(['scan', 'hop', 'view', 'build', 'walk'])
-    expect(rolesOf(s)).toEqual({ start: 'hop', second: 'scan', ring: ['hop', 'view', 'build', 'walk'] })
+    expect(s.order).toEqual(['scan', 'hop', 'terrain', 'view', 'build', 'walk'])
+    expect(rolesOf(s)).toEqual({ start: 'hop', second: 'scan', ring: ['hop', 'terrain', 'view', 'build', 'walk'] })
   })
 
   it('the toggle\'s mode moved down trades with the mode where it lands; the rest of the ring keeps its order', () => {
-    expect(moveModeTo(DEFAULT_MODES, 'walk', 3).order).toEqual(['build', 'hop', 'view', 'walk', 'scan'])
-    expect(moveModeTo(DEFAULT_MODES, 'walk', DEFAULT_AT).order).toEqual(['hop', 'walk', 'view', 'build', 'scan'])
+    expect(moveModeTo(DEFAULT_MODES, 'walk', 4).order).toEqual(['build', 'hop', 'terrain', 'view', 'walk', 'scan'])
+    expect(moveModeTo(DEFAULT_MODES, 'walk', DEFAULT_AT).order).toEqual(['hop', 'walk', 'terrain', 'view', 'build', 'scan'])
   })
 
   it('within the ring a mode slides and the others make room', () => {
     const s = moveModeTo(DEFAULT_MODES, 'scan', DEFAULT_AT)
-    expect(s.order).toEqual(['walk', 'scan', 'hop', 'view', 'build'])
+    expect(s.order).toEqual(['walk', 'scan', 'hop', 'terrain', 'view', 'build'])
     expect(rolesOf(s).start).toBe('scan')
   })
 
   it('up and down a place at a time, across the rule too, clamped at the ends, the same list back when nothing moves', () => {
-    expect(moveModeBy(DEFAULT_MODES, 'scan', -1).order).toEqual(['walk', 'hop', 'view', 'scan', 'build'])
+    expect(moveModeBy(DEFAULT_MODES, 'scan', -1).order).toEqual(['walk', 'hop', 'terrain', 'view', 'scan', 'build'])
     // The default mode up trades with the toggle; the toggle down trades with the default mode.
-    expect(moveModeBy(DEFAULT_MODES, 'hop', -1).order).toEqual(['hop', 'walk', 'view', 'build', 'scan'])
-    expect(moveModeBy(DEFAULT_MODES, 'walk', 1).order).toEqual(['hop', 'walk', 'view', 'build', 'scan'])
+    expect(moveModeBy(DEFAULT_MODES, 'hop', -1).order).toEqual(['hop', 'walk', 'terrain', 'view', 'build', 'scan'])
+    expect(moveModeBy(DEFAULT_MODES, 'walk', 1).order).toEqual(['hop', 'walk', 'terrain', 'view', 'build', 'scan'])
     expect(moveModeBy(DEFAULT_MODES, 'walk', -1)).toBe(DEFAULT_MODES)
     expect(moveModeBy(DEFAULT_MODES, 'scan', 1)).toBe(DEFAULT_MODES)
-    expect(moveModeTo(DEFAULT_MODES, 'hop', 99).order).toEqual(['walk', 'view', 'build', 'scan', 'hop'])
+    expect(moveModeTo(DEFAULT_MODES, 'hop', 99).order).toEqual(['walk', 'terrain', 'view', 'build', 'scan', 'hop'])
   })
 })
 
@@ -116,19 +117,19 @@ describe('switching modes off', () => {
   it('an off mode leaves the ring, and stays in the list', () => {
     const s = setModeOn(DEFAULT_MODES, 'view', false)
     expect(s.order).toEqual(DEFAULT_MODE_ORDER)
-    expect(rolesOf(s).ring).toEqual(['hop', 'build', 'scan'])
-    expect(nextInRing(s, 'hop')).toBe('build')
+    expect(rolesOf(s).ring).toEqual(['hop', 'terrain', 'build', 'scan'])
+    expect(nextInRing(s, 'terrain')).toBe('build')
   })
 
   it('the toggle off: no second button, and the ring as it was', () => {
     const s = setModeOn(DEFAULT_MODES, 'walk', false)
     expect(canSwitchOff(DEFAULT_MODES, 'walk')).toBe(true)
-    expect(rolesOf(s)).toEqual({ start: 'hop', second: null, ring: ['hop', 'view', 'build', 'scan'] })
+    expect(rolesOf(s)).toEqual({ start: 'hop', second: null, ring: ['hop', 'terrain', 'view', 'build', 'scan'] })
   })
 
   it('only the default mode on: no second button, and the ring is that mode', () => {
     let s: ModeSettings = DEFAULT_MODES
-    for (const id of ['walk', 'view', 'build', 'scan'] as const) s = setModeOn(s, id, false)
+    for (const id of ['walk', 'terrain', 'view', 'build', 'scan'] as const) s = setModeOn(s, id, false)
     expect(rolesOf(s)).toEqual({ start: 'hop', second: null, ring: ['hop'] })
     expect(nextInRing(s, 'hop')).toBe('hop')
   })
@@ -151,7 +152,7 @@ describe('switching modes off', () => {
     expect(rolesOf(t).second).toBeNull()
     // The default mode up into the slot leaves the old toggle the default, switched on.
     const u = moveModeBy(setModeOn(DEFAULT_MODES, 'walk', false), 'hop', -1)
-    expect(u).toEqual({ order: ['hop', 'walk', 'view', 'build', 'scan'], off: [] })
+    expect(u).toEqual({ order: ['hop', 'walk', 'terrain', 'view', 'build', 'scan'], off: [] })
   })
 
   it('from a mode off the ring, the ring goes on from its place in the list', () => {
@@ -165,7 +166,8 @@ describe('a list from another version', () => {
   it('a mode added since joins at its default place, never the toggle slot or the default place; one this version lacks is dropped', () => {
     // Saved before SCAN existed, BUILD the toggle; and a mode from a later version.
     const s = mergeModes({ order: ['build', 'walk', 'hop', 'view', 'teleport'], off: ['view', 'teleport'] })
-    expect(s.order).toEqual(['build', 'walk', 'hop', 'view', 'scan'])
+    // TERRAIN, added since too, joins after HOP, its neighbour above in the default ring.
+    expect(s.order).toEqual(['build', 'walk', 'hop', 'terrain', 'view', 'scan'])
     expect(s.off).toEqual(['view'])
     // A mode whose default neighbour is the toggle's joins below the default mode, which stays.
     const future: ModeId[] = ['walk', 'hop', 'scan', 'view', 'build']
@@ -173,7 +175,7 @@ describe('a list from another version', () => {
   })
 
   it('duplicates keep the first; a list that is missing everything builds the default', () => {
-    expect(mergeModes({ order: ['view', 'hop', 'view', 'scan', 'build'] }).order).toEqual(['view', 'hop', 'walk', 'scan', 'build'])
+    expect(mergeModes({ order: ['view', 'hop', 'view', 'scan', 'build'] }).order).toEqual(['view', 'hop', 'terrain', 'walk', 'scan', 'build'])
     expect(mergeModes({ order: [] })).toEqual(DEFAULT_MODES)
   })
 
@@ -181,7 +183,7 @@ describe('a list from another version', () => {
     expect(mergeModes(null)).toEqual(DEFAULT_MODES)
     expect(mergeModes('junk')).toEqual(DEFAULT_MODES)
     expect(mergeModes({ order: 'hop' }).order).toEqual(DEFAULT_MODE_ORDER)
-    expect(mergeModes({ order: ['scan', 'hop', 'walk', 'view', 'build'], off: ['scan', 'hop', 'walk'] })).toEqual({ order: ['scan', 'hop', 'walk', 'view', 'build'], off: ['scan', 'walk'] })
+    expect(mergeModes({ order: ['scan', 'hop', 'walk', 'view', 'build'], off: ['scan', 'hop', 'walk'] })).toEqual({ order: ['scan', 'hop', 'terrain', 'walk', 'view', 'build'], off: ['scan', 'walk'] })
   })
 
   it('a stored record that does not parse is the default', () => {
@@ -203,11 +205,18 @@ describe('a list kept before the toggle slot (v1, PR #915): the same pad', () =>
     const second = on[1] ?? null
     return { start: order[0], second, ring: on.filter((id) => id !== second) }
   }
+  /** The same pad with TERRAIN, which v1 never knew, on in the ring after HOP (after the default mode when HOP is the toggle). */
+  const withTerrain = (r: { start: ModeId; second: ModeId | null; ring: ModeId[] }) => {
+    const ring = [...r.ring]
+    const at = ring.indexOf('hop')
+    ring.splice(at < 0 ? 1 : at + 1, 0, 'terrain')
+    return { ...r, ring }
+  }
 
   it('the old first place is the default mode, the old second the toggle', () => {
     const s = v1(['walk', 'build', 'hop', 'view', 'scan'])!
-    expect(s.order).toEqual(['build', 'walk', 'hop', 'view', 'scan'])
-    expect(rolesOf(s)).toEqual({ start: 'walk', second: 'build', ring: ['walk', 'hop', 'view', 'scan'] })
+    expect(s.order).toEqual(['build', 'walk', 'hop', 'terrain', 'view', 'scan'])
+    expect(rolesOf(s)).toEqual({ start: 'walk', second: 'build', ring: ['walk', 'hop', 'terrain', 'view', 'scan'] })
   })
 
   it('the old default list is the new default list', () => {
@@ -217,8 +226,8 @@ describe('a list kept before the toggle slot (v1, PR #915): the same pad', () =>
 
   it('an old second place switched off: the next mode on was the second button, and is the toggle now', () => {
     const s = v1(['hop', 'walk', 'view', 'build', 'scan'], ['walk'])!
-    expect(s.order).toEqual(['view', 'hop', 'walk', 'build', 'scan'])
-    expect(rolesOf(s)).toEqual(v1Roles(['hop', 'walk', 'view', 'build', 'scan'], ['walk']))
+    expect(s.order).toEqual(['view', 'hop', 'terrain', 'walk', 'build', 'scan'])
+    expect(rolesOf(s)).toEqual(withTerrain(v1Roles(['hop', 'walk', 'view', 'build', 'scan'], ['walk'])))
   })
 
   it('only one mode on: there was no second button, and there is none now', () => {
@@ -226,7 +235,8 @@ describe('a list kept before the toggle slot (v1, PR #915): the same pad', () =>
     const off: ModeId[] = ['hop', 'walk', 'view', 'build']
     const s = v1(order, off)!
     expect(s.order[TOGGLE_AT]).toBe('hop')
-    expect(rolesOf(s)).toEqual({ start: 'scan', second: null, ring: ['scan'] })
+    // TERRAIN, which v1 did not know, joins the ring on.
+    expect(rolesOf(s)).toEqual({ start: 'scan', second: null, ring: ['scan', 'terrain'] })
   })
 
   it('every v1 list makes the pad it made before', () => {
@@ -237,7 +247,12 @@ describe('a list kept before the toggle slot (v1, PR #915): the same pad', () =>
       [['walk', 'build', 'scan', 'view', 'hop'], ['build', 'view']],
       [['build', 'walk', 'hop', 'view', 'scan'], ['walk', 'hop', 'scan']],
     ]
-    for (const [order, off] of lists) expect(rolesOf(v1(order, off)!), order.join()).toEqual(v1Roles(order, off))
+    // The same start, second button and ring; TERRAIN, which v1 never knew, joins the ring on.
+    for (const [order, off] of lists) {
+      const r = rolesOf(v1(order, off)!)
+      expect({ ...r, ring: r.ring.filter((m) => m !== 'terrain') }, order.join()).toEqual(v1Roles(order, off))
+      expect(r.ring, order.join()).toContain('terrain')
+    }
   })
 
   it('a mode added since v1 never takes the old second button or the start', () => {
@@ -253,15 +268,15 @@ describe('a list kept before the toggle slot (v1, PR #915): the same pad', () =>
 
   it('a later version reads as this one, never as v1', () => {
     localStorage.setItem(MODES_PREFIX + A, JSON.stringify({ v: 3, order: ['build', 'walk', 'hop', 'view', 'scan'], off: [] }))
-    expect(readModes(A)!.order).toEqual(['build', 'walk', 'hop', 'view', 'scan'])
+    expect(readModes(A)!.order).toEqual(['build', 'walk', 'hop', 'terrain', 'view', 'scan'])
   })
 
   it('a record with no version is read as v1; the next change writes v2', () => {
     localStorage.setItem(MODES_PREFIX + A, JSON.stringify({ order: ['walk', 'build', 'hop', 'view', 'scan'], off: [] }))
-    expect(storedModes().order).toEqual(['build', 'walk', 'hop', 'view', 'scan'])
+    expect(storedModes().order).toEqual(['build', 'walk', 'hop', 'terrain', 'view', 'scan'])
     updateModes((s) => setModeOn(s, 'scan', false))
-    expect(JSON.parse(kvGet(MODES_PREFIX + A)!)).toEqual({ v: 2, order: ['build', 'walk', 'hop', 'view', 'scan'], off: ['scan'] })
-    expect(readModes(A)).toEqual({ order: ['build', 'walk', 'hop', 'view', 'scan'], off: ['scan'] })
+    expect(JSON.parse(kvGet(MODES_PREFIX + A)!)).toEqual({ v: 2, order: ['build', 'walk', 'hop', 'terrain', 'view', 'scan'], off: ['scan'] })
+    expect(readModes(A)).toEqual({ order: ['build', 'walk', 'hop', 'terrain', 'view', 'scan'], off: ['scan'] })
   })
 })
 
@@ -269,7 +284,7 @@ describe('kept per identity', () => {
   it('lives in the kv store under the pubkey, and comes back for that identity only', () => {
     expect(movesToKv(MODES_PREFIX + A)).toBe(true)
     updateModes((s) => moveModeTo(s, 'hop', TOGGLE_AT))
-    expect(JSON.parse(kvGet(MODES_PREFIX + A)!)).toEqual({ v: 2, order: ['hop', 'walk', 'view', 'build', 'scan'], off: [] })
+    expect(JSON.parse(kvGet(MODES_PREFIX + A)!)).toEqual({ v: 2, order: ['hop', 'walk', 'terrain', 'view', 'build', 'scan'], off: [] })
     expect(storedModes().order[DEFAULT_AT]).toBe('walk')
 
     // Another identity starts with the default list, and keeps its own.
@@ -292,8 +307,8 @@ describe('kept per identity', () => {
     expect(kvGet(MODES_PREFIX + A)).toBeNull()
     expect(storedModes()).toEqual(DEFAULT_MODES)
     // Moving back to the default order by hand keeps no record either.
-    updateModes((s) => moveModeTo(s, 'view', 4))
-    updateModes((s) => moveModeTo(s, 'view', 2))
+    updateModes((s) => moveModeTo(s, 'view', 5))
+    updateModes((s) => moveModeTo(s, 'view', 3))
     expect(kvGet(MODES_PREFIX + A)).toBeNull()
   })
 })
@@ -309,7 +324,7 @@ describe('who gets the list', () => {
   it('the newcomer view keeps the default pad, and the list applies once it ends', () => {
     useNewcomer.setState({ record: { stage: 'newcomer', seen: [] } })
     expect(customModesApply()).toBe(false)
-    expect(effectiveModes()).toEqual(DEFAULT_MODES)
+    expect(effectiveModes()).toEqual(TEACHING_MODES)
     // Finished or skipped: graduated.
     useNewcomer.setState({ record: { stage: 'graduated', seen: [] } })
     expect(customModesApply()).toBe(true)
@@ -318,20 +333,20 @@ describe('who gets the list', () => {
 
   it('Settings > Interface: Newcomer view keeps the default pad too', () => {
     setHudChoice('newcomer')
-    expect(effectiveModes()).toEqual(DEFAULT_MODES)
+    expect(effectiveModes()).toEqual(TEACHING_MODES)
     setHudChoice('everything')
     expect(modeRoles().start).toBe('walk')
   })
 
   it('a tour run, the /demo tour and Cyberspace TV use the default pad', () => {
     useTutorial.setState({ active: true })
-    expect(effectiveModes()).toEqual(DEFAULT_MODES)
+    expect(effectiveModes()).toEqual(TEACHING_MODES)
     useTutorial.setState({ active: false })
     useTv.setState({ on: true })
-    expect(effectiveModes()).toEqual(DEFAULT_MODES)
+    expect(effectiveModes()).toEqual(TEACHING_MODES)
     useTv.setState({ on: false })
     useDemo.setState({ active: true })
-    expect(effectiveModes()).toEqual(DEFAULT_MODES)
+    expect(effectiveModes()).toEqual(TEACHING_MODES)
     useDemo.setState({ active: false })
     expect(modeRoles().start).toBe('walk')
   })

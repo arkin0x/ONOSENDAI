@@ -40,6 +40,8 @@ import { useRegion } from '../store/useRegion'
 import { buildToScan, hotkeyMode, inRing, leaveWalk, MODE_HOTKEYS, scanToHop, viewToAvatar } from '../store/padMode'
 import { toggleMenuOpen } from './useMenuOpen'
 import { scanBuying, scanSpace, useScan } from '../store/useScan'
+import { useTerrain } from '../store/useTerrain'
+import { enterTerrainMode } from '../store/padMode'
 
 // Cyberspace TV is watching only: WALK's input is closed while it is on (store/walkInput.ts).
 addWalkInputCloser(() => useTv.getState().on)
@@ -256,6 +258,13 @@ export function useKeyboard(): void {
       if (event.code === 'KeyB') {
         event.preventDefault()
         useBuilder.getState().toggle()
+        return
+      }
+
+      // T: TERRAIN from any mode, switched off in MODES too, as every mode's key (store/padMode.ts enterTerrainMode); not for newcomers, in the tour, /demo or TV.
+      if (event.code === 'KeyT' && !useTerrain.getState().active) {
+        event.preventDefault()
+        if (!event.repeat) enterTerrainMode()
         return
       }
 

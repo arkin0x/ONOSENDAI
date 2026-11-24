@@ -15,7 +15,8 @@ import { useCyberspace, type CyberspaceState } from '../store/useCyberspace'
 import { sectorTag, xyzToSectorId, type Plane } from 'cyberspace-core'
 import type { Position } from '../lib/space'
 import { useBuilder } from '../store/useBuilder'
-import { padMode } from '../store/padMode'
+import { padMode, type PadMode } from '../store/padMode'
+import { useTerrain } from '../store/useTerrain'
 import { useScan } from '../store/useScan'
 import { shortHex } from '../lib/time'
 import { ProfilePic, ProfileTap } from './ProfileBadge'
@@ -521,7 +522,21 @@ const SHARED_ROWS: Array<[string, string]> = [
   ['Esc', 'close: dialog, then menu, then the latest chip'],
 ]
 
-const MODE_ROWS: Record<'hop' | 'view' | 'walk' | 'build' | 'scan', { title: string; rows: Array<[string, string]>; hint: string }> = {
+const MODE_ROWS: Record<PadMode, { title: string; rows: Array<[string, string]>; hint: string }> = {
+  terrain: {
+    title: 'Controls · TERRAIN',
+    rows: [
+      ['W A S D', 'walk: forward, left, back, right'],
+      ['Space', 'jump (you climb a block one higher by walking into it)'],
+      ['Click / Q', 'mine'],
+      ['Right click / E', 'place'],
+      ['1 to 9', 'choose a block'],
+      ['I', 'inventory'],
+      ['G', 'survey the chunk here or ahead'],
+      ['T / Esc', 'back to the mode you came from'],
+    ],
+    hint: 'TERRAIN walks the blocks of the chunks you surveyed: every step goes to your chain, as in WALK. Mine and place within 16 blocks of your avatar.',
+  },
   hop: {
     title: 'Controls · HOP',
     rows: [
@@ -571,8 +586,9 @@ const MODE_ROWS: Record<'hop' | 'view' | 'walk' | 'build' | 'scan', { title: str
       ['X', 'recall the build cursor to your avatar'],
       ['B', 'leave build mode'],
       ['N', 'scan mode, where the build cursor is'],
+      ['T', 'TERRAIN: mine and place blocks near your avatar'],
     ],
-    hint: 'BUILD places things at a build cursor and never moves you. The movement keys and zoom move that cursor; , and . change the step it places at; Space places. X, or RECALL on the pad, brings the build cursor home and BUILD stays; B leaves.',
+    hint: 'BUILD places things at a build cursor and never moves you. The movement keys and zoom move that cursor; , and . change the step it places at; Space places. X, or RECALL on the pad, brings the build cursor home and BUILD stays; B leaves. T opens TERRAIN, where you walk, mine and place blocks near your avatar; T or Esc comes back.',
   },
   scan: {
     title: 'Controls · SCAN',
@@ -595,7 +611,8 @@ function Controls(): JSX.Element {
   const viewing = useCyberspace((s) => s.viewing())
   const building = useBuilder((s) => s.active)
   const scanning = useScan((s) => s.active)
-  const mode = padMode(walking, building, viewing, scanning)
+  const terrain = useTerrain((s) => s.active)
+  const mode = padMode(walking, building, viewing, scanning, terrain)
   const { title, rows: modeRows, hint } = MODE_ROWS[mode]
   // MODES can put WALK in the mode button's ring (store/modeOrder.ts): X then only stops the walk.
   const walkInRing = useModeRoles().ring.includes('walk')

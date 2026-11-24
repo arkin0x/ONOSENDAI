@@ -65,7 +65,8 @@ import { useTv } from '../../store/useTv'
 import { useWorkshop } from '../../store/useWorkshop'
 import { useHyperspace } from '../../store/useHyperspace'
 import { useNewcomer } from '../../newcomer/useNewcomer'
-import { backOf, currentPadMode, cycleMode, modeKeyAllowed, switchMode, watchLastRing } from '../../store/padMode'
+import { backOf, currentPadMode, cycleMode, leaveTerrain, modeKeyAllowed, switchMode, watchLastRing } from '../../store/padMode'
+import { useDemo } from '../../store/useDemo'
 import { MODES, resetModes, setModeOn, updateModes, useModes } from '../../store/modeOrder'
 import { placeSpawn } from '../../store/fixtures/placeSpawn'
 
@@ -164,7 +165,7 @@ describe('H, V, Y', () => {
   })
 
   it('open a mode turned off in MODES too, as B and N do: off is only out of the turns', () => {
-    updateModes((s) => setModeOn(setModeOn(setModeOn(s, 'view', false), 'walk', false), 'build', false))
+    updateModes((s) => setModeOn(setModeOn(setModeOn(setModeOn(s, 'view', false), 'walk', false), 'build', false), 'terrain', false))
     expect(modeKeyAllowed('view')).toBe(true)
     press('KeyV')
     expect(currentPadMode()).toBe('view')
@@ -181,6 +182,33 @@ describe('H, V, Y', () => {
     // Still out of the turns: the mode button passes over them.
     cycleMode()
     expect(currentPadMode()).toBe('scan')
+  })
+
+  it('T opens TERRAIN turned off in MODES too; the newcomer view, a tour run, /demo and TV keep it shut', async () => {
+    expect(Object.fromEntries(MODES.map((m) => [m.id, m.key])).terrain).toBe('T')
+    updateModes((s) => setModeOn(s, 'terrain', false))
+    press('KeyT')
+    await settled()
+    expect(currentPadMode()).toBe('terrain')
+    leaveTerrain()
+    await settled()
+    expect(currentPadMode()).toBe('hop')
+    useNewcomer.setState({ record: { stage: 'newcomer', seen: [] } })
+    press('KeyT')
+    expect(currentPadMode()).toBe('hop')
+    useNewcomer.setState({ record: { seen: [] } })
+    useTutorial.setState({ active: true })
+    press('KeyT')
+    expect(currentPadMode()).toBe('hop')
+    useTutorial.setState({ active: false })
+    useDemo.setState({ active: true })
+    press('KeyT')
+    expect(currentPadMode()).toBe('hop')
+    useDemo.setState({ active: false })
+    useTv.setState({ on: true })
+    press('KeyT')
+    expect(currentPadMode()).toBe('hop')
+    useTv.setState({ on: false })
   })
 
   it('follow the default list in the newcomer view and a tour run, and nothing in TV', () => {

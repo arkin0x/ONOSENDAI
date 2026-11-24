@@ -202,7 +202,7 @@ describe('the dim mode button in the Toggle Mode names the mode it was on (owner
 
 describe('the MODES panel', () => {
   it('the Toggle Mode first, a rule under it, then the Default Mode and the rest of the ring', () => {
-    expect(rows().map((r) => r.props['data-mode'])).toEqual(['walk', 'hop', 'view', 'build', 'scan'])
+    expect(rows().map((r) => r.props['data-mode'])).toEqual(['walk', 'hop', 'terrain', 'view', 'build', 'scan'])
     const items = panel().filter((e) => e.type === 'li')
     expect(items[1].props.className).toBe('modes__rule')
     expect(items[1].props['aria-hidden']).toBe(true)
@@ -220,6 +220,7 @@ describe('the MODES panel', () => {
     expect(words(inRow('walk', 'modes__key').props.children)).toBe('Y')
     expect(words(inRow('hop', 'modes__key').props.children)).toBe('H')
     expect(words(inRow('view', 'modes__key').props.children)).toBe('V')
+    expect(words(inRow('terrain', 'modes__key').props.children)).toBe('T')
     expect(panel().some((e) => words(e.props.children) === MODES_HINT)).toBe(true)
   })
 
@@ -242,17 +243,17 @@ describe('the MODES panel', () => {
     expect(inRow('walk', 'modes__up').props.disabled).toBe(true)
     expect(inRow('scan', 'modes__down').props.disabled).toBe(true)
     ;(inRow('hop', 'modes__up').props.onClick as () => void)()
-    expect(storedModes().order).toEqual(['hop', 'walk', 'view', 'build', 'scan'])
+    expect(storedModes().order).toEqual(['hop', 'walk', 'terrain', 'view', 'build', 'scan'])
     expect(words(rowOf('hop').props.children)).toContain('Toggle Mode')
     expect(words(rowOf('walk').props.children)).toContain('Default Mode')
     ;(inRow('build', 'modes__down').props.onClick as () => void)()
-    expect(storedModes().order).toEqual(['hop', 'walk', 'view', 'scan', 'build'])
+    expect(storedModes().order).toEqual(['hop', 'walk', 'terrain', 'view', 'scan', 'build'])
   })
 
   it('a drag into the toggle slot trades the two; each place is worked out from the list as the drag began', () => {
     // Rows 58px apart, the rule 15px under the first; the list at the top of the screen.
-    const ids = ['walk', 'hop', 'view', 'build', 'scan']
-    const tops = [0, 73, 131, 189, 247]
+    const ids = ['walk', 'hop', 'terrain', 'view', 'build', 'scan']
+    const tops = [0, 73, 131, 189, 247, 305]
     const list = {
       getBoundingClientRect: () => ({ top: 0 }),
       setPointerCapture: () => {},
@@ -268,13 +269,13 @@ describe('the MODES panel', () => {
     const moveTo = (clientY: number): void => { (ol.props.onPointerMove as (e: unknown) => void)({ pointerId: 1, clientY }) }
     // Up over the toggle slot: SCAN and WALK trade.
     moveTo(10)
-    expect(storedModes().order).toEqual(['scan', 'hop', 'view', 'build', 'walk'])
+    expect(storedModes().order).toEqual(['scan', 'hop', 'terrain', 'view', 'build', 'walk'])
     // Down again over the ring: from the list as it began, SCAN slides in the ring, WALK back in its slot.
     moveTo(140)
-    expect(storedModes().order).toEqual(['walk', 'hop', 'scan', 'view', 'build'])
+    expect(storedModes().order).toEqual(['walk', 'hop', 'scan', 'terrain', 'view', 'build'])
     moveTo(10)
     ;(ol.props.onPointerUp as (e: unknown) => void)({ pointerId: 1 })
-    expect(storedModes().order).toEqual(['scan', 'hop', 'view', 'build', 'walk'])
+    expect(storedModes().order).toEqual(['scan', 'hop', 'terrain', 'view', 'build', 'walk'])
     expect(words(rowOf('scan').props.children)).toContain('Toggle Mode')
     expect(words(rowOf('walk').props.children)).toContain('Mode button')
     // The Toggle Mode's own row dragged down trades with the mode where it lands.
@@ -284,9 +285,9 @@ describe('the MODES panel', () => {
     ;(((ol2 as unknown as { ref?: { current: unknown } }).ref ?? ol2.props.ref) as { current: unknown }).current = list
     const walkGrip = all2.find((e) => e.type === 'button' && has(e, 'modes__grip') && String(e.props['aria-label']).startsWith('Move WALK'))!
     ;(walkGrip.props.onPointerDown as (e: unknown) => void)({ button: 0, pointerId: 2, preventDefault: () => {} })
-    ;(ol2.props.onPointerMove as (e: unknown) => void)({ pointerId: 2, clientY: 200 })
+    ;(ol2.props.onPointerMove as (e: unknown) => void)({ pointerId: 2, clientY: 258 })
     ;(ol2.props.onPointerUp as (e: unknown) => void)({ pointerId: 2 })
-    expect(storedModes().order).toEqual(['view', 'hop', 'walk', 'build', 'scan'])
+    expect(storedModes().order).toEqual(['view', 'hop', 'terrain', 'walk', 'build', 'scan'])
   })
 
   it('RESET TO DEFAULT puts today\'s list back, and waits while it already is', () => {
@@ -318,7 +319,7 @@ describe('the MODES panel', () => {
     const me = useCyberspace.getState().identity.pubkey
     localStorage.setItem(MODES_PREFIX + me, JSON.stringify({ v: 1, order: ['walk', 'build', 'hop', 'view', 'scan'], off: [] }))
     useModes.setState({ pubkey: null })
-    expect(rows().map((r) => r.props['data-mode'])).toEqual(['build', 'walk', 'hop', 'view', 'scan'])
+    expect(rows().map((r) => r.props['data-mode'])).toEqual(['build', 'walk', 'hop', 'terrain', 'view', 'scan'])
     expect(words(rowOf('build').props.children)).toContain('Toggle Mode')
     expect(words(rowOf('walk').props.children)).toContain('Default Mode')
   })

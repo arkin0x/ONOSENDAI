@@ -96,6 +96,7 @@ import { TutorialBoxMark, TutorialTarget } from './TutorialTarget'
 import { TargetAvatars } from './TargetAvatars'
 import { PresenceAvatars } from './PresenceAvatars'
 import { WorldShards } from './WorldShards'
+import { TerrainLayer } from './TerrainLayer'
 import { WorldSeeds } from './WorldSeeds'
 import { WorldMessages } from './WorldMessages'
 import { ChestLooks } from './ChestLooks'
@@ -282,6 +283,8 @@ export function World(): JSX.Element {
       <TargetAvatars axes={axes} />
       <PresenceAvatars axes={axes} />
       <WorldShards axes={axes} />
+      {/* The blocks of the chunks you surveyed, in every mode, and TERRAIN's marks (TerrainLayer). */}
+      <TerrainLayer axes={axes} />
       {/* Each seed's bloom, grown here from its DNA and the blocks since it was planted (DECK-0008). */}
       <WorldSeeds axes={axes} />
       <WorldMessages axes={axes} />

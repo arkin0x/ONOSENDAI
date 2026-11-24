@@ -8815,10 +8815,10 @@ select.avatars__input option:checked {
  * the screen fades to nothing rather than stopping at an edge. */
 .chatdock__chip {
   position: fixed;
-  /* Level with the CONTROLS chip, which sits at the same 14px. */
-  bottom: 14px;
-  left: 50%;
-  transform: translateX(-50%);
+  /* Just right of the round menu button, level with its middle, in every mode (owner, 2026-11-24: "let's move the
+     chat panel just right of the menu button"); the menu button's own corner carries the safe-area insets. */
+  bottom: calc(var(--menu-bottom) + (var(--menu-size) - 29px) / 2);
+  left: calc(var(--menu-left) + var(--menu-size) + var(--routeov-gap));
   z-index: 101;
   display: inline-flex;
   align-items: center;
@@ -13525,6 +13525,7 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
 .hamburger-menu,
 .hosaka-pulse,
 .flyorbs,
+.chatdock__chip,
 .touchpad--mode-walk,
 .routeov,
 .deploybar {
@@ -13541,7 +13542,6 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
   translate: calc(-1 * var(--hud-shift-r)) 0;
 }
 .chatdock,
-.chatdock__chip,
 .starname {
   translate: var(--hud-skew) 0;
 }
@@ -14053,6 +14053,406 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
   .ws__groups-rename-input { font-size: 12px; }
 }
 
+/* TERRAIN (terrain/TerrainView.tsx, store/useTerrain.ts): mine and place
+   blocks, a tool of BUILD, full screen over cyberspace as a game is. White
+   words with a dark shadow over the scene; chamfered frames cut by hand
+   (top left and bottom right, as the item pictures), mint for the mode's
+   own lines; every slot and label keeps its place, so nothing jumps. */
+.terrainview {
+  --terrain: #7cffc4;
+  --terrain-line: rgba(124, 255, 196, 0.55);
+  --terrain-fill: rgba(4, 10, 14, 0.82);
+  --terrain-cut: 8px;
+  /* Ten slots and their gaps across a phone, never wider than the screen. */
+  --terrain-slot: min(32px, calc((100vw - 32px - 27px) / 10));
+  /* Over the cyberspace scene, under the compass and the menu: TERRAIN is drawn in the scene itself. */
+  position: fixed;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+  color: #fff;
+  font-family: var(--mono);
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+@media (min-width: 700px) {
+  .terrainview { --terrain-slot: 40px; }
+}
+/* Wide or short screens have room along the very bottom, centred, between CHAT (right of the menu button) and WALK's commit block
+   (owner, 2026-11-24: "move the hot bar down to the bottom of the screen"). A phone held upright has not: there the bar stays
+   just over the walk pad and the LOOK ball. */
+@media (min-width: 700px), (max-height: 520px) {
+  .terrainview .terrain-hotbar { bottom: max(14px, calc(env(safe-area-inset-bottom, 0px) + 6px)); }
+  /* Level with the top of the walk pad, so PLACE and SURVEY beside it are always clear, the menu open or not. */
+  .terrainview .terrain-hint { bottom: calc(var(--walkside-bottom) + 132px); }
+}
+@media (max-height: 520px) {
+  .terrainview { --terrain-slot: 30px; }
+}
+.terrain-hotbar, .terrain-sheet { pointer-events: auto; }
+.terrainview .terrain-key {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 4px;
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  border-radius: 3px;
+  font: inherit;
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  line-height: 1.3;
+  color: #fff;
+  opacity: 0.85;
+}
+/* A chamfered frame drawn by hand: the line is the outer box, the fill an inner one inset by the line's width. */
+.terrain-frame,
+.terrain-bar__title,
+.terrain-bar__exit,
+.terrain-survey__btn,
+.terrain-hint__box,
+.terrain-act,
+.terrain-slot,
+.terrain-sheet__card {
+  position: relative;
+  isolation: isolate;
+  border: 0;
+  background: var(--terrain-line);
+  clip-path: polygon(var(--terrain-cut) 0, 100% 0, 100% calc(100% - var(--terrain-cut)), calc(100% - var(--terrain-cut)) 100%, 0 100%, 0 var(--terrain-cut));
+}
+.terrain-bar__title::before,
+.terrain-bar__exit::before,
+.terrain-survey__btn::before,
+.terrain-hint__box::before,
+.terrain-act::before,
+
+.terrain-slot::before,
+.terrain-sheet__card::before {
+  content: "";
+  position: absolute;
+  inset: 1px;
+  z-index: -1;
+  background: var(--terrain-fill);
+  clip-path: polygon(calc(var(--terrain-cut) - 0.6px) 0, 100% 0, 100% calc(100% - var(--terrain-cut) + 0.6px), calc(100% - var(--terrain-cut) + 0.6px) 100%, 0 100%, 0 calc(var(--terrain-cut) - 0.6px));
+}
+
+/* Centred at the top, clear of the instrument chips on the left and the compass on the right. */
+.terrain-bar {
+  position: absolute;
+  top: max(12px, env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(560px, calc(100% - 32px));
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  pointer-events: none;
+}
+.terrain-bar__title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  padding: 7px 12px;
+  color: var(--terrain);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+}
+.terrain-bar__status {
+  flex: 1;
+  min-width: 0;
+  height: 18px;
+  line-height: 18px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 12px;
+  color: #fff;
+  text-shadow: 0 1px 3px #000, 0 0 8px rgba(0, 0, 0, 0.9);
+}
+.terrain-bar__exit {
+  flex: none;
+  pointer-events: auto;
+  padding: 8px 12px;
+  color: #fff;
+  font: inherit;
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  cursor: pointer;
+}
+.terrain-bar__exit:hover::before { background: rgba(124, 255, 196, 0.16); }
+
+/* The first visit's steps and SURVEY: each in a slot of its own, so the bar and the scene never move when they come and go. */
+.terrain-hint {
+  position: fixed;
+  bottom: calc(var(--terrain-orb-bottom) + var(--terrain-orb) + 18px + var(--terrain-slot));
+  left: 16px;
+  right: 16px;
+  height: 44px;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+.terrain-hint__box {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 520px;
+  padding: 8px 12px;
+  font-size: 12px;
+  line-height: 1.35;
+  color: #fff;
+  text-shadow: 0 1px 2px #000;
+}
+.terrain-hint__step {
+  flex: none;
+  color: var(--terrain);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  font-weight: 700;
+}
+.terrain-survey {
+  position: absolute;
+  top: calc(max(12px, env(safe-area-inset-top)) + 104px + var(--terrain-slot));
+  left: 0;
+  right: 0;
+  height: 40px;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+.terrain-survey__btn {
+  --terrain-line: var(--terrain);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px;
+  pointer-events: auto;
+  color: var(--terrain);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  cursor: pointer;
+  filter: drop-shadow(0 0 8px rgba(124, 255, 196, 0.45));
+}
+.terrain-survey__btn:disabled { opacity: 0.6; cursor: default; }
+
+.terrain-message {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  top: calc(50% + 22px);
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+.terrain-message__text {
+  max-width: 420px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  background: rgba(2, 5, 9, 0.55);
+  color: #fff;
+  font-size: 12px;
+  line-height: 1.4;
+  text-align: center;
+  text-shadow: 0 1px 3px #000;
+}
+.terrain-crosshair {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 18px;
+  height: 18px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+.terrain-crosshair::before,
+.terrain-crosshair::after {
+  content: "";
+  position: absolute;
+  background: rgba(255, 255, 255, 0.85);
+  box-shadow: 0 0 3px #000;
+}
+.terrain-crosshair::before { left: 8px; top: 0; width: 2px; height: 18px; }
+.terrain-crosshair::after { top: 8px; left: 0; height: 2px; width: 18px; }
+
+/* The hotbar: nine slots and the bag, a slim row just over WALK's LOOK ball and pad. */
+.terrain-hotbar {
+  position: fixed;
+  left: 50%;
+  bottom: calc(var(--terrain-orb-bottom) + var(--terrain-orb) + 10px);
+  transform: translateX(-50%);
+  display: flex;
+  gap: 3px;
+}
+.terrain-slot {
+  --terrain-cut: 6px;
+  --terrain-line: rgba(255, 255, 255, 0.32);
+  width: var(--terrain-slot);
+  height: var(--terrain-slot);
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font: inherit;
+  cursor: pointer;
+}
+.terrain-slot.is-on { --terrain-line: var(--terrain); filter: drop-shadow(0 0 6px rgba(124, 255, 196, 0.6)); }
+.terrain-slot.is-out .terrain-swatch { opacity: 0.3; }
+.terrain-slot__num {
+  position: absolute;
+  top: 2px;
+  right: 4px;
+  font-size: 8px;
+  opacity: 0.7;
+}
+.terrain-slot__count {
+  position: absolute;
+  bottom: 2px;
+  right: 4px;
+  font-size: 9px;
+  font-weight: 700;
+  text-shadow: 0 1px 2px #000;
+}
+.terrain-slot--bag { --terrain-line: rgba(124, 255, 196, 0.55); color: var(--terrain); }
+.terrain-slot--bag .terrain-slot__num { color: #fff; }
+
+/* A block's picture: its tile, pixel for pixel, glowing kinds glowing. */
+.terrain-swatch {
+  display: block;
+  flex: none;
+  background-color: var(--sw-face);
+  background-size: 100% 100%;
+  image-rendering: pixelated;
+  clip-path: polygon(4px 0, 100% 0, 100% calc(100% - 4px), calc(100% - 4px) 100%, 0 100%, 0 4px);
+}
+.terrain-swatch--glow { filter: drop-shadow(0 0 4px var(--sw-edge)); }
+.terrain-slot .terrain-swatch { width: calc(var(--terrain-slot) * 0.56) !important; height: calc(var(--terrain-slot) * 0.56) !important; }
+
+/* TERRAIN's few controls fit WALK's own layout (owner, 2026-11-24: "it should just borrow walk's layout"):
+   PLACE, and SURVEY while one is offered, in a column just left of WALK's LOOK ball, at the ball's height;
+   the hotbar a slim row just over the LOOK ball and the walk pad. WALK's controls stay where they are. */
+.terrainview {
+  --terrain-orb: 112px;
+  --terrain-orb-bottom: calc(var(--walkside-bottom) + var(--walkside-key) + var(--routeov-gap));
+}
+@media (max-height: 520px) {
+  .terrainview { --terrain-orb: 88px; }
+}
+.terrain-tools {
+  /* Just right of WALK's walk pad (owner, 2026-11-24: "just to the right of the forward/right buttons"):
+     PLACE level with FORWARD (the pad's 54px row), SURVEY's slot level with the row under it (38px),
+     the pad's 4px gap between, the pad's own bottom. The right column, which the menu opens over, stays clear. */
+  position: fixed;
+  left: calc(var(--walkpad-left) + var(--walkside-width) + 8px);
+  bottom: var(--walkside-bottom);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  pointer-events: auto;
+}
+.terrain-tools__slot { display: block; height: 38px; }
+.terrain-act {
+  position: relative;
+  width: 86px;
+  height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  color: #fff;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  touch-action: none;
+  cursor: pointer;
+}
+.terrain-act--place { height: 54px; }
+/* SURVEY's hold: a bar fills under the label over the 5 seconds (terrain/surveyHold.ts), and empties when let go. */
+.terrain-act__bar {
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  bottom: 4px;
+  height: 3px;
+  background: rgba(124, 255, 196, 0.18);
+  overflow: hidden;
+}
+.terrain-act__bar::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform-origin: left center;
+  transform: scaleX(0);
+  background: var(--terrain);
+}
+.terrain-act--survey.is-holding .terrain-act__bar::after { animation: terrain-hold 5s linear forwards; }
+@keyframes terrain-hold { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+.terrain-act--survey { --terrain-line: var(--terrain); color: var(--terrain); }
+.terrain-act:active::before { background: rgba(124, 255, 196, 0.22); }
+.terrain-act .terrain-key { margin-left: 2px; }
+
+/* The inventory: a sheet over the scene, the shared ✕ on its title line. */
+.terrain-sheet {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(2, 5, 9, 0.55);
+}
+.terrain-sheet__card {
+  --terrain-cut: 14px;
+  --terrain-fill: rgba(4, 10, 14, 0.96);
+  width: min(460px, 100%);
+  max-height: calc(100% - 32px);
+  overflow-y: auto;
+  padding: 16px;
+}
+.terrain-sheet__head { display: flex; align-items: center; gap: 8px; color: var(--terrain); }
+.terrain-sheet__head h2 { flex: 1; margin: 0; font-size: 13px; letter-spacing: 0.14em; color: var(--terrain); }
+.terrain-sheet__sub,
+.terrain-sheet__foot,
+.terrain-sheet__empty { margin: 10px 0; font-size: 12px; line-height: 1.45; color: #fff; }
+.terrain-sheet__foot { color: rgba(255, 255, 255, 0.7); }
+.terrain-sheet__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+  gap: 10px;
+}
+.terrain-kind {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 2px;
+  border: 0;
+  background: transparent;
+  color: #fff;
+  font: inherit;
+  cursor: pointer;
+}
+.terrain-kind .chamfer { --chamfer-line: rgba(255, 255, 255, 0.3); }
+.terrain-kind.is-on .chamfer { --chamfer-line: var(--terrain); }
+.terrain-kind__name { font-size: 11px; letter-spacing: 0.04em; }
+.terrain-kind__count { font-size: 11px; font-weight: 700; color: var(--terrain); }
+.terrain-sheet__keys {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 6px 12px;
+  margin: 12px 0 0;
+  font-size: 11px;
+}
+.terrain-sheet__keys > div { display: flex; align-items: center; gap: 8px; }
+.terrain-sheet__keys dt { display: flex; gap: 4px; flex-wrap: wrap; }
+.terrain-sheet__keys dt, .terrain-sheet__keys dd { margin: 0; }
+.terrain-sheet__keys .terrain-key { margin-left: 0; }
+
 /* ---------- MODES (hud/ModesPanel.tsx, store/modeOrder.ts) ----------
  * The pad's modes in the player's order. Each row a hand-cut chamfered frame
  * (top-left and bottom-right corners cut, the item-picture corners): the
@@ -14117,6 +14517,7 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
 .modes__row.is-view { --mode-color: var(--warn, #ffb020); --mode-rgb: 255, 176, 32; }
 .modes__row.is-build { --mode-color: var(--build, #f2f7ff); --mode-rgb: 242, 247, 255; }
 .modes__row.is-scan { --mode-color: var(--scan, #a98bff); --mode-rgb: var(--scan-rgb, 169, 139, 255); }
+.modes__row.is-terrain { --mode-color: var(--terrain-mode, #7cffc4); --mode-rgb: var(--terrain-mode-rgb, 124, 255, 196); }
 /* The two places with a job of their own: the start and the second button wear a brighter edge. */
 .modes__row.is-start,
 .modes__row.is-second { --cham-line: rgba(var(--mode-rgb), 0.55); }
@@ -14267,6 +14668,7 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
 .touchops .touchops__cancel.touchops__second.is-view { --second: var(--warn, #ffb020); --second-rgb: 255, 176, 32; }
 .touchops .touchops__cancel.touchops__second.is-build { --second: var(--build, #f2f7ff); --second-rgb: 242, 247, 255; }
 .touchops .touchops__cancel.touchops__second.is-scan { --second: var(--scan, #a98bff); --second-rgb: var(--scan-rgb, 169, 139, 255); }
+.touchops .touchops__cancel.touchops__second.is-terrain { --second: var(--terrain-mode); --second-rgb: var(--terrain-mode-rgb); }
 .touchops .touchops__cancel.touchops__second.is-dim {
   color: var(--second);
   border-color: rgba(var(--second-rgb), 0.42);
@@ -14282,3 +14684,124 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
   .touchops__commit.is-walk,
   .touchops .touchops__cancel.touchops__second { transition: none; }
 }
+
+/* ---------- TERRAIN's colour (owner, 2026-11-24: "Terrain mode needs a color. Make it green like the terrain UI elements") ----------
+ * The mint of TERRAIN's own lines, as HOP is blue, VIEW yellow, WALK red, BUILD white and SCAN purple: the mode
+ * button (dim and lit), the second button, the MODES row and its swatch, and WALK's pad while it walks for TERRAIN. */
+:root {
+  --terrain-mode: #7cffc4;
+  --terrain-mode-rgb: 124, 255, 196;
+}
+.touchops__commit.is-terrain { transition: color 400ms ease, background-color 400ms ease, border-color 400ms ease, box-shadow 400ms ease; }
+@media (prefers-reduced-motion: reduce) { .touchops__commit.is-terrain { transition: none; } }
+.touchops__commit.is-terrain:not(.is-on) { color: var(--terrain-mode); border-color: rgba(var(--terrain-mode-rgb), 0.45); }
+.touchops__commit.is-terrain.is-on {
+  color: #05070d;
+  background: var(--terrain-mode);
+  border-color: var(--terrain-mode);
+  font-weight: 700;
+}
+.touchpad--terrain .touchpad__key:not(:active),
+.app:has(.touchpad--terrain) .walkside .touchpad__key:not(:active),
+.touchops--terrain .touchops__cancel:not(:active) {
+  background-image: linear-gradient(rgba(var(--terrain-mode-rgb), 0.14), rgba(var(--terrain-mode-rgb), 0.14));
+  border-color: rgba(var(--terrain-mode-rgb), 0.42);
+}
+.touchpad--terrain .touchpad__key:active,
+.app:has(.touchpad--terrain) .walkside .touchpad__key:active {
+  background: rgba(var(--terrain-mode-rgb), 0.3);
+  border-color: var(--terrain-mode);
+}
+
+/* TERRAIN's controls move with the HUD while the menu is open on a wide screen (see "The HUD's edges and the open
+   menu"): PLACE and SURVEY with the walk pad they stand beside, the hotbar and the hint with the middle, as the chat does. */
+.terrain-tools { translate: var(--hud-shift-l) 0; }
+.terrain-hotbar,
+.terrain-hint { translate: var(--hud-skew) 0; }
+:root[data-hud-slide] :is(.terrain-tools, .terrain-hotbar, .terrain-hint) { transition: var(--hud-slide); }
+
+/* TERRAIN on a phone held upright (owner, 2026-11-24: "On portrait, put the hot bar just below the left back right survey
+   down jump buttons"): from the bottom, the bottom row (menu, CHAT, the commit block), then the hotbar across the screen,
+   then WALK's pad cluster, lifted by the hotbar's row and nothing else. WALK, with no hotbar, stays exactly as it is. */
+@media (max-width: 699px) and (min-height: 521px) {
+  .app:has(.terrainview) {
+    /* Ten slots and their gaps between the 16px gutters, never more than 32px a slot. */
+    --terrain-row-slot: min(32px, calc((100vw - 32px - 27px) / 10));
+    --terrain-lift: calc(var(--terrain-row-slot) + 8px);
+    --walkside-bottom: calc(92px + var(--terrain-lift));
+  }
+  .app:has(.terrainview):has(.touchpad.is-lifted) { --walkside-bottom: calc(116px + var(--terrain-lift)); }
+  .app:has(.terrainview) .touchpad { bottom: calc(92px + var(--terrain-lift)); }
+  .app:has(.terrainview) .touchpad.is-lifted { bottom: calc(116px + var(--terrain-lift)); }
+  .terrainview { --terrain-slot: var(--terrain-row-slot); }
+  /* The hotbar 4px under the lifted row, the row's own gap, where the row stood. */
+  .terrainview .terrain-hotbar { bottom: calc(var(--walkside-bottom) - var(--terrain-lift) + 4px); }
+  .terrainview .terrain-hint { bottom: calc(var(--terrain-orb-bottom) + var(--terrain-orb) + 10px); }
+}
+
+/* The chosen hotbar slot, clearly green (owner, 2026-11-24: "can the selected item be more green - the bg doesnt quite
+   change enough"): mint laid over the slot's ground at about a third, a brighter mint edge, the number in mint. */
+.terrain-slot.is-on { --terrain-line: #b8ffe1; }
+.terrain-slot.is-on::before { background: linear-gradient(rgba(124, 255, 196, 0.36), rgba(124, 255, 196, 0.36)), var(--terrain-fill); }
+.terrain-slot.is-on .terrain-slot__num { color: var(--terrain); opacity: 1; font-weight: 700; }
+
+/* The chosen block, carried (terrain/TerrainView.tsx HeldBlock): a tilted cube of its tiles, held in the right hand,
+   partly off the bottom right corner of the screen, under every control and the menu. */
+.terrain-held {
+  /* Under everything: the scene's own markers' layer (.targets, z-index 0), below the menu (.hud, 1) and every control. */
+  /* In the bottom right, partly off the bottom, its right side behind WALK's right column (the commit block covers the
+     very corner), so the hand's block still shows past the controls drawn over it. */
+  --held: 132px;
+  position: fixed;
+  right: calc(var(--controls-right) + 60px);
+  bottom: calc(var(--held) * -0.2);
+  z-index: 0;
+  width: var(--held);
+  height: var(--held);
+  perspective: 320px;
+  pointer-events: none;
+}
+@media (min-width: 1101px) {
+  .terrain-held { --held: 180px; }
+}
+.terrain-held__dip { width: 100%; height: 100%; transform-style: preserve-3d; }
+.terrain-held__dip.is-dipping { animation: terrain-held-dip 220ms ease-out; }
+@keyframes terrain-held-dip { 40% { transform: translateY(14px) rotate(-8deg); } }
+.terrain-held__cube {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  transform-style: preserve-3d;
+  transform: rotateX(-20deg) rotateY(-36deg) rotateZ(12deg);
+}
+.terrain-held.is-walking .terrain-held__cube { animation: terrain-held-sway 900ms ease-in-out infinite alternate; }
+@keyframes terrain-held-sway {
+  from { transform: translate(-3px, 0) rotateX(-20deg) rotateY(-36deg) rotateZ(12deg); }
+  to { transform: translate(3px, -5px) rotateX(-18deg) rotateY(-32deg) rotateZ(14deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .terrain-held.is-walking .terrain-held__cube,
+  .terrain-held__dip.is-dipping { animation: none; }
+}
+.terrain-held__face {
+  position: absolute;
+  inset: 0;
+  background-size: 100% 100%;
+  image-rendering: pixelated;
+  backface-visibility: hidden;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.35);
+}
+.terrain-held__face--front { transform: translateZ(calc(var(--held) / 2)); filter: brightness(0.86); }
+.terrain-held__face--back { transform: rotateY(180deg) translateZ(calc(var(--held) / 2)); }
+.terrain-held__face--right { transform: rotateY(90deg) translateZ(calc(var(--held) / 2)); filter: brightness(0.7); }
+.terrain-held__face--left { transform: rotateY(-90deg) translateZ(calc(var(--held) / 2)); filter: brightness(0.7); }
+.terrain-held__face--top { transform: rotateX(90deg) translateZ(calc(var(--held) / 2)); }
+.terrain-held__face--bottom { transform: rotateX(-90deg) translateZ(calc(var(--held) / 2)); filter: brightness(0.5); }
+
+/* Under the open menu on a phone TERRAIN's controls go, as WALK's pad does (App crowded). */
+.terrainview.is-covered { visibility: hidden; }
+
+/* CHAT's chip with no room for its word on the bottom row (hud/ChatDock.tsx chipCrowded): the bubble alone, the chip as
+   tall and at least as wide as it is tall, so the tap is as easy as before. */
+.chatdock__chip.is-tight { min-width: 29px; justify-content: center; padding-left: 8px; padding-right: 8px; }
+.chatdock__chip.is-tight .chatdock__word { display: none; }

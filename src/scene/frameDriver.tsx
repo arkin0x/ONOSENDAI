@@ -25,6 +25,7 @@ import { useOpenCeremony } from '../store/useOpenCeremony'
 import { useShards } from '../store/useShards'
 import { useTv } from '../store/useTv'
 import { useGame } from '../store/useGame'
+import { useTerrain } from '../store/useTerrain'
 import { useWorkshop } from '../store/useWorkshop'
 import { flyDir, useViewFly } from '../lib/viewFly'
 
@@ -37,6 +38,8 @@ export function viewBusy(): boolean {
   if (isBroadcast()) return true
   const cs = useCyberspace.getState()
   if (cs.walking || cs.transit !== null) return true
+  // TERRAIN draws its body's every frame (it walks under WALK, so the line above covers it too).
+  if (useTerrain.getState().active) return true
   // VIEW flying (a button held, or two or three fingers at rest): the cursor and the camera move every frame.
   if (flyDir() !== 0) return true
   if (useTv.getState().on || useDemo.getState().active || useBuilder.getState().active) return true

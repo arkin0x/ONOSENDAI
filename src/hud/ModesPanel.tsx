@@ -37,7 +37,7 @@
  */
 
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react'
-import { ChevronDown, ChevronUp, Crosshair, Eye, Footprints, GripVertical, RotateCcw, ScanSearch, Wrench, type LucideIcon } from 'lucide-react'
+import { Blocks, ChevronDown, ChevronUp, Crosshair, Eye, Footprints, GripVertical, RotateCcw, ScanSearch, Wrench, type LucideIcon } from 'lucide-react'
 import { Switch } from './ui/Switch'
 import { Explanation } from './Explanation'
 import {
@@ -50,6 +50,7 @@ import { useTutorial } from '../store/useTutorial'
 export const MODE_ICON: Record<ModeId, LucideIcon> = {
   hop: Crosshair,
   walk: Footprints,
+  terrain: Blocks,
   view: Eye,
   build: Wrench,
   scan: ScanSearch,
@@ -233,7 +234,7 @@ export function ModesPanel(): JSX.Element {
         the mode button goes down through it and the rest in this order. Drag
         a mode into the Toggle Mode to trade the two. A mode turned off leaves
         the turns but still opens by its key (H for HOP, V for VIEW, Y for
-        WALK, B for BUILD, N for SCAN), from the tutorial and from links. The
+        WALK, B for BUILD, N for SCAN, T for TERRAIN), from the tutorial and from links. The
         Toggle Mode turned off leaves its button off the pad. Drag a grip to move a mode, or use the arrows. Kept
         for this identity on this device.
       </Explanation>

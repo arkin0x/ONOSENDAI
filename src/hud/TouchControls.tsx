@@ -79,6 +79,7 @@ import { useUiHints } from '../store/useUiHints'
 import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 import { ChainStatusStrip, useChainStatus } from './ChainStatus'
 import { moveUnderWay } from '../lib/buildCursor'
+import { useTerrain } from '../store/useTerrain'
 import { useWalk } from '../store/useWalk'
 import { onAvatar, useBuilder } from '../store/useBuilder'
 import { buildHeld, commitSettling, cycleMode, goBack, leaveWalk, padMode, pressSecond, recall, type PadMode } from '../store/padMode'
@@ -110,7 +111,7 @@ export const GO_LIVE_BODY = [
 ].join('\n')
 
 /** The mode button's word for each mode it can name. */
-const MODE_WORD: Record<PadMode, string> = { hop: 'HOP', view: 'VIEW', walk: 'WALK', build: 'BUILD', scan: 'SCAN' }
+const MODE_WORD: Record<PadMode, string> = { hop: 'HOP', view: 'VIEW', walk: 'WALK', build: 'BUILD', scan: 'SCAN', terrain: 'TERRAIN' }
 
 /**
  * The lit mode button's title with the default ring, word for word as it
@@ -128,6 +129,7 @@ const MODE_TITLE: Record<PadMode, string> = {
   hop: 'Hop: the pad lines up a move and COMMIT sends it',
   view: 'Viewing: the pad moves the cursor without planning a hop; RECALL brings the cursor home and stays in VIEW',
   walk: 'Walking: every press is a step, proved behind you',
+  terrain: 'TERRAIN: walk the blocks, mine and place them; every step goes to your chain',
   build: 'Building: the pad moves the build cursor and never you',
   scan: 'Scanning: the pad moves the cursor, SCAN looks inside the purple cube',
 }
@@ -300,7 +302,12 @@ export function TouchControls(): JSX.Element {
   const held = useShards((s) => buildHeld(s))
   // SCAN mode (store/useScan.ts): VIEW's view, made SCAN's.
   const scanning = useScan((s) => s.active)
+  // TERRAIN is WALK with block tools (store/useTerrain.ts): WALK's pad, and its own mode on the mode button.
+  const terrainOn = useTerrain((t) => t.active)
+  // Where TERRAIN goes back to, which the dim mode button names (store/padMode.ts leaveTerrain).
+  const terrainFrom = useTerrain((t) => t.from)
   const mode = padMode(walking, building, viewing, scanning)
+  const ringMode: PadMode = terrainOn ? 'terrain' : mode
   // The commit block under the pad: at your head, in VIEW, and in BUILD, but
   // not while spectating, where the SPECTATING bar holds that corner (BUILD
   // is left there by EXIT, B or Esc, as before). Whenever it is drawn with
@@ -338,7 +345,7 @@ export function TouchControls(): JSX.Element {
   const roles = useModeRoles()
   const modes = useEffectiveModes()
   const second = roles.second
-  const inSecond = second !== null && mode === second
+  const inSecond = second !== null && ringMode === second
   const atRest = walking ? !stopping : resting && !computing && (
     mode === 'hop' ? home && !armed && !deploying
     : mode === 'view' || mode === 'scan' ? ownHead && !armed && !deploying && !viewAway && !flown && !(regionActive && regionGrown)
@@ -350,11 +357,12 @@ export function TouchControls(): JSX.Element {
   // A mode not in the ring (the second button's, or one MODES switched off
   // and asked for by name): the mode button is the way back, dim, naming
   // where it goes (padMode backOf), as it has been in WALK.
-  const visiting = !roles.ring.includes(mode)
+  const visiting = !roles.ring.includes(ringMode)
   // padMode backOf's rule, from what this render already reads (no store read during render).
   const back = useModes((s) => s.back)
   const lastRing = useModes((s) => s.lastRing)
-  const backMode: PadMode = mode === 'walk' ? walkFrom
+  const backMode: PadMode = terrainOn ? (terrainFrom === 'terrain' ? roles.start : terrainFrom)
+    : mode === 'walk' ? walkFrom
     : back && back !== mode && roles.ring.includes(back) ? back
     : lastRing && lastRing !== mode && roles.ring.includes(lastRing) ? lastRing
     : roles.start
@@ -473,7 +481,7 @@ export function TouchControls(): JSX.Element {
 
   return (
     <>
-      <div ref={padRef} className={`touchpad touchpad--mode-${mode}${atHead ? '' : ' touchpad--scale'}${opsUp && chainStatus ? ' is-lifted' : ''}`} role="group" aria-label={walking ? 'Walk' : 'Move cursor and change scale'}>
+      <div ref={padRef} className={`touchpad touchpad--mode-${mode}${terrainOn ? ' touchpad--terrain' : ''}${atHead ? '' : ' touchpad--scale'}${opsUp && chainStatus ? ' is-lifted' : ''}`} role="group" aria-label={walking ? 'Walk' : 'Move cursor and change scale'}>
         {/* The purple cube: the scale key taken to its end, 2^84, in one press.
             It changes the scale and nothing else, so whatever you are looking
             at stays what you are looking at, only seen from the top of the
@@ -553,7 +561,7 @@ export function TouchControls(): JSX.Element {
         </div>
       )}
 
-      {opsUp && <div ref={opsRef} className={`touchops touchops--mode-${mode}${chainStatus ? ' touchops--status' : ''}${plain ? ' touchops--plain' : ''}`}>
+      {opsUp && <div ref={opsRef} className={`touchops touchops--mode-${mode}${terrainOn ? ' touchops--terrain' : ''}${chainStatus ? ' touchops--status' : ''}${plain ? ' touchops--plain' : ''}`}>
         {/* RECALL is RESET while a grown region is up (store/useRegion.ts): it
             returns the region to the size it had when region mode started.
             With the cursor on your avatar the slot is WALK, dim, and lit in
@@ -563,8 +571,8 @@ export function TouchControls(): JSX.Element {
         {walkSlot && second === 'walk' ? (
           <button
             key="walk"
-            className={`touchops__cancel touchops__walk ${walking ? 'is-on' : 'is-dim'}${veil('pad.recall')}`}
-            aria-pressed={walking}
+            className={`touchops__cancel touchops__walk ${walking && !terrainOn ? 'is-on' : 'is-dim'}${veil('pad.recall')}`}
+            aria-pressed={walking && !terrainOn}
             title={walking
               ? `Walking: every press is a step, proved behind you. Keys: W forward, S back, A and D sideways, Space or R jump, C or F down. Press to go back to ${MODE_WORD[walkFrom]} (X)`
               : walkHeld ? 'Place or cancel what is lined up first'
@@ -625,7 +633,8 @@ export function TouchControls(): JSX.Element {
             moving the cursor to look around without planning a hop; BUILD
             (2026-11-02 in the ring) places things and never moves you. Keyed
             by the mode it names, so only its own dim to lit eases. */}
-        {walking ? ring('walk')
+        {terrainOn ? ring('terrain')
+          : walking ? ring('walk')
           : building ? ring('build')
           : viewing && scanning ? ring('scan')
           : viewing ? ring('view')

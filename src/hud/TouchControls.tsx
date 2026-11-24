@@ -303,6 +303,8 @@ export function TouchControls(): JSX.Element {
   const scanning = useScan((s) => s.active)
   // TERRAIN is WALK with block tools (store/useTerrain.ts): WALK's pad, and its own mode on the mode button.
   const terrainOn = useTerrain((t) => t.active)
+  // Where TERRAIN goes back to, which the dim mode button names (store/padMode.ts leaveTerrain).
+  const terrainFrom = useTerrain((t) => t.from)
   const mode = padMode(walking, building, viewing, scanning)
   const ringMode: PadMode = terrainOn ? 'terrain' : mode
   // The commit block under the pad: at your head, in VIEW, and in BUILD, but
@@ -336,7 +338,7 @@ export function TouchControls(): JSX.Element {
   const roles = useModeRoles()
   const modes = useEffectiveModes()
   const second = roles.second
-  const inSecond = second !== null && mode === second
+  const inSecond = second !== null && ringMode === second
   const atRest = walking ? !stopping : resting && !computing && (
     mode === 'hop' ? home && !armed && !deploying
     : mode === 'view' || mode === 'scan' ? ownHead && !armed && !deploying && !viewAway && !flown && !(regionActive && regionGrown)
@@ -352,7 +354,8 @@ export function TouchControls(): JSX.Element {
   // padMode backOf's rule, from what this render already reads (no store read during render).
   const back = useModes((s) => s.back)
   const lastRing = useModes((s) => s.lastRing)
-  const backMode: PadMode = mode === 'walk' ? walkFrom
+  const backMode: PadMode = terrainOn ? (terrainFrom === 'terrain' ? roles.start : terrainFrom)
+    : mode === 'walk' ? walkFrom
     : back && back !== mode && roles.ring.includes(back) ? back
     : lastRing && lastRing !== mode && roles.ring.includes(lastRing) ? lastRing
     : roles.start

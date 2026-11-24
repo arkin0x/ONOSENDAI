@@ -31,7 +31,8 @@ import { useCyberspace } from '../useCyberspace'
 import { useWalk } from '../useWalk'
 import { useTutorial } from '../useTutorial'
 import { OUT_OF_REACH, setTerrainSession, syncTerrain, terrainSession, useTerrain } from '../useTerrain'
-import { switchMode, currentPadMode, enterTerrainMode, leaveTerrain } from '../padMode'
+import { switchMode, currentPadMode, enterTerrainMode, leaveTerrain, pressSecond, backOf, watchLastRing } from '../padMode'
+import { DEFAULT_MODES, modeRoles, moveModeTo, resetModes, updateModes, useModes, type ModeId, type ModeSettings } from '../modeOrder'
 import { chunkKey, chunkOf, CELLS } from '../../lib/terrain/coords'
 import { FOLD_AT, openTerrainDb, readKept } from '../../lib/terrain/terrainDb'
 import { applyLayer } from '../../lib/terrain/layer'
@@ -319,4 +320,49 @@ describe('kept on the device, per identity, by chunk coordinate', () => {
     await settle()
     expect(terrainSession!.world.blockCs(...c)).toBe(EMPTY)
   })
+})
+
+describe('TERRAIN as the second button', () => {
+  // Owner, 2026-11-24: "when I put terrain as the second mode and press it, the main mode button turns to hop even
+  // when it wasnt hop before. it should remain what it was before."
+  for (const start of ['walk', 'view', 'build'] as const) {
+    it(`with the ring on ${start.toUpperCase()}: in and out by the second button, EXIT, T or Esc, back to ${start.toUpperCase()}, the ring's place kept`, async () => {
+      const order: ModeId[] = [start, 'terrain', ...DEFAULT_MODES.order.filter((m) => m !== start && m !== 'terrain')]
+      updateModes((): ModeSettings => {
+        let s: ModeSettings = { order: DEFAULT_MODES.order, off: [] }
+        order.forEach((id, i) => { s = moveModeTo(s, id, i) })
+        return s
+      })
+      const stop = watchLastRing()
+      try {
+        expect(modeRoles().second).toBe('terrain')
+        switchMode(start)
+        await settle(50)
+        expect(currentPadMode()).toBe(start)
+        useModes.setState({ back: null, lastRing: start })
+        // In by the second button: the way back, and the last ring mode, stay the mode it was pressed from.
+        pressSecond()
+        await settle(50)
+        expect(currentPadMode()).toBe('terrain')
+        expect(backOf('terrain')).toBe(start)
+        expect(useModes.getState().lastRing).toBe(start)
+        // Out by the lit second button.
+        pressSecond()
+        await settle(50)
+        expect(currentPadMode()).toBe(start)
+        // In again, out by EXIT, T or Esc (all leaveTerrain).
+        pressSecond()
+        await settle(50)
+        expect(currentPadMode()).toBe('terrain')
+        leaveTerrain()
+        await settle(50)
+        expect(currentPadMode()).toBe(start)
+        expect(useModes.getState().lastRing).toBe(start)
+      } finally {
+        stop()
+        switchMode('hop')
+        resetModes()
+      }
+    })
+  }
 })

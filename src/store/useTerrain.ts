@@ -28,6 +28,7 @@
  * where the walk has taken you.
  */
 
+import type { PadMode } from './padMode'
 import { create } from 'zustand'
 import { useCyberspace } from './useCyberspace'
 import { useShards } from './useShards'
@@ -121,7 +122,10 @@ export interface TerrainState {
   /** TERRAIN on: WALK with the block tools (store/padMode.ts enterTerrainMode is the pad's way in). */
   enter: () => Promise<void>
   /** TERRAIN off: WALK off with it, everything waiting folded, the zoom as it was. */
-  exit: () => Promise<void>
+  /** Leave TERRAIN; WALK ends with it unless `keepWalking` (TERRAIN entered from WALK goes back to WALK). */
+  exit: (opts?: { keepWalking?: boolean }) => Promise<void>
+  /** The mode TERRAIN was entered from: the way back, which the mode button names (store/padMode.ts). */
+  from: PadMode
   /** SURVEY a chunk, by key. */
   survey: (key: string) => Promise<void>
   /** Mine the block a ray hit (cs offsets). True when it was mined. */
@@ -180,6 +184,7 @@ function builtBlocks(s: TerrainSession, key: string, generated: Uint8Array): Uin
 }
 
 export const useTerrain = create<TerrainState>((set, get) => ({
+  from: 'hop',
   active: false,
   loading: false,
   inventory: emptyInventory(),
@@ -205,14 +210,17 @@ export const useTerrain = create<TerrainState>((set, get) => ({
     if (get().active) set({ loading: false })
   },
 
-  exit: async () => {
+  exit: async (opts) => {
     if (!get().active) return
     const s = terrainSession
     // All at once, before anything waits: the pad is out of TERRAIN and WALK the moment this is called (store/padMode.ts toHop).
     set({ active: false, loading: false, sheet: false, message: null, surveying: [] })
     clearTimeout(messageTimer)
-    if (useCyberspace.getState().walking) useWalk.getState().exit()
-    restoreZoom()
+    if (opts?.keepWalking) zoomBefore = null
+    else {
+      if (useCyberspace.getState().walking) useWalk.getState().exit()
+      restoreZoom()
+    }
     if (s) {
       // What waits is folded into its layers (the log keeps it either way).
       for (const key of [...s.pending.keys()]) await foldKey(s, key)

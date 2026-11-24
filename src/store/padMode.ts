@@ -235,7 +235,7 @@ export function switchMode(to: PadMode, opts?: { noFall?: boolean }): void {
  */
 export function backOf(current: PadMode = currentPadMode()): ModeId {
   if (current === 'walk') return useWalk.getState().from
-  if (current === 'terrain' && terrainFrom !== 'terrain' && terrainFrom !== 'walk') return terrainFrom
+  if (current === 'terrain') { const from = useTerrain.getState().from; if (from !== 'terrain') return from }
   const { start, ring } = modeRoles()
   const { back, lastRing } = useModes.getState()
   // Only a mode still in the ring: one switched off since is no way back.
@@ -277,6 +277,7 @@ export function cycleMode(): void {
 export function goBack(): void {
   const cur = currentPadMode()
   if (cur === 'walk') { leaveWalk(); return }
+  if (cur === 'terrain') { leaveTerrain(); return }
   const back = backOf(cur)
   useModes.setState({ back: null })
   for (const to of [back, modeRoles().start, 'hop' as const]) {
@@ -297,6 +298,8 @@ export function pressSecond(): void {
   const cur = currentPadMode()
   if (cur === second) { goBack(); return }
   if (second === 'walk') { enterWalk(); return }
+  // TERRAIN keeps its own way back (useTerrain `from`, set on the way in), which the mode button names.
+  if (second === 'terrain') { enterTerrainMode(); return }
   // The way back is a ring mode: from a mode outside it, where that one goes back to.
   const back = inRing(cur) ? cur : backOf(cur)
   switchMode(second)
@@ -311,7 +314,7 @@ export function watchLastRing(): () => void {
   let was: PadMode | null = null
   const note = (): void => {
     const now = currentPadMode()
-    if (now === was) return
+    if (now === was || enteringTerrain) return
     was = now
     if (inRing(now) && useModes.getState().lastRing !== now) useModes.setState({ lastRing: now })
     // The second button's way back lasts only while its mode does: left another way (N, B, Esc), it is forgotten.
@@ -411,12 +414,13 @@ export function recall(): void {
   cs.cancel()
 }
 
-/** The mode TERRAIN was entered from: where EXIT, T and Esc go back to (leaveTerrain), as WALK keeps `from`. */
-let terrainFrom: PadMode = 'hop'
-
-/** TERRAIN on, from HOP, remembering `from`. */
+/**
+ * TERRAIN on, remembering `from` (useTerrain `from`): where EXIT, T, Esc and
+ * the lit second button go back to (leaveTerrain), and what the dim mode
+ * button names meanwhile, as WALK keeps its own `from`.
+ */
 function openTerrain(from: PadMode): void {
-  terrainFrom = from
+  useTerrain.setState({ from })
   void useTerrain.getState().enter()
 }
 
@@ -436,17 +440,33 @@ export function enterTerrainMode(): boolean {
   const why = terrainRefusal()
   if (why) { refuseTerrain(why); return false }
   if (from === 'build' && buildHeld()) return false
-  // From WALK the walk goes on (TERRAIN is WALK with tools): its steps waiting on proofs are kept, not dropped.
-  if (from !== 'walk' && !toHop(from)) return false
-  openTerrain(from)
-  return true
+  // The modes passed through on the way in (HOP, WALK under TERRAIN) are not stops of the ring's (watchLastRing).
+  enteringTerrain = true
+  try {
+    // From WALK the walk goes on (TERRAIN is WALK with tools): its steps waiting on proofs are kept, not dropped.
+    if (from !== 'walk' && !toHop(from)) return false
+    openTerrain(from)
+    return true
+  } finally {
+    enteringTerrain = false
+  }
 }
 
-/** EXIT, T or Esc in TERRAIN: back to the mode it was entered from, at your avatar (WALK and TERRAIN itself go back to HOP). */
+/** True while TERRAIN is being entered: the pad passes through HOP and WALK, which are not the ring's stops. */
+let enteringTerrain = false
+
+/**
+ * EXIT, T, Esc or the lit second button in TERRAIN: back to the mode it was
+ * entered from, never HOP in its place (owner, 2026-11-24: "the main mode
+ * button turns to hop even when it wasnt hop before. it should remain what it
+ * was before"). From WALK the walk goes on, with WALK's own way back intact;
+ * from VIEW, BUILD or SCAN that mode opens again at your avatar.
+ */
 export function leaveTerrain(): void {
-  const back = terrainFrom
+  const back = useTerrain.getState().from
+  if (back === 'walk') { void useTerrain.getState().exit({ keepWalking: true }); return }
   if (!toHop('terrain')) return
-  if (back !== 'hop' && back !== 'walk' && back !== 'terrain') fromHop(back)
+  if (back !== 'hop' && back !== 'terrain') fromHop(back)
 }
 
 /** The word of the mode the mode button goes to from TERRAIN: the next in the ring, or the way back when TERRAIN is not in it. */

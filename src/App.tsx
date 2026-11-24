@@ -517,7 +517,8 @@ export default function App(): JSX.Element {
       {/* In-game mode: the game's world over everything, while you play one (DECK-0002 §2.3). */}
       <GameView />
       {/* TERRAIN's controls over the scene while it is on (store/useTerrain.ts); its blocks are drawn in the scene (scene/TerrainLayer.tsx). */}
-      <TerrainView />
+      {/* Hidden under the open menu on a phone, as WALK's pad is (crowded); the carried block stays under everything. */}
+      <TerrainView covered={crowded} />
       {/* The one hidden canvas that draws every list's shard pictures, there only while it has some to draw. */}
       <ThumbHost />
       {/* Docked in the lower left, a gap short of the pad while the pad is on

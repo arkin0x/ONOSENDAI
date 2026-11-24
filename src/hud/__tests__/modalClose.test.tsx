@@ -77,6 +77,8 @@ const closes = (hosts: Host[]): Host[] => hosts.filter((h) => h.type === 'button
 
 /** Every modal and sheet this change gave the shared ✕, by its source under src/. */
 const TOUCHED = [
+  // IMPORT A BUILD (2026-11-24), the newest.
+  'workshop/BlockImport.tsx',
   'hud/ActionModal.tsx',
   'hud/AgentTalk.tsx',
   'hud/AvatarsPanel.tsx',

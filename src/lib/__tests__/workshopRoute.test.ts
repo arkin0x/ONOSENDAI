@@ -11,6 +11,7 @@ import { EMPTY_TREE } from '../shardFolders'
 import { useShardFolders } from '../../store/useShardFolders'
 import { useWorkshop } from '../../store/useWorkshop'
 import { isWorkshopPath, startWorkshopRoute } from '../workshopRoute'
+import { useBlockImport } from '../../store/useBlockImport'
 
 const w = () => useWorkshop.getState()
 
@@ -191,5 +192,41 @@ describe('vercel.json', () => {
     for (const source of ['/workshop', '/workshop/', '/WORKSHOP', '/Workshop']) {
       expect(rewrites.find((r) => r.source === source)?.destination).toBe('/workshop.html')
     }
+  })
+})
+
+describe('the /import page', () => {
+  const page = readFileSync(new URL('../../../public/import.html', import.meta.url), 'utf8')
+  it('is served at /import, in any case', () => {
+    const { rewrites } = JSON.parse(readFileSync(new URL('../../../vercel.json', import.meta.url), 'utf8')) as { rewrites: Array<{ source: string; destination: string }> }
+    for (const source of ['/import', '/import/', '/IMPORT', '/Import']) expect(rewrites.find((r) => r.source === source)?.destination).toBe('/import.html')
+  })
+  it('says what it is, what it works with, who to contact, and the disclaimer, and opens the importer', () => {
+    expect(page).toContain('<h1>Import a build</h1>')
+    expect(page).toContain('Works with .schem, .litematic and .nbt files exported from Minecraft')
+    expect(page).toContain('NOT AN OFFICIAL MINECRAFT PRODUCT. NOT APPROVED BY OR ASSOCIATED WITH MOJANG OR MICROSOFT.')
+    expect(page).toContain('https://github.com/arkin0x/ONOSENDAI/issues')
+    expect(page).toContain('href="/workshop?import=build"')
+    expect(page).toMatch(/stays on your device/)
+    expect(page).not.toMatch(/—/)
+  })
+})
+
+describe('/workshop?import=build', () => {
+  it('opens the workshop with IMPORT A BUILD over it, and drops the ask from the address', () => {
+    useBlockImport.getState().close()
+    const p = page('/workshop', '?import=build&x=1')
+    expect(w().open).toBe(true)
+    expect(useBlockImport.getState().open).toBe(true)
+    expect(useBlockImport.getState().publish).toBe(false)
+    expect(p.loc.pathname).toBe('/workshop')
+    expect(p.loc.search).toBe('?x=1')
+    p.stop()
+    useBlockImport.getState().close()
+  })
+  it('leaves it closed on a plain /workshop', () => {
+    const p = page('/workshop')
+    expect(useBlockImport.getState().open).toBe(false)
+    p.stop()
   })
 })

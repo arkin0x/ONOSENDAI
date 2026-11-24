@@ -136,7 +136,7 @@ export function MenuBody({ currentId, onOpen, onImport, importing, paste: box, s
       <div className="workshop__list-row">
         <button className="workshop__new" onClick={() => w().create()}>+ NEW SHARD</button>
         <button className="workshop__btn" onClick={() => void paste()} title="An object copied from here or anywhere">PASTE</button>
-        <button className="workshop__btn" disabled={importing} onClick={onImport} title={`A 3D file, fitted to the grid and put down here: ${IMPORT_FORMATS_LABEL}. Or a .json SNO object, or a .zip of shards, each a new shard. Or drop one on the workshop.`}>{importing ? 'READING' : 'IMPORT'}</button>
+        <button className="workshop__btn" disabled={importing} onClick={onImport} title={`A 3D file, fitted to the grid and put down here: ${IMPORT_FORMATS_LABEL}. Or a .json SNO object, or a .zip of shards, each a new shard. Or a block build (.schem, .litematic, .nbt). Or drop one on the workshop.`}>{importing ? 'READING' : 'IMPORT'}</button>
       </div>
       {pasteOpen && (
         <div className="workshop__paste">
@@ -185,7 +185,8 @@ export function MenuBody({ currentId, onOpen, onImport, importing, paste: box, s
           a .json SNO object or a zip of shards comes in as new shards, and a file dropped on the workshop comes
           in the same way. A PLY from Blender comes in standing with Blender's default export settings; if you
           exported it with Up set to Y, it comes in on its back and a quarter turn stands it up. Any other PLY is
-          read Y up. From MagicaVoxel, import the .vox.
+          read Y up. From MagicaVoxel, import the .vox. A block build (.schem, .litematic or .nbt) opens IMPORT A BUILD,
+          which colours it from our palette and saves it as a new shard in IMPORTS.
           Under SHARD, PUBLISH puts the shard on your relays as a
           public object: the Shard Feed lists it, anyone can place it, and PUBLISH AGAIN replaces it under the same
           address; RETRACT asks the relays to drop it. That is separate from hiding, which seals a copy at a place.

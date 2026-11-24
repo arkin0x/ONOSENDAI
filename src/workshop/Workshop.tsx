@@ -33,6 +33,9 @@ import { BUILT_IN } from 'sno-core/snoPalette'
 import { useEscape } from '../hooks/useEscape'
 import { useScrollMemory } from '../hooks/useScrollMemory'
 import { importFiles } from '../lib/meshImport'
+import { BlockImport } from './BlockImport'
+import { useBlockImport } from '../store/useBlockImport'
+import { isBlockFile, isOldSchematic } from '../lib/blocks/readBlockFile'
 import { IMPORT_PICKER_ACCEPT } from '../lib/shardZip'
 import { stackedSpots } from '../lib/weld'
 import { useShardFolders } from '../store/useShardFolders'
@@ -287,9 +290,17 @@ export function Workshop(): JSX.Element | null {
   const importFromFiles = async (list: FileList | File[] | null): Promise<void> => {
     const files = list ? Array.from(list) : []
     // While the import's list is open, a drop on it (React carries a portal's events here) changes nothing.
-    if (!files.length || importing || useShardImport.getState().open) return
+    if (!files.length || importing || useShardImport.getState().open || useBlockImport.getState().open) return
     // A newer deploy refuses this tab's saves: nothing comes in that could not be kept (lib/versionGate.ts).
     if (savingBlocked()) { say(SAVE_BLOCKED_MESSAGE); return }
+    // A block build (.schem, .litematic, .nbt) opens IMPORT A BUILD (workshop/BlockImport).
+    const block = files.find((f) => isBlockFile(f.name) || isOldSchematic(f.name))
+    if (block) {
+      if (files.length > 1) { say('Import one block build at a time, on its own.'); return }
+      useBlockImport.getState().show()
+      void useBlockImport.getState().pick(block)
+      return
+    }
     // READING from the moment the files are sniffed, so a second pick or drop meanwhile is not a second import.
     setImporting(true)
     try {
@@ -331,6 +342,7 @@ export function Workshop(): JSX.Element | null {
       <SaveGateBar />
       <StorageWarning />
       <ZipImport />
+      <BlockImport />
 
       <TopBar open={area} onArea={toggle} />
       {/* The tour's word here while the tutorial runs: what to do first, and the way back (new-user feedback 2026-11-21). */}

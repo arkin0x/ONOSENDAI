@@ -117,6 +117,16 @@ body {
   max-height: 100%;
   overflow-y: auto;
   scrollbar-width: thin;
+  /* The whole column takes the pointer, not just its panels (owner,
+     2026-11-24: "if I position my cursor between menu panels I zoom instead
+     of scroll"). .hud is pointer-events: none, so the gaps between panels
+     were the scene's, and a wheel there zoomed the camera. Now a wheel or a
+     finger anywhere from the column's top to its bottom scrolls the menu
+     (the column itself beside the scene, .hud under it once the columns
+     stack), and a tap in a gap lands on the column and does nothing. The
+     column is only as tall as what it holds, so the scene below a short
+     menu, between the columns and in the .hud's margin still zooms. */
+  pointer-events: auto;
 }
 
 .hud__col--right {

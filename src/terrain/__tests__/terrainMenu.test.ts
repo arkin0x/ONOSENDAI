@@ -29,8 +29,16 @@ function rule(sel: string): string {
 describe('with the menu open', () => {
   it('TERRAIN\'s controls hide under it on a phone, exactly where WALK\'s pad does', () => {
     expect(APP).toContain('const showPad = padOpen && !crowded')
-    expect(APP).toContain('<TerrainView covered={crowded} />')
+    expect(APP).toContain('<TerrainView covered={menuCrowded} />')
     expect(rule('.terrainview.is-covered')).toContain('visibility: hidden;')
+  })
+
+  it('TERRAIN\'s bag on a phone covers everything as the menu does: the HUD steps aside under it', () => {
+    expect(APP).toContain('const crowded = menuCrowded || (isMobile && bagOpen)')
+    const at = CSS.indexOf('.terrainview.is-bag { z-index: 1000; }')
+    expect(at).toBeGreaterThan(-1)
+    expect(CSS).toContain('.terrainview.is-bag > :not(.terrain-sheet) { visibility: hidden; }')
+    expect(CSS).toContain('body:has(.terrainview.is-bag) .terrain-held { visibility: hidden; }')
   })
 
   it('the carried block is under the menu and every control, and takes no tap', () => {

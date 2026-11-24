@@ -438,6 +438,8 @@ export function terrainKeys(on: EventTarget): () => void {
 }
 
 function TerrainScreen({ covered }: { covered: boolean }): JSX.Element {
+  // The bag open: on a phone it covers the screen as the menu does (styles.css .is-bag; App's crowded hides the rest).
+  const bag = useTerrain((st) => st.sheet)
   const message = useTerrain((s) => s.message)
   const hint = useTerrain((s) => s.hint)
   const loading = useTerrain((s) => s.loading)
@@ -461,7 +463,7 @@ function TerrainScreen({ covered }: { covered: boolean }): JSX.Element {
   useEffect(() => terrainWheel(window), [])
 
   return (
-    <div className={`terrainview${covered ? ' is-covered' : ''}`} role="group" aria-label="TERRAIN: block tools" aria-hidden={covered || undefined}>
+    <div className={`terrainview${covered ? ' is-covered' : ''}${bag ? ' is-bag' : ''}`} role="group" aria-label="TERRAIN: block tools" aria-hidden={covered || undefined}>
       <span className="terrain-crosshair" aria-hidden />
 
       {/* What just happened (a refusal, a survey), under the cross, in a slot of its own: up to two lines, nothing moves. */}

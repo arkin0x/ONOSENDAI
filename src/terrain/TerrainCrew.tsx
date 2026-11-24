@@ -2,9 +2,10 @@
  * TerrainCrew.tsx - the Crew in TERRAIN's scene (store/terrainShare.ts):
  *
  * - "Build with <name>?" when another player is within about 8 gibsons and
- *   not in your Crew: ADD, or the shared ✕. Once per person per visit; ✕
- *   hides it for that person. Above the cross, over the scene, never over
- *   the menu or the controls.
+ *   not in your Crew: ADD (Enter), or the shared ✕ (Esc). Once per person
+ *   per visit; ✕ hides it for that person. Answered by its keys too, so a
+ *   walker whose mouse is captured never has to free it. Above the cross,
+ *   over the scene, never over the menu or the controls.
  * - A small Crew mark beside the cross while you aim at a block whose
  *   builder lists you (the outline is mint then too).
  * - The first time you aim at someone else's block (an amber outline), one
@@ -24,6 +25,7 @@ import { useProfile } from '../hooks/useProfile'
 import { useProfiles } from '../store/useProfiles'
 import { safeNpub } from '../lib/npub'
 import { ModalClose } from '../hud/ui/ModalClose'
+import { modalUp, useEscape } from '../hooks/useEscape'
 
 /** How near another player is, in gibsons, for the chip to ask. */
 export const CREW_NEAR = 8
@@ -65,6 +67,30 @@ export function nearbyToAsk(): string | null {
   return best?.pk ?? null
 }
 
+/** Whether the device has a mouse, so the chip's keys are shown beside its buttons. */
+const finePointer = (): boolean => { try { return window.matchMedia('(pointer: fine)').matches } catch { return false } }
+
+/**
+ * The chip's keys while it asks: Enter adds them, Esc (through the shared
+ * Escape stack, as a chip: a modal or the menu above it still closes first,
+ * and TERRAIN is not left) dismisses. Enter is left to anything typed into.
+ */
+export function crewChipKeys(on: EventTarget, add: () => void): () => void {
+  const down = (ev: Event): void => {
+    const e = ev as KeyboardEvent
+    if (e.key !== 'Enter' || e.repeat || e.metaKey || e.ctrlKey || e.altKey) return
+    const t = e.target as HTMLElement | null
+    if (t?.closest?.('input, textarea, select, button, [contenteditable="true"]')) return
+    // A modal or the bag above the chip has the keys.
+    if (modalUp() || useTerrain.getState().sheet) return
+    e.preventDefault()
+    e.stopImmediatePropagation()
+    add()
+  }
+  on.addEventListener('keydown', down, true)
+  return () => on.removeEventListener('keydown', down, true)
+}
+
 function CrewChip(): JSX.Element | null {
   const [who, setWho] = useState<string | null>(null)
   const name = useName(who)
@@ -72,15 +98,19 @@ function CrewChip(): JSX.Element | null {
     const t = window.setInterval(() => { if (!who) setWho(nearbyToAsk()) }, 1000)
     return () => clearInterval(t)
   }, [who])
+  const done = (): void => { if (who) offered.add(who); setWho(null) }
+  // Esc dismisses it, as the most recent chip on the Escape stack.
+  useEscape('chip', !!who, done)
+  useEffect(() => (who ? crewChipKeys(window, () => { void addCrew(who); offered.add(who); setWho(null) }) : undefined), [who])
   if (!who) return null
-  const done = (): void => { offered.add(who); setWho(null) }
+  const keys = finePointer()
   return (
     <div className="terrain-crew-chip" role="group" aria-label={`Build with ${name}?`}
       style={{ position: 'absolute', left: '50%', top: 'calc(50% - 96px)', transform: 'translateX(-50%)', display: 'flex', alignItems: 'center', gap: 8, padding: '6px 6px 6px 12px', background: 'rgba(0,0,0,0.55)', color: '#fff', textShadow: '0 1px 2px #000', fontSize: 13, pointerEvents: 'auto', clipPath: 'polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px)' }}>
       <UserPlus size={14} strokeWidth={2.25} aria-hidden />
       <span>Build with {name}?</span>
-      <button type="button" className="terrain-key" style={{ cursor: 'pointer', background: 'transparent' }} onClick={() => { void addCrew(who); done() }}>ADD</button>
-      <ModalClose onClose={done} label={`Not now: ${name}`} title="Not now" />
+      <button type="button" className="terrain-key" style={{ cursor: 'pointer', background: 'transparent' }} onClick={() => { void addCrew(who); done() }} aria-keyshortcuts="Enter">ADD{keys ? ' (ENTER)' : ''}</button>
+      <ModalClose onClose={done} label={`Not now: ${name}`} title={keys ? 'Not now (Esc)' : 'Not now'} />
     </div>
   )
 }

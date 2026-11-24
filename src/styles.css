@@ -14800,6 +14800,13 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
 
 /* Under the open menu on a phone TERRAIN's controls go, as WALK's pad does (App crowded). */
 .terrainview.is-covered { visibility: hidden; }
+/* TERRAIN's bag on a phone covers everything as the menu does (App crowded): above every HUD, with TERRAIN's own
+   hotbar, PLACE, SURVEY, hint, chip and cross and the carried block out of sight under it until it closes. */
+@media (max-width: 1099px) {
+  .terrainview.is-bag { z-index: 1000; }
+  .terrainview.is-bag > :not(.terrain-sheet) { visibility: hidden; }
+  body:has(.terrainview.is-bag) .terrain-held { visibility: hidden; }
+}
 
 /* CHAT's chip with no room for its word on the bottom row (hud/ChatDock.tsx chipCrowded): the bubble alone, the chip as
    tall and at least as wide as it is tall, so the tap is as easy as before. */

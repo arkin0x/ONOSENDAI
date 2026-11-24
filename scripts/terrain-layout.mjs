@@ -7,7 +7,10 @@
  * wide screen, where the scene stays beside it) open, and checks that the
  * boxes of the hotbar, SURVEY (with its hold bar), PLACE, CHAT, the walk
  * pad, the menu button, JUMP and DOWN, the LOOK ball, the commit block, the
- * carried block and the first-visit hint do not intersect. Nothing reaches a relay: every socket is answered here.
+ * carried block and the first-visit hint do not intersect. With the bag open on a phone (375 and 430 portrait) it
+ * covers everything as the menu does: every point of its card is the card's own, and none of the HUD (the boxes above,
+ * the carried block, the instruments and the tutorial card) is left showing under it. Nothing reaches a relay: every
+ * socket is answered here. With SHOTS=<dir>, a screenshot of each phone with the bag open is saved there.
  *
  * Usage: start the dev server (npm run dev -- --port 5197), then
  *   node scripts/terrain-layout.mjs [http://localhost:5197/]
@@ -91,6 +94,54 @@ for (const size of SIZES) {
     else console.log(`${label}: clear (${keys.join(', ')})`)
     await ctx.close()
   }
+}
+
+// The bag open on a phone: over everything, nothing over it, nothing of the HUD under it.
+// The menu button stays, as it does under the open menu; it sits outside the card, under the sheet's veil.
+const { menu: _menu, ...HUD } = BOXES
+const BAG_UNDER = { ...HUD, held: '.terrain-held', instruments: '.instruments', look: '.walklook, .orbsquare', cross: '.terrain-crosshair' }
+for (const size of SIZES.filter((z) => z.w <= 430 && z.h > z.w)) {
+  const ctx = await browser.newContext({ viewport: { width: size.w, height: size.h }, isMobile: true, hasTouch: true })
+  await ctx.route((u) => !/^https?:\/\/(localhost|127\.0\.0\.1)/.test(u.toString()), (r) => r.abort())
+  await ctx.routeWebSocket(/.*/, (ws) => { ws.onMessage((raw) => { let m; try { m = JSON.parse(String(raw)) } catch { return } if (m[0] === 'REQ') ws.send(JSON.stringify(['EOSE', m[1]])); else if (m[0] === 'EVENT') ws.send(JSON.stringify(['OK', m[1].id, true, ''])) }) })
+  const page = await ctx.newPage()
+  const sk = generateSecretKey(); const pk = getPublicKey(sk); const ns = nip19.nsecEncode(sk)
+  await page.addInitScript(([pk, ns]) => { try { localStorage.setItem('onosendai:live', '0'); localStorage.setItem('onosendai:nsec', ns); localStorage.setItem('onosendai:signer', JSON.stringify({ kind: 'local', pubkey: pk, nsec: ns })) } catch {} }, [pk, ns])
+  await page.goto(URL)
+  await page.waitForTimeout(9000)
+  await page.keyboard.press('Escape')
+  await page.evaluate(async () => { const pm = await import('/src/store/padMode.ts'); pm.enterTerrainMode() })
+  await page.waitForTimeout(3500)
+  await page.evaluate(async () => { const m = await import('/src/store/useTerrain.ts'); const inv = m.useTerrain.getState().inventory; m.useTerrain.setState({ inventory: { ...inv, hotbar: [8, ...inv.hotbar.slice(1)], counts: { ...inv.counts, 8: 5 }, slot: 0 } }); m.useTerrain.getState().setSheet(true) })
+  await page.waitForTimeout(1200)
+  const label = `${size.name}, bag open`
+  const result = await page.evaluate((under) => {
+    const card = document.querySelector('.terrain-sheet__card')
+    if (!card) return { missing: true }
+    const r = card.getBoundingClientRect()
+    const over = new Set()
+    for (let i = 1; i < 12; i++) for (let j = 1; j < 12; j++) {
+      const x = r.left + (r.width * i) / 12, y = r.top + (r.height * j) / 12
+      const e = document.elementFromPoint(x, y)
+      if (!e || !card.contains(e)) over.add(e ? (e.className && typeof e.className === 'string' ? e.className.split(' ')[0] : e.tagName) : 'nothing')
+    }
+    const showing = []
+    for (const [k, sel] of Object.entries(under)) for (const e of document.querySelectorAll(sel)) {
+      const b = e.getBoundingClientRect()
+      if (b.width > 0 && b.height > 0 && getComputedStyle(e).visibility !== 'hidden') showing.push(k)
+    }
+    return { over: [...over], showing: [...new Set(showing)] }
+  }, BAG_UNDER)
+  if (result.missing) { bad++; console.log(`${label}: no bag`) }
+  else if (result.over.length || result.showing.length) { bad++; console.log(`${label}: over the card ${result.over.join(', ') || 'nothing'}; showing under it ${result.showing.join(', ') || 'nothing'}`) }
+  else console.log(`${label}: the bag alone`)
+  if (process.env.SHOTS) await page.screenshot({ path: `${process.env.SHOTS}/terrain-bag-${size.w}.png` })
+  // Closed again: the HUD comes back.
+  await page.evaluate(async () => { const m = await import('/src/store/useTerrain.ts'); m.useTerrain.getState().setSheet(false) })
+  await page.waitForTimeout(800)
+  const back = await page.evaluate((sel) => !!document.querySelector(sel) && getComputedStyle(document.querySelector(sel)).visibility !== 'hidden', BOXES.hotbar)
+  if (!back) { bad++; console.log(`${size.name}: the hotbar did not come back when the bag closed`) }
+  await ctx.close()
 }
 await browser.close()
 process.exit(bad ? 1 : 0)

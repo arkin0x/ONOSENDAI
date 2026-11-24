@@ -220,7 +220,7 @@ describe('the WALK pad', () => {
     expect(find('touchpad__key--jump').props.title).toBe('Jump (Space or R). Press again in the air to double jump.')
     useWalk.getState().setGravity(false)
     expect(find('touchpad__key--down').props.disabled).toBeFalsy()
-    expect(find('touchpad__key--down').props.title).toBe('Down one cell (C or F)')
+    expect(find('touchpad__key--down').props.title).toBe('Down one cell (C)')
   })
 })
 

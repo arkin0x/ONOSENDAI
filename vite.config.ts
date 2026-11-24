@@ -177,7 +177,16 @@ export default defineConfig(async () => ({
     exclude: ['cyberspace-core'],
   },
   build: {
-    target: 'es2022',
+    // The oldest browser the app runs on is Safari 15.4 (iOS and iPadOS 15.4),
+    // the README's "Browsers" section says why. Naming it here makes esbuild
+    // write what that Safari lacks in a form it has: a class static block as
+    // plain assignments, a regex lookbehind as new RegExp (which then fails
+    // only where it runs, never the whole file at parse time), and in the CSS
+    // the -webkit- prefixes Safari still needs, -webkit-backdrop-filter above
+    // all, which Safari before 18 reads instead of backdrop-filter. The
+    // stylesheet follows this target too (build.cssTarget defaults to it).
+    // index.html's preflight turns away anything older, in plain words.
+    target: ['es2022', 'safari15.4', 'ios15.4'],
     // Add build hash to filenames for cache busting
     rollupOptions: {
       output: {

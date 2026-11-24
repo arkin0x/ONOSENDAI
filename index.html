@@ -52,6 +52,65 @@
     <meta name="msapplication-TileColor" content="#000000">
     <meta name="theme-color" content="#000000">
     
+    <!-- The preflight: whether this browser can run the app, in plain ES5 (src/lib/preflight.ts says why). -->
+    <script id="preflight">
+      (function () {
+        var w = window, d = document;
+        var lacks = [];
+        if (!w.WebGL2RenderingContext) lacks.push('3D graphics (WebGL 2)');
+        var ap = Array.prototype;
+        if (typeof Object.hasOwn !== 'function' || typeof ap.at !== 'function' || typeof ap.findLast !== 'function' || typeof w.structuredClone !== 'function') lacks.push('a recent web engine (Safari 15.4 or newer)');
+        var apple = /iPad|iPhone|iPod|Macintosh/.test(navigator.userAgent);
+
+        function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+        function show(title, lines, detail, reload) {
+          var draw = function () {
+            var root = d.getElementById('root');
+            // Only over the wordmark: once the app has drawn (boot.tsx), it says what went wrong itself.
+            if (!root || w.__onosendaiDrawn) return;
+            var html = '<div class="cannot-run" role="alert"><img src="/logo.png" alt="ONOSENDAI" width="1969" height="354"><h1>' + esc(title) + '</h1>';
+            for (var i = 0; i < lines.length; i++) html += '<p>' + esc(lines[i]) + '</p>';
+            html += '<ul><li>iPhone or iPad: iOS or iPadOS 15.4 or newer. Every browser there runs on Safari, so the iOS version is what counts. Settings, General, Software Update.</li><li>Computer or Android: a current Chrome, Firefox, Edge or Safari.</li></ul>';
+            if (detail) html += '<p class="cannot-run__detail">' + esc(detail) + '</p>';
+            if (reload) html += '<button type="button" onclick="location.reload()">RELOAD</button>';
+            root.innerHTML = html + '</div>';
+          };
+          if (d.getElementById('root')) draw(); else d.addEventListener('DOMContentLoaded', draw);
+        }
+
+        if (lacks.length) {
+          w.__onosendaiUnsupported = lacks;
+          var lines = ['This browser is missing ' + lacks.join(' and ') + '.'];
+          if (apple && !w.WebGL2RenderingContext) lines.push('If Lockdown Mode is on, it turns 3D graphics off: exclude this site from it in Settings, Privacy & Security, Lockdown Mode.');
+          show('ONOSENDAI can’t run in this browser', lines, navigator.userAgent, false);
+          return;
+        }
+
+        var first = null;
+        w.addEventListener('error', function (e) {
+          if (first) return;
+          var t = e && e.target;
+          first = (e && (e.message || (e.error && e.error.message))) || (t && (t.src || t.href) ? 'could not load ' + (t.src || t.href) : null);
+        }, true);
+        w.onosendaiCannotStart = function (reason) {
+          show('ONOSENDAI couldn’t start', ['Something stopped it loading. Try RELOAD. If it happens again, send the line below to the team.'], (reason || first || 'unknown') + ' | ' + navigator.userAgent, true);
+        };
+        w.addEventListener('load', function () {
+          setTimeout(function () { if (!w.__onosendaiRan) w.onosendaiCannotStart(first || 'its first script never ran'); }, 3000);
+        });
+      })();
+    </script>
+    <style>
+      .cannot-run { box-sizing: border-box; min-height: 100vh; max-width: 560px; margin: 0 auto; padding: 48px 20px; color: #fff; font: 15px/1.5 ui-monospace, Menlo, Consolas, monospace; }
+      .cannot-run img { display: block; width: 220px; max-width: 60vw; height: auto; margin-bottom: 28px; }
+      .cannot-run h1 { margin: 0 0 14px; font-size: 18px; letter-spacing: 0.08em; text-transform: uppercase; }
+      .cannot-run p { margin: 0 0 12px; }
+      .cannot-run ul { margin: 0 0 16px; padding-left: 20px; }
+      .cannot-run li { margin-bottom: 8px; }
+      .cannot-run__detail { color: rgba(255, 255, 255, 0.5); font-size: 12px; word-break: break-word; }
+      .cannot-run button { margin-top: 8px; padding: 10px 22px; color: #000; background: #fff; border: 0; font: inherit; letter-spacing: 0.1em; cursor: pointer; -webkit-clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px); clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px); }
+    </style>
+
     <!-- Unregister any existing service workers -->
     <script>
       if ('serviceWorker' in navigator) {

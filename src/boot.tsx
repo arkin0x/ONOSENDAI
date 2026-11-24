@@ -7,6 +7,8 @@ import './styles.css'
 import { installTapGuard } from './lib/tapGuard'
 import { isBroadcast, markBroadcastPage } from './lib/tv/broadcast'
 import { TvStandby } from './hud/TvStandby'
+import { CrashNote } from './hud/CrashNote'
+import { preflightPage } from './lib/preflight'
 import { hydrateWorkshop } from './store/useWorkshop'
 import { expectWorkshopRead } from './store/workshopStorage'
 import { chainReadyToDraw } from './store/useCyberspace'
@@ -82,12 +84,17 @@ function draw(): void {
   if (drawn) return
   drawn = true
   markBoot('draw')
+  // From here index.html's preflight never puts its "could not start" page in place of the app.
+  preflightPage().__onosendaiDrawn = true
   // From here a tap can ask for the library before its read starts: it starts the read then (workshopStorage workshopReading).
   if (!isWorkshopPath(location.pathname)) expectWorkshopRead()
   ReactDOM.createRoot(document.getElementById('root')!).render(
     <React.StrictMode>
-      {/* The stream never goes black: it stands by and reloads (hud/TvStandby, lib/tv/standby). */}
-      {isBroadcast() ? <TvStandby><App /></TvStandby> : <App />}
+      {/* The stream never goes black: it stands by and reloads (hud/TvStandby, lib/tv/standby).
+          Anywhere else a render that throws past every inner boundary shows
+          its error and RELOAD instead of a black page: a 3D view that cannot
+          start on an old iPad, say (README "Browsers"). */}
+      {isBroadcast() ? <TvStandby><App /></TvStandby> : <CrashNote where="the app"><App /></CrashNote>}
     </React.StrictMode>,
   )
   // The frame after the first render is the one on screen; then the workshop.

@@ -80,6 +80,10 @@ export class CrashNote extends Component<Props, State> {
             <ModalClose onClose={this.close} />
           </header>
           <p className="crash__message">{error.name}: {error.message}</p>
+          {/* three.js says "Error creating WebGL context." when the browser
+              will not open one: out of memory, too many tabs, or a device too
+              old (README "Browsers"). Said in plain words too. */}
+          {/webgl/i.test(error.message) && <p className="crash__hint">3D graphics (WebGL 2) could not start in this browser. Close other tabs and RELOAD. It needs iOS or iPadOS 15.4 or newer, or a current desktop browser.</p>}
           <pre className="crash__stack">{lines}</pre>
           <div className="modal__row">
             <button className="modal__cancel" onClick={this.copy}>{copied ? 'COPIED' : 'COPY'}</button>

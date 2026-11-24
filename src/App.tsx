@@ -374,7 +374,7 @@ export default function App(): JSX.Element {
     return (
       <div className="app">
         <WorldScans />
-        <Scene />
+        <CrashNote where="the 3D view"><Scene /></CrashNote>
         <TvScreen />
       </div>
     )
@@ -384,7 +384,9 @@ export default function App(): JSX.Element {
     <div className="app">
       <WorldScans />
       <OfferWatch hidden={crowded || secretOpen} onChange={setOfferUp} />
-      <Scene />
+      {/* A 3D view that cannot start (no WebGL 2 context on an old iPad, say)
+          shows why over the panels, which stay up, not a black page. */}
+      <CrashNote where="the 3D view"><Scene /></CrashNote>
       {!crowded && !offerUp && <TargetsHere />}
       {!crowded && !secretOpen && !offerUp && !deploying && (
         <div className="instruments">
@@ -489,10 +491,11 @@ export default function App(): JSX.Element {
           aria-label="Show controls"
         >CONTROLS</button>
       )}
-      {/* The /demo tour's caption panel, only while the tour runs. */}
-      <DemoCoach />
+      {/* The /demo tour's caption panel, only while the tour runs. Each coach
+          has its own boundary: a caption that throws leaves the world drawn. */}
+      <CrashNote where="the tour"><DemoCoach /></CrashNote>
       {/* The first-arrival tutorial's caption panel, only while it runs. */}
-      <TutorialCoach />
+      <CrashNote where="the tutorial"><TutorialCoach /></CrashNote>
       {/* WALK's lag, centered over everything and touching nothing. */}
       <SyncWarning />
       {crowded && <div className="mobile-overlay" />}

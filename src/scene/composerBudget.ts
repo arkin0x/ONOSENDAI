@@ -11,6 +11,10 @@
  * A number here is what the page asks WebGL for. The driver may keep more.
  */
 
+import { useMemo } from 'react'
+import { useThree } from '@react-three/fiber'
+import { HalfFloatType, UnsignedByteType, type TextureDataType } from 'three'
+
 /** Past this many pixels the picture is fine enough for two samples. */
 export const HIGH_RES_PIXELS = 5_000_000
 export const SAMPLES = 4
@@ -45,3 +49,21 @@ export function canvasPixels(view: { innerWidth: number; innerHeight: number; de
 
 /** The composers' samples, fixed for the page: a new count would make a new composer. The world's (Scene.tsx) and the bench's LOOK (workshop/benchBloom.tsx). */
 export const COMPOSER_SAMPLES = typeof window === 'undefined' ? SAMPLES : composerSamples(canvasPixels(window))
+
+/**
+ * The composers' colour buffer: half-float, the library's default, where the
+ * browser can draw into one, else 8-bit. WebGL 2 draws into RGBA16F only with
+ * EXT_color_buffer_half_float or EXT_color_buffer_float; without either the
+ * buffer is incomplete and the world draws black while the panels draw over
+ * it (README "Browsers": older iPads). 8-bit clips the glow's brightest
+ * values, so the bloom is a little flatter there, and everything draws.
+ */
+export function composerBufferType(gl: Pick<WebGL2RenderingContext, 'getExtension'>): TextureDataType {
+  return gl.getExtension('EXT_color_buffer_half_float') || gl.getExtension('EXT_color_buffer_float') ? HalfFloatType : UnsignedByteType
+}
+
+/** composerBufferType for the canvas this is drawn in, asked once per renderer. */
+export function useComposerBufferType(): TextureDataType {
+  const gl = useThree((s) => s.gl)
+  return useMemo(() => composerBufferType(gl.getContext()), [gl])
+}

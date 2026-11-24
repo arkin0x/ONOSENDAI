@@ -117,7 +117,7 @@ import { useTv } from '../store/useTv'
 import { CAMERA_FAR, CAMERA_NEAR, FOV, ORBIT_MAX_DISTANCE, ORBIT_MIN_DISTANCE } from './camera'
 import { headlampReach, headlampUniforms } from './headlamp'
 import { lineFade } from './nearFade'
-import { COMPOSER_SAMPLES } from './composerBudget'
+import { COMPOSER_SAMPLES, useComposerBufferType } from './composerBudget'
 import './radialFog'
 import { fogFar, fogNear, stepFog, type FogState, type FogView } from './fog'
 import { cameraNear, nextReach, orbitMaxDistance, stepOrbitLimit, useDrawReach } from './buildZoom'
@@ -1525,11 +1525,19 @@ export const Scene = memo(function Scene(): JSX.Element {
         so the 0.25 that stood here did nothing. The bloom's blur runs from
         half resolution down on its own (mipmapBlur).
       */}
-      <EffectComposer ref={resolveColourOnly} stencilBuffer multisampling={COMPOSER_SAMPLES}>
-        {bloom}
-      </EffectComposer>
+      <WorldComposer>{bloom}</WorldComposer>
     </Canvas>
   )
 })
+
+/** The world's composer, inside the canvas so it can ask the renderer which colour buffer it can draw into (composerBudget useComposerBufferType). */
+function WorldComposer({ children }: { children: JSX.Element }): JSX.Element {
+  const bufferType = useComposerBufferType()
+  return (
+    <EffectComposer ref={resolveColourOnly} stencilBuffer multisampling={COMPOSER_SAMPLES} frameBufferType={bufferType}>
+      {children}
+    </EffectComposer>
+  )
+}
 
 export { GRID_RADIUS }

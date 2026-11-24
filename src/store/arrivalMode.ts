@@ -2,7 +2,7 @@
  * arrivalMode.ts - ?mode=view and ?mode=region on arrival (arkinox, 2026-11-13).
  *
  * onosendai.tech/?mode=view opens in VIEW at your avatar, as the mode button
- * does from HOP (padMode cycleMode). ?mode=region goes on into region mode,
+ * does from HOP with the default MODES list (padMode switchMode). ?mode=region goes on into region mode,
  * as the Region button does in VIEW (store/useRegion.ts). Any other value is
  * ignored and left on the address, as ?tutorial= leaves one it does not know.
  *
@@ -42,7 +42,7 @@
  * - Nothing under the /demo tour or Cyberspace TV, which own the view.
  */
 
-import { cycleMode, currentPadMode } from './padMode'
+import { currentPadMode, switchMode } from './padMode'
 import { samePosition, savedChainLoaded, useCyberspace } from './useCyberspace'
 import { linkRegionSeed } from './useCoordRoute'
 import { useRegion } from './useRegion'
@@ -82,7 +82,8 @@ export function takeArrivalMode(loc: Pick<Location, 'pathname' | 'search' | 'has
  * the Region button do. Returns whether the mode is up.
  */
 export function applyArrivalMode(mode: ArrivalMode): boolean {
-  if (currentPadMode() === 'hop') cycleMode()
+  // VIEW by name, whatever order MODES puts the ring in (store/modeOrder.ts).
+  if (currentPadMode() === 'hop') switchMode('view')
   const cs = useCyberspace.getState()
   if (!cs.viewing()) return false
   if (mode === 'view') return true

@@ -43,6 +43,8 @@ import { TargetsPanel } from './TargetsPanel'
 import { ShardsPanel } from './ShardsPanel'
 import { Legend } from './Legend'
 import { ViewPanel } from './ViewPanel'
+import { ModesPanel } from './ModesPanel'
+import { useModeRoles } from '../store/modeOrder'
 import { ScaleLadder } from './ScaleLadder'
 import { ProofPanel } from './ProofPanel'
 import { CloudPanel } from './CloudPanel'
@@ -593,7 +595,10 @@ function Controls(): JSX.Element {
   const building = useBuilder((s) => s.active)
   const scanning = useScan((s) => s.active)
   const mode = padMode(walking, building, viewing, scanning)
-  const { title, rows, hint } = MODE_ROWS[mode]
+  const { title, rows: modeRows, hint } = MODE_ROWS[mode]
+  // MODES can put WALK in the mode button's ring (store/modeOrder.ts): X then only stops the walk.
+  const walkInRing = useModeRoles().ring.includes('walk')
+  const rows = mode === 'walk' && walkInRing ? modeRows.map((r): [string, string] => (r[0] === 'X' ? ['X', 'stop the walk'] : r)) : modeRows
 
   return (
     <section className="panel panel--controls">
@@ -653,6 +658,7 @@ const PANELS: Record<PanelId, () => JSX.Element | null> = {
   chain: ChainPanel,
   hyperspace: HyperspacePanel,
   view: ViewPanel,
+  modes: ModesPanel,
   legend: Legend,
   controls: Controls,
   derezz: DerezzPanel,

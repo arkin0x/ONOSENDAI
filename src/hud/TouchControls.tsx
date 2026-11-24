@@ -81,8 +81,8 @@ import { ChainStatusStrip, useChainStatus } from './ChainStatus'
 import { moveUnderWay } from '../lib/buildCursor'
 import { useWalk } from '../store/useWalk'
 import { onAvatar, useBuilder } from '../store/useBuilder'
-import { buildHeld, cycleMode, enterWalk, leaveWalk, padMode, recall } from '../store/padMode'
-import type { WalkFrom } from '../store/useWalk'
+import { buildHeld, cycleMode, goBack, leaveWalk, padMode, pressSecond, recall, type PadMode } from '../store/padMode'
+import { DEFAULT_MODES, modeInfo, nextInRing, useEffectiveModes, useModeRoles, useModes } from '../store/modeOrder'
 import { useCover } from '../hooks/useCover'
 import { ForwardArrow3D, ReverseArrow3D } from './ui/FlyArrows'
 import { regionAtOriginalSize, toggleRegion, useRegion } from '../store/useRegion'
@@ -110,7 +110,27 @@ export const GO_LIVE_BODY = [
 ].join('\n')
 
 /** The mode button's word for each mode it can name. */
-const MODE_WORD: Record<WalkFrom, string> = { hop: 'HOP', view: 'VIEW', build: 'BUILD', scan: 'SCAN' }
+const MODE_WORD: Record<PadMode, string> = { hop: 'HOP', view: 'VIEW', walk: 'WALK', build: 'BUILD', scan: 'SCAN' }
+
+/**
+ * The lit mode button's title with the default ring, word for word as it
+ * was before MODES: used whenever the next mode is the default ring's next.
+ */
+const DEFAULT_RING_TITLE: Partial<Record<PadMode, string>> = {
+  hop: 'Hop: the pad lines up a move and COMMIT sends it. Press for VIEW, a free look that moves nothing',
+  view: 'Viewing: the pad moves the cursor without planning a hop. Press for BUILD here; RECALL brings the cursor home and stays in VIEW',
+  build: 'Building: the pad moves the build cursor and never you. Press for SCAN here',
+  scan: 'Scanning: the pad moves the cursor, SCAN looks inside the purple cube. Press to go back to HOP',
+}
+
+/** What each mode does, the start of the lit mode button's title. */
+const MODE_TITLE: Record<PadMode, string> = {
+  hop: 'Hop: the pad lines up a move and COMMIT sends it',
+  view: 'Viewing: the pad moves the cursor without planning a hop; RECALL brings the cursor home and stays in VIEW',
+  walk: 'Walking: every press is a step, proved behind you',
+  build: 'Building: the pad moves the build cursor and never you',
+  scan: 'Scanning: the pad moves the cursor, SCAN looks inside the purple cube',
+}
 
 /**
  * Which part of the newcomer view a pad key belongs to (newcomer/reveal.ts):
@@ -302,13 +322,35 @@ export function TouchControls(): JSX.Element {
   // grown region, which is RESET's) and BUILD (where a deploy lined up holds
   // it, disabled); lit in WALK; STOP in WALK while steps wait on their
   // proofs; RECALL with the cursor off your avatar.
+  //
+  // MODES (store/modeOrder.ts) makes WALK the default list's second button:
+  // the slot holds whichever mode the player's list puts second, the same
+  // way, dim to go in and lit to go back, and RECALL or STOP otherwise. With
+  // only one mode on there is no second button, and the slot is RECALL's.
   const stopping = walking && (computing || behind > 0)
-  const walkSlot = walking ? !stopping : resting && !computing && (
+  const roles = useModeRoles()
+  const modes = useEffectiveModes()
+  const second = roles.second
+  const inSecond = second !== null && mode === second
+  const atRest = walking ? !stopping : resting && !computing && (
     mode === 'hop' ? home && !armed && !deploying
     : mode === 'view' || mode === 'scan' ? ownHead && !armed && !deploying && !viewAway && !flown && !(regionActive && regionGrown)
     : ownHead && buildHome
   )
-  const walkHeld = !walking && building && held
+  const walkSlot = second !== null && atRest
+  // Leaving BUILD waits for PLACE or CANCEL: the second button, lit or dim, too.
+  const walkHeld = building && held
+  // A mode not in the ring (the second button's, or one MODES switched off
+  // and asked for by name): the mode button is the way back, dim, naming
+  // where it goes (padMode backOf), as it has been in WALK.
+  const visiting = !roles.ring.includes(mode)
+  // padMode backOf's rule, from what this render already reads (no store read during render).
+  const back = useModes((s) => s.back)
+  const lastRing = useModes((s) => s.lastRing)
+  const backMode: PadMode = mode === 'walk' ? walkFrom
+    : back && back !== mode && roles.ring.includes(back) ? back
+    : lastRing && lastRing !== mode && roles.ring.includes(lastRing) ? lastRing
+    : roles.start
   // The button names the one action the next commit takes: COMMIT for a hop
   // to the cursor, HOP TO BOUNDARY or SIDESTEP for a step of the way, OFFLOAD
   // in blue when the step is HOSAKA's (pressing it brings up the card;
@@ -381,15 +423,16 @@ export function TouchControls(): JSX.Element {
     </button>
   )
   // The mode button: lit while its mode is on (a press goes round the ring),
-  // dim in WALK naming the mode WALK came from (a press goes back to it).
-  const modeButton = (m: WalkFrom, on: boolean): JSX.Element => {
-    const wait = on && m === 'build' && held
-    const title = !on ? `Leave WALK and go back to ${MODE_WORD[m]}`
+  // dim in a mode not in the ring (WALK with the default list) naming the
+  // mode it goes back to (a press goes back to it).
+  const modeButton = (m: PadMode, on: boolean): JSX.Element => {
+    const wait = building && held
+    const next = nextInRing(modes, m)
+    const title = !on ? `Leave ${MODE_WORD[mode]} and go back to ${MODE_WORD[m]}`
       : wait ? 'Place or cancel what is lined up first'
-      : m === 'build' ? 'Building: the pad moves the build cursor and never you. Press for SCAN here'
-      : m === 'scan' ? 'Scanning: the pad moves the cursor, SCAN looks inside the purple cube. Press to go back to HOP'
-      : m === 'view' ? 'Viewing: the pad moves the cursor without planning a hop. Press for BUILD here; RECALL brings the cursor home and stays in VIEW'
-      : 'Hop: the pad lines up a move and COMMIT sends it. Press for VIEW, a free look that moves nothing'
+      : next === m ? `${MODE_TITLE[m]}. Only this mode takes turns on this button`
+      : next === nextInRing(DEFAULT_MODES, m) && DEFAULT_RING_TITLE[m] ? DEFAULT_RING_TITLE[m]
+      : `${MODE_TITLE[m]}. Press for ${MODE_WORD[next]}`
     return (
       <button
         key={`mode-${m}`}
@@ -398,8 +441,8 @@ export function TouchControls(): JSX.Element {
         disabled={wait}
         title={title}
         {...noCallout}
-        onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); if (wait) return; if (on) cycleMode(); else leaveWalk() }}
-      >{m === 'hop' ? <>{say('HOP', plain)}<span className="touchops__sub">(MODES)</span></> : say(MODE_WORD[m], plain)}</button>
+        onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); if (wait) return; if (on) cycleMode(); else goBack() }}
+      >{m === roles.start ? <>{say(MODE_WORD[m], plain)}<span className="touchops__sub">(MODES)</span></> : say(MODE_WORD[m], plain)}</button>
     )
   }
 
@@ -411,11 +454,14 @@ export function TouchControls(): JSX.Element {
   // its slot holds a resting GO instead, so the slot never empties or moves.
   const ringShown = veil('pad.modes') !== ' nc-veiled'
   // Only HOP's: in VIEW, BUILD or SCAN the mode button is the way back to HOP, so it always shows.
-  const ring = (m: WalkFrom): JSX.Element => ringShown || m !== 'hop' ? modeButton(m, true) : (
+  const ringButton = (m: PadMode): JSX.Element => ringShown || m !== 'hop' ? modeButton(m, true) : (
     <button key="commit" className={`touchops__commit${veil('pad.go')}`} disabled title="Move the cursor somewhere first">
       {withKey(say('COMMIT', plain), 'SPACE')}
     </button>
   )
+  // The commit slot for the mode the pad is in: the ring's button, lit, or in
+  // a mode not in the ring the dim way back (backMode).
+  const ring = (m: PadMode): JSX.Element => visiting ? modeButton(backMode, false) : ringButton(m)
 
   return (
     <>
@@ -506,7 +552,7 @@ export function TouchControls(): JSX.Element {
             WALK (arkinox, 2026-11-12): pressing it goes in, or back to the
             mode WALK came from. Keyed apart from RECALL and STOP, so only
             WALK's own dim to lit (and back) eases (.touchops__walk). */}
-        {walkSlot ? (
+        {walkSlot && second === 'walk' ? (
           <button
             key="walk"
             className={`touchops__cancel touchops__walk ${walking ? 'is-on' : 'is-dim'}${veil('pad.recall')}`}
@@ -518,8 +564,23 @@ export function TouchControls(): JSX.Element {
             aria-label={walking ? `Walking. Press to go back to ${MODE_WORD[walkFrom]}` : 'Walk: first person, every press a step'}
             disabled={walkHeld}
             {...noCallout}
-            onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); if (walking) leaveWalk(); else if (!walkHeld) enterWalk() }}
+            onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); if (walkHeld) return; pressSecond() }}
           >WALK</button>
+        ) : walkSlot && second !== null ? (
+          // Another mode as the second button (MODES): the same slot, dim to
+          // go in and lit to go back, in that mode's own color.
+          <button
+            key={`second-${second}`}
+            className={`touchops__cancel touchops__second is-${second} ${inSecond ? 'is-on' : 'is-dim'}${veil('pad.recall')}`}
+            aria-pressed={inSecond}
+            title={inSecond ? `${MODE_TITLE[second]}. Press to go back to ${MODE_WORD[backMode]}`
+              : walkHeld ? 'Place or cancel what is lined up first'
+              : `${MODE_WORD[second]}: ${modeInfo(second).what}`}
+            aria-label={inSecond ? `${MODE_WORD[second]}. Press to go back to ${MODE_WORD[backMode]}` : `${MODE_WORD[second]}: ${modeInfo(second).what}`}
+            disabled={walkHeld}
+            {...noCallout}
+            onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); if (walkHeld) return; pressSecond() }}
+          >{say(MODE_WORD[second], plain)}</button>
         ) : <button
           key="cancel"
           className={`touchops__cancel${veil('pad.recall')}`}
@@ -537,7 +598,8 @@ export function TouchControls(): JSX.Element {
             e.preventDefault(); e.stopPropagation()
             if (walking) {
               if (computing || behind > 0) useWalk.getState().stop()
-              else leaveWalk()
+              // WALK in the ring (MODES) has nowhere to go back to: RECALL at home stays.
+              else if (!roles.ring.includes('walk')) leaveWalk()
               return
             }
             recall()
@@ -553,7 +615,7 @@ export function TouchControls(): JSX.Element {
             moving the cursor to look around without planning a hop; BUILD
             (2026-11-02 in the ring) places things and never moves you. Keyed
             by the mode it names, so only its own dim to lit eases. */}
-        {walking ? modeButton(walkFrom, false)
+        {walking ? ring('walk')
           : building ? ring('build')
           : viewing && scanning ? ring('scan')
           : viewing ? ring('view')

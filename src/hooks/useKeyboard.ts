@@ -36,7 +36,7 @@ import { holdEnd, holdReleaseAll, holdStart } from '../store/walkHold'
 import { addWalkInputCloser, setWalkMenuCovering, walkMenuCovering } from '../store/walkInput'
 import { canFly, useViewFly } from '../lib/viewFly'
 import { useRegion } from '../store/useRegion'
-import { buildToScan, leaveWalk, scanToHop, viewToAvatar } from '../store/padMode'
+import { buildToScan, inRing, leaveWalk, scanToHop, viewToAvatar } from '../store/padMode'
 import { scanBuying, scanSpace, useScan } from '../store/useScan'
 import { enterTerrain, useTerrain } from '../store/useTerrain'
 
@@ -145,11 +145,17 @@ function pageHidden(): void {
   if (typeof document !== 'undefined' && document.hidden) holdReleaseAll()
 }
 
-/** X in WALK: stop the steps still to prove (a fall still in the air is some), or with none, back to the mode WALK came from (padMode `leaveWalk`). */
+/**
+ * X in WALK: stop the steps still to prove (a fall still in the air is some),
+ * or with none, back to the mode WALK came from (padMode `leaveWalk`). When
+ * MODES puts WALK in the mode button's ring (store/modeOrder.ts), WALK came
+ * from nowhere to go back to: X stops, and otherwise stays in WALK, as RECALL
+ * at home stays in its mode.
+ */
 export function walkCancel(): void {
   const walk = useWalk.getState()
   if (walk.behind > 0 || walk.open !== null || walk.falling || useCyberspace.getState().proof.status === 'computing') walk.stop()
-  else leaveWalk()
+  else if (!inRing('walk')) leaveWalk()
 }
 
 /** Space (forward) or Shift (back) let go in VIEW: the fly that key drove stops, a different one held keeps its own. */

@@ -53,10 +53,15 @@ export const COLUMNS: readonly Column[] = ['left', 'right']
  * it right after ITEMS wherever the player keeps ITEMS in the left column
  * (after the nearest panel above ITEMS there, when ITEMS was dragged away);
  * every other saved place is kept.
+ *
+ * `modes` (owner, 2026-11-24: a MODES settings panel, hud/ModesPanel.tsx)
+ * sits under the Legend, so Settings keeps its place just above the Legend
+ * that decodes it (2026-10-09), and MODES stands just above Controls, whose
+ * keys follow the mode; a saved order from before gets it there.
  */
 export const DEFAULT_ORDER = {
   left: ['identity', 'items', 'games', 'agents', 'avatars', 'create', 'hidden', 'discovered', 'targets', 'links'],
-  right: ['scale', 'position', 'viewat', 'proof', 'cloud', 'chain', 'hyperspace', 'view', 'legend', 'controls', 'derezz', 'relays', 'tutorial'],
+  right: ['scale', 'position', 'viewat', 'proof', 'cloud', 'chain', 'hyperspace', 'view', 'legend', 'modes', 'controls', 'derezz', 'relays', 'tutorial'],
 } as const satisfies Record<Column, readonly string[]>
 
 export type PanelId = (typeof DEFAULT_ORDER)[Column][number]

@@ -291,8 +291,14 @@ export interface WalkState {
    */
   hardGravity: boolean
   setHardGravity: (on: boolean) => void
-  /** Turn WALK on. Only at your own head; a VIEW in progress ends first. */
-  enter: () => void
+  /**
+   * Turn WALK on. Only at your own head; a VIEW in progress ends first.
+   * `noFall`: GRAVITY waits for the first press before it asks for a floor,
+   * so WALK started by the app itself (MODES' first mode at load,
+   * store/startMode.ts) never falls, makes a hop or turns gravity off
+   * before the player does anything.
+   */
+  enter: (opts?: { noFall?: boolean }) => void
   /** Stop the walk and go back to HOP. The pad's way out, back to the mode WALK came from, is padMode `leaveWalk`. */
   exit: () => void
   /** Stop the walk where the chain is now, and stay in WALK. */
@@ -349,7 +355,7 @@ export const useWalk = create<WalkState>((set, get) => ({
     set({ hardGravity: on })
   },
 
-  enter: () => {
+  enter: (opts) => {
     const cs = useCyberspace.getState()
     if (cs.walking) return
     forgetWaitingMove()
@@ -368,7 +374,7 @@ export const useWalk = create<WalkState>((set, get) => ({
     dropWalkLanes()
     set({ queue: [], open: null, running: null, handed: 0, behind: 0, from: 'hop' })
     refreshDown()
-    if (get().gravity) fallIfAirborne()
+    if (get().gravity && !opts?.noFall) fallIfAirborne()
   },
 
   exit: () => {

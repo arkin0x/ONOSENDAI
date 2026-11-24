@@ -14395,3 +14395,224 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
 .terrain-sheet__keys dt { display: flex; gap: 4px; flex-wrap: wrap; }
 .terrain-sheet__keys dt, .terrain-sheet__keys dd { margin: 0; }
 .terrain-sheet__keys .terrain-key { margin-left: 0; }
+
+/* ---------- MODES (hud/ModesPanel.tsx, store/modeOrder.ts) ----------
+ * The pad's modes in the player's order. Each row a hand-cut chamfered frame
+ * (top-left and bottom-right corners cut, the item-picture corners): the
+ * row is the line's color, clipped, and its ::before the fill, a line's
+ * width in, its cut moved in to match (as .cham-btn). Each mode wears its
+ * pad color on its icon: HOP blue, WALK red, VIEW yellow, BUILD white, SCAN
+ * purple. Words white over a dark shadow. Every row one height, every label
+ * in a kept place: only the row being moved moves. The row lifted glows and
+ * the rows it passes slide (prefers-reduced-motion: no slide). */
+.panel--modes { --modes-row-h: 52px; }
+.modes__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  touch-action: pan-y;
+}
+.modes__list.is-dragging { cursor: grabbing; user-select: none; -webkit-user-select: none; }
+.modes__row {
+  --cham-cut: 10px;
+  --cham-line-w: 1px;
+  --cham-line: rgba(0, 229, 255, 0.28);
+  --cham-fill: rgba(4, 9, 15, 0.92);
+  --mode-color: var(--accent, #00e5ff);
+  --mode-rgb: 0, 229, 255;
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  grid-template-columns: 28px 34px minmax(0, 1fr) 22px auto 30px;
+  align-items: center;
+  column-gap: 6px;
+  height: var(--modes-row-h);
+  padding: 0 6px 0 2px;
+  background: var(--cham-line);
+  clip-path: polygon(var(--cham-cut) 0, 100% 0, 100% calc(100% - var(--cham-cut)), calc(100% - var(--cham-cut)) 100%, 0 100%, 0 var(--cham-cut));
+  transition: background-color 160ms ease, transform 160ms ease;
+}
+.modes__row::before {
+  --in-cut: calc(var(--cham-cut) - var(--cham-line-w) * 0.5858);
+  content: '';
+  position: absolute;
+  inset: var(--cham-line-w);
+  z-index: -1;
+  background:
+    linear-gradient(90deg, rgba(var(--mode-rgb), 0.12), rgba(var(--mode-rgb), 0) 46%),
+    var(--cham-fill);
+  clip-path: polygon(var(--in-cut) 0, 100% 0, 100% calc(100% - var(--in-cut)), calc(100% - var(--in-cut)) 100%, 0 100%, 0 var(--in-cut));
+}
+.modes__row.is-hop { --mode-color: var(--accent, #00e5ff); --mode-rgb: 0, 229, 255; }
+.modes__row.is-walk { --mode-color: var(--danger, #ff3b6b); --mode-rgb: 255, 59, 107; }
+.modes__row.is-view { --mode-color: var(--warn, #ffb020); --mode-rgb: 255, 176, 32; }
+.modes__row.is-build { --mode-color: var(--build, #f2f7ff); --mode-rgb: 242, 247, 255; }
+.modes__row.is-scan { --mode-color: var(--scan, #a98bff); --mode-rgb: var(--scan-rgb, 169, 139, 255); }
+/* The two places with a job of their own: the start and the second button wear a brighter edge. */
+.modes__row.is-start,
+.modes__row.is-second { --cham-line: rgba(var(--mode-rgb), 0.55); }
+.modes__row.is-lifting {
+  --cham-line: var(--mode-color);
+  --cham-fill: rgba(10, 24, 34, 0.98);
+  z-index: 1;
+  transform: scale(1.02);
+  filter: drop-shadow(0 0 10px rgba(var(--mode-rgb), 0.45));
+}
+.modes__row.is-off { --cham-line: rgba(91, 125, 143, 0.35); --mode-rgb: 91, 125, 143; }
+.modes__row.is-off .modes__icon,
+.modes__row.is-off .modes__word { opacity: 0.45; }
+.modes__grip,
+.modes__up,
+.modes__down {
+  all: unset;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(200, 245, 255, 0.7);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.modes__grip {
+  width: 28px;
+  height: 100%;
+  cursor: grab;
+  touch-action: none;
+}
+.modes__list.is-dragging .modes__grip { cursor: grabbing; }
+.modes__grip:hover,
+.modes__up:not(:disabled):hover,
+.modes__down:not(:disabled):hover { color: #fff; }
+.modes__grip:focus-visible,
+.modes__up:focus-visible,
+.modes__down:focus-visible { outline: 1px solid var(--accent, #00e5ff); outline-offset: -2px; color: #fff; }
+/* The icon in its own small chamfer, the mode's color for line and glyph. */
+.modes__icon {
+  position: relative;
+  width: 34px;
+  height: 34px;
+  background: rgba(var(--mode-rgb), 0.55);
+  clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px);
+}
+.modes__icon-in {
+  position: absolute;
+  inset: 1px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--mode-color);
+  background: rgba(4, 9, 15, 0.94);
+  clip-path: polygon(7.4px 0, 100% 0, 100% calc(100% - 7.4px), calc(100% - 7.4px) 100%, 0 100%, 0 7.4px);
+}
+.modes__text {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+  min-width: 0;
+  cursor: pointer;
+}
+.modes__word {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  line-height: 1.1;
+  color: #fff;
+  text-shadow: 0 0 1px #000, 0 1px 3px rgba(0, 0, 0, 0.9);
+  white-space: nowrap;
+}
+.modes__role {
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  line-height: 1.1;
+  text-transform: uppercase;
+  color: #fff;
+  opacity: 0.72;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.modes__row.is-start .modes__role,
+.modes__row.is-second .modes__role { color: var(--mode-color); opacity: 1; }
+.modes__row.is-build.is-start .modes__role,
+.modes__row.is-build.is-second .modes__role { color: #fff; }
+/* The mode's own key, in a kept slot so rows without one line up with rows that have one. */
+.modes__key { display: flex; justify-content: center; }
+.modes__key kbd { font-size: 9px; padding: 1px 4px; color: #fff; }
+.modes__switch:disabled { opacity: 0.55; cursor: not-allowed; }
+.modes__moves { display: flex; flex-direction: column; height: 100%; }
+.modes__up,
+.modes__down { width: 30px; flex: 1; }
+.modes__up:disabled,
+.modes__down:disabled { opacity: 0.22; cursor: default; }
+/* What a move did, read out and never shown. */
+.modes__said { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+/* One line, its height kept whatever it says. */
+.modes__hint {
+  margin: 8px 0 0;
+  min-height: 1.4em;
+  font-size: 10px;
+  line-height: 1.4;
+  color: #fff;
+  opacity: 0.7;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+}
+.modes__reset {
+  --cham-line: rgba(0, 229, 255, 0.45);
+  --cham-fill: rgba(4, 9, 15, 0.94);
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  padding: 0;
+  color: #fff;
+  font: inherit;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  cursor: pointer;
+}
+.modes__reset-in { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 36px; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9); }
+.modes__reset:not(:disabled):hover,
+.modes__reset:focus-visible { --cham-fill: #0a1f29; --cham-line: var(--accent, #00e5ff); }
+.modes__reset:disabled { opacity: 0.4; cursor: default; }
+@media (prefers-reduced-motion: reduce) {
+  .modes__row { transition: none; }
+  .modes__row.is-lifting { transform: none; }
+}
+
+/* WALK in the mode button's slot, for a MODES list that puts WALK in the
+ * ring (store/modeOrder.ts): WALK's red, lit while walking, as the other
+ * modes wear theirs. */
+.touchops__commit.is-walk { transition: color 400ms ease, background-color 400ms ease, border-color 400ms ease, box-shadow 400ms ease; }
+.touchops__commit.is-walk:not(.is-on) { color: var(--danger, #ff3b6b); border-color: rgba(255, 59, 107, 0.45); }
+.touchops__commit.is-walk.is-on {
+  color: #05070d;
+  background: var(--danger, #ff3b6b);
+  border-color: var(--danger, #ff3b6b);
+  font-weight: 700;
+}
+/* Another mode as the second button (MODES), in RECALL's slot where WALK
+ * stands by default: dim, its words in the mode's color on the dark ground;
+ * lit, the mode's fill. Above every mode's tint on RECALL's slot, as WALK's. */
+.touchops .touchops__cancel.touchops__second { --second: var(--accent, #00e5ff); --second-rgb: 0, 229, 255; font-weight: 700; background-image: none; transition: color 400ms ease, background-color 400ms ease, border-color 400ms ease; }
+.touchops .touchops__cancel.touchops__second.is-view { --second: var(--warn, #ffb020); --second-rgb: 255, 176, 32; }
+.touchops .touchops__cancel.touchops__second.is-build { --second: var(--build, #f2f7ff); --second-rgb: 242, 247, 255; }
+.touchops .touchops__cancel.touchops__second.is-scan { --second: var(--scan, #a98bff); --second-rgb: var(--scan-rgb, 169, 139, 255); }
+.touchops .touchops__cancel.touchops__second.is-dim {
+  color: var(--second);
+  border-color: rgba(var(--second-rgb), 0.42);
+  background-color: rgba(6, 14, 22, 0.8);
+}
+.touchops .touchops__cancel.touchops__second.is-on {
+  color: #05070d;
+  background-color: var(--second);
+  border-color: var(--second);
+}
+.touchops .touchops__cancel.touchops__second:disabled { opacity: 0.45; cursor: not-allowed; }
+@media (prefers-reduced-motion: reduce) {
+  .touchops__commit.is-walk,
+  .touchops .touchops__cancel.touchops__second { transition: none; }
+}

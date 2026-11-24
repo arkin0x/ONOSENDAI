@@ -2,7 +2,8 @@
  * terrain-layout.mjs: TERRAIN's HUD boxes never overlap (owner, 2026-11-24:
  * "survey button is overlapped with the chat panel").
  *
- * Opens TERRAIN in a browser at each size, with the menu closed and (on a
+ * Opens TERRAIN in a browser at each size (930x900 is a tablet, or a phone
+ * on its side, where CHAT drops its word to the bubble beside the hotbar), with the menu closed and (on a
  * wide screen, where the scene stays beside it) open, and checks that the
  * boxes of the hotbar, SURVEY (with its hold bar), PLACE, CHAT, the walk
  * pad, the menu button, JUMP and DOWN, the LOOK ball, the commit block, the
@@ -20,6 +21,8 @@ const SIZES = [
   { name: '375 portrait', w: 375, h: 812, touch: true },
   { name: '430 portrait', w: 430, h: 932, touch: true },
   { name: 'landscape', w: 812, h: 375, touch: true },
+  { name: '700x900', w: 700, h: 900, touch: true },
+  { name: '930x900', w: 930, h: 900, touch: true },
   { name: '1366x662', w: 1366, h: 662, touch: false },
   { name: '1440x900', w: 1440, h: 900, touch: false },
 ]

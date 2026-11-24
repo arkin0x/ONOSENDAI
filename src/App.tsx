@@ -183,7 +183,7 @@ export default function App(): JSX.Element {
   useEffect(() => watchArrivalMode(), [])
   // MODES (store/modeOrder.ts): the player's list follows the identity, the
   // dim mode button remembers the last ring mode, and the app starts in the
-  // list's first mode on a plain load (store/startMode.ts).
+  // list's Default Mode on a plain load (store/startMode.ts).
   useEffect(() => { startModes() }, [])
   useEffect(() => watchLastRing(), [])
   useEffect(() => watchStartMode(), [])

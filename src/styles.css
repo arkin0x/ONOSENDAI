@@ -14039,6 +14039,15 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
   touch-action: pan-y;
 }
 .modes__list.is-dragging { cursor: grabbing; user-select: none; -webkit-user-select: none; }
+/* The rule under the Toggle Mode slot: the slot is its own, the ring below it. */
+.modes__rule { display: flex; align-items: center; height: 9px; }
+.modes__rule hr {
+  flex: 1;
+  margin: 0;
+  border: 0;
+  height: 1px;
+  background: linear-gradient(90deg, rgba(0, 229, 255, 0.55), rgba(0, 229, 255, 0.12));
+}
 .modes__row {
   --cham-cut: 10px;
   --cham-line-w: 1px;
@@ -14074,7 +14083,7 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
 .modes__row.is-view { --mode-color: var(--warn, #ffb020); --mode-rgb: 255, 176, 32; }
 .modes__row.is-build { --mode-color: var(--build, #f2f7ff); --mode-rgb: 242, 247, 255; }
 .modes__row.is-scan { --mode-color: var(--scan, #a98bff); --mode-rgb: var(--scan-rgb, 169, 139, 255); }
-/* The two places with a job of their own: the start and the second button wear a brighter edge. */
+/* The two places with a job of their own: the Default Mode and the Toggle Mode wear a brighter edge. */
 .modes__row.is-start,
 .modes__row.is-second { --cham-line: rgba(var(--mode-rgb), 0.55); }
 .modes__row.is-lifting {

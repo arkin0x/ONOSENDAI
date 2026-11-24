@@ -699,11 +699,11 @@ export function Hud({ menuOpen = false }: { menuOpen?: boolean }): JSX.Element {
   // HOSAKA outranks even that: while a payment is awaited or a job is under
   // way the cloud panel takes the first panel position, under the brand.
   const cloudLeads = useCyberspace((s) => s.cloud.status === 'awaiting_payment' || jobInProgress(s.cloud.status))
-  // A move being computed outranks everything: wherever the work is happening,
-  // the proof panel is the thing you are watching, so it takes the first
-  // position and HOSAKA falls in behind it rather than above it.
-  const proofLeads = useCyberspace((s) => s.proof.status === 'computing')
-  // A free view puts the View panel first, above even a move under way
+  // A move being computed does not move the proof panel: it stays in its own
+  // place while it works (owner, 2026-11-24: "currently when a proof is in
+  // progress the movement proof panel is promoted to the top of the menu.
+  // this was a mistake").
+  // A free view puts the View panel first
   // (arkinox, 2026-11-02: "rises to position 1 while VIEW mode is active"):
   // its figures are the view's cursor. BUILD mode does too: it put the
   // Position panel first (arkinox, 2026-10-08) because VIEW, RECENT and the
@@ -738,7 +738,6 @@ export function Hud({ menuOpen = false }: { menuOpen?: boolean }): JSX.Element {
   const leads: PanelId[] = front ? [front] : []
   const lead = (id: PanelId): void => { if (!leads.includes(id)) leads.push(id) }
   if (building || freeView) lead('viewat')
-  if (proofLeads) lead('proof')
   if (cloudLeads) lead('cloud')
   if (rideSet) lead('hyperspace')
   // AGENTS is drawn for everyone, as a BETA (arkinox, 2026-10-13: "ship it

@@ -323,10 +323,11 @@ export function TouchControls(): JSX.Element {
   // it, disabled); lit in WALK; STOP in WALK while steps wait on their
   // proofs; RECALL with the cursor off your avatar.
   //
-  // MODES (store/modeOrder.ts) makes WALK the default list's second button:
-  // the slot holds whichever mode the player's list puts second, the same
-  // way, dim to go in and lit to go back, and RECALL or STOP otherwise. With
-  // only one mode on there is no second button, and the slot is RECALL's.
+  // MODES (store/modeOrder.ts) makes WALK the default list's Toggle Mode:
+  // the slot holds whichever mode the player's list puts in the toggle slot,
+  // the same way, dim to go in and lit to go back, and RECALL or STOP
+  // otherwise. With the toggle switched off there is no second button, and
+  // the slot is RECALL's.
   const stopping = walking && (computing || behind > 0)
   const roles = useModeRoles()
   const modes = useEffectiveModes()

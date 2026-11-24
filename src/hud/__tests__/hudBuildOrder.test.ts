@@ -97,12 +97,14 @@ describe('the View panel in BUILD mode', () => {
     expect(right).toContain('PositionPanel')
   })
 
-  it('outranks a move under way, which otherwise leads the menu', () => {
+  it('leads while a move is under way, and the proof panel stays in its own place', () => {
     useCyberspace.setState({ proof: { ...useCyberspace.getState().proof, status: 'computing' } })
     try {
-      expect(columns().left.slice(0, 2)).toEqual(['Brand', 'ProofPanel'])
       useBuilder.getState().enter('build')
-      expect(columns().left.slice(0, 3)).toEqual(['Brand', 'ViewAtPanel', 'ProofPanel'])
+      const { left, right } = columns()
+      expect(left.slice(0, 2)).toEqual(['Brand', 'ViewAtPanel'])
+      expect(left).not.toContain('ProofPanel')
+      expect(right).toContain('ProofPanel')
     } finally {
       useCyberspace.setState({ proof: { ...useCyberspace.getState().proof, status: 'idle' } })
     }
@@ -115,6 +117,20 @@ describe('the View panel in BUILD mode', () => {
     const { left, right } = columns()
     expect(left).not.toContain('ViewAtPanel')
     expect(right).toContain('ViewAtPanel')
+  })
+})
+
+describe('the proof panel while a move is computed (owner, 2026-11-24: "please remove this and leave the panel where it is while it is calculating")', () => {
+  it('is never promoted: the menu is in the same order computing as idle, on both columns', () => {
+    const idle = columns()
+    expect(idle.right).toContain('ProofPanel')
+    useCyberspace.setState({ proof: { ...useCyberspace.getState().proof, status: 'computing' } })
+    try {
+      expect(columns()).toEqual(idle)
+    } finally {
+      useCyberspace.setState({ proof: { ...useCyberspace.getState().proof, status: 'idle' } })
+    }
+    expect(columns()).toEqual(idle)
   })
 })
 
@@ -132,7 +148,7 @@ describe('the View panel in the menu (arkinox, 2026-10-09)', () => {
     expect(afterView()).toBe('Legend')
   })
 
-  it('stays immediately before the Legend while BUILD mode or a move under way reorders the menu', () => {
+  it('stays immediately before the Legend while BUILD mode reorders the menu, and while a move is under way', () => {
     useBuilder.getState().enter('build')
     expect(afterView()).toBe('Legend')
     useCyberspace.setState({ proof: { ...useCyberspace.getState().proof, status: 'computing' } })
@@ -273,16 +289,18 @@ describe('the saved panel layout (arkinox, 2026-10-10)', () => {
   })
 
   it('a panel saved into the left column still leads while its state holds, and is not drawn twice', () => {
-    usePanelLayout.setState({ order: moveBefore(defaultOrder(), 'proof', null, 'left') })
-    useCyberspace.setState({ proof: { ...useCyberspace.getState().proof, status: 'computing' } })
+    // HOSAKA awaiting a payment leads (the proof panel no longer does: owner, 2026-11-24).
+    usePanelLayout.setState({ order: moveBefore(defaultOrder(), 'cloud', null, 'left') })
+    const was = useCyberspace.getState().cloud
+    useCyberspace.setState({ cloud: { ...was, status: 'awaiting_payment' } })
     try {
       const { left } = columns()
-      expect(left.slice(0, 2)).toEqual(['Brand', 'ProofPanel'])
-      expect(left.filter((n) => n === 'ProofPanel')).toHaveLength(1)
+      expect(left.slice(0, 2)).toEqual(['Brand', 'CloudPanel'])
+      expect(left.filter((n) => n === 'CloudPanel')).toHaveLength(1)
     } finally {
-      useCyberspace.setState({ proof: { ...useCyberspace.getState().proof, status: 'idle' } })
+      useCyberspace.setState({ cloud: was })
     }
-    expect(columns().left.slice(-1)).toEqual(['ProofPanel'])
+    expect(columns().left.slice(-1)).toEqual(['CloudPanel'])
   })
 
   it('a slot is folded when saved so, and only a folded panel that is not leading has a grip', () => {

@@ -27,10 +27,11 @@
  *
  * MODES (owner, 2026-11-24; store/modeOrder.ts) makes all of this the
  * default list: the player can put the modes in any order and switch some
- * off. The first is where the app starts (watchStartMode), the first on
- * after it is the second button in RECALL's slot (WALK's place above), and
- * the ring is the first and every other mode on. A mode not in the ring (the
- * second button's, or one switched off and asked for by name, as B asks for
+ * off. The first place is the Toggle Mode, the second button in RECALL's
+ * slot (WALK's place above). Below it is the ring: the Default Mode, where
+ * the app starts (watchStartMode), and every other mode on after it, which
+ * the mode button goes down through. A mode not in the ring (the toggle's,
+ * or one switched off and asked for by name, as B asks for
  * BUILD) is a visit: the mode button is the way back, dim, as in WALK.
  * Going between two modes keeps the hand-offs above where the default ring
  * has them (BUILD where VIEW looked, SCAN where BUILD's cursor was), and
@@ -253,7 +254,7 @@ export function switchMode(to: PadMode, opts?: { noFall?: boolean }): void {
 /**
  * Where the dim mode button goes back to from a mode not in the ring: WALK's
  * own `from` (enterWalk), else the mode the second button was pressed from,
- * else the last ring mode the pad was in, else the first mode.
+ * else the last ring mode the pad was in, else the default mode.
  */
 export function backOf(current: PadMode = currentPadMode()): ModeId {
   if (current === 'walk') return useWalk.getState().from
@@ -293,7 +294,7 @@ export function cycleMode(): void {
 /**
  * Out of a mode not in the ring, back to where it came from (backOf). WALK
  * the pad's way (leaveWalk). A way back that will not open here falls back
- * to the first mode, then to HOP, so the dim button never does nothing.
+ * to the default mode, then to HOP, so the dim button never does nothing.
  */
 export function goBack(): void {
   const cur = currentPadMode()

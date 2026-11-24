@@ -26,7 +26,7 @@
  * (moveModeTo). Without dragging: the up and down buttons, or ArrowUp and
  * ArrowDown on a focused grip, a place at a time.
  *
- * The default mode is always on (its switch is disabled, and a mode moved
+ * The Default Mode is always on (its switch is disabled, and a mode moved
  * to that place is switched on). The toggle's switch off leaves no second
  * button, and RECALL has the slot. RESET TO DEFAULT puts today's pad back:
  * WALK the toggle, then HOP, VIEW, BUILD, SCAN, all on. Nothing here
@@ -79,7 +79,7 @@ export function dropIndex(rows: ReadonlyArray<{ id: string; top: number; height:
   return at
 }
 
-export const MODES_HINT = 'The default mode is always on.'
+export const MODES_HINT = 'The Default Mode is always on.'
 
 export function ModesPanel(): JSX.Element {
   const s = useStoredModes()
@@ -201,8 +201,8 @@ export function ModesPanel(): JSX.Element {
                 className="modes__switch"
                 checked={!off}
                 disabled={lockedOn}
-                title={lockedOn ? 'The default mode is always on'
-                  : i === TOGGLE_AT ? (off ? `Turn ${info.word} on: back on the second button` : `Turn ${info.word} off: no second button${info.key ? `, still opens with ${info.key}` : ''}`)
+                title={lockedOn ? 'The Default Mode is always on'
+                  : i === TOGGLE_AT ? (off ? `Turn ${info.word} on: back on the pad as the Toggle Mode` : `Turn ${info.word} off: no Toggle Mode on the pad${info.key ? `, still opens with ${info.key}` : ''}`)
                   : off ? `Turn ${info.word} on` : `Turn ${info.word} off: out of the turns${info.key ? `, still opens with ${info.key}` : ''}`}
                 aria-label={info.word}
                 onCheckedChange={(on) => updateModes((cur) => setModeOn(cur, id, on))}
@@ -227,14 +227,14 @@ export function ModesPanel(): JSX.Element {
         <span className="modes__reset-in"><RotateCcw size={14} strokeWidth={2.25} aria-hidden />RESET TO DEFAULT</span>
       </button>
       <Explanation>
-        The Toggle Mode, above the line, is the second button beside the mode
+        The Toggle Mode, above the line, has its own button beside the mode
         button, where WALK is at first: press it to go in and again to come
         back. Below the line, the Default Mode is the one you start in, and
         the mode button goes down through it and the rest in this order. Drag
         a mode into the Toggle Mode to trade the two. A mode turned off leaves
         the turns but still opens by its key (B for BUILD, N for SCAN), from
-        the tutorial and from links; the Toggle Mode turned off leaves no
-        second button. Drag a grip to move a mode, or use the arrows. Kept
+        the tutorial and from links; the Toggle Mode turned off leaves its
+        button off the pad. Drag a grip to move a mode, or use the arrows. Kept
         for this identity on this device.
       </Explanation>
     </section>

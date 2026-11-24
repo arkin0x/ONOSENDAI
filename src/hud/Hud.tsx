@@ -444,7 +444,7 @@ function ScalePanel(): JSX.Element {
   return (
     <section className="panel">
       <header className="panel__head">
-        <h2>Scale &amp; view</h2>
+        <h2>Scale</h2>
         <span className="scale-exp">2^{scaleExp}</span>
       </header>
 
@@ -703,8 +703,8 @@ export function Hud({ menuOpen = false }: { menuOpen?: boolean }): JSX.Element {
   // place while it works (owner, 2026-11-24: "currently when a proof is in
   // progress the movement proof panel is promoted to the top of the menu.
   // this was a mistake").
-  // A free view puts the View panel first
-  // (arkinox, 2026-11-02: "rises to position 1 while VIEW mode is active"):
+  // A free view puts the View panel first (arkinox, 2026-11-02: "rises to
+  // position 1 while VIEW mode is active"):
   // its figures are the view's cursor. BUILD mode does too: it put the
   // Position panel first (arkinox, 2026-10-08) because VIEW, RECENT and the
   // starred places there are how the build cursor jumps, and those moved to

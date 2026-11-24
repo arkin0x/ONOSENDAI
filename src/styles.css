@@ -611,7 +611,7 @@ body {
   text-shadow: 0 0 3px rgba(0, 0, 0, 0.8);
 }
 
-/* Scale & view in two columns: the key and the view facts beside the ladder,
+/* Scale in two columns: the key and the view facts beside the ladder,
  * which is as tall as both of them together. */
 .scale__cols {
   display: grid;

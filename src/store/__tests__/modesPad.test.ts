@@ -57,7 +57,7 @@ import { useWalk } from '../useWalk'
 import { useScan } from '../useScan'
 import { useTutorial } from '../useTutorial'
 import { useTv } from '../useTv'
-import { currentPadMode, cycleMode, enterWalk, goBack, pressSecond, switchMode, watchLastRing } from '../padMode'
+import { backOf, currentPadMode, cycleMode, enterWalk, goBack, pressSecond, switchMode, watchLastRing } from '../padMode'
 import { modeRoles, resetModes, setModeOn, updateModes, useModes, type ModeId, type ModeSettings } from '../modeOrder'
 import { applyStartMode, headSettled, untouchedStart, watchStartMode, worldSettled } from '../startMode'
 import { stopSpectating } from '../../lib/spectator'
@@ -360,6 +360,36 @@ describe('never stuck', () => {
     goBack()
     expect(currentPadMode()).toBe('hop')
   })
+})
+
+describe('the toggle never moves the ring (owner, 2026-11-24: "the main mode button turns to hop even when it wasnt hop before. it should remain what it was before")', () => {
+  const ALL: ModeId[] = ['hop', 'walk', 'view', 'build', 'scan']
+  for (const toggle of ALL) {
+    const ring = ALL.filter((m) => m !== toggle)
+    ring.forEach((at, i) => {
+      it(`${toggle.toUpperCase()} in the toggle slot, the ring on ${at.toUpperCase()}: in, and back to ${at.toUpperCase()}, the ring where it was`, () => {
+        setList([toggle, ...ring])
+        // Round the ring to its place by the mode button, as a player gets there.
+        if (currentPadMode() !== ring[0]) switchMode(ring[0])
+        for (let k = 0; k < i; k++) cycleMode()
+        expect(currentPadMode()).toBe(at)
+        pressSecond()
+        expect(currentPadMode()).toBe(toggle)
+        // The dim mode button names the mode it was on (WALK keeps its own way back).
+        expect(toggle === 'walk' ? useWalk.getState().from : backOf()).toBe(at)
+        pressSecond()
+        expect(currentPadMode()).toBe(at)
+        // In, and out by the dim mode button instead: the same.
+        pressSecond()
+        expect(currentPadMode()).toBe(toggle)
+        cycleMode()
+        expect(currentPadMode()).toBe(at)
+        // The ring goes on from where it was.
+        cycleMode()
+        expect(currentPadMode()).toBe(ring[(i + 1) % ring.length])
+      })
+    })
+  }
 })
 
 describe('the newcomer view', () => {

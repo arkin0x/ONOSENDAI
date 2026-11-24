@@ -240,6 +240,22 @@ describe('a list kept before the toggle slot (v1, PR #915): the same pad', () =>
     for (const [order, off] of lists) expect(rolesOf(v1(order, off)!), order.join()).toEqual(v1Roles(order, off))
   })
 
+  it('a mode added since v1 never takes the old second button or the start', () => {
+    // A later version with TERRAIN after WALK: only the modes v1 knew decide the toggle and the start.
+    const later = ['walk', 'terrain', 'hop', 'view', 'build', 'scan'] as ModeId[]
+    const a = fromV1({ order: ['walk', 'hop', 'view', 'build', 'scan'], off: [] }, later)
+    expect(a.order).toEqual(['hop', 'walk', 'terrain', 'view', 'build', 'scan'])
+    expect(rolesOf(a)).toMatchObject({ start: 'walk', second: 'hop' })
+    const b = fromV1({ order: ['hop', 'walk', 'view', 'build', 'scan'], off: ['walk'] }, later)
+    expect(rolesOf(b)).toMatchObject({ start: 'hop', second: 'view' })
+    expect(b.order).toEqual(['view', 'hop', 'walk', 'terrain', 'build', 'scan'])
+  })
+
+  it('a later version reads as this one, never as v1', () => {
+    localStorage.setItem(MODES_PREFIX + A, JSON.stringify({ v: 3, order: ['build', 'walk', 'hop', 'view', 'scan'], off: [] }))
+    expect(readModes(A)!.order).toEqual(['build', 'walk', 'hop', 'view', 'scan'])
+  })
+
   it('a record with no version is read as v1; the next change writes v2', () => {
     localStorage.setItem(MODES_PREFIX + A, JSON.stringify({ order: ['walk', 'build', 'hop', 'view', 'scan'], off: [] }))
     expect(storedModes().order).toEqual(['build', 'walk', 'hop', 'view', 'scan'])

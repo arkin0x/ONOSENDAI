@@ -174,6 +174,9 @@ export function mergeModes(saved: unknown, defaults: readonly ModeId[] = DEFAULT
   return guarded(order, off)
 }
 
+/** The modes a v1 record could hold, in v1's default order (PR #915). */
+const V1_MODES: readonly ModeId[] = ['hop', 'walk', 'view', 'build', 'scan']
+
 /**
  * A list kept before the toggle slot (record v1; see the header) as the
  * same pad: its first mode (always on) was the start, the first mode on
@@ -182,12 +185,14 @@ export function mergeModes(saved: unknown, defaults: readonly ModeId[] = DEFAULT
  * one mode on there was no second button: the mode after the start goes to
  * the slot, still off, so there is none now either.
  */
-export function fromV1(saved: unknown): ModeSettings {
-  const { order, off } = mergeList(saved, MODES.map((m) => m.id), 0, -1)
+export function fromV1(saved: unknown, defaults: readonly ModeId[] = DEFAULT_MODE_ORDER): ModeSettings {
+  // Read against the modes v1 knew, so a mode added since (TERRAIN) never
+  // takes the old second button; mergeModes then adds it by the new rules.
+  const { order, off } = mergeList(saved, V1_MODES.filter((id) => defaults.includes(id)), 0, -1)
   const start = order[0]
   const on = (id: ModeId): boolean => id === start || !off.includes(id)
   const toggle = order.find((id) => id !== start && on(id)) ?? order[1]
-  return mergeModes({ order: [toggle, ...order.filter((id) => id !== toggle)], off })
+  return mergeModes({ order: [toggle, ...order.filter((id) => id !== toggle)], off }, defaults)
 }
 
 /** What the list makes of the pad (ModeRoles). */
@@ -268,7 +273,7 @@ export function nextInRing(s: ModeSettings, current: ModeId): ModeId {
 // ---------- Kept per identity ----------
 
 export const MODES_PREFIX = 'onosendai:modes:'
-/** 2: the toggle slot first (2026-11-24). 1, or no version: the start first (fromV1). */
+/** 2: the toggle slot first (2026-11-24); a later version reads the same way. 1, or no version: the start first (fromV1). */
 const RECORD_VERSION = 2
 
 /** The stored list for `pubkey`, merged against this version's modes; null when there is none (the default applies). */
@@ -278,7 +283,7 @@ export function readModes(pubkey: string): ModeSettings | null {
   if (!raw) return null
   try {
     const saved = JSON.parse(raw) as { v?: unknown } | null
-    return saved && typeof saved === 'object' && saved.v === RECORD_VERSION ? mergeModes(saved) : fromV1(saved)
+    return saved && typeof saved === 'object' && typeof saved.v === 'number' && saved.v >= RECORD_VERSION ? mergeModes(saved) : fromV1(saved)
   } catch { return null }
 }
 

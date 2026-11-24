@@ -82,10 +82,10 @@ afterEach(() => {
 })
 
 describe('the View panel in BUILD mode', () => {
-  it('is in its own place, in the right column under Position, while the mode is off', () => {
+  it('is in its own place, in the right column under Position and Scale, while the mode is off', () => {
     const { left, right } = columns()
     expect(left).not.toContain('ViewAtPanel')
-    expect(right.slice(1, 3)).toEqual(['PositionPanel', 'ViewAtPanel'])
+    expect(right.slice(2, 5)).toEqual(['PositionPanel', 'ScalePanel', 'ViewAtPanel'])
   })
 
   it('is the first panel, under the brand, while the mode is on, and only there; Position stays put', () => {
@@ -237,7 +237,7 @@ describe('the saved panel layout (arkinox, 2026-10-10)', () => {
     const { left, right } = columns()
     expect(left).toEqual(['Brand', 'RelaysPanel', 'IdentityPanel', 'InventoryPanel', 'GamesPanel', 'AgentsPanel', 'AvatarsPanel', 'ShardsPanel', 'DiscoveredPanel', 'TargetsPanel', 'LinksPanel'])
     // TUTORIAL is drawn for everyone since the tutorial went on by default (2026-11-13).
-    expect(right).toEqual(['ScalePanel', 'PositionPanel', 'ViewAtPanel', 'ProofPanel', 'CloudPanel', 'ChainPanel', 'HyperspacePanel', 'ViewPanel', 'Legend', 'ModesPanel', 'Controls', 'DerezzPanel', 'TutorialPanel', 'HiddenPanel'])
+    expect(right).toEqual(['ModesPanel', 'TutorialPanel', 'PositionPanel', 'ScalePanel', 'ViewAtPanel', 'ProofPanel', 'CloudPanel', 'ChainPanel', 'HyperspacePanel', 'ViewPanel', 'Legend', 'Controls', 'DerezzPanel', 'HiddenPanel'])
   })
 
   it('GAMES is drawn for everyone, right under ITEMS, found games or not (owner, 2026-11-13)', () => {
@@ -283,8 +283,8 @@ describe('the saved panel layout (arkinox, 2026-10-10)', () => {
     useBuilder.getState().exit()
     useCyberspace.getState().clearFocus()
     const { right } = columns()
-    // TUTORIAL stays the last panel of all (usePanelLayout), drawn for everyone since 2026-11-13.
-    expect(right.slice(-3)).toEqual(['ViewAtPanel', 'RelaysPanel', 'TutorialPanel'])
+    // DEREZZ stays the last panel of all (usePanelLayout; owner, 2026-11-24).
+    expect(right.slice(-3)).toEqual(['ViewAtPanel', 'RelaysPanel', 'DerezzPanel'])
     expect(usePanelLayout.getState().order).toBe(order)
   })
 

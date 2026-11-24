@@ -83,6 +83,8 @@ export const REVEAL: Readonly<Record<RevealId, RevealAt>> = {
   'panel.legend': 'never',
   'panel.derezz': 'never',
   'panel.relays': 'never',
+  // MODES: the newcomer view's pad is the default one (store/modeOrder.ts).
+  'panel.modes': 'never',
 }
 
 /** How the newcomer view stands for the identity on screen. */

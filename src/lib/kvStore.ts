@@ -104,6 +104,8 @@ export const MOVED_PREFIXES: readonly string[] = [
   'onosendai:newcomer:',
   // Settings > Effects > Sound effects per player (store/sfxSwitch.ts): on or off.
   'onosendai:sfx:',
+  // The MODES list per player (store/modeOrder.ts): the pad's modes in order, and the ones switched off.
+  'onosendai:modes:',
 ]
 
 /**

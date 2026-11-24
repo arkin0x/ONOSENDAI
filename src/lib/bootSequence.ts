@@ -36,6 +36,8 @@ export interface BootSteps {
   /** `late()` turns true once the app has loaded without waiting for it: write nothing then. `writable` settles when the kv step has. */
   repair: (late: () => boolean, writable: Promise<unknown>) => Promise<unknown>
   loadApp: () => Promise<unknown>
+  /** The app's chunk failed to load or to run: told once, after the console. */
+  onFail?: (err: unknown) => void
 }
 
 /** The most the repair may hold the app past the kv step: its read is given signerPrefRepair REPAIR_WAIT_MS from there, and its chunk may still be arriving on a cold load. */
@@ -51,5 +53,8 @@ export function runBoot(steps: BootSteps, repairCapMs = REPAIR_CAP_MS): Promise<
     .finally(() => { clearTimeout(timer); late = true })
   return Promise.all([kv, capped])
     .then(() => steps.loadApp())
-    .then(() => undefined, (err: unknown) => { console.error('[boot] the app could not load:', err) })
+    .then(() => undefined, (err: unknown) => {
+      console.error('[boot] the app could not load:', err)
+      try { steps.onFail?.(err) } catch { /* the page's word is a courtesy; the console has it */ }
+    })
 }

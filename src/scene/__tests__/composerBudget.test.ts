@@ -60,6 +60,6 @@ describe('the scene uses it', () => {
   })
   it('keeps the sample count outside the render, so no render makes a new composer', () => {
     expect(budget).toMatch(/^export const COMPOSER_SAMPLES = /m)
-    expect(scene).toMatch(/import \{ COMPOSER_SAMPLES \} from '\.\/composerBudget'/)
+    expect(scene).toMatch(/import \{[^}]*\bCOMPOSER_SAMPLES\b[^}]*\} from '\.\/composerBudget'/)
   })
 })

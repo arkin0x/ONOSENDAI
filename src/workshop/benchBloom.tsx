@@ -21,7 +21,7 @@ import { useCallback, useEffect, useMemo, useRef } from 'react'
 import { EffectComposer } from '@react-three/postprocessing'
 import type { EffectComposer as PostComposer } from 'postprocessing'
 import { WorldBloom, resolveColourOnly } from '../scene/worldBloom'
-import { COMPOSER_SAMPLES } from '../scene/composerBudget'
+import { COMPOSER_SAMPLES, useComposerBufferType } from '../scene/composerBudget'
 
 export function BenchBloom(): JSX.Element {
   const composer = useRef<PostComposer | null>(null)
@@ -31,6 +31,7 @@ export function BenchBloom(): JSX.Element {
   }, [])
   // Made once: the wrapper rebuilds its passes whenever its children are a new element (Scene.tsx).
   const bloom = useMemo(() => <WorldBloom />, [])
+  const bufferType = useComposerBufferType()
   useEffect(() => {
     // The passes as built (the wrapper adds them in its layout effect, before this
     // runs); on unmount it takes its effect passes off again without disposing them.
@@ -49,7 +50,7 @@ export function BenchBloom(): JSX.Element {
     }
   }, [])
   return (
-    <EffectComposer ref={hold} stencilBuffer multisampling={COMPOSER_SAMPLES}>
+    <EffectComposer ref={hold} stencilBuffer multisampling={COMPOSER_SAMPLES} frameBufferType={bufferType}>
       {bloom}
     </EffectComposer>
   )

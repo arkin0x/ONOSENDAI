@@ -44,6 +44,48 @@ Clone both repos as siblings, and build the core once:
 cd ../cyberspace-cli-js && npm install && npm run build
 ```
 
+## Browsers
+
+The oldest browser ONOSENDAI supports is **Safari 15.4**, so the minimum
+for iPhone and iPad is **iOS / iPadOS 15.4**. On iPhone and iPad every
+browser (Safari, Brave, Chrome, Firefox) runs on Apple's WebKit, so the
+iOS version is what counts, not the browser. On a computer or Android: a
+current Chrome, Firefox, Edge or Safari.
+
+Why 15.4:
+
+- **WebGL 2.** three.js (r163 and later) draws only with WebGL 2, which
+  Safari has had since 15.0. Without it nothing can be drawn at all.
+- **JavaScript.** The app calls `Object.hasOwn`, `Array.prototype.at` and
+  `findLast`, and `structuredClone`, all Safari 15.4, without a fallback.
+  Every device that ran iOS 15.0 can update to 15.8 for free, so 15.4 asks
+  nothing of the hardware beyond what 15.0 does.
+- **CSS.** `:has()` and `dvh` are Safari 15.4 too. The few newer things
+  (`color-mix()` 16.2, container queries 16.0, `-webkit-backdrop-filter`
+  before Safari 18) have fallbacks or are cosmetic.
+
+What holds it there:
+
+- `vite.config.ts` builds for `safari15.4`: esbuild writes newer syntax in
+  older words (a class static block, a regex lookbehind as `new RegExp`)
+  and adds the CSS prefixes Safari still needs.
+- `index.html` runs a small ES5 preflight before the app
+  (`src/lib/preflight.ts`). A browser without WebGL 2 or without the
+  Safari 15.4 JavaScript gets a page in plain words saying what is missing
+  and what works, instead of a spinning wordmark or a half-drawn page. If
+  the app's script fails to load or run, the same page says it could not
+  start, with the reason and RELOAD.
+- A render that throws shows its error and RELOAD (`hud/CrashNote.tsx`)
+  around the 3D view, each coach, the HUD, the modals and the whole app,
+  never a black page.
+- `src/lib/__tests__/preflight.test.ts` keeps regex lookbehind (Safari
+  16.4) and a list of newer built-ins out of the source.
+
+Devices that stop below 15.4 (iPad Air 1st gen, iPad mini 2 and 3, iPhone
+5s and 6, all on iOS 12) cannot run it and get the preflight's page. The
+iPads that stop at iPadOS 15.8 (iPad Air 2, iPad mini 4) meet the minimum
+but have 2 GB of memory, which may be too little for the 3D view.
+
 ## Controls
 
 | Key | Action |

@@ -16,9 +16,22 @@
  */
 import { hydrateKv } from './lib/kvStore'
 import { runBoot } from './lib/bootSequence'
+import { preflightPage } from './lib/preflight'
 
-void runBoot({
-  hydrate: () => hydrateKv(),
-  repair: (late, writable) => import('./lib/signerPrefRepair').then((m) => m.repairSignerPref(undefined, late, writable)),
-  loadApp: () => import('./boot'),
-})
+/**
+ * index.html's preflight (README "Browsers"): it watches for this line, and
+ * says the app could not start when it never runs; it has already put its
+ * own word in place of the wordmark when this browser cannot run the app,
+ * and then nothing here starts.
+ */
+const page = preflightPage()
+page.__onosendaiRan = true
+if (!page.__onosendaiUnsupported) {
+  void runBoot({
+    hydrate: () => hydrateKv(),
+    repair: (late, writable) => import('./lib/signerPrefRepair').then((m) => m.repairSignerPref(undefined, late, writable)),
+    loadApp: () => import('./boot'),
+    // The app's chunk did not load or threw as it ran: said on the page, not only in a console nobody on a phone can open.
+    onFail: (err) => page.onosendaiCannotStart?.(err instanceof Error ? `${err.name}: ${err.message}` : String(err)),
+  })
+}

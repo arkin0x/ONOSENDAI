@@ -116,6 +116,18 @@ describe('runBoot', () => {
     expect(loadApp).toHaveBeenCalledTimes(1)
   })
 
+  it("tells the page when the app's chunk fails to load, once, so it can say so (index.html preflight)", async () => {
+    const err = new TypeError('Importing a module script failed.')
+    const onFail = vi.fn()
+    const quiet = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    await runBoot({ hydrate: async () => undefined, repair: async () => undefined, loadApp: () => Promise.reject(err), onFail })
+    expect(onFail).toHaveBeenCalledTimes(1)
+    expect(onFail).toHaveBeenCalledWith(err)
+    // A page that cannot say it never turns the failure into an unhandled one.
+    await expect(runBoot({ hydrate: async () => undefined, repair: async () => undefined, loadApp: () => Promise.reject(err), onFail: () => { throw new Error('no page') } })).resolves.toBeUndefined()
+    quiet.mockRestore()
+  })
+
   it('hands the repair the kv step, so its writes can wait for room', async () => {
     const kv = deferred()
     let writable: Promise<unknown> | null = null

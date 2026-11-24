@@ -14008,3 +14008,247 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
 @media (hover: hover) and (pointer: fine) {
   .ws__groups-rename-input { font-size: 12px; }
 }
+
+/* ---------- IMPORT A BUILD (workshop/BlockImport.tsx) ----------
+   A HUD panel with the house chamfer, a numbered step rail and targeting
+   corners on the drop zone and the preview, drawn by hand (no UI library).
+   Inspired by the sci-fi HUD and wizard collections on Dribbble: albemala's
+   "Sci-Fi Futuristic UIs", kasrangh's "Upload Wizard", Tredadesigner's
+   "Stepper". Fixed heights for the status line and the fit block, so a
+   build finishing or a colour changing never moves what is below. */
+.modal__card.blockimport {
+  --bi-cut: 16px;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(820px, 100%);
+  max-height: min(92vh, 900px);
+  max-height: min(92dvh, 900px);
+  padding: 16px 14px 14px;
+  border: 0;
+  border-radius: 0;
+  background:
+    linear-gradient(180deg, rgba(0, 229, 255, 0.06), transparent 120px),
+    rgba(6, 14, 22, 0.98);
+  clip-path: polygon(var(--bi-cut) 0, 100% 0, 100% calc(100% - var(--bi-cut)), calc(100% - var(--bi-cut)) 100%, 0 100%, 0 var(--bi-cut));
+}
+/* The frame's line, cut corners included. */
+.modal__card.blockimport::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  padding: 1px;
+  background: linear-gradient(135deg, rgba(0, 229, 255, 0.75), rgba(0, 229, 255, 0.2) 40%, rgba(0, 229, 255, 0.2) 60%, rgba(0, 229, 255, 0.75));
+  clip-path: inherit;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+}
+.modal__card.blockimport > * { flex-shrink: 0; }
+.modal__card.blockimport > .blockimport__body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.blockimport__title { margin: 0; letter-spacing: 0.18em; color: #fff; }
+
+.blockimport__rail {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 4px;
+}
+.blockimport__rail li {
+  --rail: rgba(0, 229, 255, 0.18);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 5px 6px 4px;
+  border-top: 2px solid var(--rail);
+  background: linear-gradient(180deg, rgba(0, 229, 255, 0.05), transparent);
+  clip-path: polygon(0 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%);
+  color: var(--dim);
+  min-width: 0;
+}
+.blockimport__rail li.is-done { --rail: rgba(0, 229, 255, 0.6); color: var(--fg); }
+.blockimport__rail li.is-now { --rail: var(--accent); color: #fff; background: linear-gradient(180deg, rgba(0, 229, 255, 0.16), transparent); box-shadow: inset 0 2px 8px -4px var(--accent); }
+.blockimport__num { font-size: 9px; letter-spacing: 0.1em; font-variant-numeric: tabular-nums; opacity: 0.8; }
+.blockimport__step { font-size: 9px; letter-spacing: 0.14em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* One line, always there: what is happening, or what went wrong. */
+.blockimport__line {
+  min-height: 2.6em;
+  font-size: 11px;
+  line-height: 1.3;
+  letter-spacing: 0.04em;
+  color: #fff;
+}
+.blockimport__line.is-bad { color: var(--danger); }
+
+/* Targeting corners, top left and bottom right, on the drop zone and the preview. */
+.blockimport__corner {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  border: 0 solid var(--accent);
+  pointer-events: none;
+  filter: drop-shadow(0 0 4px rgba(0, 229, 255, 0.7));
+}
+.blockimport__corner--tl { top: 6px; left: 6px; border-top-width: 2px; border-left-width: 2px; }
+.blockimport__corner--br { right: 6px; bottom: 6px; border-right-width: 2px; border-bottom-width: 2px; }
+
+.blockimport__drop {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 220px;
+  padding: 24px 16px;
+  font-family: inherit;
+  color: var(--fg);
+  cursor: pointer;
+  border: 1px dashed rgba(0, 229, 255, 0.35);
+  background:
+    repeating-linear-gradient(0deg, rgba(0, 229, 255, 0.04) 0 1px, transparent 1px 24px),
+    repeating-linear-gradient(90deg, rgba(0, 229, 255, 0.04) 0 1px, transparent 1px 24px),
+    rgba(0, 10, 18, 0.6);
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+.blockimport__drop:hover, .blockimport__drop.is-over { border-color: var(--accent); background-color: rgba(0, 229, 255, 0.08); }
+.blockimport__drop:disabled { cursor: progress; }
+.blockimport__dropbig { font-size: 16px; letter-spacing: 0.22em; color: #fff; text-shadow: 0 0 12px rgba(0, 229, 255, 0.6); }
+.blockimport__dropsmall { font-size: 11px; letter-spacing: 0.04em; color: var(--fg); }
+
+.blockimport__grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
+@media (min-width: 720px) {
+  .blockimport__grid { grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); align-items: start; }
+  .blockimport__left { position: sticky; top: 0; }
+}
+.blockimport__view {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  width: 100%;
+  max-height: 46vh;
+  background: radial-gradient(ellipse at 50% 70%, rgba(0, 229, 255, 0.12), transparent 65%), #03070c;
+  border: 1px solid rgba(0, 229, 255, 0.2);
+}
+@media (max-width: 719px) { .blockimport__view { aspect-ratio: 4 / 3; margin: 0 auto; } }
+.blockimport__view canvas { display: block; }
+.blockimport__meta { margin-top: 6px; min-height: 1.4em; font-size: 10px; letter-spacing: 0.04em; color: var(--fg); overflow-wrap: anywhere; }
+.blockimport__dim { color: var(--dim); }
+
+.blockimport__section { padding: 10px 0 2px; border-top: 1px solid rgba(0, 229, 255, 0.12); }
+.blockimport__section:first-child { border-top: 0; padding-top: 0; }
+.blockimport__section .ui-field { margin: 0; }
+.blockimport__h {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 0.2em;
+  color: var(--accent);
+}
+.blockimport__h::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  background: var(--accent);
+  clip-path: polygon(3px 0, 100% 0, 100% calc(100% - 3px), calc(100% - 3px) 100%, 0 100%, 0 3px);
+}
+.blockimport__regions, .blockimport__colours { list-style: none; margin: 0; padding: 0; }
+.blockimport__regions li + li { margin-top: 6px; }
+.blockimport__switches { display: grid; gap: 8px; }
+.blockimport__fromfile { margin: 10px 0 6px; font-size: 9px; letter-spacing: 0.14em; color: var(--dim); }
+.blockimport__colours {
+  max-height: 220px;
+  overflow-y: auto;
+  border-top: 1px solid rgba(0, 229, 255, 0.08);
+}
+.blockimport__colours li {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 2px;
+  border-bottom: 1px solid rgba(0, 229, 255, 0.06);
+}
+.blockimport__colours li.is-off { opacity: 0.45; }
+.blockimport__swatch {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  cursor: pointer;
+  clip-path: polygon(7px 0, 100% 0, 100% calc(100% - 7px), calc(100% - 7px) 100%, 0 100%, 0 7px);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.25);
+}
+/* See-through blocks: a glint across the swatch. */
+.blockimport__swatch.is-see { background-image: linear-gradient(135deg, transparent 35%, rgba(255, 255, 255, 0.45) 50%, transparent 65%) !important; background-blend-mode: screen; }
+.blockimport__swatch:disabled { cursor: default; }
+.blockimport__bname { font-size: 11px; color: #fff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.blockimport__count { font-size: 9px; letter-spacing: 0.1em; color: var(--dim); font-variant-numeric: tabular-nums; }
+.blockimport__palette {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(16, minmax(0, 1fr));
+  gap: 2px;
+  padding: 6px 0 4px;
+}
+.blockimport__palette > button { aspect-ratio: 1; min-height: 14px; padding: 0; border: 0; cursor: pointer; }
+.blockimport__palette > button.is-on { outline: 2px solid #fff; outline-offset: -2px; }
+.blockimport__palette > .blockimport__ours {
+  grid-column: 1 / -1;
+  aspect-ratio: auto;
+  height: 30px;
+  margin-top: 4px;
+  font-family: inherit;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  color: var(--fg);
+  background: transparent;
+  border: 1px solid rgba(200, 245, 255, 0.3);
+}
+
+.blockimport__units { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.blockimport__unit {
+  height: 36px;
+  font-family: inherit;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  color: var(--fg);
+  cursor: pointer;
+  border: 0;
+  background: rgba(0, 229, 255, 0.08);
+  box-shadow: inset 0 0 0 1px rgba(0, 229, 255, 0.3);
+  clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px);
+}
+.blockimport__unit.is-on { color: #05070d; background: var(--accent); font-weight: 700; box-shadow: 0 0 12px rgba(0, 229, 255, 0.5); }
+.blockimport__unit:disabled { cursor: default; }
+
+/* The fit block keeps one height whether it shows the bar or the pieces. */
+.blockimport__fit { min-height: 118px; }
+.blockimport__pieces p { margin: 6px 0 0; font-size: 11px; line-height: 1.45; color: #fff; }
+.blockimport__pieces p.blockimport__dim { color: var(--dim); font-size: 10px; }
+.blockimport__piecebar { display: flex; flex-wrap: wrap; gap: 3px; }
+.blockimport__piecebar > span {
+  width: 14px;
+  height: 12px;
+  background: var(--accent);
+  box-shadow: 0 0 6px rgba(0, 229, 255, 0.6);
+  clip-path: polygon(3px 0, 100% 0, 100% calc(100% - 3px), calc(100% - 3px) 100%, 0 100%, 0 3px);
+}
+.blockimport__piecebar > span.is-glass { background: #7df9ff; opacity: 0.6; }
+.blockimport__piecebar > span.is-ice { background: #a7d3ff; opacity: 0.7; }
+.blockimport__piecebar > span.is-water { background: #008dd2; opacity: 0.7; }
+@media (max-width: 480px) {
+  .blockimport__step { font-size: 8px; letter-spacing: 0.06em; }
+  .modal__card.blockimport { padding: 14px 12px 12px; }
+}
+/* A step not reached yet: its button is there, and plainly not ready. */
+.blockimport .modal__confirm:disabled,
+.blockimport .modal__cancel:disabled { opacity: 0.35; cursor: default; box-shadow: none; }

@@ -1,0 +1,57 @@
+{
+ "house": {
+  "size": [
+   11,
+   9,
+   9
+  ],
+  "blocks": 406,
+  "states": {
+   "minecraft:cobblestone": 97,
+   "minecraft:stone_brick_slab[type=top,waterlogged=false]": 1,
+   "minecraft:oak_fence[east=true,north=false,south=false,waterlogged=false,west=false]": 1,
+   "minecraft:oak_log[axis=y]": 16,
+   "minecraft:oak_planks": 120,
+   "minecraft:oak_door[facing=north,half=lower,hinge=left,open=false,powered=false]": 1,
+   "minecraft:oak_leaves[distance=1,persistent=true,waterlogged=false]": 1,
+   "minecraft:poppy": 1,
+   "minecraft:glass": 2,
+   "minecraft:oak_door[facing=north,half=upper,hinge=left,open=false,powered=false]": 1,
+   "minecraft:glass_pane[east=true,north=false,south=false,west=true]": 2,
+   "minecraft:spruce_stairs[facing=south,half=bottom,shape=straight,waterlogged=false]": 44,
+   "minecraft:spruce_stairs[facing=north,half=bottom,shape=straight,waterlogged=false]": 44,
+   "minecraft:spruce_slab[type=bottom,waterlogged=false]": 11,
+   "minecraft:red_carpet": 62,
+   "minecraft:crafting_table": 1,
+   "minecraft:wall_torch[facing=north]": 1
+  }
+ },
+ "castle": {
+  "size": [
+   48,
+   20,
+   48
+  ],
+  "blocks": 8073,
+  "states": {
+   "minecraft:grass_block[snowy=false]": 2262,
+   "minecraft:water[level=0]": 42,
+   "minecraft:cobblestone": 1225,
+   "minecraft:stone_bricks": 2314,
+   "minecraft:mossy_stone_bricks": 498,
+   "minecraft:cracked_stone_bricks": 256,
+   "minecraft:andesite": 810,
+   "minecraft:glass_pane[east=true,west=true]": 16,
+   "minecraft:spruce_planks": 144,
+   "minecraft:cobblestone_wall[east=low,north=low,south=low,up=true,waterlogged=false,west=low]": 112,
+   "minecraft:oak_trapdoor[facing=north,half=bottom,open=true]": 4,
+   "minecraft:yellow_wool": 7,
+   "minecraft:red_wool": 6,
+   "minecraft:light_blue_stained_glass": 24,
+   "minecraft:smooth_quartz": 144,
+   "minecraft:stone_brick_slab[type=bottom]": 196,
+   "minecraft:torch": 4,
+   "minecraft:stone_brick_stairs[facing=south,half=bottom,shape=straight]": 9
+  }
+ }
+}

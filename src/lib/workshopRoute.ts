@@ -20,6 +20,22 @@
 
 import { newestId, useWorkshop } from '../store/useWorkshop'
 import { useShardFolders } from '../store/useShardFolders'
+import { useBlockImport } from '../store/useBlockImport'
+
+/**
+ * onosendai.tech/workshop?import=build: the workshop with IMPORT A BUILD open
+ * over it (store/useBlockImport), the door the /import page's button opens.
+ */
+export const IMPORT_BUILD_PARAM = 'import'
+export const IMPORT_BUILD_VALUE = 'build'
+
+/** The address's query without the import ask, so a reload or a close does not ask again. */
+export function withoutImportAsk(search: string): string {
+  const q = new URLSearchParams(search)
+  q.delete(IMPORT_BUILD_PARAM)
+  const rest = q.toString()
+  return rest ? `?${rest}` : ''
+}
 
 /** Open the workshop for the address; returns what stops waiting on the deploy times, if anything waits. */
 function openFromAddress(): () => void {
@@ -58,6 +74,10 @@ export function startWorkshopRoute(
   events: Events = window,
 ): () => void {
   const stopWaiting = isWorkshopPath(loc.pathname) ? openFromAddress() : () => undefined
+  if (isWorkshopPath(loc.pathname) && new URLSearchParams(loc.search).get(IMPORT_BUILD_PARAM) === IMPORT_BUILD_VALUE) {
+    useBlockImport.getState().show()
+    try { history.replaceState(null, '', `${loc.pathname}${withoutImportAsk(loc.search)}${loc.hash}`) } catch { /* no history here */ }
+  }
   let wasAt = isWorkshopPath(loc.pathname)
 
   // Closed while the address still says /workshop: the root, with whatever

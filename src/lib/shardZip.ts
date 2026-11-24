@@ -34,7 +34,7 @@ export const ZIP_TYPES = ['application/zip', 'application/x-zip-compressed', 'ap
  * object, or a glTF) by extension and by type so a phone's picker offers it,
  * and a zip by extension and by type.
  */
-export const IMPORT_PICKER_ACCEPT = [IMPORT_ACCEPT, '.json', 'application/json', '.zip', ...ZIP_TYPES].join(',')
+export const IMPORT_PICKER_ACCEPT = [IMPORT_ACCEPT, '.json', 'application/json', '.zip', ...ZIP_TYPES, '.schem', '.litematic', '.nbt'].join(',')
 /** A .json by its name or its type: an SNO object or a glTF, which store/useShardImport routeImport tells apart. */
 export function isJsonFile(file: { name: string; type: string }): boolean {
   return /\.json$/i.test(file.name) || file.type === 'application/json'

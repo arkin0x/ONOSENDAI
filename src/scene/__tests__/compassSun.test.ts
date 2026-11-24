@@ -145,6 +145,19 @@ describe('placeSun', () => {
     expect(at.clone().normalize().distanceTo(dir)).toBeCloseTo(0)
   })
 
+  it('end on and on your side, the disc fades so the centre dot shows through the ring', () => {
+    const p = parts()
+    placeSun(p, dir, yaw(180))
+    expect(p.disc!.opacity).toBeCloseTo(0)
+    expect(p.ring!.opacity).toBe(1)
+    // Off end on, the disc is back.
+    placeSun(p, dir, yaw(120))
+    expect(p.disc!.opacity).toBeGreaterThan(0.5)
+    // Past the centre, end on, it stays: there it is behind the dot.
+    placeSun(p, dir, SNAPPED)
+    expect(p.disc!.opacity).toBeGreaterThan(0.5)
+  })
+
   it('copes with parts not yet mounted', () => {
     expect(placeSun({ group: null, disc: null, ring: null }, dir, yaw(90))).toBe('right')
   })
@@ -193,11 +206,12 @@ describe('the sun beyond the Z label', () => {
       const core = sun - across(reach, SUN_LAYOUT.coronaCore) * HALF_PX
       expect(label).toBeGreaterThan(tip)
       expect(sun).toBeGreaterThan(label)
-      // Within about 37 degrees of the screen's plane (lateral 0.8 and up),
-      // the ring's bright core starts past the letter's centre by more than
-      // half a 10px letter's width, so the Z sits clear of the ring; leaning
-      // further toward end on, it may reach into the corona's soft inner glow.
-      if (lateral >= 0.8) expect(core - label).toBeGreaterThan(2.5)
+      // A 10px bold Z is about 6.5px across with a 3px shadow, so its far
+      // edge is about 5px from its centre: the ring's bright core starts
+      // past that.
+      expect(core - label).toBeGreaterThan(5)
+      // Even the soft glow inside the ring starts past the letter itself.
+      expect(sun - across(reach, SUN_LAYOUT.coronaInner) * HALF_PX - label).toBeGreaterThan(3.5)
     })
   })
 

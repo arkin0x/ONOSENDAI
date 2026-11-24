@@ -82,13 +82,13 @@ const HALF_FOV_TAN = Math.tan((20 * Math.PI) / 180)
  * grows only as it comes end on, by up to SUN_RETICLE, so the ring stands
  * clear round the centre dot rather than hiding behind it.
  */
-const SUN_ARROW = 0.95
-const SUN_AT = 1.7
+const SUN_ARROW = 0.85
+const SUN_AT = 2.2
 const SUN_EDGE = 0.8
 const SUN_RETICLE = 1.8
-const SUN_DISC = 0.14
+const SUN_DISC = 0.12
 /** The corona: its glow fades to nothing over [0] to [1], is full over [1] to [2], fades out over [2] to [3]. */
-const SUN_CORONA = [0.1, 0.14, 0.18, 0.26] as const
+const SUN_CORONA = [0.08, 0.12, 0.16, 0.23] as const
 /** Opacities [disc, corona]: facing you, and turned away past the centre. */
 const SUN_NEAR = [0.85, 1] as const
 const SUN_FAR = [0.6, 0.9] as const
@@ -211,9 +211,14 @@ export function sunReach(inView: Vector3): number {
  * comes end on (lateral under 0.5), where it rings the centre.
  */
 export function sunScale(inView: Vector3, reach: number): number {
-  const t = Math.min(1, Math.hypot(inView.x, inView.y) / 0.5)
-  const reticle = 1 + (SUN_RETICLE - 1) * (1 - t * t * (3 - 2 * t))
+  const reticle = 1 + (SUN_RETICLE - 1) * sunEndOn(inView)
   return ((CAMERA_DISTANCE - reach * inView.z) / CAMERA_DISTANCE) * reticle
+}
+
+/** How end on the sun is seen, 0 to 1: 1 dead end on, easing to 0 by a lateral of 0.5. */
+export function sunEndOn(inView: Vector3): number {
+  const t = Math.min(1, Math.hypot(inView.x, inView.y) / 0.5)
+  return 1 - t * t * (3 - 2 * t)
 }
 
 /** How far from the centre, in the camera's normalised units (1 is the panel's edge), a point `reach` out along the axis lands. */
@@ -229,6 +234,7 @@ export const SUN_LAYOUT = {
   label: SUN_ARROW + LABEL_OFFSET,
   at: SUN_AT,
   edge: SUN_EDGE,
+  coronaInner: SUN_CORONA[0],
   coronaCore: SUN_CORONA[1],
   coronaOuter: SUN_CORONA[3],
 } as const
@@ -244,8 +250,9 @@ export interface SunParts {
 }
 
 /**
- * Stands the sun out along the Z arrow (sunReach), turns it to face the
- * compass camera and dims it by how far round the ball it is. Turned away,
+ * Stands the sun out along the Z arrow (sunReach), sizes it (sunScale),
+ * turns it to face the compass camera and dims it by how far round the ball
+ * it is. Turned away,
  * the corona draws through what is in front of it, so the sun is never lost
  * behind the centre; the disc stays depth tested, so the centre still reads
  * as in front of it. Returns the bearing.
@@ -259,7 +266,9 @@ export function placeSun(parts: SunParts, sunDir: Vector3, pose: Quaternion): Su
     parts.group.quaternion.copy(pose)
     parts.group.scale.setScalar(sunScale(seen, reach))
   }
-  if (parts.disc) parts.disc.opacity = sunOpacity(0, near)
+  // End on and on your side, the disc is nearest the eye and would cover the
+  // centre dot and the Z arrowhead, so it fades out and leaves the ring.
+  if (parts.disc) parts.disc.opacity = sunOpacity(0, near) * (seen.z > 0 ? 1 - sunEndOn(seen) : 1)
   if (parts.ring) { parts.ring.opacity = sunOpacity(1, near); parts.ring.depthTest = seen.z >= 0 }
   return sunBearing(seen)
 }

@@ -86,6 +86,11 @@ export function launchHeight(b: Bounce, fell: number, boost: boolean, boostBy: n
   return h >= BOUNCE_MIN ? h : 0
 }
 
+/** A launch of `h` gibsons as 0 (BOUNCE_MIN) to 1 (BOUNCE_MAX): how hard the bounce's sound is (lib/sfx.ts). */
+export function bounceStrength(h: number): number {
+  return Math.min(1, Math.max(0, (h - BOUNCE_MIN) / (BOUNCE_MAX - BOUNCE_MIN)))
+}
+
 /** The springboard field (provisional). */
 export const SPRINGBOARD_FIELD = 'springboard'
 

@@ -143,7 +143,8 @@ import { standing, walkStep, type WalkStep } from './walkStep'
 import { planWalkMove, walkHeading, type Stepper, type WalkHeading } from '../lib/walkSlide'
 import { anyBounce, floorPad, stepLimit, takeWallWait, wallBoxes, wallItemsAt, wallsBuilt, warmWalls, type WallItem } from './walkWalls'
 import { DOUBLE_JUMP_SPEED, JUMP_HEIGHT, JUMP_SPEED, WALK_GRAVITY, arcApex, arcHeight, arcPeak, arcSpeed, fallLimit, fallReach, jumpRise, launchSpeed, loadGravity, loadHardGravity, nothingCatches, canStillLand, reachedHeight, saveGravity, saveHardGravity, type FallLimit, type RescueBox } from './walkGravity'
-import { launchHeight } from '../lib/walkBounce'
+import { bounceStrength, launchHeight } from '../lib/walkBounce'
+import { sfx } from '../lib/sfx'
 import { walkFacing, walkFall, walkFallUp } from '../lib/walkEye'
 import { heldNow, holdReleaseAll } from './walkHold'
 import { noteWallContact } from './wallHint'
@@ -975,7 +976,11 @@ function padLaunch(at: Position, rose: boolean, items: WallItem[]): void {
   const limit = limitAt(at, items, cs.plane, g)
   if (takeWallWait() || rise === 0n) return
   beginFall(at, launchSpeed(h), rise, -limit.drop, limit.lands, items, cs.plane, g)
-  if (fall) fall.launch = { ...at }
+  if (fall) {
+    fall.launch = { ...at }
+    // The bounce's sound (lib/sfx.ts): the default bounce until DECK-0003 SFX.
+    sfx.play('bounce', bounceStrength(h))
+  }
 }
 
 /**
@@ -1117,6 +1122,8 @@ function bounceOff(f: Fall, now: number): boolean {
   f.rescuedAt = Number.NEGATIVE_INFINITY
   syncFall(f)
   walkFall.offset = Math.min(arcHeight(v0, Math.max(0, (now - t0) / 1000)), f.topN) - f.base
+  // The bounce's sound (lib/sfx.ts): the default bounce until DECK-0003 SFX.
+  sfx.play('bounce', bounceStrength(h))
   // In place the cursor is already here: a bounce in place touches no store.
   if (!samePosition(useCyberspace.getState().cursor, final)) useCyberspace.setState({ cursor: { ...final } })
   if (hops.length > 0) {

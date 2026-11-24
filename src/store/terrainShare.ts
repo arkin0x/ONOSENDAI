@@ -21,12 +21,15 @@
  *
  * The bag says where that stands: saved on this device, sharing, shared.
  *
- * READING. Other builders' layers for the chunks within reach of where you
- * stand (only those: region keys are derived for nothing farther) are read
- * from the canonical relay, checked by §6.1 (lib/terrain/layerReader.ts),
- * their builder keys checked on their authors' chains (lib/terrain/
- * reachChain.ts), mutes and the 64-author cap applied, and merged by the
- * Cell Rule (§7). What it gives is drawn and walked on like your own.
+ * READING. In TERRAIN, while LIVE, other builders' layers for the chunks
+ * within reach of where you stand (only those: region keys are derived for
+ * nothing farther) are read from the canonical relay, checked by §6.1
+ * (lib/terrain/layerReader.ts), their builder keys checked on their
+ * authors' chains as the canonical relay holds them (lib/terrain/
+ * reachChain.ts; the relay checks every hop's proof, this client does not),
+ * mutes and the 64-author cap applied, and merged by the Cell Rule (§7).
+ * What it gives is drawn and walked on like your own, in every mode while
+ * the chunk stays loaded.
  *
  * The witness's first-seen heights (W) cannot be asked for yet: the DECK
  * leaves how open (§7.4, §12 question 2). So every settle is unwitnessed,
@@ -40,7 +43,6 @@
  */
 
 import { create } from 'zustand'
-import { finalizeEvent } from 'nostr-tools/pure'
 import { coordToXyz } from 'cyberspace-core'
 import { CELLS, chunkKey, chunkOf, type ChunkBase } from '../lib/terrain/coords'
 import { regionKeyAt, encryptForRegion } from '../lib/shardCrypto'
@@ -50,13 +52,14 @@ import {
   type CountedLayer, type LayerPlaintext,
 } from '../lib/terrain/blockLayer'
 import { nextPlaintext, type CommittedBlock } from '../lib/terrain/layerWriter'
-import { readLayer, type HeaderVerdict } from '../lib/terrain/layerReader'
+import { readLayer, type HeaderVerdict, type ReachPlace } from '../lib/terrain/layerReader'
 import { reachCandidates, reachPlaces, readChainOf, retiredAnywhere, onLine, type ReadChain } from '../lib/terrain/reachChain'
 import {
   deviceKeys, ensureBuilderKey, nameAgain, namedKey, noteFound, onBuilderChange, retireCurrent, waitingIds, builderRecord,
 } from '../lib/terrain/builderKey'
 import { onActionSigned } from '../lib/terrain/builderTags'
 import { putMany, request } from '../lib/idb'
+import { localSigner } from '../lib/signers'
 import { META } from '../lib/terrain/terrainDb'
 import type { NostrEvent } from '../lib/events'
 import type { Position } from '../lib/space'
@@ -93,8 +96,12 @@ export interface ShareDeps {
   publish: (ev: NostrEvent) => Promise<{ ok: boolean; reason?: string }>
   /** Read from the canonical relay alone. */
   query: (filter: Filter) => Promise<NostrEvent[]>
-  /** An author's movement actions, read from the relays. */
-  authorEvents: (pubkey: string) => Promise<NostrEvent[]>
+  /**
+   * The movement actions of the chain of `pubkey`'s that holds `actionId`,
+   * read from the canonical relay alone, which checks every hop's proof
+   * before it accepts it: this client does not verify hop work itself.
+   */
+  authorChain: (pubkey: string, actionId: string) => Promise<NostrEvent[]>
   /** The 5.13 list for judging old hops, or null. */
   v1List: () => ReadonlySet<string> | null
   /** A block at least 6 below the tip, with its hash; null when none can be had now. */
@@ -230,7 +237,6 @@ interface Session {
   seen: Map<string, Map<string, NostrEvent>>
   idle: ReturnType<typeof setTimeout> | null
   retry: ReturnType<typeof setTimeout> | null
-  reader: ReturnType<typeof setInterval> | null
   flushing: Promise<void> | null
   again: boolean
   failed: string | null
@@ -240,7 +246,11 @@ interface Session {
 }
 
 let session: Session | null = null
-const chains = new Map<string, ReadChain>()
+let reader: ReturnType<typeof setInterval> | null = null
+/** Authors' chains read, by author and the action asked for, with when: read again after CHAIN_FRESH_MS so a retirement is seen. */
+const chains = new Map<string, { chain: ReadChain; at: number }>()
+/** How long an author's chain read is trusted before it is read again (a retirement since must count). */
+export const CHAIN_FRESH_MS = 60_000
 const grounds = new Map<string, Promise<Uint8Array>>()
 const keys = new Map<string, { key: Uint8Array; lookupId: string }>()
 
@@ -251,7 +261,7 @@ function sessionFor(): Session | null {
     if (session) closeSession(session)
     session = {
       owner: f.owner, plane: f.plane, rows: new Map(), loading: new Map(), waiting: new Map(), touched: new Map(), others: new Map(), seen: new Map(),
-      idle: null, retry: null, reader: null, flushing: null, again: false, failed: null, sending: false, readKey: '', closed: false,
+      idle: null, retry: null, flushing: null, again: false, failed: null, sending: false, readKey: '', closed: false,
     }
   }
   return session
@@ -261,7 +271,6 @@ function closeSession(s: Session): void {
   s.closed = true
   if (s.idle) clearTimeout(s.idle)
   if (s.retry) clearTimeout(s.retry)
-  if (s.reader) clearInterval(s.reader)
 }
 
 /** For tests: forget everything held. */
@@ -283,6 +292,7 @@ export function chunkRegionKey(base: ChunkBase): { key: Uint8Array; lookupId: st
     const rk = regionKeyAt(base, 5, 5)
     v = { key: rk.key, lookupId: rk.lookupId }
     keys.set(k, v)
+    while (keys.size > 256) keys.delete(keys.keys().next().value as string)
   }
   return v
 }
@@ -322,8 +332,7 @@ async function rowOf(s: Session, key: string): Promise<ShareRow> {
           if (!Array.isArray(row.touched)) row.touched = []
         } catch { /* a fresh row */ }
       }
-      // Built here before this version: what was surveyed and changed waits to be shared.
-      if (row.eventId === null && host?.field()?.surveyed(key)) row.dirty = true
+      // Chunks built before sharing existed are not published on their own: the first change made in one shares it, whole.
       s.rows.set(key, row)
       s.touched.set(key, new Set(row.touched))
       if (row.dirty && !s.waiting.has(key)) s.waiting.set(key, 1)
@@ -471,10 +480,12 @@ export async function terrainOpened(): Promise<void> {
   const s = sessionFor()
   if (!s) return
   // What this identity kept is read before TERRAIN opens (store/useTerrain.ts makeField), so a key is made only when there is none.
-  ensureBuilderKey(s.owner)
+  // Never without the database: a key that cannot be kept would be named again on every visit, and its layers never updated.
+  if (host?.field()?.db) ensureBuilderKey(s.owner)
   void confirmTags()
-  if (s.reader) clearInterval(s.reader)
-  s.reader = setInterval(() => { if (host?.active()) { void readNear(true); void confirmTags() } }, READ_EVERY_MS)
+  // Kept for the module, not the field: a field made again (a long walk re-centres it) keeps reading.
+  if (reader) clearInterval(reader)
+  reader = setInterval(() => { if (host?.active()) { void readNear(true); void confirmTags() } }, READ_EVERY_MS)
   void readNear(true)
   say(s)
 }
@@ -483,8 +494,8 @@ export async function terrainOpened(): Promise<void> {
 export async function terrainClosed(): Promise<void> {
   const s = sessionFor()
   if (!s) return
-  if (s.reader) clearInterval(s.reader)
-  s.reader = null
+  if (reader) clearInterval(reader)
+  reader = null
   await flush('close')
 }
 
@@ -498,8 +509,7 @@ export function fieldClosing(): void {
 export function liveChanged(live: boolean): void {
   const s = sessionFor()
   if (!s) return
-  if (live) void flush('live')
-  else if (s.idle) { clearTimeout(s.idle); s.idle = null }
+  if (live) { void flush('live'); void readNear(true) } else if (s.idle) { clearTimeout(s.idle); s.idle = null }
   say(s)
 }
 
@@ -532,6 +542,7 @@ onActionSigned((ev) => {
   if (!ev.tags.some((t) => t[0] === 'builder' || t[0] === 'builder-retire')) return
   if (asked.has(ev.id)) return
   asked.add(ev.id)
+  if (asked.size > 256) asked.delete(asked.values().next().value as string)
   // A move goes out a moment after it is signed: ask after it has had time to land.
   for (const ms of [4_000, 15_000, 45_000]) setTimeout(() => { void confirmTags() }, ms)
 })
@@ -597,7 +608,8 @@ async function signLayer(o: { plaintext: LayerPlaintext; author: string; base: C
   const encrypted = await encryptForRegion(key, plaintextJson(o.plaintext))
   const tags = layerTags({ lookupId, author: o.author, reach: o.reach, settleIds: ids as string[], encrypted })
   const sk = Uint8Array.from(o.sec.match(/../g)!.map((h) => parseInt(h, 16)))
-  const ev = finalizeEvent({ kind: LAYER_KIND, created_at: o.createdAt, tags, content: LAYER_CONTENT }, sk) as unknown as NostrEvent
+  // Signed through lib/signers.ts like every key this app holds; a block layer carries no client tag (lib/client.ts, §5.1).
+  const ev = await localSigner(sk).signEvent({ kind: LAYER_KIND, created_at: o.createdAt, tags, content: LAYER_CONTENT })
   if (serializedBytes(ev) > LAYER_MAX_BYTES) throw new Held('This chunk holds more than one layer can carry: undo some changes here.')
   return ev
 }
@@ -634,8 +646,13 @@ async function publishChunk(s: Session, key: string): Promise<void> {
     const createdAt = Math.max(Math.floor(d.now() / 1000), row.createdAt + 1)
     // One reach event per plane (§5.1): this plane's now, and the twin plane's it was carried with.
     const reaches: Record<string, string> = { [String(s.plane)]: reach.id }
-    const other = row.reach[String(otherPlane)]
-    if (other && plain.planes.some((p) => p.plane === otherPlane)) reaches[String(otherPlane)] = other
+    if (plain.planes.some((p) => p.plane === otherPlane)) {
+      // The twin plane's reach must be valid for this key too (§4.4): kept when the same key wrote it, else found again.
+      const kept = sameKey ? row.reach[String(otherPlane)] : undefined
+      const twin = kept ?? await twinReach(d, chain, k.pub, k.named, { ...slot.base, plane: otherPlane })
+      if (!twin) throw new Held('Shared once you stand near its twin chunk again.')
+      reaches[String(otherPlane)] = twin
+    }
     const ev = await signLayer({ plaintext: plain, author: s.owner, base: slot.base, reach: Object.keys(reaches).sort().map((p) => reaches[p]), sec: k.sec, createdAt })
     // LOCAL never publishes: asked again at the last moment, after every wait above.
     if (!d.live() || d.me() !== s.owner || s.closed) throw new Held('Sharing again soon.')
@@ -655,6 +672,14 @@ async function publishChunk(s: Session, key: string): Promise<void> {
   s.failed = null
 }
 
+/** A reach event for the twin plane of a chunk, for this key, that the canonical relay holds; null when there is none. */
+async function twinReach(d: ShareDeps, chain: ReadChain, key: string, named: string, base: ChunkBase): Promise<string | null> {
+  const c = reachCandidates(chain, key, named, base)
+  if (c.length === 0) return null
+  const held = new Set((await d.query({ ids: c.map((a) => a.id), limit: c.length })).map((e) => e.id))
+  return c.find((a) => held.has(a.id))?.id ?? null
+}
+
 /** An older key's layer here, written again with no placements (§5.7), under that key and its old reach event. */
 async function emptyOld(s: Session, row: ShareRow, base: ChunkBase, createdAt: number): Promise<void> {
   const old = deviceKeys(s.owner).find((r) => r.pub === row.builder)
@@ -667,7 +692,7 @@ async function emptyOld(s: Session, row: ShareRow, base: ChunkBase, createdAt: n
     planes: planes.map((plane) => ({ plane, survey: true, ground: 2, form: 'diff' as const, pal: [null], cells: [0, -(CELLS - 1)], t0: [], t1: [] })),
   }
   const ev = await signLayer({ plaintext, author: s.owner, base, reach: planes.map((p) => row.reach[String(p)]), sec: old.sec, createdAt })
-  if (current().live()) await current().publish(ev).catch(() => undefined)
+  if (current().live() && current().me() === s.owner && !s.closed) await current().publish(ev).catch(() => undefined)
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -691,14 +716,23 @@ export function homeChunkKey(pubkey: string): string {
   return chunkKey(chunkOf(x, y, z, plane))
 }
 
-async function chainOf(author: string, need: readonly string[]): Promise<ReadChain> {
-  const have = chains.get(author)
-  if (have && need.every((id) => have.byId.has(id))) return have
-  const events = await current().authorEvents(author)
-  const c = readChainOf(author, events, current().v1List())
-  chains.set(author, c)
-  while (chains.size > 200) chains.delete(chains.keys().next().value as string)
+/** The chain of `author`'s holding `actionId` (a respawn ends a chain; a layer's reach event may be on an ended one, §6.2), read fresh enough. */
+async function chainOf(author: string, actionId: string): Promise<ReadChain> {
+  const k = `${author}|${actionId}`
+  const have = chains.get(k)
+  const now = current().now()
+  if (have && now - have.at < CHAIN_FRESH_MS) return have.chain
+  const c = readChainOf(author, await current().authorChain(author, actionId), current().v1List())
+  chains.set(k, { chain: c, at: now })
+  while (chains.size > 400) chains.delete(chains.keys().next().value as string)
   return c
+}
+
+/** Every chain of `author`'s read: a key retired on any of them cannot list builders (§7.3 rule 3). */
+function chainsOf(author: string): ReadChain[] {
+  const out: ReadChain[] = []
+  for (const [k, v] of chains) if (k.startsWith(`${author}|`)) out.push(v.chain)
+  return out
 }
 
 let reading: Promise<void> | null = null
@@ -711,7 +745,8 @@ let readAgain = false
 /** Read the layers of the chunks within reach of where you stand. `force` reads again even when the chunks are the same. */
 export function readNear(force = false): Promise<void> {
   const s = sessionFor()
-  if (!s || !host) return Promise.resolve()
+  // Only in TERRAIN, and only while LIVE: which chunks you read layers for says roughly where you stand, and LOCAL tells the relay nothing.
+  if (!s || !host || !host.active() || !current().live()) return Promise.resolve()
   const bases = chunksInReach(host.head(), s.plane)
   const rk = bases.map(chunkKey).sort().join(';')
   if (!force && rk === s.readKey) return reading ?? Promise.resolve()
@@ -768,12 +803,15 @@ async function mergeChunk(s: Session, base: ChunkBase, lookupId: string): Promis
       lookupId,
       chunk: base,
       ground: (plane) => groundOf({ ...base, plane }),
-      reach: async (author, builder, ids) => reachPlaces(await chainOf(author, ids), builder, ids),
+      reach: async (author, builder, ids) => {
+        const out = new Map<string, ReachPlace>()
+        for (const id of ids) for (const [r, place] of reachPlaces(await chainOf(author, id), builder, [id])) out.set(r, place)
+        return out
+      },
       header: d.header,
     }).catch(() => null)
     if (!r || r.status !== 'counted') continue
-    const c = chains.get(shape.author)
-    counted.push({ ...r.layer, retiredKey: c ? retiredAnywhere(c, ev.pubkey) : false })
+    counted.push({ ...r.layer, retiredKey: chainsOf(shape.author).some((c) => retiredAnywhere(c, ev.pubkey)) })
   }
   if (s.closed) return
   const before = s.others.get(key)

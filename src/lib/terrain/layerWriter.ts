@@ -95,9 +95,10 @@ export function nextPlaintext(o: {
   for (const t of now.values()) { if (t.t0 >= 0) named.add(t.t0); if (t.t1 >= 0) named.add(t.t1) }
   if (other) for (const t of other.values()) { named.add(t.t0); named.add(t.t1) }
 
-  // Merging (§5.3): keep the oldest; the newest move to the new settle.
+  // Merging (§5.3): keep the oldest; the newest move to the new settle, only when a new settle is needed and there is no room for it.
   const carried = [...named].sort((a, b) => prevSettles[a][0] - prevSettles[b][0] || a - b)
-  const keep = new Set(carried.slice(0, SETTLES_MAX - 1))
+  const needsNew = named.size === 0 || [...now.values()].some((t) => t.t0 === NEW || t.t1 === NEW)
+  const keep = new Set(carried.slice(0, needsNew ? SETTLES_MAX - 1 : SETTLES_MAX))
   const move = (i: number): number => (i >= 0 && !keep.has(i) ? NEW : i)
   for (const [c, t] of now) now.set(c, { t0: move(t.t0), t1: move(t.t1) })
   const otherNow = new Map<number, { t0: number; t1: number }>()

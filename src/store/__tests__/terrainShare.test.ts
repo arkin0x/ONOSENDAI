@@ -52,7 +52,7 @@ import { builderRecord, forgetBuilderRecords, namedKey } from '../../lib/terrain
 import { fixTags, onActionSigned } from '../../lib/terrain/builderTags'
 import { chunkOf, idx, type ChunkBase } from '../../lib/terrain/coords'
 import { generate } from '../../lib/terrain/generate'
-import { EMPTY } from '../../lib/terrain/blocks'
+import { EMPTY, kindId } from '../../lib/terrain/blocks'
 import { readLayer } from '../../lib/terrain/layerReader'
 import { reachPlaces, readChainOf } from '../../lib/terrain/reachChain'
 import { LAYER_KIND, layerTags, plaintextJson, settleId } from '../../lib/terrain/blockLayer'
@@ -123,7 +123,7 @@ beforeEach(async () => {
     live: () => true,
     publish: async (ev) => { published.push(ev); hold(ev); return { ok: true } },
     query: async (f) => held.filter((e) => matches(f, e)),
-    authorEvents: async (pk) => held.filter((e) => e.kind === 3333 && e.pubkey === pk),
+    authorChain: async (pk) => held.filter((e) => e.kind === 3333 && e.pubkey === pk),
     ownEvents: () => own,
     v1List: () => new Set(),
     commitBlock: async () => ({ height: 925_000, hash: H }),
@@ -398,8 +398,13 @@ describe('reading another builder\'s layer', () => {
     // Surveyed: you mine their Glowcore; you see your change, while their block stays theirs for everyone else.
     await T().survey(s.world.slotAtCs(...at(rock))!.key)
     expect(s.world.blockCs(...at(air))).toBe(8)
+    const glow = kindId(42)
+    const before = T().inventory.counts[glow] ?? 0
     expect(T().mine({ cell: at(rock), normal: [0, 1, 0], distance: 1 })).toBe(true)
     expect(s.world.blockCs(...at(rock))).toBe(EMPTY)
+    // Their block is never carried: you get what was yours there (the ground's rock), not their Glowcore.
+    expect(T().inventory.counts[glow] ?? 0).toBe(before)
+    expect(T().inventory.counts[kindId(g[rock])]).toBeGreaterThan(0)
     await readChunks([base])
     await settle(100)
     expect(s.world.blockCs(...at(rock))).toBe(EMPTY)

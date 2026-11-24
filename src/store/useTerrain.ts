@@ -275,13 +275,17 @@ export const useTerrain = create<TerrainState>((set, get) => ({
     const id = s.world.blockCs(dx, dy, dz)
     if (id <= EMPTY) return false
     // A chunk others built in, shown but not surveyed by you: survey it before changing it.
-    if (!s.world.slotAtCs(dx, dy, dz)?.own) { get().say('Survey this chunk before building in it.'); return false }
+    const at = s.world.locate(dx, dy, dz)
+    if (!at.slot?.own) { get().say('Survey this chunk before building in it.'); return false }
+    // What is yours in that cell: someone else's block mined is gone for you, and never carried.
+    const yours = at.slot.own[at.cell]
     const change = s.world.setCs(dx, dy, dz, EMPTY)
     if (!change) return false
     record(s, change)
     advanceHint(0)
     // What it carries as: its kind's own id. A block this client has no kind for is mined, and carried as nothing.
-    const was = kindId(id)
+    if (yours <= EMPTY) return true
+    const was = kindId(yours)
     if (was === 255) return true
     const inv = get().inventory
     const counts = { ...inv.counts, [was]: (inv.counts[was] ?? 0) + 1 }

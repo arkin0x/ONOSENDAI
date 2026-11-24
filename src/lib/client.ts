@@ -30,6 +30,9 @@
  *   Nor is the NIP-09 deletion that retracts one (kind 5 with `k` 33335): it
  *   names the sealed entry's address, and a `client` tag on it would tie that
  *   address to the app all the same (review of #645).
+ * - A block layer (kind 33339, DECK-0009 §5.1) is not attributed: the DECK
+ *   forbids a `client` tag on it, as on a sealed entry, and like one it says
+ *   nothing public beyond the tags the DECK requires.
  */
 
 import type { EventTemplate } from './events'
@@ -39,8 +42,8 @@ export const CLIENT_NAME = 'ONOSENDAI'
 /** NIP-89 client attribution, by name only until the app has a handler event. */
 export const CLIENT_TAG: [string, string] = ['client', CLIENT_NAME]
 
-/** Auth events (NIP-42 relay auth, Blossom upload auth, NIP-98 HTTP auth), the NIP-17 seal and gift wrap, and a sealed entry (33335). */
-const UNATTRIBUTED_KINDS = new Set([22242, 24242, 27235, 13, 1059, 33335])
+/** Auth events (NIP-42 relay auth, Blossom upload auth, NIP-98 HTTP auth), the NIP-17 seal and gift wrap, a sealed entry (33335) and a block layer (33339). */
+const UNATTRIBUTED_KINDS = new Set([22242, 24242, 27235, 13, 1059, 33335, 33339])
 
 /** Whether a template is the deletion of a sealed entry (kind 5 whose `k` is 33335, lib/sealed.ts sealedDeletionTemplate). */
 function deletesSealed(template: EventTemplate): boolean {

@@ -40,6 +40,7 @@ import { useLayers } from './useLayers'
 import { walkInputOpen } from './walkInput'
 import { FOOT_SLOPE, REST_FLOOR, clearShare, faceDistance, footGround, groundUnder, restDrop, steepGround, wallItemsAt, type WallItem } from './walkWalls'
 import { STEP_DOWN_MAX, STEP_UP_MAX } from './walkStep'
+import { WALK_GRAVITY } from './walkGravity'
 
 /** How long the eye takes to glide onto a new anchor, in seconds (the time constant): about a third of a second to settle. */
 export const GLIDE_TAU_S = 0.09
@@ -263,6 +264,21 @@ export function tickFluid(now: number = performance.now()): boolean {
 export const FOOT_DROP_SPEED = Number(STEP_UP_MAX) * FLUID_MAX_SPEED * 1.1
 
 /**
+ * Under GRAVITY, the most the ground may drop away under the feet and still
+ * be stepped down onto, in steps: half a gibson, a stair's riser (the Maze
+ * Kit's grand stair rises half a gibson a step), eased down at
+ * FOOT_DROP_SPEED as before; or more, when a walkable slope (FOOT_SLOPE)
+ * drops more than that over the frame's way across. Ground dropping away
+ * further than that (a ledge, a riser of a gibson, a dip) is fallen to at
+ * WALK_GRAVITY, from rest, while the walk's level speed carries the walker
+ * on (arkinox, 2026-11-24: "Can we make it so if you fall, it falls with
+ * gravity speed? Right now, if I walk over a 1 block dip, my avatar sticks
+ * to the bottom of the dip almost instantly and it feels unnatural"): a dip
+ * a gibson across at walking speed is crossed with little or no drop.
+ */
+export const FOOT_SNAP = 0.5
+
+/**
  * How fast the drawn feet may rise with the camera following them exactly,
  * in steps a second: a rise faster than this in a frame is a riser, and the
  * camera climbs the rest of it over GLIDE_TAU_S (lib/walkEye.ts walkRise).
@@ -293,6 +309,9 @@ const foot = {
   last: null as number | null,
   /** A fall was being drawn at the last frame. */
   falling: false,
+  /** Under GRAVITY, the feet falling onto ground that dropped away (FOOT_SNAP): their speed down, gibsons a second, 0 when they stand. */
+  vy: 0,
+  dropping: false,
   /** How far under the fall's own point the feet were when it began: kept through the arc, so a jump leaves from the feet. */
   lift: 0,
   /** What the feet added to the drawn height at the last frame, gibsons along `upAxis` and `upDir`. */
@@ -322,6 +341,8 @@ function resetFoot(): void {
   foot.anchor = null
   foot.last = null
   foot.falling = false
+  foot.vy = 0
+  foot.dropping = false
   foot.lift = 0
   foot.extra = 0
   foot.pull = [0, 0, 0]
@@ -349,7 +370,7 @@ export function footHeight(): number | null {
  *
  * | Case | The drawn height |
  * |---|---|
- * | standing (a face less than a gibson under the anchor's middle) | the highest walkable ground under the footprint at the drawn point (store/walkWalls.ts groundUnder, then footGround), followed exactly up a slope and down one; a riser it passes over is stood on at once, and the camera follows it up over GLIDE_TAU_S (lib/walkEye.ts walkRise); a drop is eased down at FOOT_DROP_SPEED at least |
+ * | standing (a face less than a gibson under the anchor's middle) | the highest walkable ground under the footprint at the drawn point (store/walkWalls.ts groundUnder, then footGround), followed exactly up a slope and down one; a riser it passes over is stood on at once, and the camera follows it up over GLIDE_TAU_S (lib/walkEye.ts walkRise); under GRAVITY ground that drops away faster than a slope (a ledge, a riser, a dip) is fallen to at WALK_GRAVITY (dropTo, FOOT_SNAP), and with gravity off a drop is eased down at FOOT_DROP_SPEED at least |
  * | gravity off, rising off the floor | from the surface to the anchor's own height by the time the walker is half a step up, where it leaves the gibson, so the hand-over is seamless |
  * | in the air (a jump, a fall) | the fall's own arc, from where the feet were when it began, easing onto the arc's point (GLIDE_TAU_S) |
  * | a shard in reach still being built | where the feet were, until it is |
@@ -452,11 +473,14 @@ export function groundFluid(now: number = performance.now()): void {
       }
       if (fresh) h = target
       else if (h < target) h = standing ? target : h + (target - h) * (1 - decayK)
+      else if (h > target && gravity && standing) h = dropTo(h, target, stepG, dt)
       else if (h > target) h = Math.max(target, Math.min(h - FOOT_DROP_SPEED * stepG * dt, target + (h - target) * decayK))
       if (col !== null) {
         const floor = footAt(cs.cursor, lead, col, items, g, downKey)
         if (h < floor) h = floor
       }
+      // On the ground: the feet's fall, if any, is over.
+      if (h <= target + 1e-9 || !gravity || !standing) { foot.vy = 0; foot.dropping = false }
     }
     foot.falling = false
   } else {
@@ -465,6 +489,9 @@ export function groundFluid(now: number = performance.now()): void {
     // they land where the arc lands, on its whole gibson's standing height.
     // In the air the origin rides the arc on the floor of the gibson it is drawn in.
     const air = base - REST_FLOOR * stepG
+    // The walk's own arc takes over from a drop of the feet.
+    foot.vy = 0
+    foot.dropping = false
     if (fresh) foot.lift = 0
     else if (!foot.falling) foot.lift = h - air
     else foot.lift *= decayK
@@ -505,6 +532,28 @@ export function groundFluid(now: number = performance.now()): void {
     for (const a of AXES) walkGlide[a] -= pull[AXIS_INDEX[a]] / stepG
     walkGlide.active = true
   }
+}
+
+/**
+ * Under GRAVITY, the feet at `h` over ground at `target` below them (gibsons
+ * along up), one frame of `dt` on: stepping down onto it, eased at
+ * FOOT_DROP_SPEED as before (a slope is followed exactly), when it dropped
+ * away by no more than FOOT_SNAP, or than a walkable slope drops over the
+ * way walked this frame; else falling onto it at WALK_GRAVITY from rest,
+ * the walk going on across as it does (fluid WALK's speed is level under
+ * gravity, so it carries the walker over a dip). Display only, as all of
+ * groundFluid: the anchor still takes the step down, and the chain gets the
+ * same steps.
+ */
+function dropTo(h: number, target: number, stepG: number, dt: number): number {
+  const level = Math.hypot(st.v.x, st.v.y, st.v.z) * stepG
+  const follow = Math.max(FOOT_SNAP * stepG, FOOT_SLOPE * level * dt)
+  if (!foot.dropping && h - target <= follow + 1e-9) return Math.max(target, h - FOOT_DROP_SPEED * stepG * dt)
+  foot.dropping = true
+  // The arc itself over the frame, whatever the frame rate: v t + g t^2 / 2.
+  const fell = foot.vy * dt + (WALK_GRAVITY * dt * dt) / 2
+  foot.vy += WALK_GRAVITY * dt
+  return Math.max(target, h - fell)
 }
 
 /** The step WALK's drop under the cursor (restDrop, along its gravity), in gibsons: kept for this gibson, asked again every FOOT_ITEMS_MS (walls arriving). */

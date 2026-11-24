@@ -58,7 +58,8 @@ import { useWorkshop } from '../useWorkshop'
 import { FOOT_RADIUS, REST_FLOOR, clearWalls, eyePlace, eyeReach, restDrop, wallItemsAt, wallsBuilt } from '../walkWalls'
 import { MARKER_LIFT, markerEdges } from '../../scene/avatarMarker'
 import { MARKER_EYE } from '../../lib/avatarEye'
-import { groundFluid, resetFluid, tickFluid } from '../walkFluid'
+import { FOOT_SNAP, groundFluid, resetFluid, tickFluid } from '../walkFluid'
+import { WALK_GRAVITY } from '../walkGravity'
 import { useFluidWalk } from '../fluidSwitch'
 import { walkFacing, walkFall, walkFallUp, walkGlide, walkRise } from '../../lib/walkEye'
 import { useCalibration } from '../../lib/calibration'
@@ -599,5 +600,139 @@ describe('the step WALK (the switch off)', () => {
     const cs = useCyberspace.getState()
     const items = wallItemsAt(cs.plane, cs.cursor)
     expect(eyeReach(cs.cursor, [0.3, 0, 0], EYE, 0.15, items, { axis: 'y', dir: 1 })).toBe(eyeReach(cs.cursor, [0.3, 0, 0], EYE, 0.15, items, { axis: 'y', dir: 1 }, undefined, false))
+  })
+})
+
+/**
+ * Under GRAVITY, ground that drops away is fallen to at gravity's pace, not
+ * stuck to (arkinox, 2026-11-24: "if I walk over a 1 block dip, my avatar
+ * sticks to the bottom of the dip almost instantly and it feels unnatural.
+ * If gravity pulled me down instead, i would probably be able to walk right
+ * over a 1 block dip without really going in"; store/walkFluid.ts dropTo,
+ * FOOT_SNAP). Display only: the anchor and the chain take the same steps.
+ */
+describe('under GRAVITY the feet fall onto ground that drops away, at gravity\'s pace', () => {
+  /** A floor 0.4 under the start gibson, with `cut` (from x0 to x1) a gibson lower. */
+  function floorWith(x0: number, x1: number): { shard: ShardModel; surface: (x: number) => number } {
+    const shard = boxes('Cut floor', [[[-40, -4, -40], [x0, LOW, 40]], [[x0, -4, -40], [x1, LOW - 1, 40]], ...(x1 < 40 ? [[[x1, -4, -40], [40, LOW, 40]] as [V3, V3]] : [])])
+    return { shard, surface: (x: number) => (x >= x0 && x < x1 ? LOW - 1 : LOW) }
+  }
+
+  /** Hold W (+X) from the start, every frame `ms`, until the drawn x passes `until`: the drawn feet, frame by frame. */
+  async function run(until: number, ms = 16): Promise<Array<{ t: number; x: number; y: number }>> {
+    const out: Array<{ t: number; x: number; y: number }> = []
+    down('KeyW')
+    for (let k = 0; k < 2000 && drawn()[0] < until; k++) {
+      frame(ms)
+      await keepUp()
+      const p = drawn()
+      out.push({ t: clock, x: p[0], y: p[1] })
+    }
+    up('KeyW')
+    for (let k = 0; k < 40; k++) { frame(ms); await keepUp() }
+    return out
+  }
+
+  it('walking off a ledge a gibson high at walking speed follows a parabola, not a snap, and carries on across as it falls', async () => {
+    const { shard, surface } = floorWith(3.5, 40)
+    world(start, shard, [0, 0, 0])
+    await walk(true)
+    const path = await run(10)
+    const i0 = path.findIndex((f) => f.y < LOW - 1e-6)
+    expect(i0).toBeGreaterThan(0)
+    const i1 = path.findIndex((f) => f.y <= LOW - 1 + 1e-6)
+    expect(i1).toBeGreaterThan(i0)
+    const t0 = path[i0 - 1].t
+    // How long the fall takes: a gibson at WALK_GRAVITY from rest is sqrt(2 / g), about 0.17 s (it was under 0.05).
+    const fallS = (path[i1].t - t0) / 1000
+    expect(fallS).toBeGreaterThan(Math.sqrt(2 / WALK_GRAVITY) - 0.02)
+    expect(fallS).toBeLessThan(Math.sqrt(2 / WALK_GRAVITY) + 0.05)
+    // A parabola: each frame's drop is about g t^2 / 2 from where it left, and the drops grow frame by frame.
+    let lastDrop = 0
+    for (let i = i0; i < i1; i++) {
+      const t = (path[i].t - t0) / 1000
+      const drop = LOW - path[i].y
+      expect(drop).toBeLessThanOrEqual((WALK_GRAVITY * t * t) / 2 + 1e-6)
+      expect(drop).toBeGreaterThanOrEqual((WALK_GRAVITY * (t - 0.017) * (t - 0.017)) / 2 - 1e-6)
+      const step = drop - (i === i0 ? 0 : LOE(path, i - 1))
+      expect(step).toBeGreaterThanOrEqual(lastDrop - 1e-6)
+      lastDrop = step
+    }
+    // The walk's speed carries it on across while it falls: more than a gibson.
+    expect(path[i1].x - path[i0 - 1].x).toBeGreaterThan(1.5)
+    // It lands and stands on the lower floor, never below it.
+    for (const f of path) expect(f.y).toBeGreaterThanOrEqual(surface(f.x) - 1e-6)
+    expect(drawn()[1]).toBeCloseTo(LOW - 1, 9)
+    function LOE(p: typeof path, i: number): number { return LOW - p[i].y }
+  })
+
+  for (const [name, ms] of [['60 fps', 16], ['30 fps', 33]] as const) {
+    it(`a dip a gibson across and a gibson deep is crossed at walking speed with little drop, ${name}; every step published stands outside the floor`, async () => {
+      // The dip is the gibson at x 3 (2.5 to 3.5).
+      const { shard, surface } = floorWith(2.5, 3.5)
+      world(start, shard, [0, 0, 0])
+      await walk(true)
+      const path = await run(8, ms)
+      expect(drawn()[0]).toBeGreaterThan(8)
+      const lowest = Math.min(...path.filter((f) => f.x > 2 && f.x < 4).map((f) => f.y))
+      // It barely goes in: about a fifth of a gibson at 60 fps, a third at 30 (before, it sank the whole gibson at once).
+      expect(lowest).toBeGreaterThan(LOW - (ms > 20 ? 0.4 : 0.25))
+      // Never under any surface.
+      for (const f of path) expect(f.y).toBeGreaterThanOrEqual(surface(f.x) - 1e-6)
+      await landAll()
+      // The chain: every hop is a whole-gibson move whose ends stand on or over the floor, never inside it.
+      expect(posted.length).toBeGreaterThan(0)
+      for (const req of posted) {
+        for (const p of [req.from, req.to]) {
+          const x = Number(p.x - start.x)
+          const y = Number(p.y - start.y)
+          expect(y, `hop end at x ${x} y ${y}`).toBeGreaterThan(surface(x))
+        }
+      }
+    })
+  }
+
+  it('a staircase with half-gibson risers is walked down on the ground: the feet never leave it by more than FOOT_SNAP, and never fall', async () => {
+    // Eight steps up from x 2.3, half a gibson each, every half gibson (as the Maze Kit's grand stair climbs).
+    const list: Array<[V3, V3]> = [[[-40, -6, -40], [2.3, LOW, 40]]]
+    for (let k = 0; k < 8; k++) list.push([[2.3 + k * 0.5, -6, -40], [k === 7 ? 40 : 2.3 + (k + 1) * 0.5, LOW + (k + 1) * 0.5, 40]])
+    const shard = boxes('Half-gibson steps', list)
+    const height = (x: number): number => (x < 2.3 ? LOW : LOW + Math.min(8, Math.floor((x - 2.3) / 0.5) + 1) * 0.5)
+    world(start, shard, [0, 0, 0])
+    await walk(true)
+    await walkOver(height, 'KeyW', (x) => x > 2.3 + 8 * 0.5 + 2, 16, false)
+    expect(drawn()[1]).toBeCloseTo(LOW + 4, 9)
+    let worstGap = 0
+    let worstBelow = Infinity
+    let worstStep = 0
+    let last: number | null = null
+    down('KeyS')
+    for (let k = 0; k < 2000 && drawn()[0] > -2; k++) {
+      frame(16)
+      await keepUp()
+      const p = drawn()
+      const ground = underFoot(height, p[0])
+      worstGap = Math.max(worstGap, p[1] - ground)
+      worstBelow = Math.min(worstBelow, p[1] - height(p[0]))
+      if (last !== null) worstStep = Math.max(worstStep, last - p[1])
+      last = p[1]
+    }
+    up('KeyS')
+    expect(drawn()[0]).toBeLessThan(-2)
+    expect(worstGap).toBeLessThanOrEqual(FOOT_SNAP + 1e-6)
+    expect(worstBelow).toBeGreaterThanOrEqual(-1e-6)
+    // Stepped down, eased: never a riser at once.
+    expect(worstStep).toBeLessThan(0.5)
+  })
+
+  it('gravity off, a drop is eased down as before (nothing falls)', async () => {
+    const { shard } = floorWith(3.5, 40)
+    world(start, shard, [0, 0, 0])
+    await walk(false)
+    const path = await run(10)
+    const i0 = path.findIndex((f) => f.y < LOW - 1e-6)
+    const i1 = path.findIndex((f) => f.y <= LOW - 1 + 1e-6)
+    expect(i1).toBeGreaterThan(i0)
+    expect((path[i1].t - path[i0 - 1].t) / 1000).toBeLessThan(0.1)
   })
 })

@@ -27,9 +27,9 @@
  *
  * The bag says where that stands: saved on this device, sharing, shared.
  *
- * READING. In TERRAIN, while LIVE, other builders' layers for the chunks
- * within 16 gibsons of where you stand (region keys are derived for nothing
- * farther) are read from the canonical relay, checked by §6.1
+ * READING. In every mode (HOP, WALK, TERRAIN), LIVE or LOCAL, as shards are
+ * read, other builders' layers for the chunks round where you stand (the
+ * ring the field draws, READ_RING) are read from the canonical relay, checked by §6.1
  * (lib/terrain/layerReader.ts: a retired or unnamed builder key drops its
  * layers), mutes removed, and stacked (§7, the Stack): each cell shows the
  * highest-ranked layer that changed it, else the surveyed ground. The home
@@ -41,7 +41,7 @@
 import { create } from 'zustand'
 import { CELLS, chunkKey, chunkOf, parseChunkKey, type ChunkBase } from '../lib/terrain/coords'
 import { regionKeyAt, encryptForRegion } from '../lib/shardCrypto'
-import { reachDistance, REACH } from '../lib/terrain/world'
+import { reachDistance } from '../lib/terrain/world'
 import {
   LAYER_KIND, LAYER_MAX_BYTES, COBUILDERS_MAX, changesOf, countedLayers, emptiedPlaintext, freeTextWithinBounds, inHome, layerShape, layerTags,
   nextPlaintext, parsePlaintext, plaintextJson, resolveStack, serializedBytes, startFrom, withinRank,
@@ -68,7 +68,7 @@ export const BATCH_ALONE = 200
 export const BATCH_NEAR = 50
 /** How soon a publish that could not go is tried again (ms). */
 export const RETRY_MS = 20_000
-/** How often, while TERRAIN is open, the layers in reach are read again (ms). */
+/** How often the layers round you are read again, in any mode (ms). */
 export const READ_EVERY_MS = 12_000
 /** How near someone must be, in gibsons, to count as building with you. */
 export const NEAR_GIBSONS = 64
@@ -251,6 +251,12 @@ interface Session {
 
 let session: Session | null = null
 let reader: ReturnType<typeof setInterval> | null = null
+
+/** Others' layers round you read again every READ_EVERY_MS, in every mode, once anything has been read; and your builder tag asked after. */
+function keepReading(): void {
+  if (reader) return
+  reader = setInterval(() => { if (sessionFor()) { void readNear(true); void confirmTags() } }, READ_EVERY_MS)
+}
 const statuses = new Map<string, { s: KeyStatus; at: number }>()
 const grounds = new Map<string, Promise<Uint8Array>>()
 const keys = new Map<string, { key: Uint8Array; lookupId: string }>()
@@ -282,6 +288,8 @@ function closeSession(s: Session): void {
 export function resetShare(): void {
   if (session) closeSession(session)
   session = null
+  if (reader) clearInterval(reader)
+  reader = null
   statuses.clear()
   grounds.clear()
   keys.clear()
@@ -658,7 +666,7 @@ export function noteChange(key: string, change?: CellChange): void {
   })
 }
 
-/** You moved: a chunk left by more than LEAVE_BLOCKS publishes what waits, and the layers in reach are read. */
+/** You moved: a chunk left by more than LEAVE_BLOCKS publishes what waits, and the layers round you are read (any mode). */
 export function noteMove(): void {
   const s = sessionFor()
   if (!s || !host) return
@@ -672,7 +680,7 @@ export function noteMove(): void {
   void readNear()
 }
 
-/** TERRAIN opened: this device's builder key is made if it has none, the Crew read, and the layers in reach read and kept fresh. */
+/** TERRAIN opened: this device's builder key is made if it has none, the Crew read, and the layers round you read again. */
 export async function terrainOpened(): Promise<void> {
   const s = sessionFor()
   if (!s) return
@@ -682,9 +690,6 @@ export async function terrainOpened(): Promise<void> {
   await loadCrew(s)
   void loadFollows(s.owner)
   void confirmTags()
-  // Kept for the module, not the field: a field made again (a long walk re-centres it) keeps reading.
-  if (reader) clearInterval(reader)
-  reader = setInterval(() => { if (host?.active()) { void readNear(true); void confirmTags() } }, READ_EVERY_MS)
   void readNear(true)
   if (s.republish) void flush('crew')
   say(s)
@@ -699,12 +704,10 @@ async function loadFollows(me: string): Promise<void> {
   } catch { /* none known */ }
 }
 
-/** TERRAIN closed: everything waiting is published (while LIVE), and the reading stops. */
+/** TERRAIN closed: everything waiting is published (while LIVE). Others' layers are still read: in every mode. */
 export async function terrainClosed(): Promise<void> {
   const s = sessionFor()
   if (!s) return
-  if (reader) clearInterval(reader)
-  reader = null
   await flush('close')
 }
 
@@ -754,7 +757,7 @@ onActionSigned((ev) => {
   asked.add(ev.id)
   if (asked.size > 256) asked.delete(asked.values().next().value as string)
   // A move goes out a moment after it is signed: ask after it has had time to land.
-  for (const ms of [4_000, 15_000, 45_000]) setTimeout(() => { void confirmTags() }, ms)
+  for (const ms of [1_500, 4_000, 15_000, 45_000]) setTimeout(() => { void confirmTags() }, ms)
 })
 onBuilderChange((owner) => { if (session?.owner === owner) say(session) })
 
@@ -1076,18 +1079,24 @@ function pacedPublish(ev: NostrEvent, still: () => boolean): Promise<{ ok: boole
 // ---------------------------------------------------------------------------------------------------------------
 // Reading.
 
-/** The chunks within 16 gibsons of a place, in its plane (at most two per axis): the only ones whose keys are derived. */
-export function chunksInReach(at: Position, plane: number): ChunkBase[] {
+/** How many chunks out from yours others' layers are read: the same ring the field draws (store/useTerrain.ts DRAW_RING). */
+export const READ_RING = 2
+
+/**
+ * The chunks round a place, in its plane, out to READ_RING on each axis (5 by
+ * 5 by 5): the ones whose layers are read, in every mode, LIVE or LOCAL, as
+ * shards are read wherever you stand (hooks/useDiscovery.ts).
+ */
+export function chunksAround(at: Position, plane: number, ring = READ_RING): ChunkBase[] {
   const c = chunkOf(at.x, at.y, at.z, plane)
   const out: ChunkBase[] = []
-  for (const dy of [-1, 0, 1]) for (const dz of [-1, 0, 1]) for (const dx of [-1, 0, 1]) {
+  for (let dy = -ring; dy <= ring; dy++) for (let dz = -ring; dz <= ring; dz++) for (let dx = -ring; dx <= ring; dx++) {
     const b = { x: c.x + 32n * BigInt(dx), y: c.y + 32n * BigInt(dy), z: c.z + 32n * BigInt(dz), plane }
     if (b.x < 0n || b.y < 0n || b.z < 0n) continue
-    if (reachDistance({ ...at, plane }, b) <= REACH) out.push(b)
+    out.push(b)
   }
   return out
 }
-
 
 /** Builder keys' status, read from the relay at most once a minute per key; a read that fails knows nothing yet. */
 async function statusesOf(author: string, list: string[]): Promise<Map<string, KeyStatus>> {
@@ -1113,20 +1122,29 @@ async function statusesOf(author: string, list: string[]): Promise<Map<string, K
 }
 
 let reading: Promise<void> | null = null
-/** At most one read of the chunks in reach this often while you travel. */
+/** At most one read of the chunks round you this often while you travel. */
 export const READ_GAP_MS = 2_000
 let lastRead = 0
 let trailing: ReturnType<typeof setTimeout> | null = null
 let readAgain = false
 
-/** Read the layers of the chunks within reach of where you stand. `force` reads again even when the chunks are the same. */
+/**
+ * Read the layers of the chunks round where you stand. `force` reads again
+ * even when the chunks are the same. In every mode (HOP, WALK, TERRAIN) and
+ * LIVE or LOCAL: blocks are part of cyberspace like shards, and reading is not
+ * publishing (owner, 2026-11-25). It once ran only in TERRAIN while LIVE, and
+ * only for the chunks within reach, so a visitor hopping or walking by saw
+ * nothing.
+ */
 export function readNear(force = false): Promise<void> {
   const s = sessionFor()
-  // Only in TERRAIN, and only while LIVE: which chunks you read layers for says roughly where you stand, and LOCAL tells the relay nothing.
-  if (!s || !host || !host.active() || !current().live()) return Promise.resolve()
-  const bases = chunksInReach(host.head(), s.plane)
-  const rk = bases.map(chunkKey).sort().join(';')
+  if (!s || !host) return Promise.resolve()
+  keepReading()
+  const at = host.head()
+  // The same chunks while you stay in the one you stand in: nothing to work out on every step.
+  const rk = chunkKey(chunkOf(at.x, at.y, at.z, s.plane))
   if (!force && rk === s.readKey) return reading ?? Promise.resolve()
+  const bases = chunksAround(at, s.plane)
   const now = current().now()
   if (!force && now - lastRead < READ_GAP_MS) {
     trailing ??= setTimeout(() => { trailing = null; void readNear() }, READ_GAP_MS)

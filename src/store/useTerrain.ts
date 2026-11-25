@@ -53,7 +53,7 @@ import {
 import type { Position, ViewAxes } from '../lib/space'
 import type { RayHit } from '../lib/terrain/raycast'
 import {
-  applyCarried, connectShareHost, fieldClosing, liveChanged, noteChange, noteMove, prepareChunk, sharedKeys, terrainClosed, terrainOpened, viewOf,
+  applyCarried, connectShareHost, fieldClosing, liveChanged, noteChange, noteMove, prepareChunk, READ_RING, readNear, sharedKeys, terrainClosed, terrainOpened, viewOf,
 } from './terrainShare'
 import { loadBuilder, releaseBuilderDb } from '../lib/terrain/builderKey'
 import './terrainShareLive'
@@ -64,8 +64,8 @@ export const HINT_DONE = 3
 /** How long a message stays on screen, ms. */
 export const MESSAGE_MS = 3200
 
-/** How many chunks round you the surveyed ones are loaded, drawn and walkable, on each axis. */
-export const DRAW_RING = 2
+/** How many chunks round you the surveyed ones (yours, and others' read from the relay) are loaded, drawn and walkable, on each axis. */
+export const DRAW_RING = READ_RING
 
 /** Past this many gibsons from the field's origin, the field starts again round you: numbers stay exact. */
 const FAR = 2 ** 30
@@ -216,7 +216,7 @@ export const useTerrain = create<TerrainState>((set, get) => ({
     usePad.getState().setOpen(true)
     await syncTerrain()
     if (get().active) set({ loading: false })
-    // This device's builder key is made on TERRAIN's first use; the layers in reach are read (store/terrainShare.ts).
+    // This device's builder key is made on TERRAIN's first use; the layers round you are read again (store/terrainShare.ts).
     if (get().active) void terrainOpened()
   },
 
@@ -533,6 +533,7 @@ async function syncOnce(): Promise<TerrainSession | null> {
   const plane = cs.plane
   const at = headNow()
   let s = terrainSession
+  let made = false
   const far = s ? offsetOf(s, at).some((v) => Math.abs(v) > FAR) : false
   if (!s || s.owner !== owner || s.plane !== plane || far) {
     const old = s
@@ -541,9 +542,12 @@ async function syncOnce(): Promise<TerrainSession | null> {
     terrainSession = s
     if (old) await closeField(old)
     publishWalls()
+    made = true
   }
   await s.ready
   if (terrainSession !== s) return null
+  // A new field (load, another identity or plane, far away): others' layers round you are read at once, in any mode (store/terrainShare.ts).
+  if (made) void readNear(true)
   const world = s.world
   const centre = TerrainWorld.chunkOf(...offsetOf(s, headNow()))
   const want = new Set<ChunkSlot>()
@@ -648,7 +652,7 @@ useCyberspace.subscribe((c, prev) => {
   if (c.identity.pubkey !== prev.identity.pubkey && useTerrain.getState().active) void useTerrain.getState().exit()
   // LOCAL shares nothing; back to LIVE, what waited goes out (store/terrainShare.ts).
   if (c.live !== prev.live && c.identity.pubkey === prev.identity.pubkey) liveChanged(c.live)
-  // Every step: a chunk left by more than 4 blocks shares what waits, and the layers in reach are read (store/terrainShare.ts).
+  // Every step, in any mode: a chunk left by more than 4 blocks shares what waits, and the layers round you are read (store/terrainShare.ts).
   if (c.cursor !== prev.cursor || c.position !== prev.position || c.walking !== prev.walking) noteMove()
   // WALK ending under TERRAIN (its button, X, a respawn) ends TERRAIN: TERRAIN is WALK.
   if (prev.walking && !c.walking && useTerrain.getState().active) void useTerrain.getState().exit()

@@ -19,6 +19,10 @@
  *   them; a retired key voids its layers.
  * - The cursor's outline colour: yours, your home, a builder who lists you,
  *   someone else's, unbuilt ground.
+ * - Two identities: A publishes; B, another throwaway on the same device,
+ *   reads and draws A's holes and surveyed ground in HOP, WALK and TERRAIN,
+ *   LIVE or LOCAL, against a mock relay that refuses a tag filter mixing a
+ *   key with a word, as the canonical relay does.
  */
 
 import 'fake-indexeddb/auto'
@@ -58,6 +62,8 @@ import { chunkKey, chunkOf, type ChunkBase } from '../../lib/terrain/coords'
 import { generate } from '../../lib/terrain/generate'
 import { EMPTY } from '../../lib/terrain/blocks'
 import { readLayer, type KeyStatus } from '../../lib/terrain/layerReader'
+import { keyStatusOn } from '../../lib/terrain/builderStatus'
+import { wallItems } from '../walkWalls'
 import { LAYER_KIND, builderKeyValid, expandRuns, freeTextWithinBounds, layerTags, nextPlaintext, parsePlaintext, plaintextJson } from '../../lib/terrain/blockLayer'
 import { encryptForRegion, decryptForRegion } from '../../lib/shardCrypto'
 import { spawnTemplate, type NostrEvent } from '../../lib/events'
@@ -557,6 +563,113 @@ describe('reading by the Stack', () => {
     await readChunks([base])
     await settle(300)
     expect(aimAt(chunkKey(base), air)).toBe('mine')
+  })
+})
+
+describe('two identities: A publishes, B reads and draws in every mode', () => {
+  // B is only a pubkey on screen (B only reads): A, the store's own identity, back after each.
+  let own: { pubkey: string; npub: string } | null = null
+  beforeEach(() => { own = useCyberspace.getState().identity })
+  afterEach(async () => {
+    if (T().active) await T().exit()
+    if (own) useCyberspace.setState({ identity: own, walking: false })
+    await settle(100)
+  })
+  const PLACE = { x: 0x468ace02468ace024680n, y: 0x13579bdf13579bdf13560n, z: 0x0abcdef0abcdef0abce0n, plane: 0 as const }
+  const HEX = /^[0-9a-f]{64}$/
+
+  /** The mock relay as the canonical relay answers: one tag filter mixing a 64-hex value (first) with a word is refused. */
+  async function ask(f: Filter): Promise<{ events: NostrEvent[]; trouble: unknown }> {
+    for (const [k, v] of Object.entries(f)) {
+      if (!/^#[a-zA-Z]$/.test(k)) continue
+      const vs = v as string[]
+      if (vs.length > 1 && HEX.test(vs[0]) && vs.some((x) => !HEX.test(x))) return { events: [], trouble: 'closed: error: could not query events' }
+    }
+    const got = held.filter((e) => matches(f, e) && (f.until === undefined || e.created_at <= f.until)).sort((a, b) => b.created_at - a.created_at)
+    return { events: f.limit ? got.slice(0, f.limit) : got, trouble: null }
+  }
+
+  /** A, the store's own throwaway identity: surveys PLACE's chunk and mines three cells, surveys the chunk beside it and leaves it as it is; both layers go out. */
+  async function aPublishes(): Promise<{ a: string; mined: Array<[bigint, bigint, bigint]>; rock: [bigint, bigint, bigint]; beside: ChunkBase }> {
+    setShareDeps({ keyStatus: (author, keys) => keyStatusOn(ask, author, keys, (e) => verifyEvent(e as never)) })
+    await named(true, PLACE)
+    const a = me()
+    await surveyHere()
+    const s = terrainSession!
+    const o = s.world.origin
+    const base = chunkOf(PLACE.x, PLACE.y, PLACE.z, 0)
+    const g = generate(base).blocks
+    const off = [Number(base.x - o.x), Number(base.y - o.y), Number(base.z - o.z)]
+    const mined: Array<[bigint, bigint, bigint]> = []
+    let rock: [bigint, bigint, bigint] | null = null
+    for (let c = 0; c < 32768 && (mined.length < 3 || !rock); c++) {
+      if (g[c] === EMPTY) continue
+      const cell: [number, number, number] = [off[0] + (c & 31), off[1] + (c >> 10), off[2] + ((c >> 5) & 31)]
+      const abs: [bigint, bigint, bigint] = [o.x + BigInt(cell[0]), o.y + BigInt(cell[1]), o.z + BigInt(cell[2])]
+      if (mined.length < 3) { if (T().mine({ cell, normal: [0, 1, 0], distance: 1 })) mined.push(abs) } else rock = abs
+    }
+    const beside = { x: base.x + 32n, y: base.y, z: base.z, plane: 0 as const }
+    // A step along x, still in TERRAIN.
+    const step = { x: beside.x + 3n, y: PLACE.y, z: PLACE.z }
+    useCyberspace.setState({ position: { ...step }, cursor: { ...step } })
+    await settle(200)
+    await surveyHere()
+    await flush('test')
+    await T().exit()
+    await settle(300)
+    expect(published.filter((e) => e.kind === LAYER_KIND)).toHaveLength(2)
+    return { a, mined, rock: rock!, beside }
+  }
+
+  /** B: another throwaway identity on this device, standing a chunk away in HOP (never in TERRAIN yet). */
+  async function bArrives(): Promise<string> {
+    const b = getPublicKey(generateSecretKey())
+    useCyberspace.setState({ identity: { pubkey: b, npub: `npub-${b.slice(0, 8)}` } })
+    standAt({ ...PLACE, z: PLACE.z + 40n })
+    await settle(600)
+    expect(terrainSession!.owner).toBe(b)
+    return b
+  }
+
+  const blockAt = (p: readonly [bigint, bigint, bigint]): number => {
+    const s = terrainSession!
+    const o = s.world.origin
+    return s.world.blockCs(Number(p[0] - o.x), Number(p[1] - o.y), Number(p[2] - o.z))
+  }
+
+  it('in HOP, WALK and TERRAIN, LIVE: A\'s holes and A\'s surveyed ground show for B, and B walks on them', async () => {
+    const { mined, rock, beside } = await aPublishes()
+    await bArrives()
+    // HOP: read without opening TERRAIN, and drawn.
+    for (const m of mined) expect(blockAt(m)).toBe(EMPTY)
+    expect(blockAt(rock)).not.toBe(EMPTY)
+    // The chunk A surveyed and left as it was: its ground shows too.
+    const bg = generate(beside).blocks
+    let solid = -1
+    for (let c = 0; c < 32768 && solid < 0; c++) if (bg[c] !== EMPTY) solid = c
+    const besideCell: [bigint, bigint, bigint] = [beside.x + BigInt(solid & 31), beside.y + BigInt(solid >> 10), beside.z + BigInt((solid >> 5) & 31)]
+    expect(blockAt(besideCell)).toBe(bg[solid])
+    // WALK: the same blocks, and they are walls.
+    useCyberspace.setState({ walking: true })
+    await settle(300)
+    expect(blockAt(rock)).not.toBe(EMPTY)
+    expect(wallItems(0).length).toBeGreaterThan(0)
+    // TERRAIN: still there, read again on the way in.
+    await T().enter()
+    await settle(300)
+    for (const m of mined) expect(blockAt(m)).toBe(EMPTY)
+    expect(blockAt(rock)).not.toBe(EMPTY)
+    expect(blockAt(besideCell)).toBe(bg[solid])
+  })
+
+  it('LOCAL reads too, as shards are read in LOCAL: nothing is published, A\'s blocks show for B', async () => {
+    const { mined, rock } = await aPublishes()
+    const sent = published.length
+    setShareDeps({ live: () => false })
+    await bArrives()
+    for (const m of mined) expect(blockAt(m)).toBe(EMPTY)
+    expect(blockAt(rock)).not.toBe(EMPTY)
+    expect(published.length).toBe(sent)
   })
 })
 

@@ -15,54 +15,13 @@ import { CYBERSPACE_RELAY, publishOnceTo, queryAnyChecked } from '../lib/relay'
 import { followsOf } from '../lib/contacts'
 import { verifyOnce } from '../lib/verifiedSigs'
 import { generateChunk } from '../lib/terrain/blocksClient'
-import { builderKeyValid } from '../lib/terrain/blockLayer'
+import { keyStatusOn } from '../lib/terrain/builderStatus'
 import type { KeyStatus } from '../lib/terrain/layerReader'
 import type { NostrEvent } from '../lib/events'
 
-const ACTION = 3333
-/** Pages of an author's movement actions read to find where a key is named. */
-const NAMING_PAGES = 20
-const PAGE = 500
-
-/**
- * Whether some of an author's builder keys are valid (DECK-0009 §4.4).
- * Retirements first, with one `#R` filter for the keys and `all` (any
- * chain); then the author's movement actions, newest first, until each key's
- * newest naming is found or there are none left. A key never named is void;
- * a read that fails, or a history longer than the pages read, leaves it
- * unknown (asked again later).
- */
-async function keyStatus(author: string, keys: string[]): Promise<Map<string, KeyStatus>> {
-  const out = new Map<string, KeyStatus>()
-  const own = (es: NostrEvent[]): NostrEvent[] => es.filter((e) => e.pubkey === author && e.kind === ACTION && verifyOnce(e))
-  const r = await queryAnyChecked([CYBERSPACE_RELAY], { kinds: [ACTION], authors: [author], '#R': [...keys, 'all'] })
-  if (r.trouble) return out
-  const retirements = own(r.events)
-  const seen: NostrEvent[] = [...retirements]
-  let left = keys.filter((k) => {
-    if (retirements.some((e) => e.tags.some((t) => t[0] === 'builder-retire' && t[1] === k))) { out.set(k, 'void'); return false }
-    return true
-  })
-  let until: number | undefined
-  const ids = new Set(seen.map((e) => e.id))
-  for (let page = 0; page < NAMING_PAGES && left.length; page++) {
-    const got = await queryAnyChecked([CYBERSPACE_RELAY], { kinds: [ACTION], authors: [author], limit: PAGE, ...(until !== undefined ? { until } : {}) })
-    if (got.trouble) return out
-    // A page may end inside a second: the next asks from that second again, and what was seen is skipped.
-    const fresh = got.events.filter((e) => !ids.has(e.id))
-    for (const e of fresh) ids.add(e.id)
-    seen.push(...own(fresh))
-    // Newest first: the first naming found is a key's newest.
-    left = left.filter((k) => {
-      if (!seen.some((e) => e.tags.some((t) => t[0] === 'builder' && t[1] === k))) return true
-      out.set(k, builderKeyValid(k, seen) ? 'valid' : 'void')
-      return false
-    })
-    // Nothing new: there are no more actions, so a key not named by now never was.
-    if (fresh.length === 0) { for (const k of left) out.set(k, 'void'); return out }
-    until = Math.min(...got.events.map((e) => e.created_at))
-  }
-  return out
+/** Whether some of an author's builder keys are valid (DECK-0009 §4.4), asked of the canonical relay (lib/terrain/builderStatus.ts). */
+function keyStatus(author: string, keys: string[]): Promise<Map<string, KeyStatus>> {
+  return keyStatusOn((filter) => queryAnyChecked([CYBERSPACE_RELAY], filter), author, keys, verifyOnce)
 }
 
 /** The canonical relay's answer; it throws when the relay could not be heard, so nothing is taken as "none" on a failure. */

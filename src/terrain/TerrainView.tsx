@@ -32,6 +32,8 @@ import { tileUrl } from '../lib/terrain/tiles'
 import { ModalClose } from '../hud/ui/ModalClose'
 import { Chamfer } from '../hud/ui/Chamfer'
 import { noCallout } from '../hooks/useRepeatable'
+import { ShareLine } from './ShareLine'
+import { TerrainCrew, crewChipAsking } from './TerrainCrew'
 
 /** A press held this long without moving places (a long press). */
 export const LONG_PRESS_MS = 420
@@ -174,7 +176,6 @@ function Hotbar(): JSX.Element {
 function InventorySheet(): JSX.Element | null {
   const open = useTerrain((s) => s.sheet)
   const inv = useTerrain((s) => s.inventory)
-  const waiting = useTerrain((s) => s.waiting)
   if (!open) return null
   const kinds = Object.entries(inv.counts).map(([id, n]) => [Number(id), n] as const).filter(([, n]) => n > 0).sort((a, b) => a[0] - b[0])
   const close = (): void => useTerrain.getState().setSheet(false)
@@ -200,7 +201,7 @@ function InventorySheet(): JSX.Element | null {
               ))}
             </div>
           )}
-        <p className="terrain-sheet__foot">{waiting > 0 ? `${waiting} ${waiting === 1 ? 'change' : 'changes'} saved on this device. Sharing them with other players comes later.` : 'Your changes are saved on this device. Sharing them with other players comes later.'}</p>
+        <ShareLine />
         <dl className="terrain-sheet__keys">
           <div><dt><Key>W A S D</Key></dt><dd>walk</dd></div>
           <div><dt><Key>SPACE</Key></dt><dd>jump</dd></div>
@@ -411,7 +412,7 @@ export function terrainKeys(on: EventTarget): () => void {
     if (target?.closest?.('input, textarea, [contenteditable="true"]')) return
     const st = useTerrain.getState()
     const take = (): void => { e.preventDefault(); e.stopImmediatePropagation() }
-    if (e.code === 'Escape') { if (mouseLocked() || escFreedMouse()) { take(); return } if (st.sheet) { take(); st.setSheet(false) } else if (topEscape() === null && !document.querySelector('[aria-modal="true"]')) { take(); leaveTerrain() } return }
+    if (e.code === 'Escape') { if (mouseLocked() || escFreedMouse()) { take(); return } if (st.sheet) { take(); st.setSheet(false) } else if (crewChipAsking()) { /* the Crew chip's Esc dismisses it (TerrainCrew.tsx), never leaves TERRAIN */ } else if (topEscape() === null && !document.querySelector('[aria-modal="true"]')) { take(); leaveTerrain() } return }
     if (e.code === 'KeyT') { take(); if (!e.repeat) leaveTerrain(); return }
     if (e.code === 'KeyI') { take(); if (!e.repeat) st.setSheet(!st.sheet); return }
     if (st.sheet) return
@@ -437,6 +438,8 @@ export function terrainKeys(on: EventTarget): () => void {
 }
 
 function TerrainScreen({ covered }: { covered: boolean }): JSX.Element {
+  // The bag open: on a phone it covers the screen as the menu does (styles.css .is-bag; App's crowded hides the rest).
+  const bag = useTerrain((st) => st.sheet)
   const message = useTerrain((s) => s.message)
   const hint = useTerrain((s) => s.hint)
   const loading = useTerrain((s) => s.loading)
@@ -460,7 +463,7 @@ function TerrainScreen({ covered }: { covered: boolean }): JSX.Element {
   useEffect(() => terrainWheel(window), [])
 
   return (
-    <div className={`terrainview${covered ? ' is-covered' : ''}`} role="group" aria-label="TERRAIN: block tools" aria-hidden={covered || undefined}>
+    <div className={`terrainview${covered ? ' is-covered' : ''}${bag ? ' is-bag' : ''}`} role="group" aria-label="TERRAIN: block tools" aria-hidden={covered || undefined}>
       <span className="terrain-crosshair" aria-hidden />
 
       {/* What just happened (a refusal, a survey), under the cross, in a slot of its own: up to two lines, nothing moves. */}
@@ -502,6 +505,7 @@ function TerrainScreen({ covered }: { covered: boolean }): JSX.Element {
         </span>
       </div>
 
+      <TerrainCrew />
       <Hotbar />
       <InventorySheet />
     </div>

@@ -23,7 +23,8 @@
 
 import { useState, type ComponentType } from 'react'
 import { nip19 } from 'nostr-tools'
-import { Bot, Copy, CopyPlus, MessageSquare, Target, TvMinimal } from 'lucide-react'
+import { Bot, Copy, CopyPlus, MessageSquare, Target, TvMinimal, UserPlus, Users } from 'lucide-react'
+import { addCrew, removeCrew, useShare } from '../store/terrainShare'
 import type { NostrEvent } from 'nostr-tools'
 import type { ShardModel } from 'sno-core/shards'
 import { ProfilePic, ProfileTap } from './ProfileBadge'
@@ -180,6 +181,7 @@ export function PersonCard({ pubkey, shard, event = null, onClose, Preview = Car
               <button className="secret__act" onClick={chat} disabled={noChat !== null} title={noChat ?? `Talk to ${name} in local chat, tagged`}>
                 <MessageSquare size={ICON} strokeWidth={2.25} aria-hidden />CHAT
               </button>
+              <CrewButton pubkey={pubkey} />
               {/* The card stays up, so the button turns to UNBLOCK at once. */}
               <BlockButton pubkey={pubkey} label="BLOCK" />
             </>
@@ -202,4 +204,18 @@ export function chatUnavailable(atHead: boolean, hasKey: boolean): string | null
   if (!atHead) return 'Come back to your head to talk'
   if (!hasKey) return 'Waiting for the scan of where you stand'
   return null
+}
+
+/**
+ * ADD TO CREW (store/terrainShare.ts): they can build on your blocks, at your
+ * rank, in the cells you built. No signer is asked; the card stays up, so the
+ * button turns to IN YOUR CREW, and a second tap takes them off.
+ */
+function CrewButton({ pubkey }: { pubkey: string }): JSX.Element {
+  const inCrew = useShare((s) => s.crew.includes(pubkey))
+  return (
+    <button className={`secret__act ${inCrew ? 'is-on' : ''}`} onClick={() => { void (inCrew ? removeCrew(pubkey) : addCrew(pubkey)) }} title={inCrew ? 'In your crew: tap to take them off' : 'Let them build on your blocks'}>
+      {inCrew ? <Users size={ICON} strokeWidth={2.25} aria-hidden /> : <UserPlus size={ICON} strokeWidth={2.25} aria-hidden />}{inCrew ? 'IN YOUR CREW' : 'ADD TO CREW'}
+    </button>
+  )
 }

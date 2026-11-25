@@ -12,7 +12,10 @@
  * identity in IndexedDB (lib/terrain/terrainDb.ts; arkinox 2026-11-19: all
  * local data per npub): the op log of your changes, folded into layers as
  * DECK §5.5 planes (lib/terrain/layer.ts), the chunks surveyed, the
- * inventory and the first-visit hint. Nothing is published yet.
+ * inventory and the first-visit hint. While LIVE, each chunk's changes are
+ * shared as this device's block layer, and other builders' layers near you
+ * are read and stacked with yours (store/terrainShare.ts, DECK-0009 §5 to
+ * §7, the Stack); LOCAL shares nothing.
  *
  * TERRAIN THE MODE (owner, 2026-11-24: "I basically just want terrain mode
  * to be a normal WALK mode, but it has tools to survey and interact with
@@ -49,6 +52,11 @@ import {
 } from '../lib/terrain/terrainDb'
 import type { Position, ViewAxes } from '../lib/space'
 import type { RayHit } from '../lib/terrain/raycast'
+import {
+  applyCarried, connectShareHost, fieldClosing, liveChanged, noteChange, noteMove, prepareChunk, READ_RING, identityLeaving, readNear, sharedKeys, surveyedForYou, terrainClosed, terrainOpened, viewOf,
+} from './terrainShare'
+import { loadBuilder, releaseBuilderDb } from '../lib/terrain/builderKey'
+import './terrainShareLive'
 
 /** The first-visit hint's steps: mine one, place one, open the inventory; then done. */
 export const HINT_DONE = 3
@@ -56,8 +64,8 @@ export const HINT_DONE = 3
 /** How long a message stays on screen, ms. */
 export const MESSAGE_MS = 3200
 
-/** How many chunks round you the surveyed ones are loaded, drawn and walkable, on each axis. */
-export const DRAW_RING = 2
+/** How many chunks round you the surveyed ones (yours, and others' read from the relay) are loaded, drawn and walkable, on each axis. */
+export const DRAW_RING = READ_RING
 
 /** Past this many gibsons from the field's origin, the field starts again round you: numbers stay exact. */
 const FAR = 2 ** 30
@@ -183,6 +191,31 @@ function builtBlocks(s: TerrainSession, key: string, generated: Uint8Array): Uin
   return blocks
 }
 
+/**
+ * A chunk someone else surveyed (drawn for you, DECK-0009 §7.5) becomes
+ * yours to build in at once, with no SURVEY: your blocks start from the
+ * ground, and your layer surveys it too (survey true, every change against
+ * the ground), so your changes stand on ground even if you mute whoever
+ * surveyed it first. Inside someone else's home only the owner's surveys
+ * count, so yours is ignored there, and your changes still read against the
+ * ground the owner revealed. True when the chunk is (now) yours to build in.
+ */
+function surveyShown(s: TerrainSession, slot: ChunkSlot | null): slot is ChunkSlot & { own: Uint8Array } {
+  if (!slot) return false
+  if (slot.own) return true
+  if (!slot.generated || !slot.inSpace || s.building.has(slot.key) || !surveyedForYou(slot.key)) return false
+  s.surveyedKeys.add(slot.key)
+  const own = builtBlocks(s, slot.key, slot.generated)
+  applyCarried(slot.key, own, slot.generated)
+  slot.own = own
+  if (s.db) keep(writeSurveyed(s.db, s.owner, slot.key, Date.now()))
+  // The survey is shared like any change (DECK-0009 §3.1), with the change about to be made.
+  noteChange(slot.key)
+  s.world.setBlocks(slot.key, slot.generated, viewOf(slot.key, slot.generated, own))
+  s.version++
+  return true
+}
+
 export const useTerrain = create<TerrainState>((set, get) => ({
   from: 'hop',
   active: false,
@@ -208,6 +241,8 @@ export const useTerrain = create<TerrainState>((set, get) => ({
     usePad.getState().setOpen(true)
     await syncTerrain()
     if (get().active) set({ loading: false })
+    // This device's builder key is made on TERRAIN's first use; the layers round you are read again (store/terrainShare.ts).
+    if (get().active) void terrainOpened()
   },
 
   exit: async (opts) => {
@@ -225,6 +260,8 @@ export const useTerrain = create<TerrainState>((set, get) => ({
       // What waits is folded into its layers (the log keeps it either way).
       for (const key of [...s.pending.keys()]) await foldKey(s, key)
       if (s.db) keep(writeInventory(s.db, s.owner, get().inventory))
+      // Closing TERRAIN shares what waits (while LIVE).
+      if (terrainSession === s) void terrainClosed()
     }
     void syncTerrain()
   },
@@ -235,7 +272,7 @@ export const useTerrain = create<TerrainState>((set, get) => ({
     const slot = s.world.slotByKey(key)
     if (!slot) return
     if (!slot.inSpace) { get().say('That chunk is past the edge of cyberspace.'); return }
-    if (slot.surveyed || s.building.has(key)) return
+    if (slot.own || s.building.has(key)) return
     if (!slotInReach(s, key)) { get().say(OUT_OF_REACH); return }
     set({ surveying: [...get().surveying, key] })
     try {
@@ -243,6 +280,8 @@ export const useTerrain = create<TerrainState>((set, get) => ({
       await build(s, slot)
       if (terrainSession !== s) return
       if (s.db) keep(writeSurveyed(s.db, s.owner, key, Date.now()))
+      // A survey is shared like any change (DECK-0009 §3.1).
+      noteChange(key)
       clearWalker(s, key)
       get().say('Terrain revealed from cyberspace\'s structure.')
     } catch {
@@ -260,12 +299,18 @@ export const useTerrain = create<TerrainState>((set, get) => ({
     const [dx, dy, dz] = hit.cell
     const id = s.world.blockCs(dx, dy, dz)
     if (id <= EMPTY) return false
+    // A chunk someone else surveyed is yours to build in at once (surveyShown); one nobody surveyed is never drawn.
+    const at = s.world.locate(dx, dy, dz)
+    if (!surveyShown(s, at.slot)) { get().say('Survey this chunk before building in it.'); return false }
+    // What is yours in that cell: someone else's block mined is gone for you (and for whoever ranks you first), never carried.
+    const yours = at.slot.own[at.cell]
     const change = s.world.setCs(dx, dy, dz, EMPTY)
     if (!change) return false
     record(s, change)
     advanceHint(0)
     // What it carries as: its kind's own id. A block this client has no kind for is mined, and carried as nothing.
-    const was = kindId(id)
+    if (yours <= EMPTY) return true
+    const was = kindId(yours)
     if (was === 255) return true
     const inv = get().inventory
     const counts = { ...inv.counts, [was]: (inv.counts[was] ?? 0) + 1 }
@@ -294,9 +339,9 @@ export const useTerrain = create<TerrainState>((set, get) => ({
     // Open space, or a liquid, which a placed block takes the place of.
     if (isSolid(s.world.blockCs(dx, dy, dz))) return false
     const slot = s.world.slotAtCs(dx, dy, dz)
-    if (!slot?.blocks) { get().say('Survey this chunk before building in it.'); return false }
-    // Never where you stand: the walk's own gibson.
+    // Never where you stand: the walk's own gibson. Asked first, so a refused place never surveys the chunk for you.
     if (walkerAt(s, cell)) { get().say('You are standing there: step back to place it.'); return false }
+    if (!surveyShown(s, slot)) { get().say('Survey this chunk before building in it.'); return false }
     const change = s.world.setCs(dx, dy, dz, id)
     if (!change) return false
     record(s, change)
@@ -373,9 +418,11 @@ const countWaiting = (s: TerrainSession): number => {
 async function foldKey(s: TerrainSession, key: string): Promise<void> {
   const slot = s.world.slotByKey(key)
   const list = s.pending.get(key)
-  if (!slot?.generated || !slot.blocks || !list || list.length === 0) return
+  const own = slot?.own
+  if (!slot?.generated || !own || !list || list.length === 0) return
   if (s.unreadable.has(key)) return
-  const layer = encodeLayer(slot.generated, slot.blocks, s.plane === 1 ? 1 : 0)
+  // Your own blocks alone, never what others shared: your layer says only what you changed.
+  const layer = encodeLayer(slot.generated, own, s.plane === 1 ? 1 : 0)
   s.layers.set(key, layer)
   const seqs = list.map((p) => p.seq)
   s.pending.delete(key)
@@ -385,6 +432,11 @@ async function foldKey(s: TerrainSession, key: string): Promise<void> {
 
 /** Record a change: the log in memory and on the device, the layer folded when the log is long. */
 function record(s: TerrainSession, change: Change): void {
+  const slot = s.world.slotByKey(change.chunk)
+  const ownBefore = slot?.own ? slot.own[change.cell] : change.was
+  if (slot?.own) slot.own[change.cell] = change.id
+  // What it was, for the layer: setting a cell to its ground over someone else's block is written as a change (DECK-0009 §5.4).
+  noteChange(change.chunk, slot?.generated ? { cell: change.cell, ownBefore, ownAfter: change.id, shownBefore: change.was, ground: slot.generated[change.cell] } : undefined)
   const seq = s.nextSeq++
   const list = s.pending.get(change.chunk) ?? []
   list.push({ seq, change })
@@ -426,8 +478,14 @@ async function build(s: TerrainSession, slot: ChunkSlot): Promise<void> {
       }
     }
     const g = await generateChunk(slot.base)
+    await prepareChunk(slot.key)
     if (terrainSession !== s || s.world.slotByKey(slot.key) !== slot) return
-    s.world.setBlocks(slot.key, g.blocks, builtBlocks(s, slot.key, g.blocks))
+    // Your own blocks where you surveyed, and everyone else's shared layers under them (store/terrainShare.ts).
+    const own = s.surveyedKeys.has(slot.key) ? builtBlocks(s, slot.key, g.blocks) : null
+    // Blocks a new key carried in from your other keys' layers (store/terrainShare.ts, DECK-0009 §5.6) are yours here.
+    if (own) applyCarried(slot.key, own, g.blocks)
+    slot.own = own
+    s.world.setBlocks(slot.key, g.blocks, viewOf(slot.key, g.blocks, own))
     s.version++
     useTerrain.setState({ waiting: countWaiting(s) })
   } finally {
@@ -452,6 +510,7 @@ function makeField(owner: string, plane: number, at: Position): TerrainSession {
       for (const k of kept.surveyed) s.surveyedKeys.add(k)
       s.nextSeq = Math.max(s.nextSeq, kept.nextSeq)
       s.db = db
+      await loadBuilder(db, owner).catch(() => undefined)
       useTerrain.setState({ inventory: kept.inventory, hint: kept.hint })
     } catch {
       db?.close()
@@ -463,6 +522,7 @@ function makeField(owner: string, plane: number, at: Position): TerrainSession {
 /** Close a field: everything waiting folded, the database let go. */
 async function closeField(s: TerrainSession): Promise<void> {
   for (const key of [...s.pending.keys()]) await foldKey(s, key)
+  if (s.db) releaseBuilderDb(s.owner, s.db)
   s.db?.close()
   s.db = null
 }
@@ -498,16 +558,24 @@ async function syncOnce(): Promise<TerrainSession | null> {
   const plane = cs.plane
   const at = headNow()
   let s = terrainSession
+  let made = false
   const far = s ? offsetOf(s, at).some((v) => Math.abs(v) > FAR) : false
   if (!s || s.owner !== owner || s.plane !== plane || far) {
     const old = s
+    // Another identity: what the one left changed goes out first while its field is still here, if it is LIVE (its own setting; DECK-0009 §5.7).
+    // LIVE as it was in memory while that identity was on screen, never read back from storage (a save that failed would read LIVE); unknown is LOCAL.
+    if (old && old.owner !== owner && old.owner !== 'local') await identityLeaving(old.owner, liveSeen.get(old.owner) ?? false).catch(() => undefined)
+    if (old) fieldClosing()
     s = makeField(owner, plane, at)
     terrainSession = s
     if (old) await closeField(old)
     publishWalls()
+    made = true
   }
   await s.ready
   if (terrainSession !== s) return null
+  // A new field (load, another identity or plane, far away): others' layers round you are read at once, in any mode (store/terrainShare.ts).
+  if (made) void readNear(true)
   const world = s.world
   const centre = TerrainWorld.chunkOf(...offsetOf(s, headNow()))
   const want = new Set<ChunkSlot>()
@@ -515,10 +583,12 @@ async function syncOnce(): Promise<TerrainSession | null> {
   for (let cy = -ring; cy <= ring; cy++) for (let cz = -ring; cz <= ring; cz++) for (let cx = -ring; cx <= ring; cx++) {
     want.add(world.slotAt(centre[0] + cx, centre[1] + cy, centre[2] + cz, true)!)
   }
+  const shared = sharedKeys()
   for (let cy = -DRAW_RING; cy <= DRAW_RING; cy++) for (let cz = -DRAW_RING; cz <= DRAW_RING; cz++) for (let cx = -DRAW_RING; cx <= DRAW_RING; cx++) {
     const o = world.origin
     const base: ChunkBase = { x: o.x + BigInt(32 * (centre[0] + cx)), y: o.y + BigInt(32 * (centre[1] + cy)), z: o.z + BigInt(32 * (centre[2] + cz)), plane }
-    if (!s.surveyedKeys.has(chunkKey(base))) continue
+    const k = chunkKey(base)
+    if (!s.surveyedKeys.has(k) && !shared.has(k)) continue
     want.add(world.slotAt(centre[0] + cx, centre[1] + cy, centre[2] + cz, true)!)
   }
   // Far chunks folded and let go; a chunk being built stays until it lands.
@@ -529,7 +599,7 @@ async function syncOnce(): Promise<TerrainSession | null> {
     s.version++
   }
   // The chunk you stand in first, then the rest, so the ground under you comes first.
-  const order = [...want].filter((sl) => !sl.blocks && s!.surveyedKeys.has(sl.key))
+  const order = [...want].filter((sl) => !sl.blocks && (s!.surveyedKeys.has(sl.key) || shared.has(sl.key)))
   order.sort((a, b) => dist(a.off, centre) - dist(b.off, centre))
   for (const slot of order) {
     await build(s, slot).catch(() => { /* drawn empty; the next sync tries again */ })
@@ -564,13 +634,15 @@ export function surveyTarget(s: TerrainSession | null = terrainSession): string 
   if (!s) return null
   const w = offsetOf(s, headNow())
   const here = s.world.slotAtCs(w[0], w[1], w[2])
-  if (here && here.inSpace && !here.surveyed && slotInReach(s, here.key)) return here.key
+  // Only chunks nobody has surveyed for you: one someone else surveyed is built in at once (surveyShown).
+  const open = (sl: ChunkSlot): boolean => sl.inSpace && !sl.own && !surveyedForYou(sl.key) && slotInReach(s, sl.key)
+  if (here && open(here)) return here.key
   const look = walkLookDirection()
   if (!look.valid) return null
   const d = look.forward
   for (let t = 2; t < 48; t += 2) {
     const sl = s.world.slotAtCs(Math.round(w[0] + d.x * t), Math.round(w[1] + d.y * t), Math.round(w[2] + d.z * t))
-    if (sl && sl.inSpace && !sl.surveyed && slotInReach(s, sl.key)) return sl.key
+    if (sl && open(sl)) return sl.key
   }
   return null
 }
@@ -606,14 +678,60 @@ function follow(): void {
 // A tap on the scene mines in TERRAIN: it never folds the controls or the chat (owner, 2026-11-24).
 takeSceneTaps(() => useTerrain.getState().active)
 
+/** Each identity's LIVE or LOCAL as last seen on screen (in memory): what decides whether its waiting changes go out when it is switched away from. */
+const liveSeen = new Map<string, boolean>()
+{
+  const c0 = useCyberspace.getState()
+  if (c0.identity.pubkey) liveSeen.set(c0.identity.pubkey, c0.live)
+}
+
 useCyberspace.subscribe((c, prev) => {
+  // The identity on screen's own setting (a switch sets identity and LIVE together).
+  if (c.identity.pubkey) liveSeen.set(c.identity.pubkey, c.live)
   if (c.identity.pubkey !== prev.identity.pubkey && useTerrain.getState().active) void useTerrain.getState().exit()
+  // LOCAL shares nothing; back to LIVE, what waited goes out (store/terrainShare.ts).
+  if (c.live !== prev.live && c.identity.pubkey === prev.identity.pubkey) liveChanged(c.live)
+  // Every step, in any mode: a chunk left by more than 4 blocks shares what waits, and the layers round you are read (store/terrainShare.ts).
+  if (c.cursor !== prev.cursor || c.position !== prev.position || c.walking !== prev.walking) noteMove()
   // WALK ending under TERRAIN (its button, X, a respawn) ends TERRAIN: TERRAIN is WALK.
   if (prev.walking && !c.walking && useTerrain.getState().active) void useTerrain.getState().exit()
   follow()
 })
 useTerrain.subscribe((t, prev) => { if (t.active !== prev.active) follow() })
 publishWalls()
+
+/** Draw a chunk again with what is shared there now (store/terrainShare.ts), or load it when it is not held. */
+function redisplay(key: string): void {
+  const s = terrainSession
+  if (!s) return
+  const slot = s.world.slotByKey(key)
+  if (!slot?.generated) { void syncTerrain(); return }
+  s.world.setBlocks(key, slot.generated, viewOf(key, slot.generated, slot.own ?? null))
+  s.version++
+}
+
+connectShareHost({
+  field: () => {
+    const s = terrainSession
+    return s ? { owner: s.owner, plane: s.plane, db: s.db, slot: (key) => s.world.slotByKey(key), surveyed: (key) => s.surveyedKeys.has(key) } : null
+  },
+  head: headNow,
+  active: () => useTerrain.getState().active,
+  fold: async (key) => { const s = terrainSession; if (s) await foldKey(s, key) },
+  redisplay,
+  adopt: async (key, cells) => {
+    const s = terrainSession
+    const slot = s?.world.slotByKey(key)
+    if (!s || !slot?.generated || !slot.own) return
+    // Another key's blocks a new key started from (store/terrainShare.ts, DECK-0009 §5.6): yours on this device now.
+    for (const [c, v] of cells) slot.own[c] = Math.min(v, 255)
+    for (const { change } of s.pending.get(key) ?? []) slot.own[change.cell] = change.id
+    const layer = encodeLayer(slot.generated, slot.own, s.plane === 1 ? 1 : 0)
+    s.layers.set(key, layer)
+    if (s.db) await foldChunk(s.db, s.owner, key, layer, [], Date.now()).catch(() => { /* kept in memory */ })
+    redisplay(key)
+  },
+})
 
 // Development only: the field, for browser probes (never in a production build).
 if (import.meta.env.DEV && typeof window !== 'undefined') {

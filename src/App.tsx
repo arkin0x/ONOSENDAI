@@ -43,6 +43,9 @@ import './tutorial/straylight'
 import './tutorial/dungeon'
 import { GameView } from './game/GameView'
 import { TerrainView } from './terrain/TerrainView'
+import { useTerrain } from './store/useTerrain'
+import { useWorkshop } from './store/useWorkshop'
+import { useGame } from './store/useGame'
 import { GameChip } from './hud/GameChip'
 import { TvScreen } from './hud/TvScreen'
 import { isTvPath, useTv } from './store/useTv'
@@ -316,7 +319,17 @@ export default function App(): JSX.Element {
 
   // Only a phone has to choose between reading the panels and driving. On a
   // desktop there is room for both at once.
-  const crowded = isMobile && showPanels
+  const menuCrowded = isMobile && showPanels
+  // TERRAIN's bag covers a phone as the menu does: the pad, LOOK, JUMP, the
+  // instruments and the tutorial card step aside under it and come back when
+  // it closes (terrain/TerrainView.tsx hides its own hotbar, PLACE and SURVEY).
+  const bagOpen = useTerrain((s) => s.active && s.sheet)
+  const crowded = menuCrowded || (isMobile && bagOpen)
+  // The menu, the workshop or a game opening puts the bag away, so it never comes back over them.
+  const workshopOpen = useWorkshop((s) => s.open)
+  const inGame = useGame((s) => !!s.session)
+  const coveredByMore = showPanels || workshopOpen || inGame
+  useEffect(() => { if (coveredByMore && useTerrain.getState().sheet) useTerrain.getState().setSheet(false) }, [coveredByMore])
   // The keys stand down with the pad while the menu covers the scene.
   useEffect(() => { setMenuCovering(crowded) }, [crowded])
 
@@ -467,7 +480,7 @@ export default function App(): JSX.Element {
           }} />
         </div>
       )}
-      {showPanels && !offerUp && <CrashNote where="the menu"><Hud menuOpen={crowded} /></CrashNote>}
+      {showPanels && !offerUp && <CrashNote where="the menu"><Hud menuOpen={menuCrowded} /></CrashNote>}
       <SpectateBar />
       {/* Hidden, never unmounted, while out of the way: each mount is a new WebGL context (scene/Compass3D). */}
       <Compass3D hidden={crowded || offerUp || deploying || !shows('compass')} onTap={() => setViewMenuOpen((open) => !open)} />
@@ -518,7 +531,7 @@ export default function App(): JSX.Element {
       <GameView />
       {/* TERRAIN's controls over the scene while it is on (store/useTerrain.ts); its blocks are drawn in the scene (scene/TerrainLayer.tsx). */}
       {/* Hidden under the open menu on a phone, as WALK's pad is (crowded); the carried block stays under everything. */}
-      <TerrainView covered={crowded} />
+      <TerrainView covered={menuCrowded} />
       {/* The one hidden canvas that draws every list's shard pictures, there only while it has some to draw. */}
       <ThumbHost />
       {/* Docked in the lower left, a gap short of the pad while the pad is on

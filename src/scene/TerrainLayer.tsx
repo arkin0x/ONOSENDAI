@@ -35,6 +35,7 @@ import {
   Raycaster, Vector2, Vector3, type LineSegments,
 } from 'three'
 import { cellInReach, slotInReach, surveyTarget, terrainSession, useTerrain, type TerrainSession } from '../store/useTerrain'
+import { AIM_COLORS, aimAt, sceneDraws } from '../store/terrainShare'
 import { useCyberspace } from '../store/useCyberspace'
 import { useLayers } from '../store/useLayers'
 import { raycast, type RayHit } from '../lib/terrain/raycast'
@@ -193,7 +194,7 @@ function Chunks({ axes }: { axes: ViewAxes }): JSX.Element {
 }
 
 const CURSOR_EDGES = new EdgesGeometry(new BoxGeometry(1.02, 1.02, 1.02))
-/** The targeted block's outline: plain white, a dull red out of reach. */
+/** The targeted block's outline: by whose block it is (AIM_COLORS), a dull red out of reach. */
 const OUTLINE = '#ffffff'
 const OUTLINE_FAR = '#c86464'
 const UNIT_EDGES = new EdgesGeometry(new BoxGeometry(1, 1, 1))
@@ -250,7 +251,9 @@ function Marks({ axes }: { axes: ViewAxes }): JSX.Element {
     o.visible = !!hit
     if (hit) {
       o.position.set(hit.cell[0] + 0.5, hit.cell[1] + 0.5, hit.cell[2] + 0.5)
-      ;(o.material as LineBasicMaterial).color.set(cellInReach(s, hit.cell) ? OUTLINE : OUTLINE_FAR)
+      // Whose block it is (store/terrainShare.ts): mint yours or in your home, amber someone else's, white unbuilt ground.
+      const at = s.world.locate(hit.cell[0], hit.cell[1], hit.cell[2])
+      ;(o.material as LineBasicMaterial).color.set(cellInReach(s, hit.cell) ? AIM_COLORS[aimAt(at.slot?.key ?? null, at.cell)] : OUTLINE_FAR)
     }
     const now = performance.now()
     if (now - last.current < 200) return
@@ -292,6 +295,8 @@ function Marks({ axes }: { axes: ViewAxes }): JSX.Element {
 }
 
 export function TerrainLayer({ axes }: { axes: ViewAxes }): JSX.Element {
+  // Others' blocks round you are read while the scene draws blocks, in every mode (store/terrainShare.ts), as shards are scanned while the app shows them.
+  useEffect(() => { sceneDraws(true); return () => sceneDraws(false) }, [])
   return (
     <>
       <Chunks axes={axes} />

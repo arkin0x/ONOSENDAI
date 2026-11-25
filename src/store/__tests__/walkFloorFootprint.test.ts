@@ -12,7 +12,8 @@
  * Rig): fluid WALK's frame (tickFluid, tickFall, groundFluid), or the step
  * WALK's eased walker point lifted by stepFloor, then the camera from
  * scene/walkEyeRig.ts. Two avatars 3 gibsons tall, the owner's: an operative
- * whose eye is 2.8 up and 0.27 forward, and one with the automatic eye.
+ * whose eye is 2.8 up and 0.27 forward, and one with the automatic eye; and
+ * the default icosahedron, no avatar at all, whose eye is 0.875 up.
  *
  * - the feet are never below the ground under the drawn point, nor under the
  *   footprint (the walkable ground FOOT_RADIUS round it);
@@ -68,7 +69,7 @@ import { csDirection } from '../../lib/pose'
 import { WORLD_DOWN } from '../../lib/walkDown'
 import { canonicalQuaternion, type Position, type ViewAxes } from '../../lib/space'
 import { walkKeyDown, walkKeyUp, walkKeysReleased } from '../../hooks/useKeyboard'
-import { WalkEyeRig } from '../../scene/walkEyeRig'
+import { EYE_ROOM, WalkEyeRig } from '../../scene/walkEyeRig'
 
 type V3 = [number, number, number]
 
@@ -205,7 +206,7 @@ function toRender(axes: ViewAxes, v: V3): V3 {
 
 const eyeVec = new Vector3()
 /** The camera, gibsons from `start`, for the walker drawn at `p` looking along `look`, as Scene.tsx asks the rig. */
-function camera(rig: WalkEyeRig, shard: ShardModel, p: V3, look: V3): V3 {
+function camera(rig: WalkEyeRig, shard: ShardModel | null, p: V3, look: V3): V3 {
   const cs = useCyberspace.getState()
   const axes = cs.axes()
   const c: V3 = [Number(cs.cursor.x - start.x), Number(cs.cursor.y - start.y), Number(cs.cursor.z - start.z)]
@@ -224,9 +225,18 @@ function camera(rig: WalkEyeRig, shard: ShardModel, p: V3, look: V3): V3 {
 function column(name: string, eye?: V3): ShardModel {
   return { ...newShard(name), vertices: [{ p: [0, 0, 0], c: [1, 1, 1] }, { p: [0, 3, 0], c: [1, 1, 1] }, { p: [0, 0, 1], c: [1, 1, 1] }], faces: [[0, 1, 2]], ...(eye ? { extra: { eye } } : {}) }
 }
-const AVATARS: Array<[string, ShardModel]> = [
-  ['an operative (eye 2.8 up, 0.27 forward)', column('Operative', [4, 336, -32])],
-  ['a 3-gibson avatar with the automatic eye', column('Auto')],
+/**
+ * Who walks, and the least height over the feet the camera may have before it
+ * counts as down at them (camAtFeet). The 3-gibson avatars: half a gibson.
+ * The default icosahedron (no avatar, arkinox 2026-11-25: "i am clipping under
+ * the floor constantly"), whose eye is 0.875 up: a stair's trail lowers its
+ * camera toward a riser taller than its eye by design (lib/walkEye.ts
+ * walkRise), never nearer the feet than the near plane's room, EYE_ROOM.
+ */
+const AVATARS: Array<[string, ShardModel | null, number]> = [
+  ['the default icosahedron (no avatar)', null, EYE_ROOM * (1 - 1 / 8)],
+  ['an operative (eye 2.8 up, 0.27 forward)', column('Operative', [4, 336, -32]), 0.5],
+  ['a 3-gibson avatar with the automatic eye', column('Auto'), 0.5],
 ]
 
 const key = (code: string) => ({ code, ctrlKey: false, shiftKey: false, altKey: false, metaKey: false, preventDefault: () => {} })
@@ -285,17 +295,17 @@ async function walk(fluid: boolean, gravity: boolean): Promise<void> {
   if (!gravity) useWalk.getState().setGravity(false)
 }
 
-interface Walked { frames: number; feetUnder: number; footWorst: number; camInGround: number; camAtFeet: number }
+interface Walked { frames: number; feetUnder: number; footWorst: number; camInGround: number; camAtFeet: number; camLowest: number }
 
 /**
  * Walk `legs` (a heading and how far along it, in gibsons), a frame every
  * `ms`, the rig's walker point as Scene.tsx eases it (fluid exactly, the step
  * WALK eased and lifted by stepFloor), and measure against `surface`.
  */
-async function walkLegs(legs: Array<[number, number, number]>, ms: number, avatar: ShardModel, fluid: boolean, surface: (x: number, z: number) => number | null, inGround: (p: V3) => boolean): Promise<Walked> {
+async function walkLegs(legs: Array<[number, number, number]>, ms: number, avatar: ShardModel | null, fluid: boolean, surface: (x: number, z: number) => number | null, inGround: (p: V3) => boolean, atFeet = 0.5): Promise<Walked> {
   const rig = new WalkEyeRig()
   let smooth = target()
-  const out: Walked = { frames: 0, feetUnder: 0, footWorst: 0, camInGround: 0, camAtFeet: 0 }
+  const out: Walked = { frames: 0, feetUnder: 0, footWorst: 0, camInGround: 0, camAtFeet: 0, camLowest: Infinity }
   for (const [dx, dz, dist] of legs) {
     face(dx, dz)
     const c0 = useCyberspace.getState().cursor
@@ -321,7 +331,8 @@ async function walkLegs(legs: Array<[number, number, number]>, ms: number, avata
       const f = footTop(surface, p[0], p[2])
       if (f !== null) out.footWorst = Math.max(out.footWorst, f - p[1])
       if (inGround(cam)) out.camInGround++
-      if (cam[1] - p[1] < 0.5) out.camAtFeet++
+      if (cam[1] - p[1] < atFeet) out.camAtFeet++
+      out.camLowest = Math.min(out.camLowest, cam[1] - p[1])
     }
     walkKeyUp('KeyW')
     for (let k = 0; k < 20; k++) { frame(ms); await keepUp() }
@@ -335,11 +346,11 @@ describe('over rolling heightfield slabs with a seam, a ridge and a valley', () 
   const surface = makeSurface([[rolling, [0, ORIGIN_Y, 0], grid(32, 2), grid(32, 2)], [rolling, [64, ORIGIN_Y, 0], grid(32, 2), grid(32, 2)]])
   const inGround = (p: V3): boolean => { const s = surface(p[0], p[2]); return s !== null && p[1] < s - 1e-6 && p[1] > ORIGIN_Y - 16 }
   const LEGS: Array<[number, number, number]> = [[1, 0, 46], [-1, 0, 46], [0, -1, 20], [0, 1, 20], [1, 0.6, 30], [-1, -0.6, 30]]
-  for (const fluid of [true, false]) for (const gravity of [true, false]) for (const ms of [16, 33]) for (const [who, avatar] of AVATARS) {
+  for (const fluid of [true, false]) for (const gravity of [true, false]) for (const ms of [16, 33]) for (const [who, avatar, atFeet] of AVATARS) {
     it(`${fluid ? 'fluid' : 'step'} WALK, gravity ${gravity ? 'on' : 'off'}, a frame every ${ms} ms, ${who}: the feet never under the ground or the footprint, the camera never in it`, async () => {
       world([[slab('Rolling A', grid(32, 2), grid(32, 2), rolling), [0, ORIGIN_Y, 0]], [slab('Rolling B', grid(32, 2), grid(32, 2), rolling), [64, ORIGIN_Y, 0]]])
       await walk(fluid, gravity)
-      const r = await walkLegs(LEGS, ms, avatar, fluid, surface, inGround)
+      const r = await walkLegs(LEGS, ms, avatar, fluid, surface, inGround, atFeet)
       expect(r.frames).toBeGreaterThan(200)
       expect(r, JSON.stringify(r)).toMatchObject({ feetUnder: 0, camInGround: 0, camAtFeet: 0 })
       // Between the footprint's seventeen samples a crest can poke up a little: never a tenth of a gibson (1.5 cm).
@@ -353,11 +364,11 @@ describe('along a channel with steep sides', () => {
   const ORIGIN_Y = -1
   const surface = makeSurface([[channel, [0, ORIGIN_Y, 0], grid(16, 2), CHANNEL_ZS]])
   const inGround = (p: V3): boolean => { const s = surface(p[0], p[2]); return s !== null && p[1] < s - 1e-6 && p[1] > ORIGIN_Y - 16 }
-  for (const fluid of [true, false]) for (const ms of [16, 33]) for (const [who, avatar] of AVATARS) {
+  for (const fluid of [true, false]) for (const ms of [16, 33]) for (const [who, avatar, atFeet] of AVATARS) {
     it(`${fluid ? 'fluid' : 'step'} WALK, a frame every ${ms} ms, ${who}: the feet never inside the side, the camera never down at them`, async () => {
       world([[slab('Channel', grid(16, 2), CHANNEL_ZS, channel), [0, ORIGIN_Y, 0]]])
       await walk(fluid, true)
-      const r = await walkLegs([[0, 1, 9], [1, 0.45, 10], [-1, 0.45, 20], [1, -0.45, 20], [-1, -0.45, 10]], ms, avatar, fluid, surface, inGround)
+      const r = await walkLegs([[0, 1, 9], [1, 0.45, 10], [-1, 0.45, 20], [1, -0.45, 20], [-1, -0.45, 10]], ms, avatar, fluid, surface, inGround, atFeet)
       expect(r.frames).toBeGreaterThan(100)
       expect(r, JSON.stringify(r)).toMatchObject({ feetUnder: 0, camInGround: 0, camAtFeet: 0 })
     }, 120_000)
@@ -376,7 +387,7 @@ describe('the step WALK up and down a flight of steps (its eased point cut each 
       return best
     }
     const inGround = (p: V3): boolean => steps.some(([lo, hi]) => p[0] > lo[0] + 1e-6 && p[0] < hi[0] - 1e-6 && p[1] > lo[1] && p[1] < hi[1] - 1e-6 && p[2] > lo[2] && p[2] < hi[2])
-    for (const ms of [16, 33]) for (const [who, avatar] of AVATARS) {
+    for (const ms of [16, 33]) for (const [who, avatar, atFeet] of AVATARS) {
       it(`risers of ${rise} every ${run}, a frame every ${ms} ms, ${who}: the walker point never inside a step, the camera never in one or down at the feet`, async () => {
         const vertices: ShardModel['vertices'] = []
         const faces: Array<[number, number, number]> = []
@@ -387,7 +398,7 @@ describe('the step WALK up and down a flight of steps (its eased point cut each 
         }
         world([[withConstrain({ ...newShard('Steps'), mode: 'solid', vertices, faces }, 'all'), [0, 0, 0]]])
         await walk(false, true)
-        const r = await walkLegs([[1, 0, FIRST + 5 * run + 2], [-1, 0, FIRST + 5 * run + 4]], ms, avatar, false, surface, inGround)
+        const r = await walkLegs([[1, 0, FIRST + 5 * run + 2], [-1, 0, FIRST + 5 * run + 4]], ms, avatar, false, surface, inGround, atFeet)
         expect(r.frames).toBeGreaterThan(40)
         expect(r, JSON.stringify(r)).toMatchObject({ feetUnder: 0, camInGround: 0, camAtFeet: 0 })
       }, 120_000)

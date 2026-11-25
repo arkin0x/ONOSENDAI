@@ -6,7 +6,8 @@
  * your hand on the bench (shell/EyeBar). A reserved line under it says how
  * the eye reaches others: USE THIS SHARD publishes it, with the avatar; and
  * when the avatar you wear is this shape with another eye, that it still
- * uses its old one until you do.
+ * uses its old one until you do. On a shape with no points yet, that the eye
+ * is on the default icosahedron, which TRY WALK walks with.
  */
 
 import { ScanEye } from 'lucide-react'
@@ -31,6 +32,8 @@ const shapeKey = (s: ShardModel): string => { const { name: _n, ...rest } = toPa
  * says what the worn one still uses; otherwise how both are published.
  */
 export function eyeNote(shard: ShardModel, worn: ShardModel | null): string {
+  // No shape yet: nothing to publish, but WHAT YOU SEE and TRY WALK look from this eye on the default icosahedron.
+  if (shard.vertices.length === 0) return 'NO SHAPE YET: THIS IS THE EYE ON THE DEFAULT ICOSAHEDRON. TRY WALK TO WALK WITH IT.'
   if (worn && shapeKey(worn) === shapeKey(shard)) {
     const eye = eyeLabel(worn) + eyeChosen(worn) !== eyeLabel(shard) + eyeChosen(shard)
     const face = drawnFace(worn) !== drawnFace(shard)

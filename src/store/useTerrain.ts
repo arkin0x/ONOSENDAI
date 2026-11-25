@@ -53,7 +53,7 @@ import {
 import type { Position, ViewAxes } from '../lib/space'
 import type { RayHit } from '../lib/terrain/raycast'
 import {
-  applyCarried, connectShareHost, fieldClosing, liveChanged, noteChange, noteMove, prepareChunk, READ_RING, readNear, sharedKeys, surveyedForYou, terrainClosed, terrainOpened, viewOf,
+  applyCarried, connectShareHost, fieldClosing, liveChanged, noteChange, noteMove, prepareChunk, READ_RING, identityLeaving, readNear, sharedKeys, surveyedForYou, terrainClosed, terrainOpened, viewOf,
 } from './terrainShare'
 import { loadBuilder, releaseBuilderDb } from '../lib/terrain/builderKey'
 import './terrainShareLive'
@@ -562,6 +562,9 @@ async function syncOnce(): Promise<TerrainSession | null> {
   const far = s ? offsetOf(s, at).some((v) => Math.abs(v) > FAR) : false
   if (!s || s.owner !== owner || s.plane !== plane || far) {
     const old = s
+    // Another identity: what the one left changed goes out first while its field is still here, if it is LIVE (its own setting; DECK-0009 §5.7).
+    // LIVE as it was in memory while that identity was on screen, never read back from storage (a save that failed would read LIVE); unknown is LOCAL.
+    if (old && old.owner !== owner && old.owner !== 'local') await identityLeaving(old.owner, liveSeen.get(old.owner) ?? false).catch(() => undefined)
     if (old) fieldClosing()
     s = makeField(owner, plane, at)
     terrainSession = s
@@ -675,7 +678,16 @@ function follow(): void {
 // A tap on the scene mines in TERRAIN: it never folds the controls or the chat (owner, 2026-11-24).
 takeSceneTaps(() => useTerrain.getState().active)
 
+/** Each identity's LIVE or LOCAL as last seen on screen (in memory): what decides whether its waiting changes go out when it is switched away from. */
+const liveSeen = new Map<string, boolean>()
+{
+  const c0 = useCyberspace.getState()
+  if (c0.identity.pubkey) liveSeen.set(c0.identity.pubkey, c0.live)
+}
+
 useCyberspace.subscribe((c, prev) => {
+  // The identity on screen's own setting (a switch sets identity and LIVE together).
+  if (c.identity.pubkey) liveSeen.set(c.identity.pubkey, c.live)
   if (c.identity.pubkey !== prev.identity.pubkey && useTerrain.getState().active) void useTerrain.getState().exit()
   // LOCAL shares nothing; back to LIVE, what waited goes out (store/terrainShare.ts).
   if (c.live !== prev.live && c.identity.pubkey === prev.identity.pubkey) liveChanged(c.live)

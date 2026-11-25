@@ -251,6 +251,8 @@ interface Session {
   failed: string | null
   readKey: string
   closed: boolean
+  /** Its identity is being switched away from while it was LIVE: what waits goes out first, signed by its builder key (identityLeaving). */
+  leaving: boolean
 }
 
 let session: Session | null = null
@@ -258,10 +260,16 @@ let reader: ReturnType<typeof setInterval> | null = null
 
 /** How many scenes draw blocks now (scene/TerrainLayer.tsx): others' layers are read only while one does. */
 let drawing = 0
+let watchingTab = false
 
 /** A scene that draws blocks came (true) or went (false): others' layers round you are read while one is there, in every mode. */
 export function sceneDraws(on: boolean): void {
   drawing = Math.max(0, drawing + (on ? 1 : -1))
+  if (on && !watchingTab && typeof document !== 'undefined') {
+    watchingTab = true
+    // Back to this tab (another identity's tab, another app): read at once, not at the next tick.
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) void readNear(true) })
+  }
   if (on) void readNear(true)
   else if (drawing === 0 && reader) { clearInterval(reader); reader = null }
 }
@@ -287,7 +295,7 @@ function sessionFor(): Session | null {
     if (session) closeSession(session)
     session = {
       owner: f.owner, plane: f.plane, rows: new Map(), loading: new Map(), waiting: new Map(), others: new Map(), views: new Map(), seen: new Map(),
-      crew: [], crewRead: null, gen: 0, republish: false, idle: null, retry: null, flushing: null, again: false, failed: null, readKey: '', closed: false,
+      crew: [], crewRead: null, gen: 0, republish: false, idle: null, retry: null, flushing: null, again: false, failed: null, readKey: '', closed: false, leaving: false,
     }
     // Another identity (or plane): its own Crew, read from the device, never the one before's.
     useShare.setState({ crew: [], crewOf: [] })
@@ -806,31 +814,62 @@ export function retireDeviceKey(): boolean {
 // ---------------------------------------------------------------------------------------------------------------
 // Publishing.
 
+/** Whether a session's layers may go out now: its identity on screen and LIVE, or its identity being left while it was LIVE. */
+function mayPublish(s: Session): boolean {
+  return s.leaving || (current().live() && current().me() === s.owner)
+}
+
+/** How long a switch of identity waits for the identity left to publish what waited (ms); whatever is left goes out on its next visit. */
+export const LEAVING_WAIT_MS = 8_000
+
+/**
+ * The identity on screen is switching away from `owner`, which was LIVE
+ * (`wasLive`): what waits in its chunks is published now, before its field
+ * is let go, signed by its own builder key (no signature of the identity
+ * is needed), as DECK-0009 §5.7 says. Without this, changes made just before
+ * a switch stayed on the device until that identity came back, and nobody
+ * else saw them (2026-11-25). LOCAL leaves them on the device as ever.
+ * Only chunks still held in the field go now; a chunk let go before the
+ * switch goes out on that identity's next visit.
+ */
+export async function identityLeaving(owner: string, wasLive: boolean): Promise<void> {
+  const s = session
+  if (!s || s.owner !== owner || !wasLive || s.closed) return
+  if (waitingTotal(s) === 0 && !s.republish) return
+  s.leaving = true
+  // A flush already under way (TERRAIN closing on the switch) stopped at the identity check: this one starts after it.
+  const go = (async () => { if (s.flushing) await s.flushing.catch(() => undefined); await flushSession(s, 'switch') })()
+  await Promise.race([go, wait(LEAVING_WAIT_MS)])
+}
+
 /** Publish what waits in `only` (else every chunk), one chunk after another, and every layer again when the key or the Crew changed. */
 export function flush(why: string, only?: string[]): Promise<void> {
   const s = sessionFor()
   if (!s) return Promise.resolve()
+  return flushSession(s, why, only)
+}
+
+function flushSession(s: Session, why: string, only?: string[]): Promise<void> {
   if (s.flushing) { s.again = true; return s.flushing }
   s.flushing = (async () => {
     do {
       s.again = false
-      if (!current().live() || s.closed) break
-      if (current().me() !== s.owner) break
+      if (!mayPublish(s) || s.closed) break
       // Every layer carries the Crew as kept: read before anything goes out.
       await loadCrew(s)
       await confirmTags()
       const list = only ?? [...s.waiting.keys()]
       for (const key of list) {
-        if (s.closed || !current().live()) break
+        if (s.closed || !mayPublish(s)) break
         if (!s.waiting.get(key)) continue
         await publishChunk(s, key).catch((err) => { s.failed = failWords(err) })
       }
-      if (s.republish && !s.closed && current().live()) await republishAll(s).catch((err) => { s.failed = failWords(err) })
+      if (s.republish && !s.closed && mayPublish(s)) await republishAll(s).catch((err) => { s.failed = failWords(err) })
       only = undefined
     } while (s.again && !s.closed)
   })().finally(() => {
     s.flushing = null
-    if (!s.closed && (waitingTotal(s) > 0 || s.republish) && current().live() && namedKey(s.owner)) {
+    if (!s.closed && !s.leaving && (waitingTotal(s) > 0 || s.republish) && current().live() && namedKey(s.owner)) {
       if (s.retry) clearTimeout(s.retry)
       s.retry = setTimeout(() => { s.retry = null; void flush('retry') }, RETRY_MS)
     }
@@ -896,7 +935,7 @@ async function publishChunk(s: Session, key: string): Promise<void> {
   if (plain) {
     const createdAt = Math.max(Math.floor(d.now() / 1000), row.createdAt + 1)
     const ev = await signLayer({ plaintext: plain, author: s.owner, base: slot.base, sec: k.sec, createdAt })
-    const res = await pacedPublish(ev, () => d.live() && d.me() === s.owner && !s.closed)
+    const res = await pacedPublish(ev, () => mayPublish(s) && !s.closed)
     if (!res.ok) throw new Held('Sharing again soon.')
     saveRow(s, key, { ...(s.rows.get(key) ?? row), plaintext: plaintextJson(plain), eventId: ev.id, builder: k.pub, createdAt, dirty: false })
     // What the other keys held here is yours on this device now, in both planes, so the next version keeps it.
@@ -1011,7 +1050,7 @@ async function emptyOlds(s: Session, olds: OtherKey[], base: ChunkBase, createdA
     if (!held || !o.valid) continue
     // It keeps your Crew: the newest of your layers here may be this one (§8), and an empty list would drop every lift.
     const ev = await signLayer({ plaintext: emptiedPlaintext(o.plaintext, s.crew), author: s.owner, base, sec: held.sec, createdAt })
-    await pacedPublish(ev, () => current().live() && current().me() === s.owner && !s.closed).catch(() => undefined)
+    await pacedPublish(ev, () => mayPublish(s) && !s.closed).catch(() => undefined)
   }
 }
 
@@ -1023,7 +1062,6 @@ async function emptyOlds(s: Session, olds: OtherKey[], base: ChunkBase, createdA
  * chunk need not be loaded.
  */
 async function republishAll(s: Session): Promise<void> {
-  const d = current()
   const k = namedKey(s.owner)
   const store = db()
   if (!k || !k.named) throw new Held('Shared after your next move.')
@@ -1032,7 +1070,7 @@ async function republishAll(s: Session): Promise<void> {
   let failed: unknown = null
   const rows = await request(store.transaction([META], 'readonly').objectStore(META).getAll(IDBKeyRange.bound(pubPrefix(s.owner), `${pubPrefix(s.owner)}~`))) as Array<{ key: string; value?: Partial<PublishedRow> }>
   for (const r of rows) {
-    if (s.closed || !d.live() || s.gen !== gen) return
+    if (s.closed || !mayPublish(s) || s.gen !== gen) return
     // One chunk that cannot go now never holds up the rest; it is tried again on the next pass.
     try { await republishRow(s, store, k, r) } catch (err) { failed = err }
   }
@@ -1061,7 +1099,7 @@ async function republishRow(s: Session, store: IDBDatabase, k: { pub: string; se
   }
   const createdAt = Math.max(Math.floor(d.now() / 1000), pub.createdAt + 1)
   const ev = await signLayer({ plaintext: plain, author: s.owner, base: at, sec: k.sec, createdAt })
-  const res = await pacedPublish(ev, () => d.live() && d.me() === s.owner && !s.closed)
+  const res = await pacedPublish(ev, () => mayPublish(s) && !s.closed)
   if (!res.ok) throw new Held('Sharing again soon.')
   const next: PublishedRow = { plaintext: plaintextJson(plain), eventId: ev.id, builder: k.pub, createdAt }
   await putMany(store, META, [{ key: r.key, value: next }]).catch(() => undefined)

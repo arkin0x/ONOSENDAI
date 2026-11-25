@@ -49,6 +49,7 @@ vi.mock('../../lib/relay', () => ({
 
 import { finalizeEvent, generateSecretKey, getPublicKey, verifyEvent } from 'nostr-tools/pure'
 import { coordToXyz, hexToCoord } from 'cyberspace-core'
+import { nip19 } from 'nostr-tools'
 import { useCyberspace } from '../useCyberspace'
 import { useWalk } from '../useWalk'
 import { setTerrainSession, surveyTarget, terrainSession, useTerrain } from '../useTerrain'
@@ -764,6 +765,105 @@ describe('two identities: A publishes, B reads and draws in every mode', () => {
     for (const m of mined) expect(blockAt(m)).toBe(EMPTY)
     expect(blockAt(rock)).not.toBe(EMPTY)
     expect(published.length).toBe(sent)
+  })
+})
+
+describe('one device, two npubs: A surveys and digs, B builds there and switches straight back to A', () => {
+  const PLACE = { x: 0x1357913579135791357a0n, y: 0x0246802468024680246c0n, z: 0x1112131415161718191a0n, plane: 1 as const }
+  let own: { pubkey: string; npub: string } | null = null
+  beforeEach(() => { own = useCyberspace.getState().identity })
+  afterEach(async () => {
+    if (T().active) await T().exit()
+    if (own) useCyberspace.setState({ identity: own, walking: false })
+    await settle(100)
+  })
+
+  /** Every cell of the chunk at PLACE, as an absolute coordinate, from its index. */
+  const base = chunkOf(PLACE.x, PLACE.y, PLACE.z, PLACE.plane)
+  const absOf = (c: number): [bigint, bigint, bigint] => [base.x + BigInt(c & 31), base.y + BigInt(c >> 10), base.z + BigInt((c >> 5) & 31)]
+  const csOf = (p: readonly [bigint, bigint, bigint]): [number, number, number] => {
+    const o = terrainSession!.world.origin
+    return [Number(p[0] - o.x), Number(p[1] - o.y), Number(p[2] - o.z)]
+  }
+  const blockAt = (c: number): number => terrainSession!.world.blockCs(...csOf(absOf(c)))
+
+  it('A sees what B changed where A changed nothing, and A\'s own changes where both did', async () => {
+    setShareDeps({ keyStatus: (author, keys) => keyStatusOn(async (f) => ({ events: held.filter((e) => matches(f, e) && (f.until === undefined || e.created_at <= f.until)).sort((a, b) => b.created_at - a.created_at).slice(0, f.limit ?? 10_000), trouble: null }), author, keys, (e) => verifyEvent(e as never)) })
+    const g = generate(base).blocks
+    const solid: number[] = []
+    for (let c = 32767; c >= 0 && solid.length < 400; c--) if (g[c] !== EMPTY && (c >> 10) > 2 && g[c + 1024] !== undefined) solid.push(c)
+    // Cells: A digs aCells; B digs bCells, and fills A's first hole from the cell beside it.
+    const aCells = solid.slice(0, 3)
+    const bCells = solid.slice(100, 104)
+    const skA = generateSecretKey()
+    const skB = generateSecretKey()
+    await useCyberspace.getState().useNsec(nip19.nsecEncode(skA))
+    expect(me()).toBe(getPublicKey(skA))
+    await named(true, PLACE)
+    await surveyHere()
+    for (const c of aCells) expect(T().mine({ cell: csOf(absOf(c)), normal: [0, 1, 0], distance: 1 })).toBe(true)
+    await flush('test')
+    await T().exit()
+    await settle(300)
+    // B, on the same device.
+    await useCyberspace.getState().useNsec(nip19.nsecEncode(skB))
+    expect(me()).toBe(getPublicKey(skB))
+    await named(true, PLACE)
+    await settle(300)
+    expect(blockAt(aCells[0])).toBe(EMPTY)
+    for (const c of bCells) expect(T().mine({ cell: csOf(absOf(c)), normal: [0, 1, 0], distance: 1 })).toBe(true)
+    // Fill A's hole: placed against the cell below it.
+    const below = aCells[0] - 1024
+    expect(T().place({ cell: csOf(absOf(below)), normal: [0, 1, 0], distance: 1 })).toBe(true)
+    expect(blockAt(aCells[0])).not.toBe(EMPTY)
+    // Straight back to A, with B's changes still waiting: they go out on the switch, signed by B's builder key.
+    await useCyberspace.getState().useNsec(nip19.nsecEncode(skA))
+    expect(me()).toBe(getPublicKey(skA))
+    standAt(PLACE)
+    await settle(1200)
+    const layers = published.filter((e) => e.kind === LAYER_KIND)
+    expect(new Set(layers.map((e) => e.tags.find((t) => t[0] === 'p')![1]))).toEqual(new Set([getPublicKey(skA), getPublicKey(skB)]))
+    for (const c of bCells) expect(blockAt(c)).toBe(EMPTY)
+    // Where both changed, A's own change shows for A.
+    expect(blockAt(aCells[0])).toBe(EMPTY)
+    for (const c of aCells) expect(blockAt(c)).toBe(EMPTY)
+    // And in TERRAIN.
+    await T().enter()
+    await settle(300)
+    for (const c of bCells) expect(blockAt(c)).toBe(EMPTY)
+  })
+
+  it('B LOCAL with storage that cannot save it: LOCAL as it was on screen decides, and nothing of B\'s goes out', async () => {
+    const skA = generateSecretKey()
+    const skB = generateSecretKey()
+    await useCyberspace.getState().useNsec(nip19.nsecEncode(skA))
+    await useCyberspace.getState().useNsec(nip19.nsecEncode(skB))
+    await named(true, PLACE)
+    await surveyHere()
+    expect(mineSome(3)).toBe(3)
+    const spy = vi.spyOn(localStorage, 'setItem').mockImplementation(() => { throw new Error('quota') })
+    try {
+      useCyberspace.getState().setLive(false)
+      await settle(100)
+    } finally { spy.mockRestore() }
+    await useCyberspace.getState().useNsec(nip19.nsecEncode(skA))
+    await settle(1200)
+    expect(published.filter((e) => e.kind === LAYER_KIND && e.tags.some((t) => t[0] === 'p' && t[1] === getPublicKey(skB)))).toHaveLength(0)
+  })
+
+  it('B LOCAL: nothing of B\'s goes out on the switch, and it waits on the device', async () => {
+    const skA = generateSecretKey()
+    const skB = generateSecretKey()
+    await useCyberspace.getState().useNsec(nip19.nsecEncode(skA))
+    await useCyberspace.getState().useNsec(nip19.nsecEncode(skB))
+    await named(true, PLACE)
+    await surveyHere()
+    expect(mineSome(3)).toBe(3)
+    useCyberspace.getState().setLive(false)
+    await settle(100)
+    await useCyberspace.getState().useNsec(nip19.nsecEncode(skA))
+    await settle(1200)
+    expect(published.filter((e) => e.kind === LAYER_KIND && e.tags.some((t) => t[0] === 'p' && t[1] === getPublicKey(skB)))).toHaveLength(0)
   })
 })
 

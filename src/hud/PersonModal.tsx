@@ -213,15 +213,18 @@ export function chatUnavailable(atHead: boolean, hasKey: boolean): string | null
  * rule): a tap on IN YOUR CREW asks TAP AGAIN TO TAKE OFF for a few seconds,
  * as the bag's RETIRE KEY does, and the bag's Crew has the full confirm.
  */
-const CREW_CONFIRM_MS = 4000
-function CrewButton({ pubkey }: { pubkey: string }): JSX.Element {
+export const CREW_CONFIRM_MS = 4000
+/** `confirmMs`: how long the second tap is waited for (a test shortens it). */
+export function CrewButton({ pubkey, confirmMs = CREW_CONFIRM_MS }: { pubkey: string; confirmMs?: number }): JSX.Element {
   const inCrew = useShare((s) => s.crew.includes(pubkey))
   const [asking, setAsking] = useState(false)
   useEffect(() => {
     if (!asking) return
-    const t = window.setTimeout(() => setAsking(false), CREW_CONFIRM_MS)
+    const t = window.setTimeout(() => setAsking(false), confirmMs)
     return () => clearTimeout(t)
-  }, [asking])
+  }, [asking, confirmMs])
+  // Taken off some other way (the bag's Crew): the next IN YOUR CREW starts from one tap again.
+  useEffect(() => { if (!inCrew) setAsking(false) }, [inCrew])
   const tap = (): void => {
     if (!inCrew) { void addCrew(pubkey); return }
     if (!asking) { setAsking(true); return }

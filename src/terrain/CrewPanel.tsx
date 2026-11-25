@@ -45,8 +45,17 @@ import { ModalClose } from '../hud/ui/ModalClose'
 export const CREW_FACE_PX = 40
 /** How many people the picker lists at once (a long follow list is searched, not scrolled through). */
 export const PICKER_SHOWN = 60
-/** How many of the people you follow have their names looked up when the picker opens, so a name search reaches past the first screen. */
-export const PICKER_NAMES = 1000
+/**
+ * How many of the people you follow have their names looked up when the
+ * picker opens, so a name search reaches past the first screen: once a visit
+ * each (namesAsked), and few enough not to push the people around you out
+ * of the profile cache kept on the device.
+ */
+export const PICKER_NAMES = 300
+/** How long the picker says it is still looking up names, ms: past this, a miss is a miss (a relay that never answers leaves a profile unknown). */
+export const NAMES_WAIT_MS = 8000
+/** Whose names the picker has asked for this visit. */
+const namesAsked = new Set<string>()
 
 /** The one-line explanation under CREW. */
 export const CREW_WHAT = 'Your crew’s changes to blocks you built count as yours: everyone sees one shared build. Changing it never asks your signer.'
@@ -255,10 +264,15 @@ function Picker(): JSX.Element {
       const newest = [...l].reverse()
       setFollows(newest)
       const { request } = useProfiles.getState()
-      for (const pk of newest.slice(0, PICKER_NAMES)) if (pk !== me) request(pk)
+      for (const pk of newest.slice(0, PICKER_NAMES)) if (pk !== me && !namesAsked.has(pk)) { namesAsked.add(pk); request(pk) }
     }).catch(() => { if (on) setFollows([]) })
     return () => { on = false }
   }, [me])
+  const [namesWaited, setNamesWaited] = useState(false)
+  useEffect(() => {
+    const t = window.setTimeout(() => setNamesWaited(true), NAMES_WAIT_MS)
+    return () => clearTimeout(t)
+  }, [])
   useEffect(() => { if (finePointer()) input.current?.focus() }, [])
   const { direct, list } = useMemo(() => pickerMatches(typed, follows ?? [], profiles, me), [typed, follows, profiles, me])
   const full = crew.length >= COBUILDERS_MAX
@@ -279,7 +293,7 @@ function Picker(): JSX.Element {
   if (typedMe) empty = 'That’s you: your own blocks are always yours.'
   else if (!direct && list.length === 0) {
     if (follows === null) empty = 'Looking up the people you follow…'
-    else if (q && (follows.slice(0, PICKER_NAMES).some((p) => profiles[p] === undefined))) empty = 'Nobody yet: still looking up names. Or paste their npub to add anyone.'
+    else if (q && !namesWaited && follows.slice(0, PICKER_NAMES).some((p) => p !== me && profiles[p] === undefined)) empty = 'Nobody yet: still looking up names. Or paste their npub to add anyone.'
     else if (q) empty = 'Nobody you follow matches. Paste their npub to add anyone.'
     else empty = 'You don’t follow anyone yet. Paste an npub above to add anyone.'
   }
@@ -378,11 +392,17 @@ function Confirm({ pubkey }: { pubkey: string }): JSX.Element {
 /** The picker or the confirm over the bag; a tap on the dark around it closes it. Gone with the bag. */
 export function CrewLayer(): JSX.Element | null {
   const open = useCrewLayer((s) => s.open)
+  // Whether the press began on the dark itself: a drag from the search box let go over the dark is no tap outside.
+  const pressedDark = useRef(false)
   useEffect(() => () => { useCrewLayer.setState({ open: null }) }, [])
   if (!open) return null
   return (
     // On the click, not the press: closing on the press would hand a phone's click to whatever of the bag is under the finger then.
-    <div className="crew-layer" onClick={(e) => { if (e.target === e.currentTarget) closeCrewLayer() }}>
+    <div
+      className="crew-layer"
+      onPointerDown={(e) => { pressedDark.current = e.target === e.currentTarget }}
+      onClick={(e) => { if (e.target === e.currentTarget && pressedDark.current) closeCrewLayer(); pressedDark.current = false }}
+    >
       {open.kind === 'add' ? <Picker /> : <Confirm key={open.pubkey} pubkey={open.pubkey} />}
     </div>
   )

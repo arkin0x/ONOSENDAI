@@ -185,7 +185,7 @@ function InventorySheet(): JSX.Element | null {
   const close = (): void => useTerrain.getState().setSheet(false)
   return (
     <div className="terrain-sheet" role="dialog" aria-modal="true" aria-label="Inventory" onPointerDown={(e) => { if (e.target === e.currentTarget) close() }}>
-      <div className="terrain-sheet__card">
+      <div className="terrain-sheet__card terrain-sheet__card--bag">
         <div className="terrain-sheet__head">
           <Backpack size={16} strokeWidth={2} aria-hidden />
           <h2>INVENTORY</h2>
@@ -193,7 +193,7 @@ function InventorySheet(): JSX.Element | null {
         </div>
         {/* What scrolls, under a title line that stays: the card's frame and fill stand still around it. */}
         <div className="terrain-sheet__body">
-          <p className="terrain-sheet__sub">Kept on this device. Tap a block to put it in slot {inv.slot + 1}.</p>
+          <p className="terrain-sheet__sub">Kept on this device. Tap a block to put it in slot&nbsp;{inv.slot + 1}.</p>
           {kinds.length === 0
             ? <p className="terrain-sheet__empty">Nothing yet: mine a block to carry it.</p>
             : (

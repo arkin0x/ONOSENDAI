@@ -17,6 +17,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 ;(globalThis as { window?: unknown }).window ??= globalThis
+// terrainKeys listens for the window's blur: a window here is the global, which has no listeners of its own.
+;(globalThis as { addEventListener?: unknown }).addEventListener ??= () => {}
+;(globalThis as { removeEventListener?: unknown }).removeEventListener ??= () => {}
 if (typeof localStorage === 'undefined') {
   const mem = new Map<string, string>()
   ;(globalThis as { localStorage?: unknown }).localStorage = {
@@ -47,15 +50,34 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { createElement } from 'react'
 import { nip19 } from 'nostr-tools'
-import { mount, textOf } from '../../test/elementRoot'
+import { mount, settled, textOf } from '../../test/elementRoot'
 import { useShare } from '../../store/terrainShare'
 import type { Profile } from '../../store/useProfiles'
+import { useTerrain } from '../../store/useTerrain'
+import { terrainKeys } from '../TerrainView'
+import type { Host } from '../../test/elementRoot'
 import { CREW_REMOVE_WHAT, CrewLayer, CrewPanel, PICKER_SHOWN, closeCrewLayer, crewInput, crewLabel, pickerMatches, useCrewLayer } from '../CrewPanel'
 
 const A = 'a1'.repeat(32)
 const B = 'b2'.repeat(32)
 const C = 'c3'.repeat(32)
 const ME = 'ee'.repeat(32)
+/** A stand-in for the window whose key events seem to come from a text field when `inField`. */
+class FieldTarget extends EventTarget {
+  inField = false
+  closest(sel: string): unknown { return this.inField && sel.includes('input') ? {} : null }
+}
+/** Esc pressed on it; true when TERRAIN took it. */
+function esc(on: EventTarget): boolean {
+  const e = new Event('keydown', { cancelable: true })
+  Object.assign(e, { code: 'Escape', key: 'Escape', repeat: false, metaKey: false, ctrlKey: false, altKey: false })
+  on.dispatchEvent(e)
+  return e.defaultPrevented
+}
+/** The search box's onKeyDown, pressed with a key. */
+function typeKey(input: Host, key: string): void {
+  ;(input.props.onKeyDown as (e: unknown) => void)({ key, preventDefault: () => {}, stopPropagation: () => {}, target: { blur: () => {} } })
+}
 const profile = (pubkey: string, name: string): Profile => ({ pubkey, name, picture: null, about: null, nip05: null, at: 1 })
 
 beforeEach(() => {
@@ -76,13 +98,31 @@ describe('the bag', () => {
     expect(readFileSync(resolve(__dirname, '../../styles.css'), 'utf8')).not.toMatch(/terrain-sheet__keys/)
   })
 
-  it('closes the picker or the confirm on Esc before the bag', () => {
-    const view = readFileSync(resolve(__dirname, '../TerrainView.tsx'), 'utf8')
-    expect(view).toMatch(/if \(st\.sheet\) \{ take\(\); if \(!closeCrewLayer\(\)\) st\.setSheet\(false\) \}/)
-    expect(closeCrewLayer()).toBe(false)
-    useCrewLayer.setState({ open: { kind: 'add' } })
-    expect(closeCrewLayer()).toBe(true)
-    expect(useCrewLayer.getState().open).toBeNull()
+  it('closes the picker or the confirm on Esc before the bag, and leaves a key typed into a field alone', () => {
+    useTerrain.setState({ sheet: true })
+    const on = new FieldTarget()
+    const stop = terrainKeys(on)
+    try {
+      useCrewLayer.setState({ open: { kind: 'add' } })
+      expect(esc(on)).toBe(true)
+      expect(useCrewLayer.getState().open).toBeNull()
+      expect(useTerrain.getState().sheet).toBe(true)
+      // From the search box: TERRAIN takes nothing (the box has its own Esc).
+      useCrewLayer.setState({ open: { kind: 'add' } })
+      on.inField = true
+      expect(esc(on)).toBe(false)
+      expect(useCrewLayer.getState().open).toEqual({ kind: 'add' })
+      on.inField = false
+      expect(esc(on)).toBe(true)
+      expect(useTerrain.getState().sheet).toBe(true)
+      // Nothing over the bag now: Esc closes the bag.
+      expect(esc(on)).toBe(true)
+      expect(useTerrain.getState().sheet).toBe(false)
+      expect(closeCrewLayer()).toBe(false)
+    } finally {
+      stop()
+      useTerrain.setState({ sheet: false })
+    }
   })
 })
 
@@ -158,6 +198,9 @@ describe('the picker', () => {
     const npubC = nip19.npubEncode(C)
     expect(pickerMatches(npubC.slice(0, 16), [A, B, C], profiles, ME).list).toEqual([C])
     expect(pickerMatches('zed', [A, B, C], profiles, ME).list).toEqual([])
+    // A short name search never matches inside npubs: only Alice's name has an "a" here, though every npub may.
+    expect(pickerMatches('a', [A, B, C], profiles, ME).list).toEqual([A])
+    expect(pickerMatches(npubC.slice(6, 14), [A, B, C], profiles, ME).list).toEqual([])
   })
 
   it('takes a pasted npub or hex on its own, but never yours', () => {
@@ -181,6 +224,23 @@ describe('the picker', () => {
     expect(m.all().some((h) => h.type === 'input' && h.props['aria-label'] === 'Search by name, or paste an npub')).toBe(true)
     expect(m.all().filter((h) => h.type === 'button' && String(h.props.className).includes('modal-close'))).toHaveLength(1)
     expect(m.says('You don’t follow anyone yet.')).toBe(true)
+    await m.unmount()
+  })
+
+  it('Esc in the search box clears what was typed first, then closes the picker', async () => {
+    useCrewLayer.setState({ open: { kind: 'add' } })
+    const m = await mount(createElement(CrewLayer))
+    const box = (): Host => m.all().find((h) => h.type === 'input')!
+    ;(box().props.onChange as (e: unknown) => void)({ target: { value: 'mol' } })
+    await settled()
+    expect(box().props.value).toBe('mol')
+    typeKey(box(), 'Escape')
+    await settled()
+    expect(box().props.value).toBe('')
+    expect(useCrewLayer.getState().open).toEqual({ kind: 'add' })
+    typeKey(box(), 'Escape')
+    await settled()
+    expect(useCrewLayer.getState().open).toBeNull()
     await m.unmount()
   })
 })

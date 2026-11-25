@@ -14406,19 +14406,43 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
   padding: 16px;
   background: rgba(2, 5, 9, 0.55);
 }
+/* Clear of the controls: on a desktop above the hotbar and below the top chips; on a phone above the menu button, which stays. */
+@media (min-width: 1100px) {
+  .terrain-sheet { padding: 140px 16px 76px; }
+}
+@media (max-width: 1099px) {
+  .terrain-sheet { padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 84px); }
+}
 .terrain-sheet__card {
   --terrain-cut: 14px;
   --terrain-fill: rgba(4, 10, 14, 0.96);
   display: flex;
   flex-direction: column;
   width: min(460px, 100%);
-  max-height: calc(100% - 32px);
+  max-height: 100%;
   overflow: hidden;
   padding: 16px;
 }
+/* The bag keeps one height whatever it holds, so its title and ✕ never move as blocks or people come and go; the body scrolls. */
+.terrain-sheet__card--bag { height: min(680px, 100%); }
 /* The bag scrolls inside its frame, under its title line: its fill (::before) is the card's height, so nothing scrolls past it. */
 .terrain-sheet__head { flex: none; }
-.terrain-sheet__body { flex: 1 1 auto; min-height: 0; margin-right: -10px; padding-right: 10px; overflow-y: auto; overscroll-behavior: contain; }
+.terrain-sheet__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin-right: -10px;
+  padding-right: 10px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  /* What scrolls up fades out under the title line rather than being cut off hard. */
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 10px);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 10px);
+}
+/* The share line: its icon, its words taking the room, RETIRE KEY at the end, on one line. */
+.terrain-share { display: flex; align-items: center; gap: 8px; }
+.terrain-share > svg { flex: none; }
+.terrain-share__words { flex: 1 1 0; min-width: 0; }
+.terrain-share > .crew-btn { flex: none; }
 .terrain-sheet__head { display: flex; align-items: center; gap: 8px; color: var(--terrain); }
 .terrain-sheet__head h2 { flex: 1; margin: 0; font-size: 13px; letter-spacing: 0.14em; color: var(--terrain); }
 .terrain-sheet__sub,
@@ -14578,6 +14602,7 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
 }
 .crew-group__title { font-size: 10px; font-weight: 700; letter-spacing: 0.16em; color: var(--terrain); white-space: nowrap; }
 .crew-group__sub { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: #fff; opacity: 0.75; }
+.crew-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .crew-group__count {
   display: inline-flex;
   align-items: center;
@@ -14642,7 +14667,8 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 16px;
+  /* The bag's own room (.terrain-sheet), so the picker is as clear of the controls as the bag. */
+  padding: inherit;
   background: rgba(2, 5, 9, 0.84);
 }
 .crew-layer__card { width: min(420px, 100%); }

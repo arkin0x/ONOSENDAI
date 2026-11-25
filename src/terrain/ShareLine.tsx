@@ -12,8 +12,6 @@ import { retireDeviceKey, useShare } from '../store/terrainShare'
 /** How long the second tap of RETIRE is waited for, ms. */
 const CONFIRM_MS = 4000
 
-const small = { cursor: 'pointer', background: 'transparent' } as const
-
 export function ShareLine(): JSX.Element {
   const { state, words } = useShare()
   const [asking, setAsking] = useState(false)
@@ -29,14 +27,13 @@ export function ShareLine(): JSX.Element {
     retireDeviceKey()
   }
   return (
-    <p className="terrain-sheet__foot" data-share={state} role="status" style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+    <p className="terrain-sheet__foot terrain-share" data-share={state} role="status">
       <Icon size={13} strokeWidth={2} aria-hidden />
-      <span>{words}</span>
+      <span className="terrain-share__words">{words}</span>
       <button
         type="button"
-        className="terrain-key"
+        className={`crew-btn${asking ? ' crew-btn--danger' : ''}`}
         onClick={retire}
-        style={{ marginLeft: 'auto', ...small }}
         title="Retire this device's building key: what it signed stops counting, and your blocks go out again under a new key"
         aria-label={asking ? 'Tap again to retire this device\'s building key' : 'Retire this device\'s building key'}
       >

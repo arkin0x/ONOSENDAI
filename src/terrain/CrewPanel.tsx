@@ -45,6 +45,8 @@ import { ModalClose } from '../hud/ui/ModalClose'
 export const CREW_FACE_PX = 40
 /** How many people the picker lists at once (a long follow list is searched, not scrolled through). */
 export const PICKER_SHOWN = 60
+/** How many of the people you follow have their names looked up when the picker opens, so a name search reaches past the first screen. */
+export const PICKER_NAMES = 1000
 
 /** The one-line explanation under CREW. */
 export const CREW_WHAT = 'Your crew’s changes to blocks you built count as yours: everyone sees one shared build. Changing it never asks your signer.'
@@ -74,8 +76,11 @@ export function crewLabel(pubkey: string, profile: Profile | null | undefined): 
 
 /**
  * Whom the picker lists for what was typed: `direct` is a pubkey pasted (an
- * npub or hex), `list` the people you follow that match by name or npub, in
- * your follow list's order, never you, at most PICKER_SHOWN.
+ * npub or hex), `list` the people you follow that match, in the order given
+ * (the picker gives the newest follows first), never you, at most
+ * PICKER_SHOWN. A name matches anywhere in it, whatever the case; an npub
+ * only from its start, and only when what was typed starts npub1, so a short
+ * name search does not find a crowd of keys.
  */
 export function pickerMatches(typed: string, follows: string[], profiles: Record<string, Profile | null>, me: string): { direct: string | null; list: string[] } {
   const q = typed.trim()
@@ -84,10 +89,8 @@ export function pickerMatches(typed: string, follows: string[], profiles: Record
   if (pasted) return { direct: pasted === me ? null : pasted, list: [] }
   if (!q) return { direct: null, list: others.slice(0, PICKER_SHOWN) }
   const low = q.toLowerCase()
-  const list = others.filter((p) => {
-    const name = profiles[p]?.name?.toLowerCase()
-    return (name && name.includes(low)) || safeNpub(p).includes(low)
-  })
+  const byKey = low.startsWith('npub1')
+  const list = others.filter((p) => (byKey ? safeNpub(p).startsWith(low) : !!profiles[p]?.name?.toLowerCase().includes(low)))
   return { direct: null, list: list.slice(0, PICKER_SHOWN) }
 }
 
@@ -157,7 +160,7 @@ function Group({ title, sub, count, children }: { title: string; sub: string; co
       <div className="crew-group__head">
         <span className="crew-group__title">{title}</span>
         <span className="crew-group__sub">{sub}</span>
-        <span className="crew-group__count" aria-label={`${count} ${count === 1 ? 'person' : 'people'}`}>{count}</span>
+        <span className="crew-group__count"><span aria-hidden>{count}</span><span className="crew-hidden">{count === 1 ? '1 person' : `${count} people`}</span></span>
       </div>
       {children}
     </div>
@@ -219,7 +222,7 @@ export function CrewPanel(): JSX.Element {
               {crewOf.map((pk) => (
                 <CrewRow key={pk} pubkey={pk} side={crew.includes(pk)
                   ? <Mutual />
-                  : <button type="button" className="crew-btn" onClick={() => { void addCrew(pk) }} disabled={full} title="Let them build on yours too">ADD BACK</button>} />
+                  : <button type="button" className="crew-btn" onClick={() => { void addCrew(pk) }} disabled={full} title={full ? `Your crew is full: ${COBUILDERS_MAX} people` : 'Let them build on yours too'}>ADD BACK</button>} />
               ))}
             </ul>
           )}
@@ -243,17 +246,28 @@ function Picker(): JSX.Element {
   const [why, setWhy] = useState('')
   const input = useRef<HTMLInputElement | null>(null)
   const close = (): void => { useCrewLayer.setState({ open: null }) }
+  // Newest follows first (a contact list adds at its end), and their names asked for now, in the profile store's batches.
   useEffect(() => {
     if (!me) { setFollows([]); return }
     let on = true
-    followsOf(me).then((l) => { if (on) setFollows(l) }).catch(() => { if (on) setFollows([]) })
+    followsOf(me).then((l) => {
+      if (!on) return
+      const newest = [...l].reverse()
+      setFollows(newest)
+      const { request } = useProfiles.getState()
+      for (const pk of newest.slice(0, PICKER_NAMES)) if (pk !== me) request(pk)
+    }).catch(() => { if (on) setFollows([]) })
     return () => { on = false }
   }, [me])
   useEffect(() => { if (finePointer()) input.current?.focus() }, [])
   const { direct, list } = useMemo(() => pickerMatches(typed, follows ?? [], profiles, me), [typed, follows, profiles, me])
   const full = crew.length >= COBUILDERS_MAX
+  // Read back from the store once it is done: a second tap that found them already in is no failure.
   const add = (pk: string): void => {
-    void addCrew(pk).then((ok) => setWhy(ok ? '' : full ? `Your crew is full: ${COBUILDERS_MAX} people.` : 'That one could not be added.'))
+    void addCrew(pk).then(() => {
+      const now = useShare.getState().crew
+      setWhy(now.includes(pk) ? '' : now.length >= COBUILDERS_MAX ? `Your crew is full: ${COBUILDERS_MAX} people.` : 'That one could not be added.')
+    })
   }
   const side = (pk: string): ReactNode => crew.includes(pk)
     ? <span className="crew-added"><Check size={12} strokeWidth={2.75} aria-hidden />ADDED</span>
@@ -265,6 +279,7 @@ function Picker(): JSX.Element {
   if (typedMe) empty = 'That’s you: your own blocks are always yours.'
   else if (!direct && list.length === 0) {
     if (follows === null) empty = 'Looking up the people you follow…'
+    else if (q && (follows.slice(0, PICKER_NAMES).some((p) => profiles[p] === undefined))) empty = 'Nobody yet: still looking up names. Or paste their npub to add anyone.'
     else if (q) empty = 'Nobody you follow matches. Paste their npub to add anyone.'
     else empty = 'You don’t follow anyone yet. Paste an npub above to add anyone.'
   }
@@ -327,10 +342,17 @@ function Picker(): JSX.Element {
 function Confirm({ pubkey }: { pubkey: string }): JSX.Element {
   const profile = useProfile(pubkey)
   const name = crewLabel(pubkey, profile)
+  const keep = useRef<HTMLButtonElement | null>(null)
   const close = (): void => { useCrewLayer.setState({ open: null }) }
+  // KEEP takes the focus (Enter then keeps them); the button that opened the confirm gets it back on closing.
+  useEffect(() => {
+    const opener = typeof document !== 'undefined' ? document.activeElement as HTMLElement | null : null
+    keep.current?.focus()
+    return () => { if (opener?.isConnected) opener.focus() }
+  }, [])
   const takeOff = (): void => { void removeCrew(pubkey); close() }
   return (
-    <div className="terrain-sheet__card crew-layer__card crew-layer__card--confirm" role="alertdialog" aria-modal="true" aria-label={`Take ${name} off your crew?`}>
+    <div className="terrain-sheet__card crew-layer__card crew-layer__card--confirm" role="alertdialog" aria-modal="true" aria-label={`Take ${name} off your crew?`} aria-describedby="crew-confirm-what">
       <div className="terrain-sheet__head">
         <UserMinus size={16} strokeWidth={2} aria-hidden />
         <h2>TAKE OFF YOUR CREW</h2>
@@ -344,9 +366,9 @@ function Confirm({ pubkey }: { pubkey: string }): JSX.Element {
         </span>
       </div>
       <p className="crew-confirm__ask">Take {name} off your crew?</p>
-      <p className="crew-layer__sub">{CREW_REMOVE_WHAT}</p>
+      <p className="crew-layer__sub" id="crew-confirm-what">{CREW_REMOVE_WHAT}</p>
       <div className="crew-pair">
-        <button type="button" className="crew-btn" onClick={close}>KEEP</button>
+        <button ref={keep} type="button" className="crew-btn" onClick={close}>KEEP</button>
         <button type="button" className="crew-btn crew-btn--danger" onClick={takeOff}><UserMinus size={13} strokeWidth={2.5} aria-hidden />TAKE OFF</button>
       </div>
     </div>
@@ -359,7 +381,8 @@ export function CrewLayer(): JSX.Element | null {
   useEffect(() => () => { useCrewLayer.setState({ open: null }) }, [])
   if (!open) return null
   return (
-    <div className="crew-layer" onPointerDown={(e) => { if (e.target === e.currentTarget) { e.stopPropagation(); closeCrewLayer() } }}>
+    // On the click, not the press: closing on the press would hand a phone's click to whatever of the bag is under the finger then.
+    <div className="crew-layer" onClick={(e) => { if (e.target === e.currentTarget) closeCrewLayer() }}>
       {open.kind === 'add' ? <Picker /> : <Confirm key={open.pubkey} pubkey={open.pubkey} />}
     </div>
   )

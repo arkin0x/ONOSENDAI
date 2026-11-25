@@ -51,7 +51,7 @@ import { finalizeEvent, generateSecretKey, getPublicKey, verifyEvent } from 'nos
 import { coordToXyz, hexToCoord } from 'cyberspace-core'
 import { useCyberspace } from '../useCyberspace'
 import { useWalk } from '../useWalk'
-import { setTerrainSession, terrainSession, useTerrain } from '../useTerrain'
+import { setTerrainSession, surveyTarget, terrainSession, useTerrain } from '../useTerrain'
 import {
   AIM_COLORS, BATCH_NEAR, LAYER_CONTENT, RATE_BACKOFF_MS, addCrew, aimAt, chunkRegionKey, confirmTags, flush, liveChanged, readChunks,
   removeCrew, resetShare, retireDeviceKey, sceneDraws, setShareDeps, useShare,
@@ -64,7 +64,7 @@ import { EMPTY } from '../../lib/terrain/blocks'
 import { readLayer, type KeyStatus } from '../../lib/terrain/layerReader'
 import { keyStatusOn } from '../../lib/terrain/builderStatus'
 import { wallItems } from '../walkWalls'
-import { LAYER_KIND, builderKeyValid, expandRuns, freeTextWithinBounds, layerTags, nextPlaintext, parsePlaintext, plaintextJson } from '../../lib/terrain/blockLayer'
+import { LAYER_KIND, builderKeyValid, encodePlane, inHome, resolveStack, expandRuns, freeTextWithinBounds, layerTags, nextPlaintext, parsePlaintext, plaintextJson } from '../../lib/terrain/blockLayer'
 import { encryptForRegion, decryptForRegion } from '../../lib/shardCrypto'
 import { spawnTemplate, type NostrEvent } from '../../lib/events'
 import type { Filter } from 'nostr-tools/filter'
@@ -462,8 +462,6 @@ describe('reading by the Stack', () => {
     await readChunks([base])
     await settle(300)
     expect(s.world.blockCs(...at(air))).toBe(8)
-    // Not yours to change until you survey the chunk yourself.
-    expect(T().mine({ cell: at(air), normal: [0, 1, 0], distance: 1 })).toBe(false)
     // You survey and mine a rock; the stranger, later, puts Glowcore in that cell: yours shows for you.
     await T().survey(s.world.slotAtCs(...at(rock))!.key)
     expect(T().mine({ cell: at(rock), normal: [0, 1, 0], distance: 1 })).toBe(true)
@@ -566,6 +564,99 @@ describe('reading by the Stack', () => {
     await readChunks([base])
     await settle(300)
     expect(aimAt(chunkKey(base), air)).toBe('mine')
+  })
+
+  it('a chunk someone else surveyed: you mine at once with no SURVEY, your layer surveys it too, and your hole stays when you mute them', async () => {
+    const { base, g, at, rock, s } = await atHead()
+    const who = stranger()
+    // Theirs surveys the chunk and changes nothing.
+    await layerBy(who, base, {}, 1_790_000_100)
+    await readChunks([base])
+    await settle(300)
+    expect(s.world.blockCs(...at(rock))).toBe(g[rock])
+    // SURVEY is only for chunks nobody surveyed.
+    expect(surveyTarget()).not.toBe(chunkKey(base))
+    expect(T().mine({ cell: at(rock), normal: [0, 1, 0], distance: 1 })).toBe(true)
+    expect(T().message ?? '').not.toMatch(/Survey/)
+    expect(s.world.blockCs(...at(rock))).toBe(EMPTY)
+    await flush('test')
+    await settle(300)
+    const ev = published.filter((e) => e.kind === LAYER_KIND && e.tags.some((t) => t[0] === 'p' && t[1] === me())).at(-1)!
+    const { key: rk, lookupId } = chunkRegionKey(base)
+    const r = await readLayer(ev, { verify: (e) => verifyEvent(e as never), key: rk, lookupId, ground: async () => g, keyStatus: async () => 'valid' })
+    expect(r.status).toBe('counted')
+    if (r.status !== 'counted') return
+    // Survey true, against the ground: the one cell you mined, nothing else.
+    expect(r.layer.planes[0].survey).toBe(true)
+    expect(r.layer.planes[0].changed).toEqual([rock])
+    // Muted, they never surveyed it for you: your own survey keeps the ground, and your hole.
+    muted = new Set([who.pubkey])
+    await readChunks([base])
+    await settle(200)
+    expect(s.world.blockCs(...at(rock))).toBe(EMPTY)
+    let solid = -1
+    for (let c = 0; c < 32768 && solid < 0; c++) if (g[c] !== EMPTY && c !== rock) solid = c
+    expect(s.world.blockCs(...at(solid))).toBe(g[solid])
+  })
+
+  it('in someone else\'s home: you build at once on the ground the owner revealed; your survey is ignored there, your change still counts where the owner made none', async () => {
+    const who = stranger()
+    const c = coordToXyz(hexToCoord(who.pubkey))
+    const p = { x: c.x, y: c.y, z: c.z, plane: c.plane as 0 | 1 }
+    await named(true, p)
+    const base = chunkOf(p.x, p.y, p.z, p.plane)
+    const g = generate(base).blocks
+    const s = terrainSession!
+    const at = (cell: number): [number, number, number] => [Number(base.x - s.world.origin.x) + (cell & 31), Number(base.y - s.world.origin.y) + (cell >> 10), Number(base.z - s.world.origin.z) + ((cell >> 5) & 31)]
+    let rock = -1
+    for (let i = 32767; i >= 0 && rock < 0; i--) if (g[i] !== EMPTY) rock = i
+    await layerBy(who, base, {}, 1_790_000_100)
+    await readChunks([base])
+    await settle(300)
+    expect(T().mine({ cell: at(rock), normal: [0, 1, 0], distance: 1 })).toBe(true)
+    await flush('test')
+    await settle(300)
+    const ev = published.filter((e) => e.kind === LAYER_KIND && e.tags.some((t) => t[0] === 'p' && t[1] === me())).at(-1)!
+    const { key: rk, lookupId } = chunkRegionKey(base)
+    const mineR = await readLayer(ev, { verify: (e) => verifyEvent(e as never), key: rk, lookupId, ground: async () => g, keyStatus: async () => 'valid' })
+    const theirsEv = held.filter((e) => e.kind === LAYER_KIND && e.tags.some((t) => t[0] === 'p' && t[1] === who.pubkey)).at(-1)!
+    const theirsR = await readLayer(theirsEv, { verify: (e) => verifyEvent(e as never), key: rk, lookupId, ground: async () => g, keyStatus: async () => 'valid' })
+    if (mineR.status !== 'counted' || theirsR.status !== 'counted') throw new Error('not counted')
+    expect(mineR.layer.planes[0].survey).toBe(true)
+    expect(mineR.layer.planes[0].changed).toEqual([rock])
+    // A third reader: the owner's survey shows the ground, yours is ignored here, and your hole counts.
+    const third = getPublicKey(generateSecretKey())
+    const view = { me: third, follows: new Set<string>(), home: (a: string) => inHome(a, base) }
+    const out = resolveStack([theirsR.layer, mineR.layer], p.plane, view)
+    expect(out.surveyed).toBe(true)
+    expect(out.values[rock]).toBe(EMPTY)
+  })
+
+  it('a chunk drawn but not surveyed for you still refuses: inside a home whose owner has not surveyed it, a stranger\'s survey does not count', async () => {
+    const owner = stranger()
+    const c = coordToXyz(hexToCoord(owner.pubkey))
+    const p = { x: c.x, y: c.y, z: c.z, plane: c.plane as 0 | 1 }
+    await named(true, p)
+    const base = chunkOf(p.x, p.y, p.z, p.plane)
+    const g = generate(base).blocks
+    const s = terrainSession!
+    const at = (cell: number): [number, number, number] => [Number(base.x - s.world.origin.x) + (cell & 31), Number(base.y - s.world.origin.y) + (cell >> 10), Number(base.z - s.world.origin.z) + ((cell >> 5) & 31)]
+    let air = -1
+    for (let i = 32767; i >= 0 && air < 0; i--) if (g[i] === EMPTY) air = i
+    // The owner places a block without surveying; a stranger surveys the chunk.
+    const values = g.slice()
+    values[air] = 8
+    const plain = { planes: [encodePlane(p.plane, false, values, g, new Set())], cobuilders: [] }
+    const { key, lookupId } = chunkRegionKey(base)
+    hold(finalizeEvent({ kind: LAYER_KIND, created_at: 1_790_000_100, tags: layerTags({ lookupId, author: owner.pubkey, encrypted: await encryptForRegion(key, plaintextJson(plain)) }), content: '' }, owner.builder) as unknown as NostrEvent)
+    await layerBy(stranger(), base, {}, 1_790_000_200)
+    await readChunks([base])
+    await settle(300)
+    // Drawn (the owner's block), but not surveyed for you: no building, and SURVEY still offers it.
+    expect(s.world.blockCs(...at(air))).toBe(8)
+    expect(T().mine({ cell: at(air), normal: [0, 1, 0], distance: 1 })).toBe(false)
+    expect(T().message).toMatch(/Survey this chunk/)
+    expect(surveyTarget()).toBe(chunkKey(base))
   })
 })
 

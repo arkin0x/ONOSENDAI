@@ -222,6 +222,8 @@ interface ChunkView {
   from: Int32Array
   /** Each author's newest list here (§8). */
   lists: Map<string, readonly string[]>
+  /** Whether the chunk is surveyed for you (§7.5): by your own layer, or someone else's counted one. */
+  surveyed: boolean
 }
 
 interface Session {
@@ -480,7 +482,7 @@ function ownLayer(me: string, own: Uint8Array, ground: Uint8Array, plane: 0 | 1,
  * base (the ground where the plane is surveyed, open space where not). Also
  * which layer each cell shows.
  */
-export function composeView(o: { ground: Uint8Array; own: Uint8Array | null; explicit: ReadonlySet<number>; others: readonly StackLayer[]; plane: 0 | 1; view: StackView; myCrew: readonly string[]; mutes: ReadonlySet<string>; now: number; ownAt?: number }): { blocks: Uint8Array; layers: StackLayer[]; from: Int32Array } {
+export function composeView(o: { ground: Uint8Array; own: Uint8Array | null; explicit: ReadonlySet<number>; others: readonly StackLayer[]; plane: 0 | 1; view: StackView; myCrew: readonly string[]; mutes: ReadonlySet<string>; now: number; ownAt?: number }): { blocks: Uint8Array; layers: StackLayer[]; from: Int32Array; surveyed: boolean } {
   const counted = countedLayers(o.others, o.view, o.mutes, o.now)
   // Your own blocks count as yours, never held back by the clock or the cap; dated as published (now while changes wait), so a newer layer of another device of yours wins as §7.3 says.
   const layers = o.own && o.view.me ? [...counted, ownLayer(o.view.me, o.own, o.ground, o.plane, o.explicit, o.myCrew, o.ownAt ?? o.now)] : counted
@@ -490,7 +492,7 @@ export function composeView(o: { ground: Uint8Array; own: Uint8Array | null; exp
     const v = r.values[c]
     blocks[c] = v >= 0 ? Math.min(v, 255) : r.surveyed ? o.ground[c] : 0
   }
-  return { blocks, layers, from: r.from }
+  return { blocks, layers, from: r.from, surveyed: r.surveyed }
 }
 
 /** Whom a reader ranks where (§7): you, whom you follow, and who is home here. */
@@ -512,9 +514,19 @@ export function viewOf(key: string, ground: Uint8Array, own: Uint8Array | null):
   })
   const newest = new Map<string, StackLayer>()
   for (const l of v.layers) { const n = newest.get(l.author); if (!n || withinRank(l, n) < 0) newest.set(l.author, l) }
-  s.views.set(key, { layers: v.layers, from: v.from, lists: new Map([...newest].map(([a, l]) => [a, l.cobuilders])) })
+  s.views.set(key, { layers: v.layers, from: v.from, lists: new Map([...newest].map(([a, l]) => [a, l.cobuilders])), surveyed: v.surveyed })
   while (s.views.size > 160) s.views.delete(s.views.keys().next().value as string)
   return v.blocks
+}
+
+/**
+ * Whether a chunk is surveyed for you (§7.5, as last drawn): by your own
+ * layer, or a counted layer of someone else's. Where you hold no blocks of
+ * your own it is someone else's: you may mine and place there at once, and
+ * your first change surveys it for you too (store/useTerrain.ts).
+ */
+export function surveyedForYou(key: string): boolean {
+  return sessionFor()?.views.get(key)?.surveyed ?? false
 }
 
 /** Chunks that others built in near you: loaded and drawn even where you never surveyed. */

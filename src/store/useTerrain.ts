@@ -53,7 +53,7 @@ import {
 import type { Position, ViewAxes } from '../lib/space'
 import type { RayHit } from '../lib/terrain/raycast'
 import {
-  applyCarried, connectShareHost, fieldClosing, liveChanged, noteChange, noteMove, prepareChunk, READ_RING, readNear, sharedKeys, terrainClosed, terrainOpened, viewOf,
+  applyCarried, connectShareHost, fieldClosing, liveChanged, noteChange, noteMove, prepareChunk, READ_RING, readNear, sharedKeys, surveyedForYou, terrainClosed, terrainOpened, viewOf,
 } from './terrainShare'
 import { loadBuilder, releaseBuilderDb } from '../lib/terrain/builderKey'
 import './terrainShareLive'
@@ -191,6 +191,31 @@ function builtBlocks(s: TerrainSession, key: string, generated: Uint8Array): Uin
   return blocks
 }
 
+/**
+ * A chunk someone else surveyed (drawn for you, DECK-0009 §7.5) becomes
+ * yours to build in at once, with no SURVEY: your blocks start from the
+ * ground, and your layer surveys it too (survey true, every change against
+ * the ground), so your changes stand on ground even if you mute whoever
+ * surveyed it first. Inside someone else's home only the owner's surveys
+ * count, so yours is ignored there, and your changes still read against the
+ * ground the owner revealed. True when the chunk is (now) yours to build in.
+ */
+function surveyShown(s: TerrainSession, slot: ChunkSlot | null): slot is ChunkSlot & { own: Uint8Array } {
+  if (!slot) return false
+  if (slot.own) return true
+  if (!slot.generated || !slot.inSpace || s.building.has(slot.key) || !surveyedForYou(slot.key)) return false
+  s.surveyedKeys.add(slot.key)
+  const own = builtBlocks(s, slot.key, slot.generated)
+  applyCarried(slot.key, own, slot.generated)
+  slot.own = own
+  if (s.db) keep(writeSurveyed(s.db, s.owner, slot.key, Date.now()))
+  // The survey is shared like any change (DECK-0009 §3.1), with the change about to be made.
+  noteChange(slot.key)
+  s.world.setBlocks(slot.key, slot.generated, viewOf(slot.key, slot.generated, own))
+  s.version++
+  return true
+}
+
 export const useTerrain = create<TerrainState>((set, get) => ({
   from: 'hop',
   active: false,
@@ -274,9 +299,9 @@ export const useTerrain = create<TerrainState>((set, get) => ({
     const [dx, dy, dz] = hit.cell
     const id = s.world.blockCs(dx, dy, dz)
     if (id <= EMPTY) return false
-    // A chunk others built in, shown but not surveyed by you: survey it before changing it.
+    // A chunk someone else surveyed is yours to build in at once (surveyShown); one nobody surveyed is never drawn.
     const at = s.world.locate(dx, dy, dz)
-    if (!at.slot?.own) { get().say('Survey this chunk before building in it.'); return false }
+    if (!surveyShown(s, at.slot)) { get().say('Survey this chunk before building in it.'); return false }
     // What is yours in that cell: someone else's block mined is gone for you (and for whoever ranks you first), never carried.
     const yours = at.slot.own[at.cell]
     const change = s.world.setCs(dx, dy, dz, EMPTY)
@@ -314,9 +339,9 @@ export const useTerrain = create<TerrainState>((set, get) => ({
     // Open space, or a liquid, which a placed block takes the place of.
     if (isSolid(s.world.blockCs(dx, dy, dz))) return false
     const slot = s.world.slotAtCs(dx, dy, dz)
-    if (!slot?.own) { get().say('Survey this chunk before building in it.'); return false }
-    // Never where you stand: the walk's own gibson.
+    // Never where you stand: the walk's own gibson. Asked first, so a refused place never surveys the chunk for you.
     if (walkerAt(s, cell)) { get().say('You are standing there: step back to place it.'); return false }
+    if (!surveyShown(s, slot)) { get().say('Survey this chunk before building in it.'); return false }
     const change = s.world.setCs(dx, dy, dz, id)
     if (!change) return false
     record(s, change)
@@ -606,13 +631,15 @@ export function surveyTarget(s: TerrainSession | null = terrainSession): string 
   if (!s) return null
   const w = offsetOf(s, headNow())
   const here = s.world.slotAtCs(w[0], w[1], w[2])
-  if (here && here.inSpace && !here.own && slotInReach(s, here.key)) return here.key
+  // Only chunks nobody has surveyed for you: one someone else surveyed is built in at once (surveyShown).
+  const open = (sl: ChunkSlot): boolean => sl.inSpace && !sl.own && !surveyedForYou(sl.key) && slotInReach(s, sl.key)
+  if (here && open(here)) return here.key
   const look = walkLookDirection()
   if (!look.valid) return null
   const d = look.forward
   for (let t = 2; t < 48; t += 2) {
     const sl = s.world.slotAtCs(Math.round(w[0] + d.x * t), Math.round(w[1] + d.y * t), Math.round(w[2] + d.z * t))
-    if (sl && sl.inSpace && !sl.own && slotInReach(s, sl.key)) return sl.key
+    if (sl && open(sl)) return sl.key
   }
   return null
 }

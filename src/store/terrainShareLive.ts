@@ -20,9 +20,13 @@ import type { KeyStatus } from '../lib/terrain/layerReader'
 import type { NostrEvent } from '../lib/events'
 
 /** Whether some of an author's builder keys are valid (DECK-0009 §4.4), asked of the canonical relay (lib/terrain/builderStatus.ts). */
-function keyStatus(author: string, keys: string[]): Promise<Map<string, KeyStatus>> {
-  return keyStatusOn((filter) => queryAnyChecked([CYBERSPACE_RELAY], filter), author, keys, verifyOnce)
+async function keyStatus(author: string, keys: string[]): Promise<Map<string, KeyStatus>> {
+  const out = await keyStatusOn((filter) => queryAnyChecked([CYBERSPACE_RELAY], filter), author, keys, verifyOnce, namedAt)
+  while (namedAt.size > 2000) namedAt.delete(namedAt.keys().next().value as string)
+  return out
 }
+/** When each builder key seen was last named, so a check after the first asks only for retirements. */
+const namedAt = new Map<string, number>()
 
 /** The canonical relay's answer; it throws when the relay could not be heard, so nothing is taken as "none" on a failure. */
 async function query(filter: Parameters<typeof queryAnyChecked>[1]): Promise<NostrEvent[]> {

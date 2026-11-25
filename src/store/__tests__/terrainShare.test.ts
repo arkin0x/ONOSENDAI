@@ -54,7 +54,7 @@ import { useWalk } from '../useWalk'
 import { setTerrainSession, terrainSession, useTerrain } from '../useTerrain'
 import {
   AIM_COLORS, BATCH_NEAR, LAYER_CONTENT, RATE_BACKOFF_MS, addCrew, aimAt, chunkRegionKey, confirmTags, flush, liveChanged, readChunks,
-  removeCrew, resetShare, retireDeviceKey, setShareDeps, useShare,
+  removeCrew, resetShare, retireDeviceKey, sceneDraws, setShareDeps, useShare,
 } from '../terrainShare'
 import { builderRecord, forgetBuilderRecords, namedKey } from '../../lib/terrain/builderKey'
 import { fixTags, onActionSigned } from '../../lib/terrain/builderTags'
@@ -122,6 +122,8 @@ beforeEach(async () => {
   useTerrain.setState({ active: false, loading: false })
   ;(globalThis as { indexedDB: IDBFactory }).indexedDB = new IDBFactory()
   resetShare()
+  // The scene draws blocks (scene/TerrainLayer.tsx mounts this in the app): others' layers are read.
+  sceneDraws(true)
   forgetBuilderRecords()
   held = []
   published = []
@@ -146,6 +148,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   if (T().active) await T().exit()
+  sceneDraws(false)
 })
 
 /** Open TERRAIN at `at` (your spawn when not given), sign your spawn (it names the builder key), and let the relay hold it. */

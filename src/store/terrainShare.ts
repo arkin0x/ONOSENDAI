@@ -27,8 +27,8 @@
  *
  * The bag says where that stands: saved on this device, sharing, shared.
  *
- * READING. In every mode (HOP, WALK, TERRAIN), LIVE or LOCAL, as shards are
- * read, other builders' layers for the chunks round where you stand (the
+ * READING. In every mode (HOP, WALK, TERRAIN), LIVE or LOCAL, while the scene
+ * draws blocks (as shards are read while the app shows them), other builders' layers for the chunks round where you stand (the
  * ring the field draws, READ_RING) are read from the canonical relay, checked by §6.1
  * (lib/terrain/layerReader.ts: a retired or unnamed builder key drops its
  * layers), mutes removed, and stacked (§7, the Stack): each cell shows the
@@ -76,6 +76,8 @@ export const NEAR_GIBSONS = 64
 export const LAYER_CONTENT = ''
 /** How long a builder key's status read from the relay is trusted (ms): a retirement since must count. */
 export const STATUS_FRESH_MS = 60_000
+/** How long a key whose status could not be read waits before it is asked again (ms). */
+export const UNKNOWN_FRESH_MS = 30_000
 
 // ---------------------------------------------------------------------------------------------------------------
 // What this module needs from the world, swapped out in tests.
@@ -252,10 +254,24 @@ interface Session {
 let session: Session | null = null
 let reader: ReturnType<typeof setInterval> | null = null
 
+/** How many scenes draw blocks now (scene/TerrainLayer.tsx): others' layers are read only while one does. */
+let drawing = 0
+
+/** A scene that draws blocks came (true) or went (false): others' layers round you are read while one is there, in every mode. */
+export function sceneDraws(on: boolean): void {
+  drawing = Math.max(0, drawing + (on ? 1 : -1))
+  if (on) void readNear(true)
+  else if (drawing === 0 && reader) { clearInterval(reader); reader = null }
+}
+
 /** Others' layers round you read again every READ_EVERY_MS, in every mode, once anything has been read; and your builder tag asked after. */
 function keepReading(): void {
   if (reader) return
-  reader = setInterval(() => { if (sessionFor()) { void readNear(true); void confirmTags() } }, READ_EVERY_MS)
+  // Not while the tab is hidden: nothing is drawn; the first tick once it shows again reads.
+  reader = setInterval(() => {
+    if (typeof document !== 'undefined' && document.hidden) return
+    if (sessionFor()) { void readNear(true); void confirmTags() }
+  }, READ_EVERY_MS)
 }
 const statuses = new Map<string, { s: KeyStatus; at: number }>()
 const grounds = new Map<string, Promise<Uint8Array>>()
@@ -1079,6 +1095,9 @@ function pacedPublish(ev: NostrEvent, still: () => boolean): Promise<{ ok: boole
 // ---------------------------------------------------------------------------------------------------------------
 // Reading.
 
+/** Chunks asked about in one filter. */
+export const READ_BATCH = 25
+
 /** How many chunks out from yours others' layers are read: the same ring the field draws (store/useTerrain.ts DRAW_RING). */
 export const READ_RING = 2
 
@@ -1114,7 +1133,8 @@ async function statusesOf(author: string, list: string[]): Promise<Map<string, K
     for (const k of ask) {
       const st = got.get(k) ?? 'unknown'
       out.set(k, st)
-      if (st !== 'unknown') statuses.set(`${author}|${k}`, { s: st, at: now })
+      // Unknown too (the relay did not answer, or the history is longer than the pages read), asked again after UNKNOWN_FRESH_MS, not on every read.
+      statuses.set(`${author}|${k}`, { s: st, at: st === 'unknown' ? now - STATUS_FRESH_MS + UNKNOWN_FRESH_MS : now })
     }
     while (statuses.size > 800) statuses.delete(statuses.keys().next().value as string)
   }
@@ -1138,7 +1158,7 @@ let readAgain = false
  */
 export function readNear(force = false): Promise<void> {
   const s = sessionFor()
-  if (!s || !host) return Promise.resolve()
+  if (!s || !host || drawing === 0) return Promise.resolve()
   keepReading()
   const at = host.head()
   // The same chunks while you stay in the one you stand in: nothing to work out on every step.
@@ -1169,7 +1189,10 @@ export async function readChunks(bases: ChunkBase[]): Promise<void> {
   const d = current()
   const byLookup = new Map<string, ChunkBase>()
   for (const b of bases) byLookup.set(chunkRegionKey(b).lookupId, b)
-  const events = await d.query({ kinds: [LAYER_KIND], '#d': [...byLookup.keys()] })
+  // In batches: the relay sends at most 500 events for one filter, so a busy ring asked at once would lose its older layers.
+  const ids = [...byLookup.keys()]
+  const events: NostrEvent[] = []
+  for (let i = 0; i < ids.length; i += READ_BATCH) events.push(...await d.query({ kinds: [LAYER_KIND], '#d': ids.slice(i, i + READ_BATCH) }))
   for (const ev of events) {
     const shape = layerShape(ev)
     if (!shape || !byLookup.has(shape.lookupId)) continue

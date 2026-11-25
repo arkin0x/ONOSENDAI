@@ -31,7 +31,14 @@ export type AskRelay = (filter: Filter) => Promise<{ events: NostrEvent[]; troub
  * Refused, every key stayed unknown, so no one else's layer was ever drawn
  * (2026-11-25).
  */
-export async function keyStatusOn(ask: AskRelay, author: string, keys: string[], verify: (e: NostrEvent) => boolean): Promise<Map<string, KeyStatus>> {
+/**
+ * `named` holds when each key's newest naming was found before, by
+ * `${author}|${key}` (a naming never changes once on the relay): a key named
+ * after every `all` is valid on the retirements alone, so its author's
+ * movement actions are read once, not on every check. Namings found here are
+ * added to it.
+ */
+export async function keyStatusOn(ask: AskRelay, author: string, keys: string[], verify: (e: NostrEvent) => boolean, named?: Map<string, number>): Promise<Map<string, KeyStatus>> {
   const out = new Map<string, KeyStatus>()
   const own = (es: NostrEvent[]): NostrEvent[] => es.filter((e) => e.pubkey === author && e.kind === ACTION && verify(e))
   const hex = keys.filter((k) => /^[0-9a-f]{64}$/.test(k))
@@ -43,8 +50,12 @@ export async function keyStatusOn(ask: AskRelay, author: string, keys: string[],
     retirements.push(...own(r.events))
   }
   const seen: NostrEvent[] = [...retirements]
+  let lastAll: number | null = null
+  for (const e of retirements) if (e.tags.some((t) => t[0] === 'builder-retire' && t[1] === 'all')) lastAll = Math.max(lastAll ?? 0, e.created_at)
   let left = keys.filter((k) => {
     if (retirements.some((e) => e.tags.some((t) => t[0] === 'builder-retire' && t[1] === k))) { out.set(k, 'void'); return false }
+    const at = named?.get(`${author}|${k}`)
+    if (at !== undefined && (lastAll === null || at > lastAll)) { out.set(k, 'valid'); return false }
     return true
   })
   let until: number | undefined
@@ -58,7 +69,9 @@ export async function keyStatusOn(ask: AskRelay, author: string, keys: string[],
     seen.push(...own(fresh))
     // Newest first: the first naming found is a key's newest.
     left = left.filter((k) => {
-      if (!seen.some((e) => e.tags.some((t) => t[0] === 'builder' && t[1] === k))) return true
+      const namings = seen.filter((e) => e.tags.some((t) => t[0] === 'builder' && t[1] === k))
+      if (namings.length === 0) return true
+      named?.set(`${author}|${k}`, Math.max(...namings.map((e) => e.created_at)))
       out.set(k, builderKeyValid(k, seen) ? 'valid' : 'void')
       return false
     })

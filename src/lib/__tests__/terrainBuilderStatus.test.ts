@@ -82,6 +82,21 @@ describe('builder key status against the canonical relay', () => {
     expect(got.get(k2)).toBe('void')
   })
 
+  it('a naming found once is kept: the next check asks only for retirements, and a later `all` still voids the key', async () => {
+    const sk = generateSecretKey()
+    const author = getPublicKey(sk)
+    const k = getPublicKey(generateSecretKey())
+    const held = [move(sk, 1_790_000_000, [['builder', k]]), move(sk, 1_790_000_010, [])]
+    const named = new Map<string, number>()
+    expect((await keyStatusOn(canonicalLike(held), author, [k], verify, named)).get(k)).toBe('valid')
+    expect(named.get(`${author}|${k}`)).toBe(1_790_000_000)
+    const asked: Filter[] = []
+    expect((await keyStatusOn(canonicalLike(held, asked), author, [k], verify, named)).get(k)).toBe('valid')
+    expect(asked.every((f) => (f as Record<string, unknown>)['#R'] !== undefined)).toBe(true)
+    held.push(move(sk, 1_790_000_020, [['builder-retire', 'all'], ['R', 'all']]))
+    expect((await keyStatusOn(canonicalLike(held), author, [k], verify, named)).get(k)).toBe('void')
+  })
+
   it('a relay that cannot answer leaves the key unknown', async () => {
     const k = getPublicKey(generateSecretKey())
     const got = await keyStatusOn(async () => ({ events: [], trouble: 'unreachable' }), getPublicKey(generateSecretKey()), [k], verify)

@@ -35,7 +35,7 @@ import {
   Raycaster, Vector2, Vector3, type LineSegments,
 } from 'three'
 import { cellInReach, slotInReach, surveyTarget, terrainSession, useTerrain, type TerrainSession } from '../store/useTerrain'
-import { AIM_COLORS, aimAt } from '../store/terrainShare'
+import { AIM_COLORS, aimAt, sceneDraws } from '../store/terrainShare'
 import { useCyberspace } from '../store/useCyberspace'
 import { useLayers } from '../store/useLayers'
 import { raycast, type RayHit } from '../lib/terrain/raycast'
@@ -295,6 +295,8 @@ function Marks({ axes }: { axes: ViewAxes }): JSX.Element {
 }
 
 export function TerrainLayer({ axes }: { axes: ViewAxes }): JSX.Element {
+  // Others' blocks round you are read while the scene draws blocks, in every mode (store/terrainShare.ts), as shards are scanned while the app shows them.
+  useEffect(() => { sceneDraws(true); return () => sceneDraws(false) }, [])
   return (
     <>
       <Chunks axes={axes} />

@@ -48,12 +48,11 @@ describe('AUTO on a shape with no vertices', () => {
     expect(walkEyeLocal(empty(), 0, 1)).toEqual([0, MARKER_EYE, 0])
   })
 
-  it('is the same height in gibsons at any unit: whole ticks of that unit’s grid', () => {
-    // At unit 1 a tick is 2/120 of a gibson: 52.5 ticks rounds to 53, 0.883 gibsons.
-    expect(markerShapeEye(empty(1))).toEqual([0, 53, 0])
-    expect(walkEyeLocal(empty(1), 0, 1)[1]).toBeCloseTo((53 * 2) / 120, 12)
-    // At unit -1 a tick is 1/240 of a gibson: 210 ticks, exactly 0.875.
-    expect(walkEyeLocal(empty(-1), 0, 1)[1]).toBeCloseTo(0.875, 12)
+  it('is the icosahedron’s 0.875 at every unit, never rounded onto the floor by a big unit’s grid', () => {
+    for (const unit of [0, 1, 5, 7, 8, 10, 20, 84]) {
+      expect(walkEyeLocal(empty(unit), 0, 1)).toEqual([0, MARKER_EYE, 0])
+      expect(eyeLabel(empty(unit))).toBe('0, 0.88, 0')
+    }
   })
 })
 
@@ -77,6 +76,15 @@ describe('a CHOSEN eye on a shape with no vertices', () => {
 
   it('is measured in the shape’s own unit', () => {
     expect(walkEyeLocal(withEye(empty(1), [0, 60, 0]), 0, 1)).toEqual([0, 1, 0])
+  })
+
+  it('is where the bench shows it, at a big unit too: never a place the bench does not draw', () => {
+    for (const unit of [0, 3, 8, 9, 12]) {
+      const s = withEye(empty(unit), [0, 120, 0])
+      const shown = usedBenchEye(s)
+      const k = 2 ** unit / 120
+      expect(walkEyeLocal(s, 0, 1)[1]).toBeCloseTo(Math.min(4, shown[1] * k), 12)
+    }
   })
 
   it('is kept within the avatar size limit, as a custom avatar’s is', () => {

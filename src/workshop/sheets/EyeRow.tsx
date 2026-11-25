@@ -32,8 +32,6 @@ const shapeKey = (s: ShardModel): string => { const { name: _n, ...rest } = toPa
  * says what the worn one still uses; otherwise how both are published.
  */
 export function eyeNote(shard: ShardModel, worn: ShardModel | null): string {
-  // No shape yet: nothing to publish, but WHAT YOU SEE and TRY WALK look from this eye on the default icosahedron.
-  if (shard.vertices.length === 0) return 'NO SHAPE YET: THIS IS THE EYE ON THE DEFAULT ICOSAHEDRON. TRY WALK TO WALK WITH IT.'
   if (worn && shapeKey(worn) === shapeKey(shard)) {
     const eye = eyeLabel(worn) + eyeChosen(worn) !== eyeLabel(shard) + eyeChosen(shard)
     const face = drawnFace(worn) !== drawnFace(shard)
@@ -41,6 +39,8 @@ export function eyeNote(shard: ShardModel, worn: ShardModel | null): string {
     if (eye) return `YOUR WORN AVATAR STILL USES ${eyeChosen(worn) ? eyeLabel(worn) : 'AUTO'}. USE THIS SHARD TO UPDATE IT.`
     if (face) return `YOUR WORN AVATAR STILL USES ${drawnFace(worn).toUpperCase()} FACING. USE THIS SHARD TO UPDATE IT.`
   }
+  // No shape yet: nothing to publish, but WHAT YOU SEE and TRY WALK look from this eye on the default icosahedron.
+  if (shard.vertices.length === 0) return 'NO SHAPE YET: THIS IS THE EYE ON THE DEFAULT ICOSAHEDRON. TRY WALK TO WALK WITH IT.'
   return 'USE THIS SHARD PUBLISHES THE EYE AND FACING.'
 }
 

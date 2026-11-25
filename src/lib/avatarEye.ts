@@ -187,8 +187,9 @@ export function gibsonsLabel(ticks: number, shard: ShardModel): string {
   return String(hundredths / 100 + 0)
 }
 
-/** The eye as the workshop prints it: "0, 1.33, 0", in gibsons in the bench's frame. */
+/** The eye as the workshop prints it: "0, 1.33, 0", in gibsons in the bench's frame; AUTO on a shape with no vertices is the icosahedron's, 0.88, at any unit. */
 export function eyeLabel(shard: ShardModel): string {
+  if (shard.vertices.length === 0 && !eyeChosen(shard)) return `0, ${Math.round(MARKER_EYE * 100) / 100}, 0`
   return usedBenchEye(shard).map((t) => gibsonsLabel(t, shard)).join(', ')
 }
 
@@ -220,7 +221,14 @@ export function walkEyeLocal(shard: ShardModel | null, scaleExp: number, spectat
   // its eye (markerShapeEye): one gibson across at true scale and one cell
   // across at any zoom, as the icosahedron is drawn, so the eye's gibsons on
   // the bench are cells here, times the icosahedron's own shrink.
-  if (shard.vertices.length === 0) return fitEye(markerShapeEye(shard), 2 ** shard.unit / TICKS_PER_UNIT, spectator)
+  // AUTO is the icosahedron's eye exactly, at any unit (whole ticks of a big
+  // unit's grid would round it off the shape, to the floor from unit 8). A
+  // chosen eye is taken as the bench uses it (usedBenchEye: within the size
+  // limit, in whole ticks), so WALK never looks from a place the bench does not show.
+  if (shard.vertices.length === 0) {
+    if (!eyeChosen(shard)) return [0, MARKER_EYE * spectator, 0]
+    return fitEye(flipEyeZ(usedBenchEye(shard)), 2 ** shard.unit / TICKS_PER_UNIT, spectator)
+  }
   // A custom avatar drawn as the icosahedron, zoomed far out: the icosahedron's eye (DECK-0003 §1.17).
   if (avatarDraw(shard, scaleExp) === 'marker') return [0, MARKER_EYE * spectator, 0]
   return fitEye(eyeOf(shard), avatarScale(shard) / TICKS_PER_UNIT, 2 ** -scaleExp)

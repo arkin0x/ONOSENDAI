@@ -235,6 +235,7 @@ function column(name: string, eye?: V3): ShardModel {
  */
 const AVATARS: Array<[string, ShardModel | null, number]> = [
   ['the default icosahedron (no avatar)', null, EYE_ROOM * (1 - 1 / 8)],
+  ['a shape with no points, its eye set at the icosahedron’s top', { ...newShard('Empty'), extra: { eye: [0, 120, 0] } }, EYE_ROOM * (1 - 1 / 8)],
   ['an operative (eye 2.8 up, 0.27 forward)', column('Operative', [4, 336, -32]), 0.5],
   ['a 3-gibson avatar with the automatic eye', column('Auto'), 0.5],
 ]
@@ -295,7 +296,7 @@ async function walk(fluid: boolean, gravity: boolean): Promise<void> {
   if (!gravity) useWalk.getState().setGravity(false)
 }
 
-interface Walked { frames: number; feetUnder: number; footWorst: number; camInGround: number; camAtFeet: number; camLowest: number }
+interface Walked { frames: number; feetUnder: number; footWorst: number; camInGround: number; camAtFeet: number }
 
 /**
  * Walk `legs` (a heading and how far along it, in gibsons), a frame every
@@ -305,7 +306,7 @@ interface Walked { frames: number; feetUnder: number; footWorst: number; camInGr
 async function walkLegs(legs: Array<[number, number, number]>, ms: number, avatar: ShardModel | null, fluid: boolean, surface: (x: number, z: number) => number | null, inGround: (p: V3) => boolean, atFeet = 0.5): Promise<Walked> {
   const rig = new WalkEyeRig()
   let smooth = target()
-  const out: Walked = { frames: 0, feetUnder: 0, footWorst: 0, camInGround: 0, camAtFeet: 0, camLowest: Infinity }
+  const out: Walked = { frames: 0, feetUnder: 0, footWorst: 0, camInGround: 0, camAtFeet: 0 }
   for (const [dx, dz, dist] of legs) {
     face(dx, dz)
     const c0 = useCyberspace.getState().cursor
@@ -332,7 +333,6 @@ async function walkLegs(legs: Array<[number, number, number]>, ms: number, avata
       if (f !== null) out.footWorst = Math.max(out.footWorst, f - p[1])
       if (inGround(cam)) out.camInGround++
       if (cam[1] - p[1] < atFeet) out.camAtFeet++
-      out.camLowest = Math.min(out.camLowest, cam[1] - p[1])
     }
     walkKeyUp('KeyW')
     for (let k = 0; k < 20; k++) { frame(ms); await keepUp() }

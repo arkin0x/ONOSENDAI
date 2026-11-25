@@ -10,7 +10,8 @@
  * and it follows your edits); CENTER puts the eye in the middle of the shape's
  * box; ORIGIN at 0, 0, 0, the eye every avatar had before; NUMBERS opens X, Y
  * and Z steppers in gibsons, a grid step a press; TRY WALK walks with this eye
- * before you publish (store/tryEye.ts); DONE puts the eye down.
+ * before you publish (store/tryEye.ts), the icosahedron's walk for a shape
+ * with no vertices; DONE puts the eye down.
  *
  * A status line above the slots always holds the eye's place in gibsons from
  * 0, 0, 0, and AUTO or CHOSEN at its end: reserved, so nothing jumps.
@@ -85,7 +86,8 @@ export function EyeBar(): JSX.Element | null {
         <button className={`ws__heldbtn ws__heldbtn--two${numbers ? ' is-on' : ''}`} aria-expanded={numbers} aria-haspopup="true" onClick={() => setNumbers((n) => !n)} title="X, Y and Z in gibsons, a grid step a press" {...noCallout}>
           <Hash size={18} strokeWidth={2} aria-hidden /><span>NUMBERS</span>
         </button>
-        <button className="ws__heldbtn ws__eyebar-gap" disabled={!has} onClick={() => { startTryWalk() }} title="Walk with this eye before you publish. Your steps are real moves. Leave WALK to come back here" {...noCallout}>
+        {/* A shape with no vertices walks as the icosahedron with this eye (lib/avatarEye.ts markerShapeEye). */}
+        <button className="ws__heldbtn ws__eyebar-gap" onClick={() => { startTryWalk() }} title="Walk with this eye before you publish. Your steps are real moves. Leave WALK to come back here" {...noCallout}>
           <Footprints size={18} strokeWidth={2} aria-hidden /><span>TRY WALK</span>
         </button>
         <button className="ws__heldbtn ws__heldbtn--ok" onClick={() => w().setEyeEdit(false)} title="Put the eye down (E)" aria-label="Done with the eye" {...noCallout}>

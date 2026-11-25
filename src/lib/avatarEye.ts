@@ -19,6 +19,9 @@
  * its own shape: half a cell up less an eighth of a cell, 0.375 cells above
  * its centre. So does a custom avatar while it is drawn as that icosahedron
  * (zoomed far out), since its own eye would be smaller than what is drawn.
+ * A shape with no vertices is drawn as that icosahedron too, and its own
+ * `eye`, when it has one, is measured on it (markerShapeEye): SET EYE on an
+ * empty shape moves WHAT YOU SEE and TRY WALK's camera.
  *
  * Written by the workshop's SET EYE (withEye, below). sno-core will carry the
  * same reader and writer; these go when it does.
@@ -76,6 +79,29 @@ export function eyeOf(shard: Pick<ShardModel, 'vertices' | 'extra'>): Eye {
   return readEye(shard.extra?.[EYE_FIELD]) ?? autoEye(shard)
 }
 
+/**
+ * The eye a shape with no vertices of its own looks from, in ticks in its
+ * payload's frame (arkinox, 2026-11-25: "the 'what you see' doesn't change
+ * when I move my eye"). Such a shape is drawn as the default icosahedron,
+ * one gibson across on the bench and in WALK at true scale, its lowest point
+ * on its origin. Its own `eye` when it has one, measured on that icosahedron;
+ * otherwise the icosahedron's eye (MARKER_EYE, DECK-0003 §1.17 "The default
+ * avatar"), in whole ticks of the shard's grid: 105 at unit 0. The spec's
+ * automatic eye of an empty payload is its origin (autoEye), which is the
+ * floor: never where WALK looks from, so never shown as the eye.
+ */
+export function markerShapeEye(shard: Pick<ShardModel, 'unit' | 'extra'>): Eye {
+  const own = readEye(shard.extra?.[EYE_FIELD])
+  if (own) return own
+  const y = Math.min(EYE_REACH, Math.round((MARKER_EYE * TICKS_PER_UNIT) / 2 ** shard.unit))
+  return [0, y, 0]
+}
+
+/** The eye WALK looks from for this shard as worn, in ticks in its payload's frame: eyeOf, or markerShapeEye for a shape with no vertices. */
+export function wornEye(shard: ShardModel): Eye {
+  return shard.vertices.length === 0 ? markerShapeEye(shard) : eyeOf(shard)
+}
+
 /** Whether an avatar's eye is its own `eye` (CHOSEN) rather than the automatic one. */
 export function eyeChosen(shard: Pick<ShardModel, 'extra'>): boolean {
   return readEye(shard.extra?.[EYE_FIELD]) !== undefined
@@ -106,8 +132,8 @@ export function withEye<T extends Pick<ShardModel, 'extra'>>(s: T, eye: Eye | un
  */
 export const flipEyeZ = (e: Eye): Eye => [e[0], e[1], 0 - e[2]]
 
-/** The eye in the workshop's model frame, in ticks: what the bench draws and its handles move. */
-export const benchEye = (shard: Pick<ShardModel, 'vertices' | 'extra'>): Eye => flipEyeZ(eyeOf(shard))
+/** The eye in the workshop's model frame, in ticks: what the bench draws and its handles move (wornEye: the icosahedron's for a shape with no vertices). */
+export const benchEye = (shard: ShardModel): Eye => flipEyeZ(wornEye(shard))
 
 /**
  * CENTER: the middle of the shape's box, in ticks in the payload's frame,
@@ -161,8 +187,9 @@ export function gibsonsLabel(ticks: number, shard: ShardModel): string {
   return String(hundredths / 100 + 0)
 }
 
-/** The eye as the workshop prints it: "0, 1.33, 0", in gibsons in the bench's frame. */
+/** The eye as the workshop prints it: "0, 1.33, 0", in gibsons in the bench's frame; AUTO on a shape with no vertices is the icosahedron's, 0.88, at any unit. */
 export function eyeLabel(shard: ShardModel): string {
+  if (shard.vertices.length === 0 && !eyeChosen(shard)) return `0, ${Math.round(MARKER_EYE * 100) / 100}, 0`
   return usedBenchEye(shard).map((t) => gibsonsLabel(t, shard)).join(', ')
 }
 
@@ -183,21 +210,39 @@ export const MARKER_EYE = 2 * AVATAR_MARKER_HALF - (2 * AVATAR_MARKER_HALF) / 8
  * a vertex is drawn. Scaled as the avatar's mesh is (avatarScale, the zoom),
  * and kept within the avatar size limit, MAX_AVATAR_RADIUS gibsons from the
  * origin on each axis, the reach a shrunk avatar is drawn inside. The marker's
- * eye when the icosahedron is drawn: no avatar, one with no vertices, or a
- * custom one zoomed out to the marker. `spectator` is the marker's shrink at
+ * eye when the icosahedron is drawn: no avatar, or a custom one zoomed out
+ * to the marker. A shape with no vertices is the icosahedron with its own eye
+ * (markerShapeEye), scaled as the icosahedron is. `spectator` is the marker's shrink at
  * the top of the ladder (lib/avatar spectatorScale).
  */
 export function walkEyeLocal(shard: ShardModel | null, scaleExp: number, spectator: number): Eye {
-  const draw = shard && shard.vertices.length > 0 ? avatarDraw(shard, scaleExp) : 'marker'
-  if (!shard || draw === 'marker') return [0, MARKER_EYE * spectator, 0]
-  const e = eyeOf(shard)
-  const k = avatarScale(shard) / TICKS_PER_UNIT
-  // Gibsons at true scale, then brought inside the size limit as a whole, so
-  // an eye far off keeps its direction from the origin.
+  if (!shard) return [0, MARKER_EYE * spectator, 0]
+  // A shape with no vertices is the icosahedron with an eye of its own, or
+  // its eye (markerShapeEye): one gibson across at true scale and one cell
+  // across at any zoom, as the icosahedron is drawn, so the eye's gibsons on
+  // the bench are cells here, times the icosahedron's own shrink.
+  // AUTO is the icosahedron's eye exactly, at any unit (whole ticks of a big
+  // unit's grid would round it off the shape, to the floor from unit 8). A
+  // chosen eye is taken as the bench uses it (usedBenchEye: within the size
+  // limit, in whole ticks), so WALK never looks from a place the bench does not show.
+  if (shard.vertices.length === 0) {
+    if (!eyeChosen(shard)) return [0, MARKER_EYE * spectator, 0]
+    return fitEye(flipEyeZ(usedBenchEye(shard)), 2 ** shard.unit / TICKS_PER_UNIT, spectator)
+  }
+  // A custom avatar drawn as the icosahedron, zoomed far out: the icosahedron's eye (DECK-0003 §1.17).
+  if (avatarDraw(shard, scaleExp) === 'marker') return [0, MARKER_EYE * spectator, 0]
+  return fitEye(eyeOf(shard), avatarScale(shard) / TICKS_PER_UNIT, 2 ** -scaleExp)
+}
+
+/**
+ * Ticks `e` as gibsons at true scale (`k` gibsons a tick), brought inside the
+ * size limit as a whole so an eye far off keeps its direction from the
+ * origin, then times `zoom`: render cells. Never -0.
+ */
+function fitEye(e: Eye, k: number, zoom: number): Eye {
   const g = [e[0] * k, e[1] * k, e[2] * k]
   const far = Math.max(Math.abs(g[0]), Math.abs(g[1]), Math.abs(g[2]))
   const fit = far > MAX_AVATAR_RADIUS ? MAX_AVATAR_RADIUS / far : 1
-  const zoom = 2 ** -scaleExp
   return [g[0] * fit * zoom + 0, g[1] * fit * zoom + 0, g[2] * fit * zoom + 0]
 }
 

@@ -14406,14 +14406,43 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
   padding: 16px;
   background: rgba(2, 5, 9, 0.55);
 }
+/* Clear of the controls: on a desktop above the hotbar and below the top chips; on a phone above the menu button, which stays. */
+@media (min-width: 1100px) {
+  .terrain-sheet { padding: 140px 16px 76px; }
+}
+@media (max-width: 1099px) {
+  .terrain-sheet { padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 84px); }
+}
 .terrain-sheet__card {
   --terrain-cut: 14px;
   --terrain-fill: rgba(4, 10, 14, 0.96);
+  display: flex;
+  flex-direction: column;
   width: min(460px, 100%);
-  max-height: calc(100% - 32px);
-  overflow-y: auto;
+  max-height: 100%;
+  overflow: hidden;
   padding: 16px;
 }
+/* The bag keeps one height whatever it holds, so its title and ✕ never move as blocks or people come and go; the body scrolls. */
+.terrain-sheet__card--bag { height: min(680px, 100%); }
+/* The bag scrolls inside its frame, under its title line: its fill (::before) is the card's height, so nothing scrolls past it. */
+.terrain-sheet__head { flex: none; }
+.terrain-sheet__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin-right: -10px;
+  padding-right: 10px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  /* What scrolls up fades out under the title line rather than being cut off hard. */
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 10px);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 10px);
+}
+/* The share line: its icon, its words taking the room, RETIRE KEY at the end, on one line. */
+.terrain-share { display: flex; align-items: center; gap: 8px; }
+.terrain-share > svg { flex: none; }
+.terrain-share__words { flex: 1 1 0; min-width: 0; }
+.terrain-share > .crew-btn { flex: none; min-width: 136px; }  /* fits TAP AGAIN TO RETIRE, so the words beside it wrap the same while it asks */
 .terrain-sheet__head { display: flex; align-items: center; gap: 8px; color: var(--terrain); }
 .terrain-sheet__head h2 { flex: 1; margin: 0; font-size: 13px; letter-spacing: 0.14em; color: var(--terrain); }
 .terrain-sheet__sub,
@@ -14441,17 +14470,257 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
 .terrain-kind.is-on .chamfer { --chamfer-line: var(--terrain); }
 .terrain-kind__name { font-size: 11px; letter-spacing: 0.04em; }
 .terrain-kind__count { font-size: 11px; font-weight: 700; color: var(--terrain); }
-.terrain-sheet__keys {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
-  gap: 6px 12px;
-  margin: 12px 0 0;
-  font-size: 11px;
+/* ---------- TERRAIN's Crew (terrain/CrewPanel.tsx) ----------
+ * The bag's Crew: who can build on yours and whose you build on, one row per
+ * person, every row the same height. Cut by hand in the augmented-ui manner
+ * (inspiration only, no dependency): clip-path corners, the line as the
+ * outer box and the fill a pixel in (as .cham-btn and .terrain-sheet__card),
+ * an inlay bar on each panel's title strip, and a mint rule with a notch
+ * over the section. Words are white; mint marks only what is TERRAIN's own. */
+.crew {
+  position: relative;
+  margin-top: 16px;
+  padding-top: 16px;
+  color: #fff;
 }
-.terrain-sheet__keys > div { display: flex; align-items: center; gap: 8px; }
-.terrain-sheet__keys dt { display: flex; gap: 4px; flex-wrap: wrap; }
-.terrain-sheet__keys dt, .terrain-sheet__keys dd { margin: 0; }
-.terrain-sheet__keys .terrain-key { margin-left: 0; }
+/* The rule over the section: a mint tick, then a hairline fading out, a small step dropping from the tick's end. */
+.crew::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 1px;
+  background: linear-gradient(90deg, var(--terrain) 0 36px, rgba(124, 255, 196, 0.32) 36px, rgba(124, 255, 196, 0.06) 75%, transparent);
+}
+.crew::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 1px;
+  width: 36px;
+  height: 3px;
+  background: var(--terrain);
+  clip-path: polygon(0 0, 100% 0, calc(100% - 3px) 100%, 0 100%);
+}
+.crew__head { display: flex; align-items: center; gap: 9px; }
+/* The section's mark: a small chamfered square, mint line, its icon in mint. */
+.crew__badge,
+.crew-btn,
+.crew-group,
+.crew-search {
+  --cut: 6px;
+  position: relative;
+  isolation: isolate;
+  clip-path: polygon(var(--cut) 0, 100% 0, 100% calc(100% - var(--cut)), calc(100% - var(--cut)) 100%, 0 100%, 0 var(--cut));
+}
+.crew__badge::before,
+.crew-btn::before,
+.crew-group::before {
+  content: '';
+  position: absolute;
+  inset: 1px;
+  z-index: -1;
+  clip-path: polygon(calc(var(--cut) - 0.6px) 0, 100% 0, 100% calc(100% - var(--cut) + 0.6px), calc(100% - var(--cut) + 0.6px) 100%, 0 100%, 0 calc(var(--cut) - 0.6px));
+}
+.crew__badge {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  color: var(--terrain);
+  background: var(--terrain-line);
+}
+.crew__badge::before { background: #0a1d19; }
+.crew__title { flex: 1; margin: 0; font-size: 12px; letter-spacing: 0.16em; color: var(--terrain); }
+.crew__what { margin: 8px 0 12px; font-size: 12px; line-height: 1.45; color: #fff; }
+
+/* A button: CREATE's size and padding (.avatars__go), chamfered, mint. */
+.crew-btn {
+  --line: rgba(124, 255, 196, 0.55);
+  --fill: #07161a;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 0;
+  background: var(--line);
+  color: var(--terrain);
+  font: inherit;
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  white-space: nowrap;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.crew-btn::before { background: var(--fill); }
+.crew-btn:hover { --fill: #0d2823; }
+.crew-btn:active { --fill: #12382f; }
+.crew-btn:focus-visible { outline: none; --line: #fff; }
+.crew-btn:disabled { opacity: 0.4; cursor: default; }
+.crew-btn > svg { flex: none; }
+/* Alone on its row, the full width, as CREATE's lone button is (.shards__compose-open); a mint glow across its fill. */
+.crew-btn--wide { width: 100%; --line: var(--terrain); --fill: linear-gradient(90deg, #0d2b24, #07131a 70%); }
+.crew-btn--wide:hover { --fill: linear-gradient(90deg, #12392f, #0a1b1f 70%); }
+.crew-btn--icon { width: 26px; padding: 0; color: #fff; --line: rgba(255, 255, 255, 0.35); --fill: #071015; }
+.crew-btn--icon:hover { --line: rgba(255, 255, 255, 0.6); --fill: #0c1a20; }
+.crew-btn--danger { --line: rgba(255, 59, 107, 0.75); --fill: #1d0910; color: #ff7b9a; }
+.crew-btn--danger:hover { --fill: #2c0d18; }
+.crew-btn--danger:active { --fill: #3a1120; }
+
+/* A panel of people: chamfered, a mint line, a title strip with an inlay bar at its left, and a count. */
+.crew-group {
+  --cut: 10px;
+  margin-top: 12px;
+  background: rgba(124, 255, 196, 0.3);
+}
+.crew-group::before { background: #050c10; }
+.crew-group__head {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  margin: 1px 1px 0;
+  padding: 0 10px 0 16px;
+  border-bottom: 1px solid rgba(124, 255, 196, 0.16);
+  background: linear-gradient(90deg, rgba(124, 255, 196, 0.12), rgba(124, 255, 196, 0) 75%);
+}
+.crew-group__head::before {
+  content: '';
+  position: absolute;
+  left: 7px;
+  top: 9px;
+  bottom: 9px;
+  width: 2px;
+  background: var(--terrain);
+}
+.crew-group__title { font-size: 10px; font-weight: 700; letter-spacing: 0.16em; color: var(--terrain); white-space: nowrap; }
+.crew-group__sub { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: #fff; opacity: 0.75; }
+.crew-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.crew-group__count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 18px;
+  padding: 0 6px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #fff;
+  background: rgba(124, 255, 196, 0.16);
+  clip-path: polygon(4px 0, 100% 0, 100% calc(100% - 4px), calc(100% - 4px) 100%, 0 100%, 0 4px);
+}
+.crew-list { list-style: none; margin: 0; padding: 0; }
+/* One person: every row 56px, the side slot one width, so nothing moves when a button turns into a mark. */
+.crew-row { display: flex; align-items: center; gap: 10px; height: 56px; padding: 0 10px 0 12px; }
+.crew-row + .crew-row { border-top: 1px solid rgba(255, 255, 255, 0.07); }
+.crew-row__who { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.crew-row__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 700; color: #fff; }
+.crew-row__npub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); font-size: 10px; color: #fff; opacity: 0.6; }
+.crew-row__side { flex: none; display: flex; align-items: center; justify-content: flex-end; gap: 6px; min-width: 68px; }
+/* A face: the shared chamfered frame (ui/Chamfer), white line, mint for someone in your crew. */
+.crew-face { --chamfer-cut: 9px; --chamfer-line: rgba(255, 255, 255, 0.3); --chamfer-fill: #071015; }
+.crew-face.is-lit { --chamfer-line: rgba(124, 255, 196, 0.8); }
+.crew-face__pic { width: 100%; height: 100%; object-fit: cover; }
+.crew-face__initial {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  font-size: 17px;
+  font-weight: 700;
+  color: #fff;
+  background:
+    radial-gradient(circle at 30% 25%, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0) 65%),
+    color-mix(in srgb, var(--face, #7cffc4) 34%, #071015);
+  text-shadow: 0 1px 2px #000;
+}
+/* In each other's crews. */
+.crew-mutual {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 18px;
+  padding: 0 6px;
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  color: var(--terrain);
+  background: rgba(124, 255, 196, 0.13);
+  clip-path: polygon(4px 0, 100% 0, 100% calc(100% - 4px), calc(100% - 4px) 100%, 0 100%, 0 4px);
+}
+.crew-added { display: inline-flex; align-items: center; justify-content: center; gap: 4px; height: 26px; padding: 0 4px; font-size: 8px; letter-spacing: 0.14em; color: var(--terrain); }
+.crew-empty { display: flex; align-items: flex-start; gap: 10px; margin: 0; padding: 12px 12px 13px 14px; font-size: 12px; line-height: 1.5; color: #fff; }
+.crew-empty > svg { flex: none; margin-top: 1px; color: var(--terrain); }
+
+/* Over the bag: the picker and the confirm, a card of the bag's own cut on the dark. */
+.crew-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* The bag's own room (.terrain-sheet), so the picker is as clear of the controls as the bag. */
+  padding: inherit;
+  background: rgba(2, 5, 9, 0.84);
+}
+.crew-layer__card { width: min(420px, 100%); }
+/* The picker keeps one height whatever the search finds, so the box never moves under the finger; on a phone, the whole bag's room. */
+.crew-layer__card--picker { height: min(560px, 100%); max-height: 100%; }
+@media (max-width: 699px) {
+  .crew-layer__card--picker { height: 100%; }
+}
+.crew-layer__card--confirm { width: min(380px, 100%); }
+.crew-layer__sub { margin: 8px 0 0; font-size: 12px; line-height: 1.45; color: #fff; }
+.crew-layer__status { flex: none; min-height: 16px; margin: 6px 0 0; font-size: 11px; line-height: 16px; color: #fff; }
+.crew-search { --cut: 8px; flex: none; display: flex; align-items: center; margin-top: 12px; background: rgba(124, 255, 196, 0.4); }
+.crew-search:focus-within { background: var(--terrain); }
+.crew-search__icon { position: absolute; left: 11px; z-index: 1; color: var(--terrain); pointer-events: none; }
+.crew-search__input {
+  --in-cut: calc(8px - 0.6px);
+  width: 100%;
+  height: 34px;
+  margin: 1px;
+  padding: 0 38px 0 32px;
+  border: 0;
+  border-radius: 0;
+  outline: none;
+  background: #050c10;
+  color: #fff;
+  font: inherit;
+  font-size: 12px;
+  clip-path: polygon(var(--in-cut) 0, 100% 0, 100% calc(100% - var(--in-cut)), calc(100% - var(--in-cut)) 100%, 0 100%, 0 var(--in-cut));
+}
+.crew-search__input::placeholder { color: #fff; opacity: 0.5; }
+.crew-search__clear {
+  position: absolute;
+  right: 5px;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  background: transparent;
+  color: #fff;
+  cursor: pointer;
+}
+.crew-group--fill { flex: 1; min-height: 0; display: flex; flex-direction: column; margin-top: 4px; }
+.crew-layer__scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.crew-confirm__who { display: flex; align-items: center; gap: 12px; margin-top: 14px; }
+.crew-confirm__ask { margin: 14px 0 0; font-size: 13px; font-weight: 700; color: #fff; }
+/* Two buttons side by side, half the width each, as CREATE's rows. */
+.crew-pair { display: flex; gap: 6px; margin-top: 16px; }
+.crew-pair > .crew-btn { flex: 1 1 0; min-width: 0; }
 
 /* ---------- MODES (hud/ModesPanel.tsx, store/modeOrder.ts) ----------
  * The pad's modes in the player's order. Each row a hand-cut chamfered frame

@@ -21,7 +21,7 @@
  * The actions sit two to a row.
  */
 
-import { useState, type ComponentType } from 'react'
+import { useEffect, useState, type ComponentType } from 'react'
 import { nip19 } from 'nostr-tools'
 import { Bot, Copy, CopyPlus, MessageSquare, Target, TvMinimal, UserPlus, Users } from 'lucide-react'
 import { addCrew, removeCrew, useShare } from '../store/terrainShare'
@@ -209,13 +209,32 @@ export function chatUnavailable(atHead: boolean, hasKey: boolean): string | null
 /**
  * ADD TO CREW (store/terrainShare.ts): they can build on your blocks, at your
  * rank, in the cells you built. No signer is asked; the card stays up, so the
- * button turns to IN YOUR CREW, and a second tap takes them off.
+ * button turns to IN YOUR CREW. Taking them off is never one tap (owner's
+ * rule): a tap on IN YOUR CREW asks TAP AGAIN TO TAKE OFF for a few seconds,
+ * as the bag's RETIRE KEY does, and the bag's Crew has the full confirm.
  */
-function CrewButton({ pubkey }: { pubkey: string }): JSX.Element {
+export const CREW_CONFIRM_MS = 4000
+/** `confirmMs`: how long the second tap is waited for (a test shortens it). */
+export function CrewButton({ pubkey, confirmMs = CREW_CONFIRM_MS }: { pubkey: string; confirmMs?: number }): JSX.Element {
   const inCrew = useShare((s) => s.crew.includes(pubkey))
+  const [asking, setAsking] = useState(false)
+  useEffect(() => {
+    if (!asking) return
+    const t = window.setTimeout(() => setAsking(false), confirmMs)
+    return () => clearTimeout(t)
+  }, [asking, confirmMs])
+  // Taken off some other way (the bag's Crew): the next IN YOUR CREW starts from one tap again.
+  useEffect(() => { if (!inCrew) setAsking(false) }, [inCrew])
+  const tap = (): void => {
+    if (!inCrew) { void addCrew(pubkey); return }
+    if (!asking) { setAsking(true); return }
+    setAsking(false)
+    void removeCrew(pubkey)
+  }
+  const label = !inCrew ? 'ADD TO CREW' : asking ? 'TAP AGAIN TO TAKE OFF' : 'IN YOUR CREW'
   return (
-    <button className={`secret__act ${inCrew ? 'is-on' : ''}`} onClick={() => { void (inCrew ? removeCrew(pubkey) : addCrew(pubkey)) }} title={inCrew ? 'In your crew: tap to take them off' : 'Let them build on your blocks'}>
-      {inCrew ? <Users size={ICON} strokeWidth={2.25} aria-hidden /> : <UserPlus size={ICON} strokeWidth={2.25} aria-hidden />}{inCrew ? 'IN YOUR CREW' : 'ADD TO CREW'}
+    <button className={`secret__act ${inCrew ? 'is-on' : ''}`} onClick={tap} title={!inCrew ? 'Let them build on your blocks' : asking ? 'Tap again: their edits stay theirs; they just stop counting on your builds' : 'In your crew: tap twice to take them off'}>
+      {inCrew ? <Users size={ICON} strokeWidth={2.25} aria-hidden /> : <UserPlus size={ICON} strokeWidth={2.25} aria-hidden />}{label}
     </button>
   )
 }

@@ -8,7 +8,10 @@
  *   you look, with its generated ground.
  * - MINE (Q, a click or a tap on a block) and PLACE (E, a right click or a
  *   act on the block under the cross, or under the pointer: a tap mines, PLACE places.
- * - The hotbar, 1 to 9, and the bag (I): what you carry, on this device.
+ * - The hotbar, 1 to 9, and the bag (I): what you carry, on this device, and
+ *   your Crew (CrewPanel.tsx). The bag lists no keys: each is printed on its
+ *   own button (owner, 2026-11-25: "get rid of the control hints on the
+ *   inventory bag modal").
  * - T or Esc goes back to the mode you came from; the mode button goes on
  *   round the ring.
  *
@@ -34,6 +37,7 @@ import { Chamfer } from '../hud/ui/Chamfer'
 import { noCallout } from '../hooks/useRepeatable'
 import { ShareLine } from './ShareLine'
 import { TerrainCrew, crewChipAsking } from './TerrainCrew'
+import { CrewLayer, CrewPanel, closeCrewLayer } from './CrewPanel'
 
 /** A press held this long without moving places (a long press). */
 export const LONG_PRESS_MS = 420
@@ -181,37 +185,33 @@ function InventorySheet(): JSX.Element | null {
   const close = (): void => useTerrain.getState().setSheet(false)
   return (
     <div className="terrain-sheet" role="dialog" aria-modal="true" aria-label="Inventory" onPointerDown={(e) => { if (e.target === e.currentTarget) close() }}>
-      <div className="terrain-sheet__card">
+      <div className="terrain-sheet__card terrain-sheet__card--bag">
         <div className="terrain-sheet__head">
           <Backpack size={16} strokeWidth={2} aria-hidden />
           <h2>INVENTORY</h2>
           <ModalClose onClose={close} title="Close (I or Esc)" />
         </div>
-        <p className="terrain-sheet__sub">Kept on this device. Tap a block to put it in slot {inv.slot + 1}.</p>
-        {kinds.length === 0
-          ? <p className="terrain-sheet__empty">Nothing yet: mine a block to carry it.</p>
-          : (
-            <div className="terrain-sheet__grid">
-              {kinds.map(([id, n]) => (
-                <button key={id} className={`terrain-kind${inv.hotbar[inv.slot] === id ? ' is-on' : ''}`} onClick={() => useTerrain.getState().assignSlot(id)} aria-label={`${blockName(id)}, ${n}: put in slot ${inv.slot + 1}`}>
-                  <Chamfer size={64}><Swatch id={id} size={34} /></Chamfer>
-                  <span className="terrain-kind__name">{blockName(id)}</span>
-                  <span className="terrain-kind__count">{n}</span>
-                </button>
-              ))}
-            </div>
-          )}
-        <ShareLine />
-        <dl className="terrain-sheet__keys">
-          <div><dt><Key>W A S D</Key></dt><dd>walk</dd></div>
-          <div><dt><Key>SPACE</Key></dt><dd>jump</dd></div>
-          <div><dt><Key>TAP</Key> <Key>CLICK</Key></dt><dd>mine</dd></div>
-          <div><dt><Key>PLACE</Key> <Key>E</Key> <Key>RIGHT CLICK</Key></dt><dd>place</dd></div>
-          <div><dt><Key>1 to 9</Key></dt><dd>choose a block</dd></div>
-          <div><dt><Key>HOLD SURVEY</Key> <Key>HOLD G</Key></dt><dd>survey</dd></div>
-          <div><dt><Key>T</Key></dt><dd>leave TERRAIN</dd></div>
-        </dl>
+        {/* What scrolls, under a title line that stays: the card's frame and fill stand still around it. */}
+        <div className="terrain-sheet__body">
+          <p className="terrain-sheet__sub">Kept on this device. Tap a block to put it in slot&nbsp;{inv.slot + 1}.</p>
+          {kinds.length === 0
+            ? <p className="terrain-sheet__empty">Nothing yet: mine a block to carry it.</p>
+            : (
+              <div className="terrain-sheet__grid">
+                {kinds.map(([id, n]) => (
+                  <button key={id} className={`terrain-kind${inv.hotbar[inv.slot] === id ? ' is-on' : ''}`} onClick={() => useTerrain.getState().assignSlot(id)} aria-label={`${blockName(id)}, ${n}: put in slot ${inv.slot + 1}`}>
+                    <Chamfer size={64}><Swatch id={id} size={34} /></Chamfer>
+                    <span className="terrain-kind__name">{blockName(id)}</span>
+                    <span className="terrain-kind__count">{n}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          <ShareLine />
+          <CrewPanel />
+        </div>
       </div>
+      <CrewLayer />
     </div>
   )
 }
@@ -412,7 +412,7 @@ export function terrainKeys(on: EventTarget): () => void {
     if (target?.closest?.('input, textarea, [contenteditable="true"]')) return
     const st = useTerrain.getState()
     const take = (): void => { e.preventDefault(); e.stopImmediatePropagation() }
-    if (e.code === 'Escape') { if (mouseLocked() || escFreedMouse()) { take(); return } if (st.sheet) { take(); st.setSheet(false) } else if (crewChipAsking()) { /* the Crew chip's Esc dismisses it (TerrainCrew.tsx), never leaves TERRAIN */ } else if (topEscape() === null && !document.querySelector('[aria-modal="true"]')) { take(); leaveTerrain() } return }
+    if (e.code === 'Escape') { if (mouseLocked() || escFreedMouse()) { take(); return } if (st.sheet) { take(); if (!closeCrewLayer()) st.setSheet(false) } else if (crewChipAsking()) { /* the Crew chip's Esc dismisses it (TerrainCrew.tsx), never leaves TERRAIN */ } else if (topEscape() === null && !document.querySelector('[aria-modal="true"]')) { take(); leaveTerrain() } return }
     if (e.code === 'KeyT') { take(); if (!e.repeat) leaveTerrain(); return }
     if (e.code === 'KeyI') { take(); if (!e.repeat) st.setSheet(!st.sheet); return }
     if (st.sheet) return

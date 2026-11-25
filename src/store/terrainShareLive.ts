@@ -21,12 +21,15 @@ import type { NostrEvent } from '../lib/events'
 
 /** Whether some of an author's builder keys are valid (DECK-0009 §4.4), asked of the canonical relay (lib/terrain/builderStatus.ts). */
 async function keyStatus(author: string, keys: string[]): Promise<Map<string, KeyStatus>> {
+  // Let go every 10 minutes: a retirement written without its R tag (against §4.3) is found again in the pages.
+  if (Date.now() - namedSince > 600_000) { namedAt.clear(); namedSince = Date.now() }
   const out = await keyStatusOn((filter) => queryAnyChecked([CYBERSPACE_RELAY], filter), author, keys, verifyOnce, namedAt)
   while (namedAt.size > 2000) namedAt.delete(namedAt.keys().next().value as string)
   return out
 }
 /** When each builder key seen was last named, so a check after the first asks only for retirements. */
 const namedAt = new Map<string, number>()
+let namedSince = Date.now()
 
 /** The canonical relay's answer; it throws when the relay could not be heard, so nothing is taken as "none" on a failure. */
 async function query(filter: Parameters<typeof queryAnyChecked>[1]): Promise<NostrEvent[]> {

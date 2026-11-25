@@ -306,6 +306,7 @@ export function resetShare(): void {
   session = null
   if (reader) clearInterval(reader)
   reader = null
+  drawing = 0
   statuses.clear()
   grounds.clear()
   keys.clear()

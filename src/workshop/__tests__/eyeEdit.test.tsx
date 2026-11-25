@@ -138,6 +138,8 @@ describe('FIRST-PERSON EYE in the AVATAR sheet', () => {
     expect(eyeNote(s, chosen)).toBe('YOUR WORN AVATAR STILL USES 0, 2, 0. USE THIS SHARD TO UPDATE IT.')
     // Another shape altogether: nothing to compare.
     expect(eyeNote(chosen, { ...s, vertices: s.vertices.slice(0, 2) })).toBe('USE THIS SHARD PUBLISHES THE EYE AND FACING.')
+    // No shape yet: the eye is on the default icosahedron, and TRY WALK walks with it.
+    expect(eyeNote({ ...s, vertices: [], faces: [] }, null)).toBe('NO SHAPE YET: THIS IS THE EYE ON THE DEFAULT ICOSAHEDRON. TRY WALK TO WALK WITH IT.')
   })
 
   it('keeps the strip one height, the eye\'s status line inside it, and the guide card away', () => {
@@ -152,7 +154,7 @@ describe('FIRST-PERSON EYE in the AVATAR sheet', () => {
     expect(ws).toContain('{sheet === null && !eyeEdit && <Guide />}')
   })
 
-  it('greys the slots that cannot act rather than hiding them', async () => {
+  it('greys the slots that cannot act rather than hiding them (an empty shape still walks: as the icosahedron, with this eye)', async () => {
     const empty = newShard('Empty')
     useWorkshop.setState({ shards: [empty], currentId: empty.id })
     useWorkshop.getState().setEyeEdit(true)
@@ -160,7 +162,7 @@ describe('FIRST-PERSON EYE in the AVATAR sheet', () => {
     const strip = byClass(m.all(), 'ws__strip')[0]
     const slots = buttonsIn(strip)
     expect(slots.map(words)).toEqual(['AUTO', 'CENTER', 'ORIGIN', 'NUMBERS', 'TRY WALK', 'DONE'])
-    expect(slots.filter((b) => b.props.disabled).map(words)).toEqual(['CENTER', 'TRY WALK'])
+    expect(slots.filter((b) => b.props.disabled).map(words)).toEqual(['CENTER'])
     await m.unmount()
   })
 

@@ -224,11 +224,13 @@ export function ViewPanel(): JSX.Element {
       set: (v) => useCyberspace.getState().setShowSecrets(v),
     },
     // On by default. Off draws every shard face exactly its own color, as
-    // the world always had it (scene/headlamp.ts).
+    // the world always had it (scene/headlamp.ts), and with Block shading
+    // the lamp at your eye on TERRAIN's blocks is only a glimmer
+    // (terrain/terrainMaterial.ts EYE_GLIMMER).
     {
       id: 'view-headlamp',
       title: 'Headlamp',
-      hint: 'Light shards from your view so their shape and depth show.',
+      hint: 'Light shards and nearby blocks from your view.',
       on: headlamp,
       set: (v) => useLayers.getState().setLayer('headlamp', v),
     },

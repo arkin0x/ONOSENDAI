@@ -107,7 +107,7 @@ const ROWS: Array<[string, string, string]> = [
   ['view-walk-limits', 'Optimize chain', WALK_LIMITS_HINT],
   ['view-chain-trail', 'Chain trail', 'The red line of your movement history.'],
   ['view-region-keys', 'Region keys', 'Green cages on the regions you hold keys for.'],
-  ['view-headlamp', 'Headlamp', 'Light shards from your view so their shape and depth show.'],
+  ['view-headlamp', 'Headlamp', 'Light shards and nearby blocks from your view.'],
   ['view-spatial-audio', 'Spatial Audio', 'See spatial audio sources and fade perimeters.'],
   ['view-glow', 'Glow', 'Light and fog that objects cast.'],
   ['view-block-shading', 'Block shading', 'Darker caves and corners.'],

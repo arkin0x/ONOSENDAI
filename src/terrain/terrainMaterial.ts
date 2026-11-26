@@ -22,7 +22,7 @@
 import { ClampToEdgeWrapping, Color, CustomBlending, Data3DTexture, DataTexture, LinearFilter, LinearMipmapLinearFilter, NearestFilter, OneFactor, OneMinusSrcAlphaFactor, RGBAFormat, ShaderMaterial, SrcAlphaFactor, UnsignedByteType, ZeroFactor } from 'three'
 import { BG } from '../lib/palette'
 import { ATLAS, CELL, PER_ROW, buildAtlas } from '../lib/terrain/tiles'
-import { LIGHT_SIDE } from '../lib/terrain/light'
+import { BRIGHT_MAX, LIGHT_SIDE } from '../lib/terrain/light'
 import { SHADE } from '../lib/terrain/mesh'
 
 /** Where the fog starts and is whole, in blocks from the eye. The box is 96 blocks across. */
@@ -30,17 +30,20 @@ export const FOG_NEAR = 24
 export const FOG_FAR = 60
 
 /**
- * Block shading's look: a level's brightness is 0.8 to the power of the
- * levels it is short of full (as the block games light it), never darker
- * than LIGHT_FLOOR, and the lamp at your eye lights the blocks nearest you
- * even in the dark (EYE_LIGHT, fading out by EYE_REACH blocks), so a cave
- * stays walkable. Then the corners: where the open cells round a point
- * fall to none, the face darkens to AO_DARK of its light (a crease, half
- * open, to halfway).
+ * Block shading's look. The texture holds each cell's brightness
+ * (lib/terrain/light.ts BRIGHT_SKY, BRIGHT_BLOCK): open light steep, so a
+ * space sealed off from the open is dark, and block light gentle and a
+ * little brighter than full open light, so a glowing block lights a room.
+ * Never darker than LIGHT_FLOOR, a faint read of the walls. The lamp at your
+ * eye lights the nearest blocks, fading to nothing by its reach: a real lamp
+ * with Headlamp on in Settings (EYE_LAMP), only a glimmer with it off
+ * (EYE_GLIMMER). Then the corners: where the open cells round a point fall
+ * to none, the face darkens to AO_DARK of its light (a crease, half open, to
+ * halfway).
  */
-export const LIGHT_FLOOR = 0.07
-export const EYE_LIGHT = 0.42
-export const EYE_REACH = 9
+export const LIGHT_FLOOR = 0.02
+export const EYE_LAMP = { light: 0.25, reach: 7 } as const
+export const EYE_GLIMMER = { light: 0.06, reach: 3 } as const
 export const AO_DARK = 0.15
 
 const vertex = /* glsl */ `
@@ -73,6 +76,9 @@ uniform sampler2D atlas;
 uniform sampler3D light;
 /** Block shading in Settings: 1 reads the light, 0 draws fully lit as before. */
 uniform float shading;
+/** The lamp at your eye: its light, and the blocks it reaches (Headlamp in Settings). */
+uniform float eyeLight;
+uniform float eyeReach;
 uniform vec3 bg;
 uniform float fogNear;
 uniform float fogFar;
@@ -87,8 +93,6 @@ varying float vTile;
 varying float vShade;
 varying float vDist;
 varying vec3 vNormal;
-/** A light level's brightness, 0 to 1 for levels 0 to 15. */
-float bright(float x) { return pow(0.8, 15.0 * (1.0 - x)); }
 void main() {
   vec3 n = abs(normalize(cross(dFdx(vLocal), dFdy(vLocal))));
   float t = floor(vTile + 0.5);
@@ -109,10 +113,11 @@ void main() {
     // Half a block out from the face, in the open cell in front of it: the texture filters between the four cells round the point.
     vec3 p = (vLocal + 0.5 * vNormal + 1.0) / ${LIGHT_SIDE.toFixed(1)};
     vec4 l = texture(light, vec3(p.x, p.z, p.y));
-    // The open cells' light alone: the filtered colour over the filtered share of open cells (solid cells hold 0), so no light leaks through a wall.
+    // The open cells' brightness alone: the filtered colour over the filtered share of open cells (solid cells hold 0), so no light leaks through a wall; stored as a square root.
     vec3 lv = l.rgb / max(l.a, 1.0 / 255.0);
-    shine = vec3(bright(lv.r), bright(lv.g), bright(lv.b));
-    shine = max(shine, vec3(max(${LIGHT_FLOOR.toFixed(3)}, ${EYE_LIGHT.toFixed(3)} * clamp(1.0 - gib / ${EYE_REACH.toFixed(1)}, 0.0, 1.0))));
+    shine = lv * lv * ${BRIGHT_MAX.toFixed(2)};
+    float near = clamp(1.0 - gib / eyeReach, 0.0, 1.0);
+    shine = max(shine, vec3(max(${LIGHT_FLOOR.toFixed(3)}, eyeLight * near * near)));
     shine *= mix(${AO_DARK.toFixed(3)}, 1.0, l.a);
   }
   vec3 col = tex.rgb * vShade * lamp * shine * (1.0 - em) + tex.rgb * em * 1.15;
@@ -135,8 +140,8 @@ export interface TerrainMaterial {
   material: ShaderMaterial
   /** The see-through pass: blended over what is behind, keeping its bloom tag (alpha) as it was, so water never blooms. */
   clearMaterial: ShaderMaterial
-  /** The zoom (render units per gibson), GLOW and Block shading, each frame. */
-  setView: (unit: number, glow: boolean, shading?: boolean) => void
+  /** The zoom (render units per gibson), GLOW, Block shading and Headlamp, each frame. */
+  setView: (unit: number, glow: boolean, shading?: boolean, headlamp?: boolean) => void
   /** A chunk's two materials (solid and see-through) reading its own light; dispose them with the chunk. The texture is the caller's. */
   forChunk: (light: Data3DTexture) => { material: ShaderMaterial; clearMaterial: ShaderMaterial }
   dispose: () => void
@@ -184,6 +189,8 @@ export function makeTerrainMaterial(): TerrainMaterial {
       unit: { value: 1 },
       glow: { value: 1 },
       shading: { value: 1 },
+      eyeLight: { value: EYE_LAMP.light },
+      eyeReach: { value: EYE_LAMP.reach },
     },
   })
   material.uniforms.seeThrough = { value: 0 }
@@ -205,7 +212,12 @@ export function makeTerrainMaterial(): TerrainMaterial {
   return {
     material,
     clearMaterial,
-    setView: (unit, glow, shading = true) => { material.uniforms.unit.value = unit; material.uniforms.glow.value = glow ? 1 : 0; material.uniforms.shading.value = shading ? 1 : 0 },
+    setView: (unit, glow, shading = true, headlamp = true) => {
+      const u = material.uniforms
+      u.unit.value = unit; u.glow.value = glow ? 1 : 0; u.shading.value = shading ? 1 : 0
+      const eye = headlamp ? EYE_LAMP : EYE_GLIMMER
+      u.eyeLight.value = eye.light; u.eyeReach.value = eye.reach
+    },
     forChunk: (light) => {
       const solid = material.clone()
       solid.uniforms = { ...material.uniforms, light: { value: light } }

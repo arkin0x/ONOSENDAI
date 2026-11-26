@@ -206,7 +206,7 @@ function Chunks({ axes }: { axes: ViewAxes }): JSX.Element {
     if (!s || !show) return
     const layers = useLayers.getState()
     const shading = layers.blockShading
-    made.setView(2 ** -zoom, layers.glow, shading)
+    made.setView(2 ** -zoom, layers.glow, shading, layers.headlamp)
     if (shading !== shadingWas.current) {
       shadingWas.current = shading
       seen.current = -1
@@ -393,7 +393,29 @@ export function blockOcclusion(s: TerrainSession | null, axes: ViewAxes, ray: Ra
   return occPoint.distanceTo(ray.origin)
 }
 
-const CURSOR_EDGES = new EdgesGeometry(new BoxGeometry(1.02, 1.02, 1.02))
+/** The targeted block's outline: a hair bigger than the block (OUTLINE_PULL keeps it off the block's own faces). */
+const CURSOR_EDGES = new EdgesGeometry(new BoxGeometry(1.004, 1.004, 1.004))
+/** How far the outline is drawn toward the eye, in blocks, so its edges never fight the faces they lie on, while a block in front still hides them. */
+export const OUTLINE_PULL = 0.03
+
+/**
+ * The outline's material (owner, 2026-11-26: "can we make that outline
+ * occluded by the surrounding blocks? its not occluded and it ruins my
+ * depth perception"): depth tested, so the blocks round it (and its own
+ * block's far edges) hide what is behind them, each vertex drawn
+ * OUTLINE_PULL toward the eye as a polygon offset would (lines take none).
+ * Never blooms.
+ */
+export function makeOutlineMaterial(color: string): LineBasicMaterial {
+  const m = new LineBasicMaterial({ color, transparent: true, opacity: 0.6, depthTest: true, depthWrite: false, ...NO_BLOOM_BLEND })
+  m.onBeforeCompile = (shader) => {
+    shader.vertexShader = shader.vertexShader.replace('#include <project_vertex>', `#include <project_vertex>
+  mvPosition.xyz *= 1.0 - ${OUTLINE_PULL.toFixed(3)} / max(length(mvPosition.xyz), ${(2 * OUTLINE_PULL).toFixed(3)});
+  gl_Position = projectionMatrix * mvPosition;`)
+  }
+  m.customProgramCacheKey = () => 'terrain-outline-pull'
+  return m
+}
 /** The targeted block's outline: by whose block it is (AIM_COLORS), a dull red out of reach. */
 const OUTLINE = '#ffffff'
 const OUTLINE_FAR = '#c86464'
@@ -423,6 +445,8 @@ function Marks({ axes }: { axes: ViewAxes }): JSX.Element {
   /** When the outline last asked whether a shard stands in front of its block, and the answer. */
   const looked = useRef(-Infinity)
   const hidden = useRef(false)
+  const outlineMaterial = useMemo(() => makeOutlineMaterial(OUTLINE), [])
+  useEffect(() => () => outlineMaterial.dispose(), [outlineMaterial])
   useFrame((state) => {
     const s = terrainSession
     const f = frame.current, o = outline.current, sv = survey.current, rg = reachGroup.current
@@ -496,9 +520,7 @@ function Marks({ axes }: { axes: ViewAxes }): JSX.Element {
   return (
     <group ref={frame} name="terrain-marks" visible={false} matrixAutoUpdate={false}>
       {/* The targeted block: a thin plain outline that never blooms (owner, 2026-11-24: "get rid of the block preview glow"). */}
-      <lineSegments ref={outline} geometry={CURSOR_EDGES} renderOrder={5}>
-        <lineBasicMaterial color={OUTLINE} transparent opacity={0.6} depthTest={false} {...NO_BLOOM_BLEND} />
-      </lineSegments>
+      <lineSegments ref={outline} geometry={CURSOR_EDGES} renderOrder={5} material={outlineMaterial} />
       <group ref={reachGroup}>
         {Array.from({ length: 8 }, (_, i) => (
           <lineSegments key={i} geometry={UNIT_EDGES} scale={32} visible={false}>

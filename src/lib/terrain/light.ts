@@ -27,15 +27,20 @@
  * The answer is a 34 cube of texels, the chunk and one cell round it, for a
  * 3D texture the block shader samples half a block out from each face,
  * filtered between the four cells round each point (terrainMaterial.ts).
- * Red, green and blue are the light that reaches the cell, open and block
- * light together (the brighter of the two in each colour), and alpha says
- * whether the cell is open; a solid cell holds 0 in all four. Filtered,
- * alpha is the share of open cells round the point, so a face darkens
- * toward a crease or a corner where solid blocks close in: ambient
- * occlusion from the same texture, in the dark as in the light, with no
- * change to the greedy mesh. And the filtered colour over the filtered
- * alpha is the light of the open cells alone, so light never leaks through
- * a wall from the far side, and solid cells never smear dark into it.
+ * Red, green and blue are how bright the cell is, open and block light
+ * together (the brighter of the two in each colour, BRIGHT_SKY and
+ * BRIGHT_BLOCK), and alpha says whether the cell is open; a solid cell holds
+ * 0 in all four. Filtered, alpha is the share of open cells round the
+ * point, so a face darkens toward a crease or a corner where solid blocks
+ * close in: ambient occlusion from the same texture, in the dark as in the
+ * light, with no change to the greedy mesh. And the filtered colour over
+ * the filtered alpha is the brightness of the open cells alone, so light
+ * never leaks through a wall from the far side.
+ *
+ * Open light falls off steeply (each level 0.7 of the one above), so a
+ * space sealed off from the open is dark; block light falls off gently
+ * (0.84 a level) and starts brighter than full open light (1.35), so a
+ * glowing block lights a sealed room in its colour, like a lamp.
  */
 
 import { KINDS } from './blocks'
@@ -44,7 +49,7 @@ import { KINDS } from './blocks'
 export const MAX_LIGHT = 15
 /** Texels on each side of a chunk's light: the chunk and one cell round it. */
 export const LIGHT_SIDE = 34
-/** Bytes of a chunk's light: RGBA, the light's red, green and blue levels times 17 and 255 for an open cell, all 0 for a solid one. */
+/** Bytes of a chunk's light: RGBA, the brightness in red, green and blue (BRIGHT_MAX) and 255 for an open cell, all 0 for a solid one. */
 export const LIGHT_BYTES = LIGHT_SIDE * LIGHT_SIDE * LIGHT_SIDE * 4
 /** Blocks round the chunk that are read: light spreads 15 blocks, and the texels reach one more. */
 export const MARGIN = 16
@@ -58,17 +63,32 @@ export const WINDOW = 32 + 2 * MARGIN
  */
 export const EMIT: Readonly<Record<string, { level: number; color: string }>> = {
   Magmaflow: { level: 15, color: '#ff7a1a' },
-  Glowcore: { level: 13, color: '#00e5ff' },
-  Lumenwood: { level: 11, color: '#7dffcf' },
-  Gibsonite: { level: 12, color: '#ff00ff' },
-  Prismite: { level: 7, color: '#c58bff' },
-  'Relic shard': { level: 12, color: '#ff3b6b' },
-  Voidpearl: { level: 12, color: '#b48cff' },
-  Auroric: { level: 12, color: '#6dffd8' },
-  Chronite: { level: 12, color: '#ffe08a' },
-  'Singularity core': { level: 12, color: '#ffffff' },
-  'Genesis shard': { level: 12, color: '#ffc23a' },
+  Glowcore: { level: 15, color: '#00e5ff' },
+  Lumenwood: { level: 14, color: '#7dffcf' },
+  Gibsonite: { level: 14, color: '#ff00ff' },
+  Prismite: { level: 10, color: '#c58bff' },
+  'Relic shard': { level: 14, color: '#ff3b6b' },
+  Voidpearl: { level: 14, color: '#b48cff' },
+  Auroric: { level: 14, color: '#6dffd8' },
+  Chronite: { level: 14, color: '#ffe08a' },
+  'Singularity core': { level: 14, color: '#ffffff' },
+  'Genesis shard': { level: 14, color: '#ffc23a' },
 }
+
+/**
+ * How bright each level is, as the texture stores it: the square root of
+ * brightness over BRIGHT_MAX, times 255 (the shader squares it back), so
+ * the dark end keeps its steps. Open light: 0.7 to the power of the levels
+ * short of 15, level 0 black. Block light: 1.35 times 0.84 to the power of
+ * the levels short of 15, fading in over its last 4 levels so its edge never
+ * shows. Fixed integers, so every device stores the same bytes.
+ */
+export const BRIGHT_MAX = 1.4
+export const BRIGHT_SKY: readonly number[] = [0, 18, 21, 25, 30, 36, 43, 52, 62, 74, 88, 106, 126, 151, 180, 216]
+export const BRIGHT_BLOCK: readonly number[] = [0, 37, 57, 76, 96, 105, 114, 125, 136, 148, 162, 177, 193, 210, 230, 250]
+
+/** A stored byte as brightness (1 is full open light). */
+export const brightness = (byte: number): number => (byte / 255) ** 2 * BRIGHT_MAX
 
 /** For the light: which ids let light through, and what each id gives off. */
 export interface LightTables {
@@ -155,8 +175,8 @@ function spread(level: Uint8Array, pass: Uint8Array, buckets: Buckets): void {
 
 /**
  * The light of the chunk at the middle of `around`, as LIGHT_BYTES of RGBA
- * texels (texelIndex): the light's red, green and blue levels times 17
- * (0 to 255) and 255 where the cell is open; all 0 where it is solid. `skyTop`
+ * texels (texelIndex): the brightness in red, green and blue (BRIGHT_SKY,
+ * BRIGHT_BLOCK) and 255 where the cell is open; all 0 where it is solid. `skyTop`
  * (FOOT by FOOT) says which columns are open above the top row of chunks;
  * null when nothing is loaded up there. Integers only: the same bytes on
  * every device.
@@ -251,8 +271,8 @@ export function computeLight(around: Around, skyTop: Uint8Array | null, tables: 
     const w = (tx + MARGIN - 1) | ((tz + MARGIN - 1) << 6) | ((ty + MARGIN - 1) << 12)
     const o = 4 * (tx + L * (tz + L * ty))
     if (!pass[w]) { out[o] = 0; out[o + 1] = 0; out[o + 2] = 0; out[o + 3] = 0; continue }
-    const s0 = sky[w]
-    out[o] = Math.max(s0, b0[w]) * 17; out[o + 1] = Math.max(s0, b1[w]) * 17; out[o + 2] = Math.max(s0, b2[w]) * 17; out[o + 3] = 255
+    const s0 = BRIGHT_SKY[sky[w]]
+    out[o] = Math.max(s0, BRIGHT_BLOCK[b0[w]]); out[o + 1] = Math.max(s0, BRIGHT_BLOCK[b1[w]]); out[o + 2] = Math.max(s0, BRIGHT_BLOCK[b2[w]]); out[o + 3] = 255
   }
   return out
 }
@@ -280,17 +300,17 @@ export function shadedColumns(blocks: Uint8Array, pass: Uint8Array): Uint8Array 
   return out
 }
 
-/** The light's levels at a cell, -1 to 32 on each axis, as [red, green, blue], each 0 to 15. */
+/** The light's stored bytes at a cell, -1 to 32 on each axis, as [red, green, blue] (BRIGHT_SKY, BRIGHT_BLOCK). */
 export function lightAt(light: Uint8Array, x: number, y: number, z: number): [number, number, number] {
   const o = 4 * texelIndex(x, y, z)
-  return [light[o] / 17, light[o + 1] / 17, light[o + 2] / 17]
+  return [light[o], light[o + 1], light[o + 2]]
 }
 
 /**
- * The light the block shader reads at a corner of a face, as [red, green,
- * blue] levels 0 to 15: the open cells' light among the four cells round the
- * corner in the layer in front of the face, averaged over the open ones
- * (the filtered colour over the filtered alpha, terrainMaterial.ts).
+ * The brightness the block shader reads at a corner of a face, as [red,
+ * green, blue] (1 is full open light): the open cells among the four round
+ * the corner in the layer in front of the face, averaged over the open ones
+ * (the filtered colour over the filtered alpha, decoded, terrainMaterial.ts).
  * Arguments as cornerOpen.
  */
 export function cornerLight(light: Uint8Array, cell: readonly [number, number, number], face: number, corner: readonly [number, number]): [number, number, number] {
@@ -304,7 +324,7 @@ export function cornerLight(light: Uint8Array, cell: readonly [number, number, n
     const o = 4 * texelIndex(p[0], p[1], p[2])
     sum[0] += light[o]; sum[1] += light[o + 1]; sum[2] += light[o + 2]; open += light[o + 3]
   }
-  return open === 0 ? [0, 0, 0] : [(sum[0] * 15) / open, (sum[1] * 15) / open, (sum[2] * 15) / open]
+  return open === 0 ? [0, 0, 0] : [brightness((sum[0] * 255) / open), brightness((sum[1] * 255) / open), brightness((sum[2] * 255) / open)]
 }
 
 /**

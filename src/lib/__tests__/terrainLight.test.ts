@@ -7,7 +7,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { CELLS, idx } from '../terrain/coords'
-import { aroundIndex, computeLight, cornerLight, cornerOpen, EMIT, FOOT, lightAt, lightReaches, lightTables, LIGHT_BYTES, shadedColumns, type Around } from '../terrain/light'
+import { aroundIndex, brightness, BRIGHT_BLOCK, BRIGHT_SKY, computeLight, cornerLight, cornerOpen, EMIT, FOOT, lightAt, lightReaches, lightTables, LIGHT_BYTES, shadedColumns, type Around } from '../terrain/light'
 import { generate } from '../terrain/generate'
 import { handleBlocks } from '../terrain/blocksJob'
 import { TerrainWorld } from '../terrain/world'
@@ -17,6 +17,10 @@ import { tileTable } from '../terrain/blocks'
 const STONE = 1
 const GLOWCORE = 42
 const tables = lightTables()
+/** The stored byte of an open-light level, and of a block-light level. */
+const sky = (level: number): number => BRIGHT_SKY[Math.max(0, level)]
+const blk = (level: number): number => BRIGHT_BLOCK[Math.max(0, level)]
+const FULL = [sky(15), sky(15), sky(15)]
 
 /** Only the middle chunk surveyed; the rest open space. */
 const alone = (blocks: Uint8Array): Around => Array.from({ length: 27 }, (_, i) => (i === aroundIndex(0, 0, 0) ? blocks : null))
@@ -57,7 +61,7 @@ describe('ambient occlusion at a face corner', () => {
     const light = computeLight(alone(one), null, tables)
     expect(lightAt(light, 11, 11, 10)).toEqual([0, 0, 0])
     // The corner by the wall reads the open cells' full light, darkened only by the share of open cells (AO).
-    expect(cornerLight(light, [10, 10, 10], TOP, [1, 1])).toEqual([15, 15, 15])
+    expect(cornerLight(light, [10, 10, 10], TOP, [1, 1]).map((v) => +v.toFixed(3))).toEqual(Array(3).fill(+brightness(sky(15)).toFixed(3)))
   })
 
   it('lets no light through a one-block wall: a dark cave beside a lit shaft stays dark at the wall\'s foot', () => {
@@ -66,7 +70,7 @@ describe('ambient occlusion at a face corner', () => {
     for (let y = 5; y < 32; y++) b[idx(10, y, 16)] = 0
     for (let y = 6; y <= 8; y++) for (let z = 14; z <= 18; z++) for (let x = 12; x <= 20; x++) b[idx(x, y, z)] = 0
     const light = computeLight(alone(b), null, tables)
-    expect(lightAt(light, 10, 6, 16)[0]).toBe(15)
+    expect(lightAt(light, 10, 6, 16)[0]).toBe(sky(15))
     expect(lightAt(light, 12, 6, 16)[0]).toBe(0)
     // The cave floor's corner against the wall: the wall cell sits between the shaft and the cave, and must not bring the shaft's light in.
     expect(cornerLight(light, [12, 5, 16], TOP, [0, 0])).toEqual([0, 0, 0])
@@ -78,9 +82,9 @@ describe('open light', () => {
     const b = new Uint8Array(CELLS)
     for (let z = 0; z < 32; z++) for (let x = 0; x < 32; x++) b[idx(x, 0, z)] = STONE
     const light = computeLight(alone(b), null, tables)
-    expect(lightAt(light, 16, 1, 16)).toEqual([15, 15, 15])
-    expect(lightAt(light, 16, 31, 16)).toEqual([15, 15, 15])
-    expect(lightAt(light, -1, 5, 5)).toEqual([15, 15, 15])
+    expect(lightAt(light, 16, 1, 16)).toEqual(FULL)
+    expect(lightAt(light, 16, 31, 16)).toEqual(FULL)
+    expect(lightAt(light, -1, 5, 5)).toEqual(FULL)
   })
 
   it('falls by one a block down a sealed tunnel from its mouth, to dark', () => {
@@ -88,14 +92,14 @@ describe('open light', () => {
     const b = solidChunk()
     for (let x = 0; x <= 24; x++) b[idx(x, 16, 16)] = 0
     const light = computeLight(alone(b), null, tables)
-    for (let x = 0; x <= 24; x++) expect(lightAt(light, x, 16, 16)[0]).toBe(Math.max(0, 14 - x))
+    for (let x = 0; x <= 24; x++) expect(lightAt(light, x, 16, 16)[0]).toBe(sky(14 - x))
   })
 
   it('stays full down a shaft open to the top, however deep', () => {
     const b = solidChunk()
     for (let y = 2; y < 32; y++) b[idx(16, y, 16)] = 0
     const light = computeLight(alone(b), null, tables)
-    expect(lightAt(light, 16, 2, 16)[0]).toBe(15)
+    expect(lightAt(light, 16, 2, 16)[0]).toBe(sky(15))
   })
 
   it('is shaded by a block in a chunk higher up (skyTop), and spreads from the side instead', () => {
@@ -105,8 +109,8 @@ describe('open light', () => {
     skyTop[(32 + 16) + FOOT * (32 + 16)] = 0
     const light = computeLight(alone(b), skyTop, tables)
     // The shaft's top opens on open space above the chunk (lit, not shaded at its own column's sides): 14 at the top cell, one less a block down.
-    expect(lightAt(light, 16, 31, 16)[0]).toBe(14)
-    expect(lightAt(light, 16, 25, 16)[0]).toBe(8)
+    expect(lightAt(light, 16, 31, 16)[0]).toBe(sky(14))
+    expect(lightAt(light, 16, 25, 16)[0]).toBe(sky(8))
     expect(lightAt(light, 16, 2, 16)[0]).toBe(0)
   })
 })
@@ -124,18 +128,54 @@ describe('block light', () => {
     for (let k = 1; k <= 8; k++) {
       const [r, g, bl] = lightAt(light, 16 + k, 16, 16)
       expect(r).toBe(0)
-      expect(bl).toBe(e.level - k)
-      expect(g).toBe(Math.max(0, Math.round((e.level * 0xe5) / 0xff) - k))
+      expect(bl).toBe(blk(e.level - k))
+      expect(g).toBe(blk(Math.round((e.level * 0xe5) / 0xff) - k))
     }
     // Round a corner it is the path, not the straight line, that counts.
-    expect(lightAt(light, 16 + 3, 16 + 3, 16)[2]).toBe(e.level - 6)
+    expect(lightAt(light, 16 + 3, 16 + 3, 16)[2]).toBe(blk(e.level - 6))
   })
 
   it('takes the brighter of open light and block light in each colour', () => {
     const b = new Uint8Array(CELLS)
     b[idx(16, 16, 16)] = GLOWCORE
     const light = computeLight(alone(b), null, tables)
-    expect(lightAt(light, 17, 16, 16)).toEqual([15, 15, 15])
+    // Next to it Glowcore's blue (level 14) is a little brighter than full open light, as a lamp is; red stays the open light's.
+    expect(lightAt(light, 17, 16, 16)).toEqual([sky(15), Math.max(sky(15), blk(12)), blk(14)])
+    expect(blk(14)).toBeGreaterThan(sky(15))
+  })
+
+  it('lights a sealed room clearly in cyan from one Glowcore, where the room would otherwise be dark', () => {
+    // A 9 by 5 by 9 room sealed in solid rock, a Glowcore in one corner of the floor.
+    const room = (): Uint8Array => { const b = solidChunk(); for (let y = 10; y <= 14; y++) for (let z = 10; z <= 18; z++) for (let x = 10; x <= 18; x++) b[idx(x, y, z)] = 0; return b }
+    const dark = computeLight(alone(room()), null, tables)
+    const lit = room(); lit[idx(10, 10, 10)] = GLOWCORE
+    const light = computeLight(alone(lit), null, tables)
+    // The floor 9 to 11 blocks off: dark without it, clearly cyan with it.
+    const far = cornerLight(light, [16, 9, 16], 3, [0, 0])
+    expect(cornerLight(dark, [16, 9, 16], 3, [0, 0])).toEqual([0, 0, 0])
+    expect(far[0]).toBe(0)
+    expect(far[2]).toBeGreaterThan(0.1)
+    // The middle of the floor, 7 to 9 blocks off: lit a good part of full open light.
+    expect(cornerLight(light, [14, 9, 14], 3, [1, 1])[2]).toBeGreaterThan(0.25)
+  })
+})
+
+describe('a space sealed off from the open', () => {
+  it('stays dark: every texel of a sealed room with nothing glowing reads 0', () => {
+    const b = solidChunk()
+    for (let y = 10; y <= 14; y++) for (let z = 10; z <= 18; z++) for (let x = 10; x <= 18; x++) b[idx(x, y, z)] = 0
+    const light = computeLight(alone(b), null, tables)
+    let max = 0
+    for (let y = 10; y <= 14; y++) for (let z = 10; z <= 18; z++) for (let x = 10; x <= 18; x++) max = Math.max(max, ...lightAt(light, x, y, z))
+    expect(max).toBe(0)
+  })
+
+  it('darkens steeply with distance from an opening: 6 blocks in is under a fifth of full light, 10 in under a twentieth', () => {
+    const b = solidChunk()
+    for (let x = 0; x <= 24; x++) b[idx(x, 16, 16)] = 0
+    const light = computeLight(alone(b), null, tables)
+    expect(brightness(lightAt(light, 6, 16, 16)[0])).toBeLessThan(0.2)
+    expect(brightness(lightAt(light, 10, 16, 16)[0])).toBeLessThan(0.05)
   })
 })
 

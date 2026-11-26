@@ -98,7 +98,7 @@ export const SETTINGS_GROUPS: ReadonlyArray<{ id: string; title: string; rows: r
   { id: 'protocol', title: 'Protocol visualization', rows: ['view-chain-trail', 'view-terrain-dots', 'view-hx-boxes', 'view-region-keys', 'view-spatial-audio'] },
   { id: 'movement', title: 'Movement', rows: ['view-walk-gravity', 'view-walk-gravity-hard', 'view-walk-fluid', WALK_LIMITS_ROW] },
   { id: 'interface', title: 'Interface', rows: ['view-walk-look'] },
-  { id: 'effects', title: 'Effects', rows: ['view-headlamp', 'view-glow', 'view-walk-avatar', 'view-sfx'] },
+  { id: 'effects', title: 'Effects', rows: ['view-headlamp', 'view-glow', 'view-block-shading', 'view-walk-avatar', 'view-sfx'] },
   { id: 'sync', title: 'Sync', rows: ['view-hides-sync'] },
 ]
 
@@ -110,6 +110,7 @@ export function ViewPanel(): JSX.Element {
   const headlamp = useLayers((s) => s.headlamp)
   const spatialAudio = useLayers((s) => s.spatialAudio)
   const glow = useLayers((s) => s.glow)
+  const blockShading = useLayers((s) => s.blockShading)
   const walkLimits = useLayers((s) => s.walkLimits)
   const gravity = useWalk((s) => s.gravity)
   const hardGravity = useWalk((s) => s.hardGravity)
@@ -251,6 +252,17 @@ export function ViewPanel(): JSX.Element {
       hint: 'Light and fog that objects cast.',
       on: glow,
       set: (v) => useLayers.getState().setLayer('glow', v),
+    },
+    // TERRAIN's blocks darkened by the light that reaches them: caves, creases
+    // and corners darker, glowing blocks lighting what is round them
+    // (lib/terrain/light.ts; owner, 2026-11-26). On by default; off draws them
+    // fully lit as before and works out no light, for a slow phone.
+    {
+      id: 'view-block-shading',
+      title: 'Block shading',
+      hint: 'Darker caves and corners.',
+      on: blockShading,
+      set: (v) => useLayers.getState().setLayer('blockShading', v),
     },
     // The game's short sounds through lib/sfx.ts, the bounce's boing among
     // them (owner, 2026-11-24). On by default, kept per identity in

@@ -5,28 +5,62 @@
  * bottoms by x and z, sides by their own across and cyberspace y, so a skin's
  * fringe hangs from the top). Lit by which way a face looks and by a lamp at
  * your eye that fades with distance, glowing where the tile's alpha says,
- * and fogged into the scene's black. One material for every chunk.
+ * and fogged into the scene's black.
+ *
+ * Block shading (Settings, Effects; on by default): each chunk's light
+ * (lib/terrain/light.ts), a 34 cube 3D texture, read half a block out from
+ * every face and filtered between the four cells round the point, so caves
+ * darken with depth, creases and corners darken where blocks close in, and
+ * glowing blocks light what is round them in their colour. The greedy mesh
+ * is unchanged: the light is per pixel, from the texture. Off, every chunk
+ * draws as it did before, fully lit.
+ *
+ * One material for every chunk (`material`), and one for each chunk's light
+ * (`forChunk`): the same program, the same shared uniforms, its own texture.
  */
 
-import { Color, CustomBlending, DataTexture, LinearMipmapLinearFilter, NearestFilter, OneFactor, OneMinusSrcAlphaFactor, RGBAFormat, ShaderMaterial, SrcAlphaFactor, ZeroFactor } from 'three'
+import { ClampToEdgeWrapping, Color, CustomBlending, Data3DTexture, DataTexture, LinearFilter, LinearMipmapLinearFilter, NearestFilter, OneFactor, OneMinusSrcAlphaFactor, RGBAFormat, ShaderMaterial, SrcAlphaFactor, UnsignedByteType, ZeroFactor } from 'three'
 import { BG } from '../lib/palette'
 import { ATLAS, CELL, PER_ROW, buildAtlas } from '../lib/terrain/tiles'
+import { LIGHT_SIDE } from '../lib/terrain/light'
+import { SHADE } from '../lib/terrain/mesh'
 
 /** Where the fog starts and is whole, in blocks from the eye. The box is 96 blocks across. */
 export const FOG_NEAR = 24
 export const FOG_FAR = 60
 
+/**
+ * Block shading's look: a level's brightness is 0.8 to the power of the
+ * levels it is short of full (as the block games light it), never darker
+ * than LIGHT_FLOOR, and the lamp at your eye lights the blocks nearest you
+ * even in the dark (EYE_LIGHT, fading out by EYE_REACH blocks), so a cave
+ * stays walkable. Then the corners: where the open cells round a point
+ * fall to none, the face darkens to AO_DARK of its light (a crease, half
+ * open, to halfway).
+ */
+export const LIGHT_FLOOR = 0.07
+export const EYE_LIGHT = 0.42
+export const EYE_REACH = 9
+export const AO_DARK = 0.15
+
 const vertex = /* glsl */ `
 attribute float tile;
-attribute float shade;
+attribute float face;
 varying vec3 vLocal;
 varying float vTile;
 varying float vShade;
 varying float vDist;
+varying vec3 vNormal;
 void main() {
   vLocal = position;
   vTile = tile;
-  vShade = shade;
+  // Which way the face looks: -x, +x, -y, +y, -z, +z (lib/terrain/mesh.ts), its light by that, and its normal.
+  int f = int(face + 0.5);
+  float shades[6] = float[6](${SHADE.map((v) => v.toFixed(3)).join(', ')});
+  vShade = shades[f];
+  vec3 n = vec3(0.0);
+  n[f / 2] = (f - (f / 2) * 2) == 1 ? 1.0 : -1.0;
+  vNormal = n;
   vec4 mv = modelViewMatrix * vec4(position, 1.0);
   vDist = -mv.z;
   gl_Position = projectionMatrix * mv;
@@ -34,7 +68,12 @@ void main() {
 `
 
 const fragment = /* glsl */ `
+precision highp sampler3D;
 uniform sampler2D atlas;
+/** The chunk's light (lib/terrain/light.ts): the light's red, green and blue, and whether a cell is open, over the chunk and one cell round it. */
+uniform sampler3D light;
+/** Block shading in Settings: 1 reads the light, 0 draws fully lit as before. */
+uniform float shading;
 uniform vec3 bg;
 uniform float fogNear;
 uniform float fogFar;
@@ -48,6 +87,9 @@ varying vec3 vLocal;
 varying float vTile;
 varying float vShade;
 varying float vDist;
+varying vec3 vNormal;
+/** A light level's brightness, 0 to 1 for levels 0 to 15. */
+float bright(float x) { return pow(0.8, 15.0 * (1.0 - x)); }
 void main() {
   vec3 n = abs(normalize(cross(dFdx(vLocal), dFdy(vLocal))));
   float t = floor(vTile + 0.5);
@@ -63,7 +105,16 @@ void main() {
   float em = 1.0 - tex.a;
   float gib = vDist / unit;
   float lamp = 0.5 + 0.5 * clamp(1.0 - gib / 30.0, 0.0, 1.0);
-  vec3 col = tex.rgb * vShade * lamp * (1.0 - em) + tex.rgb * em * 1.15;
+  vec3 shine = vec3(1.0);
+  if (shading > 0.5) {
+    // Half a block out from the face, in the open cell in front of it: the texture filters between the four cells round the point.
+    vec3 p = (vLocal + 0.5 * vNormal + 1.0) / ${LIGHT_SIDE.toFixed(1)};
+    vec4 l = texture(light, vec3(p.x, p.z, p.y));
+    shine = vec3(bright(l.r), bright(l.g), bright(l.b));
+    shine = max(shine, vec3(max(${LIGHT_FLOOR.toFixed(3)}, ${EYE_LIGHT.toFixed(3)} * clamp(1.0 - gib / ${EYE_REACH.toFixed(1)}, 0.0, 1.0))));
+    shine *= mix(${AO_DARK.toFixed(3)}, 1.0, l.a);
+  }
+  vec3 col = tex.rgb * vShade * lamp * shine * (1.0 - em) + tex.rgb * em * 1.15;
   float fog = smoothstep(fogNear, fogFar, gib);
   col = mix(col, bg, fog);
   // Rock writes the world's untagged colour (alpha 0): the world bloom passes it by, as it passes a shard's face.
@@ -83,9 +134,35 @@ export interface TerrainMaterial {
   material: ShaderMaterial
   /** The see-through pass: blended over what is behind, keeping its bloom tag (alpha) as it was, so water never blooms. */
   clearMaterial: ShaderMaterial
-  /** The zoom (render units per gibson) and GLOW, each frame. */
-  setView: (unit: number, glow: boolean) => void
+  /** The zoom (render units per gibson), GLOW and Block shading, each frame. */
+  setView: (unit: number, glow: boolean, shading?: boolean) => void
+  /** A chunk's two materials (solid and see-through) reading its own light; dispose them with the chunk. The texture is the caller's. */
+  forChunk: (light: Data3DTexture) => { material: ShaderMaterial; clearMaterial: ShaderMaterial }
   dispose: () => void
+}
+
+/** A chunk's light as a 3D texture (lib/terrain/light.ts computeLight's bytes), filtered between cells. */
+export function lightTexture(bytes: Uint8Array<ArrayBuffer>): Data3DTexture {
+  const t = new Data3DTexture(bytes, LIGHT_SIDE, LIGHT_SIDE, LIGHT_SIDE)
+  t.format = RGBAFormat
+  t.type = UnsignedByteType
+  t.minFilter = LinearFilter
+  t.magFilter = LinearFilter
+  t.wrapS = t.wrapT = t.wrapR = ClampToEdgeWrapping
+  t.unpackAlignment = 1
+  t.generateMipmaps = false
+  t.needsUpdate = true
+  return t
+}
+
+/** Full light everywhere: what a chunk reads before its own light is worked out. */
+function fullLight(): Data3DTexture {
+  const t = new Data3DTexture(new Uint8Array([255, 255, 255, 255]), 1, 1, 1)
+  t.format = RGBAFormat
+  t.type = UnsignedByteType
+  t.unpackAlignment = 1
+  t.needsUpdate = true
+  return t
 }
 
 export function makeTerrainMaterial(): TerrainMaterial {
@@ -94,6 +171,7 @@ export function makeTerrainMaterial(): TerrainMaterial {
   atlas.minFilter = LinearMipmapLinearFilter
   atlas.generateMipmaps = true
   atlas.needsUpdate = true
+  const full = fullLight()
   const material = new ShaderMaterial({
     vertexShader: vertex,
     fragmentShader: fragment,
@@ -104,22 +182,34 @@ export function makeTerrainMaterial(): TerrainMaterial {
       fogFar: { value: FOG_FAR },
       unit: { value: 1 },
       glow: { value: 1 },
+      shading: { value: 1 },
     },
   })
   material.uniforms.seeThrough = { value: 0 }
-  const clearMaterial = material.clone()
-  clearMaterial.uniforms = { ...material.uniforms, seeThrough: { value: 1 } }
-  clearMaterial.transparent = true
-  clearMaterial.depthWrite = false
-  clearMaterial.blending = CustomBlending
-  clearMaterial.blendSrc = SrcAlphaFactor
-  clearMaterial.blendDst = OneMinusSrcAlphaFactor
-  clearMaterial.blendSrcAlpha = ZeroFactor
-  clearMaterial.blendDstAlpha = OneFactor
+  material.uniforms.light = { value: full }
+  // A clone shares the program; its uniforms are put back to the shared ones (a clone copies the atlas texture, which would upload again).
+  const see = (m: ShaderMaterial, light: Data3DTexture): ShaderMaterial => {
+    const c = m.clone()
+    c.uniforms = { ...material.uniforms, seeThrough: { value: 1 }, light: { value: light } }
+    c.transparent = true
+    c.depthWrite = false
+    c.blending = CustomBlending
+    c.blendSrc = SrcAlphaFactor
+    c.blendDst = OneMinusSrcAlphaFactor
+    c.blendSrcAlpha = ZeroFactor
+    c.blendDstAlpha = OneFactor
+    return c
+  }
+  const clearMaterial = see(material, full)
   return {
     material,
     clearMaterial,
-    setView: (unit, glow) => { material.uniforms.unit.value = unit; material.uniforms.glow.value = glow ? 1 : 0 },
-    dispose: () => { material.dispose(); clearMaterial.dispose(); atlas.dispose() },
+    setView: (unit, glow, shading = true) => { material.uniforms.unit.value = unit; material.uniforms.glow.value = glow ? 1 : 0; material.uniforms.shading.value = shading ? 1 : 0 },
+    forChunk: (light) => {
+      const solid = material.clone()
+      solid.uniforms = { ...material.uniforms, light: { value: light } }
+      return { material: solid, clearMaterial: see(material, light) }
+    },
+    dispose: () => { material.dispose(); clearMaterial.dispose(); atlas.dispose(); full.dispose() },
   }
 }

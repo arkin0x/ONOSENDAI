@@ -74,6 +74,23 @@ export async function meshChunkAsync(blocks: Uint8Array, borders: Borders): Prom
   return a.mesh
 }
 
+/**
+ * A chunk's light (light.ts computeLight): from copies of the chunk and its
+ * 26 neighbours' blocks (null where open space), and which columns are open
+ * above them.
+ */
+export async function lightChunkAsync(around: ReadonlyArray<Uint8Array | null>, skyTop: Uint8Array | null): Promise<Uint8Array<ArrayBuffer>> {
+  const copies = around.map((b) => (b ? b.slice() : null))
+  const top = skyTop ? skyTop.slice() : null
+  const transfer: Transferable[] = []
+  for (const b of copies) if (b) transfer.push(b.buffer)
+  if (top) transfer.push(top.buffer)
+  const a = await ask({ type: 'light', id: nextId++, around: copies, skyTop: top }, transfer)
+  if (a.type === 'error') throw new Error(a.message)
+  if (a.type !== 'light') throw new Error('unexpected answer')
+  return a.light
+}
+
 /** Let the worker go: TERRAIN closed. Jobs still out are answered with an error: nobody wants them now, and redoing them here would stall the page. */
 export function releaseBlocksWorker(): void {
   const w = worker

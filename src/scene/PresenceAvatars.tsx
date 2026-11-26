@@ -26,12 +26,13 @@ interface PersonProps {
   center: [number, number, number]
   position: Present['position']
   place: (p: Present['position']) => [number, number, number]
+  spawned: boolean
 }
 
-function Person({ pubkey, center, position, place }: PersonProps): JSX.Element {
+function Person({ pubkey, center, position, place, spawned }: PersonProps): JSX.Element {
   const profile = useProfile(pubkey)
   const text = (profile?.name ?? `${pubkey.slice(0, 8)}…`).toUpperCase()
-  return <OtherAvatar pubkey={pubkey} color={targetColor(pubkey)} center={center} position={position} place={place} label={text} labelOpacity={0.6} />
+  return <OtherAvatar pubkey={pubkey} color={targetColor(pubkey)} center={center} position={position} place={place} spawned={spawned} label={text} labelOpacity={0.6} />
 }
 
 export function PresenceAvatars({ axes }: { axes: ViewAxes }): JSX.Element | null {
@@ -70,7 +71,7 @@ export function PresenceAvatars({ axes }: { axes: ViewAxes }): JSX.Element | nul
   return (
     <>
       {near.map((p) => (
-        <Person key={p.pubkey} pubkey={p.pubkey} center={p.centre} position={p.position} place={place} />
+        <Person key={p.pubkey} pubkey={p.pubkey} center={p.centre} position={p.position} place={place} spawned={p.type === 'spawn'} />
       ))}
     </>
   )

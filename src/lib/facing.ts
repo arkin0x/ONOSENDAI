@@ -200,7 +200,7 @@ export function facingTurn(axes: ViewAxes, move: readonly [Position, Position] |
  * across the view's up when it was seen, for UPRIGHT, which keeps its
  * heading on a move straight up or down (DECK-0003 §1.18). Standing still
  * keeps both. Before any move both are null and the avatar stands at rest,
- * as it always has.
+ * as it always has, and a respawn forgets them: a chain of one faces nothing.
  */
 export interface SeenMoves {
   last: readonly [Position, Position] | null
@@ -224,6 +224,31 @@ export function seeMove(seen: SeenMoves, from: Position, to: Position, axes: Vie
  */
 export function seenTurn(seen: SeenMoves, axes: ViewAxes, face: FaceMode): Quaternion {
   if (face !== 'upright') return facingTurn(axes, seen.last, face)
-  const kept = seen.level && crossesUp(seen.level[0], seen.level[1], axes) ? seen.level : null
+  // The newest move first when it goes across your up now (a compass turn can
+  // make an old climb level), else the newest that did when it was seen.
+  const across = (m: readonly [Position, Position] | null): boolean => m !== null && crossesUp(m[0], m[1], axes)
+  const kept = across(seen.last) ? seen.last : across(seen.level) ? seen.level : null
   return facingTurn(axes, kept, face)
+}
+
+/**
+ * The moves seen of each person, by pubkey, kept across the avatar being
+ * drawn and not drawn (a zoom out and in, a hop that takes them out of reach
+ * and back, spectating), so someone standing still keeps their heading when
+ * they are drawn again. Presentation only; the most recently seen are kept.
+ */
+const seenBy = new Map<string, SeenMoves>()
+export const SEEN_KEPT = 500
+
+/** The moves seen of `pubkey`, or none. */
+export function seenOf(pubkey: string): SeenMoves {
+  return seenBy.get(pubkey) ?? NO_MOVES
+}
+
+/** Keep the moves seen of `pubkey`; NO_MOVES forgets them (a respawn). */
+export function keepSeen(pubkey: string, seen: SeenMoves): void {
+  seenBy.delete(pubkey)
+  if (seen === NO_MOVES) return
+  seenBy.set(pubkey, seen)
+  while (seenBy.size > SEEN_KEPT) seenBy.delete(seenBy.keys().next().value!)
 }

@@ -49,7 +49,7 @@ import { REST_FLOOR } from '../store/walkWalls'
 import { easeRest, useRestDrop } from './useRestDrop'
 import { drawnAvatars } from '../lib/targets'
 import { yawOnly } from '../lib/avatarEye'
-import { NO_MOVES, seeMove, seenTurn, type SeenMoves } from '../lib/facing'
+import { NO_MOVES, keepSeen, seeMove, seenOf, seenTurn, type SeenMoves } from '../lib/facing'
 import { TurnEase } from '../lib/turnEase'
 import { useAvatarFace } from '../store/avatarFace'
 import { usePersonCard } from '../store/usePersonCard'
@@ -73,6 +73,8 @@ interface Props {
    * seen here went (seeMove).
    */
   turn?: Quaternion
+  /** Their newest action is a spawn: the move to it is a respawn, which faces nothing, not a heading. */
+  spawned?: boolean
   label: string
   labelOpacity: number
   /** Whether a tap opens their card; false on Cyberspace TV, where nothing on screen takes a tap. */
@@ -92,17 +94,21 @@ interface Props {
   scaleExp?: number
 }
 
-export function OtherAvatar({ pubkey, color, center, position, place, turn, label, labelOpacity, tappable = true, size, keepShape = false, labelPx = 11, scaleExp }: Props): JSX.Element {
+export function OtherAvatar({ pubkey, color, center, position, place, turn, spawned = false, label, labelOpacity, tappable = true, size, keepShape = false, labelPx = 11, scaleExp }: Props): JSX.Element {
   const drawn = useRef<Group>(null)
   const placed = useRef<Group>(null)
   const lerp = useRef(new AvatarLerp())
   const out = useRef<Vec3>([0, 0, 0])
   const last = useRef<Position>(position)
   const zoomWas = useRef(scaleExp)
-  // The moves of theirs seen here, and the turn the shape is easing into.
-  const seen = useRef<SeenMoves>(NO_MOVES)
-  const ease = useRef(new TurnEase())
+  // The moves of theirs seen here (kept by pubkey across being drawn and
+  // not, lib/facing.ts seenOf), and the turn the shape is easing into.
+  const seen = useRef<SeenMoves>(seenOf(pubkey))
+  const ease = useRef<TurnEase | null>(null)
+  if (ease.current === null) ease.current = new TurnEase()
   const aimed = useRef<{ seen: SeenMoves; turn: Quaternion | undefined; face: string; view: Quaternion } | null>(null)
+  // Whether the shape still has to be written: while a turn is under way, and once more as it lands.
+  const unsettled = useRef(true)
   /** The drop a move left with, and how far its glide had to go (render cells): apply blends the drop along it. */
   const dropFrom = useRef<number | null>(null)
   const glideLen = useRef(0)
@@ -127,7 +133,8 @@ export function OtherAvatar({ pubkey, color, center, position, place, turn, labe
     const old = last.current
     last.current = position
     if (old.x === position.x && old.y === position.y && old.z === position.z) return
-    seen.current = seeMove(seen.current, old, position, useCyberspace.getState().axes())
+    seen.current = spawned ? NO_MOVES : seeMove(seenOf(pubkey), old, position, useCyberspace.getState().axes())
+    keepSeen(pubkey, seen.current)
     const was = place(old)
     lerp.current.move([was[0] - center[0], was[1] - center[1], was[2] - center[2]], performance.now())
     // The height it leaves with, blended onto the new one as the glide goes (apply).
@@ -186,23 +193,28 @@ export function OtherAvatar({ pubkey, color, center, position, place, turn, labe
   }, [pubkey])
   // The heading to face, worked out again only when what it comes from
   // changes: a move seen, a new turn from the caller, a new face, a view turn.
-  // A view turn, or the first heading, snaps; anything else turns in.
+  // The first heading, a view turn or a new facing mode (their shape loading)
+  // snaps; a new move or a new turn from the caller turns in.
   function turnShape(now: number): void {
     const d = drawn.current
     if (!d) return
     const s = useCyberspace.getState()
     const was = aimed.current
+    const e = ease.current!
     if (!was || was.seen !== seen.current || was.turn !== turn || was.face !== face || was.view !== s.view) {
       // UPRIGHT (DECK-0003 §1.18): a caller's turn laid level about your
       // view's up, render +Y, so they stand on their feet on your screen
       // however the compass has turned the world. Idempotent on a turn
       // already level; seenTurn lays its own.
       const target = turn ? (face === 'upright' ? yawOnly(turn, new Quaternion()) : turn) : seenTurn(seen.current, s.axes(), face)
-      if (!was || was.view !== s.view) ease.current.snap(target)
-      else ease.current.aim(target, now)
+      if (!was || was.view !== s.view || was.face !== face) e.snap(target)
+      else e.aim(target, now)
       aimed.current = { seen: seen.current, turn, face, view: s.view }
+      unsettled.current = true
     }
-    ease.current.at(now, d.quaternion)
+    if (!unsettled.current) return
+    e.at(now, d.quaternion)
+    unsettled.current = e.turning(now)
   }
   return (
     <group ref={placed}>

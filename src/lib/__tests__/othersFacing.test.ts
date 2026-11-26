@@ -6,7 +6,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import { Quaternion, Vector3 } from 'three'
-import { NO_MOVES, facingTurn, seeMove, seenTurn, type SeenMoves } from '../facing'
+import { NO_MOVES, SEEN_KEPT, facingTurn, keepSeen, seeMove, seenOf, seenTurn, type SeenMoves } from '../facing'
 import { TURN_MS, TurnEase } from '../turnEase'
 import { canonicalQuaternion, rotateView, viewAxes, type Position } from '../space'
 
@@ -103,6 +103,11 @@ describe('different gravity frames', () => {
     const after = seenTurn(walk([O, by([0, 0, 1]), by([4, 0, 1])], xUp), xUp, 'upright')
     expect(apply(after, NOSE)).toEqual(apply(before, NOSE))
   })
+  it('a climb seen in one view faces its way once a compass turn makes it level', () => {
+    // A step along X, then a climb along Y; turned so X is up, the climb is the level move.
+    const seen = walk([O, by([1, 0, 0]), by([1, 3, 0])])
+    expect(seenTurn(seen, xUp, 'upright').toArray()).toEqual(facingTurn(xUp, [by([1, 0, 0]), by([1, 3, 0])], 'upright').toArray())
+  })
   it('a heading kept in one view is let go when a compass turn makes it a climb', () => {
     const seen = walk([O, by([1, 0, 0])])
     expect(apply(seenTurn(seen, xUp, 'upright'), TOP)).toEqual([0, 1, 0])
@@ -150,5 +155,26 @@ describe('turning to a new heading (TurnEase)', () => {
     e.snap(yaw(40))
     e.aim(yaw(40), 0)
     expect(e.turning(1)).toBe(false)
+  })
+})
+
+describe('kept by pubkey across being drawn and not', () => {
+  it('a person drawn again keeps the moves seen before', () => {
+    const seen = walk([O, by([1, 0, 0])])
+    keepSeen('alice', seen)
+    expect(seenOf('alice')).toBe(seen)
+    expect(seenOf('nobody')).toBe(NO_MOVES)
+  })
+  it('a respawn forgets them: a chain of one faces nothing', () => {
+    keepSeen('bob', walk([O, by([0, 0, 1])]))
+    keepSeen('bob', NO_MOVES)
+    expect(seenOf('bob')).toBe(NO_MOVES)
+  })
+  it('keeps only the most recently seen', () => {
+    const seen = walk([O, by([1, 0, 0])])
+    keepSeen('first', seen)
+    for (let i = 0; i < SEEN_KEPT; i++) keepSeen(`p${i}`, seen)
+    expect(seenOf('first')).toBe(NO_MOVES)
+    expect(seenOf(`p${SEEN_KEPT - 1}`)).toBe(seen)
   })
 })

@@ -10,9 +10,11 @@
  * space, so its faces are drawn.
  *
  * Vertex layout, 5 floats: position (3), tile (1: the kind's tile row times
- * 3 plus the face, 0 top, 1 side, 2 bottom, tiles.ts), shade (1, the face's
- * light by which way it faces). The material repeats the tile once a block
- * across a merged rectangle, from the position, so it still reads as blocks.
+ * 3 plus the face, 0 top, 1 side, 2 bottom, tiles.ts), face (1: which way it
+ * faces, 0 to 5, -x, +x, -y, +y, -z, +z; the material shades by it, SHADE,
+ * and reads Block shading's light half a block out from it). The material
+ * repeats the tile once a block across a merged rectangle, from the
+ * position, so it still reads as blocks.
 
  * No skin is drawn over a chunk's edge (owner, 2026-11-24: blocks are part
  * of cyberspace like shards, and nothing changes on its own): what is drawn
@@ -39,8 +41,8 @@ export interface ChunkMesh {
 export const FLOATS_PER_VERTEX = 5
 
 
-/** Light by face: -x, +x, -y, +y, -z, +z. Up (+y here) brightest. */
-const SHADE = [0.72, 0.8, 0.5, 1, 0.64, 0.88]
+/** Light by face: -x, +x, -y, +y, -z, +z. Up (+y here) brightest. The material applies it (terrainMaterial.ts). */
+export const SHADE = [0.72, 0.8, 0.5, 1, 0.64, 0.88]
 
 /** Where a border slab keeps the cell at (u, v) of the face it touches: u, v the two axes other than the face's, in x, y, z order. */
 export const slabIndex = (u: number, v: number): number => u + 32 * v
@@ -97,7 +99,6 @@ function pass(blocks: Uint8Array, borders: Borders, tiles: Uint8Array, clear: Ui
     for (let side = 0; side < 2; side++) {
       const faceIndex = d * 2 + side
       const border = borders[faceIndex]
-      const shade = SHADE[faceIndex]
       // Which tile of the kind: the top on +y, the bottom on -y, a side elsewhere.
       const face = d === 1 ? (side ? 0 : 2) : 1
       q[0] = q[1] = q[2] = 0
@@ -143,7 +144,7 @@ function pass(blocks: Uint8Array, borders: Borders, tiles: Uint8Array, clear: Ui
               const o = nv * FLOATS_PER_VERTEX
               verts[o] = p[0]; verts[o + 1] = p[1]; verts[o + 2] = p[2]
               verts[o + 3] = c - 1
-              verts[o + 4] = shade
+              verts[o + 4] = faceIndex
               nv++
             }
             // Counter-clockwise seen from outside the block (right-handed axes): u x v is +d.

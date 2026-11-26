@@ -15222,6 +15222,10 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
 
 /* Under the open menu on a phone TERRAIN's controls go, as WALK's pad does (App crowded). */
 .terrainview.is-covered { visibility: hidden; }
+/* The pad put away (usePad; in TERRAIN only the open chat on a phone does it): PLACE, SURVEY, the hotbar and the carried
+   block go with it and LOOK, out of sight in their places so nothing moves, and come back with CONTROLS. */
+.terrainview.is-folded :is(.terrain-tools, .terrain-hotbar) { visibility: hidden; }
+body:has(.terrainview.is-folded) .terrain-held { visibility: hidden; }
 /* TERRAIN's bag on a phone covers everything as the menu does (App crowded): above every HUD (and under the modals, from
    300, so a card that comes up on its own still shows), with TERRAIN's own
    hotbar, PLACE, SURVEY, hint, chip and cross and the carried block out of sight under it until it closes. */

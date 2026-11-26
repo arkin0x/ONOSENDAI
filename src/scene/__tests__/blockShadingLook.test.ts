@@ -10,7 +10,7 @@ import { OneFactor, ZeroFactor } from 'three'
 import { makeOutlineMaterial, OUTLINE_PULL } from '../TerrainLayer'
 import { AO_DARK, EYE_GLIMMER, EYE_LAMP, LIGHT_FLOOR, makeTerrainMaterial } from '../../terrain/terrainMaterial'
 
-/** What a sealed, unlit wall gets at a distance (the shader's floor and eye lamp; the light texture reads 0 there). */
+/** What a sealed, unlit wall gets at a distance: the shader's floor and eye lamp, copied here from terrainMaterial.ts (the light texture reads 0 there), so this checks the constants, not the GLSL. */
 const sealed = (eye: { light: number; reach: number }, blocks: number): number => {
   const near = Math.max(0, 1 - blocks / eye.reach)
   return Math.max(LIGHT_FLOOR, eye.light * near * near)
@@ -52,13 +52,16 @@ describe('the targeted block\'s outline', () => {
     // The bloom's tag: alpha left as it was (NO_BLOOM_BLEND).
     expect(m.blendSrcAlpha).toBe(ZeroFactor)
     expect(m.blendDstAlpha).toBe(OneFactor)
+    m.dispose()
   })
 
   it('is drawn a hair toward the eye, so its edges do not fight its own block\'s faces', () => {
     const m = makeOutlineMaterial('#ffffff')
     const shader = { vertexShader: 'void main() {\n#include <project_vertex>\n}', fragmentShader: '', uniforms: {} }
     m.onBeforeCompile(shader as never, null as never)
-    expect(shader.vertexShader).toContain(`1.0 - ${OUTLINE_PULL.toFixed(3)} / max(length(mvPosition.xyz)`)
+    expect(shader.vertexShader).toContain(`${OUTLINE_PULL.toFixed(3)} * length(modelViewMatrix[0].xyz)`)
+    expect(shader.vertexShader).toContain('mvPosition.xyz *= 1.0 - pullBlocks / max(length(mvPosition.xyz), 2.0 * pullBlocks)')
+    m.dispose()
     expect(OUTLINE_PULL).toBeGreaterThan(0)
     expect(OUTLINE_PULL).toBeLessThan(0.1)
   })

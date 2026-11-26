@@ -7,7 +7,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { CELLS, idx } from '../terrain/coords'
-import { aroundIndex, brightness, BRIGHT_BLOCK, BRIGHT_SKY, computeLight, cornerLight, cornerOpen, EMIT, FOOT, lightAt, lightReaches, lightTables, LIGHT_BYTES, shadedColumns, type Around } from '../terrain/light'
+import { aroundIndex, brightness, BRIGHT_BLOCK, BRIGHT_MAX, BRIGHT_SKY, computeLight, cornerLight, cornerOpen, EMIT, FOOT, lightAt, lightReaches, lightTables, LIGHT_BYTES, shadedColumns, type Around } from '../terrain/light'
 import { generate } from '../terrain/generate'
 import { handleBlocks } from '../terrain/blocksJob'
 import { TerrainWorld } from '../terrain/world'
@@ -21,6 +21,8 @@ const tables = lightTables()
 const sky = (level: number): number => BRIGHT_SKY[Math.max(0, level)]
 const blk = (level: number): number => BRIGHT_BLOCK[Math.max(0, level)]
 const FULL = [sky(15), sky(15), sky(15)]
+/** The +y face. */
+const TOP = 3
 
 /** Only the middle chunk surveyed; the rest open space. */
 const alone = (blocks: Uint8Array): Around => Array.from({ length: 27 }, (_, i) => (i === aroundIndex(0, 0, 0) ? blocks : null))
@@ -29,7 +31,6 @@ const solidChunk = (): Uint8Array => new Uint8Array(CELLS).fill(STONE)
 describe('ambient occlusion at a face corner', () => {
   // A stone floor at y = 10 under open space: the +y face of the floor cell (10, 10, 10).
   const floor = (): Uint8Array => { const b = new Uint8Array(CELLS); for (let z = 0; z < 32; z++) for (let x = 0; x < 32; x++) b[idx(x, 10, z)] = STONE; return b }
-  const TOP = 3
   const corner = (b: Uint8Array): number => cornerOpen(computeLight(alone(b), null, tables), [10, 10, 10], TOP, [1, 1])
 
   it('reads fully open on an open floor', () => {
@@ -151,12 +152,27 @@ describe('block light', () => {
     const lit = room(); lit[idx(10, 10, 10)] = GLOWCORE
     const light = computeLight(alone(lit), null, tables)
     // The floor 9 to 11 blocks off: dark without it, clearly cyan with it.
-    const far = cornerLight(light, [16, 9, 16], 3, [0, 0])
-    expect(cornerLight(dark, [16, 9, 16], 3, [0, 0])).toEqual([0, 0, 0])
+    const far = cornerLight(light, [16, 9, 16], TOP, [0, 0])
+    expect(cornerLight(dark, [16, 9, 16], TOP, [0, 0])).toEqual([0, 0, 0])
     expect(far[0]).toBe(0)
     expect(far[2]).toBeGreaterThan(0.1)
     // The middle of the floor, 7 to 9 blocks off: lit a good part of full open light.
-    expect(cornerLight(light, [14, 9, 14], 3, [1, 1])[2]).toBeGreaterThan(0.25)
+    expect(cornerLight(light, [14, 9, 14], TOP, [1, 1])[2]).toBeGreaterThan(0.25)
+  })
+})
+
+describe('the brightness tables', () => {
+  it('are their formulas, rounded, and only ever rise', () => {
+    const enc = (b: number): number => Math.round(255 * Math.sqrt(Math.min(BRIGHT_MAX, b) / BRIGHT_MAX))
+    for (let l = 1; l <= 15; l++) {
+      expect(BRIGHT_SKY[l]).toBe(enc(0.7 ** (15 - l)))
+      expect(BRIGHT_BLOCK[l]).toBe(enc(1.35 * 0.84 ** (15 - l) * Math.min(1, l / 4)))
+      expect(BRIGHT_SKY[l]).toBeGreaterThan(BRIGHT_SKY[l - 1])
+      expect(BRIGHT_BLOCK[l]).toBeGreaterThan(BRIGHT_BLOCK[l - 1])
+    }
+    expect(BRIGHT_SKY[0]).toBe(0)
+    expect(BRIGHT_BLOCK[0]).toBe(0)
+    expect(brightness(BRIGHT_SKY[15])).toBeCloseTo(1, 1)
   })
 })
 

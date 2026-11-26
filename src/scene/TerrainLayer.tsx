@@ -403,14 +403,16 @@ export const OUTLINE_PULL = 0.03
  * occluded by the surrounding blocks? its not occluded and it ruins my
  * depth perception"): depth tested, so the blocks round it (and its own
  * block's far edges) hide what is behind them, each vertex drawn
- * OUTLINE_PULL toward the eye as a polygon offset would (lines take none).
+ * OUTLINE_PULL blocks toward the eye (in blocks at any zoom: the field's
+ * scale) as a polygon offset would (lines take none).
  * Never blooms.
  */
 export function makeOutlineMaterial(color: string): LineBasicMaterial {
   const m = new LineBasicMaterial({ color, transparent: true, opacity: 0.6, depthTest: true, depthWrite: false, ...NO_BLOOM_BLEND })
   m.onBeforeCompile = (shader) => {
     shader.vertexShader = shader.vertexShader.replace('#include <project_vertex>', `#include <project_vertex>
-  mvPosition.xyz *= 1.0 - ${OUTLINE_PULL.toFixed(3)} / max(length(mvPosition.xyz), ${(2 * OUTLINE_PULL).toFixed(3)});
+  float pullBlocks = ${OUTLINE_PULL.toFixed(3)} * length(modelViewMatrix[0].xyz);
+  mvPosition.xyz *= 1.0 - pullBlocks / max(length(mvPosition.xyz), 2.0 * pullBlocks);
   gl_Position = projectionMatrix * mvPosition;`)
   }
   m.customProgramCacheKey = () => 'terrain-outline-pull'

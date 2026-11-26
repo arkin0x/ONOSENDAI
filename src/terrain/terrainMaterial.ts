@@ -22,7 +22,7 @@
 import { ClampToEdgeWrapping, Color, CustomBlending, Data3DTexture, DataTexture, LinearFilter, LinearMipmapLinearFilter, NearestFilter, OneFactor, OneMinusSrcAlphaFactor, RGBAFormat, ShaderMaterial, SrcAlphaFactor, UnsignedByteType, ZeroFactor } from 'three'
 import { BG } from '../lib/palette'
 import { ATLAS, CELL, PER_ROW, buildAtlas } from '../lib/terrain/tiles'
-import { BRIGHT_MAX, LIGHT_SIDE } from '../lib/terrain/light'
+import { BRIGHT_MAX, BRIGHT_SKY, LIGHT_SIDE } from '../lib/terrain/light'
 import { SHADE } from '../lib/terrain/mesh'
 
 /** Where the fog starts and is whole, in blocks from the eye. The box is 96 blocks across. */
@@ -43,7 +43,7 @@ export const FOG_FAR = 60
  */
 export const LIGHT_FLOOR = 0.02
 export const EYE_LAMP = { light: 0.18, reach: 6 } as const
-export const EYE_GLIMMER = { light: 0.06, reach: 3 } as const
+export const EYE_GLIMMER = { light: 0.05, reach: 3 } as const
 export const AO_DARK = 0.15
 
 const vertex = /* glsl */ `
@@ -161,9 +161,9 @@ export function lightTexture(bytes: Uint8Array<ArrayBuffer>): Data3DTexture {
   return t
 }
 
-/** Full light everywhere: what a chunk reads before its own light is worked out. */
+/** Full open light everywhere (BRIGHT_SKY at level 15, which decodes to 1): what a chunk reads before its own light is worked out. */
 function fullLight(): Data3DTexture {
-  const t = new Data3DTexture(new Uint8Array([255, 255, 255, 255]), 1, 1, 1)
+  const t = new Data3DTexture(new Uint8Array([BRIGHT_SKY[15], BRIGHT_SKY[15], BRIGHT_SKY[15], 255]), 1, 1, 1)
   t.format = RGBAFormat
   t.type = UnsignedByteType
   t.unpackAlignment = 1

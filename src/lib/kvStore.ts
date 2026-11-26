@@ -102,6 +102,8 @@ export const MOVED_PREFIXES: readonly string[] = [
   'onosendai:tutorial:stage:',
   // The tutorial's progress per player (tutorial/gate.ts): the step, how it ended, the routes checked off.
   'onosendai:tutorial:progress:',
+  // The tutorial's TERRAIN route per player (tutorial/terrainRoute.ts): the build step done this route.
+  'onosendai:tutorial:terrain-built:',
   // The newcomer view's record per player (newcomer/useNewcomer.ts): stage, steps seen, Settings choice.
   'onosendai:newcomer:',
   // Settings > Effects > Sound effects per player (store/sfxSwitch.ts): on or off.

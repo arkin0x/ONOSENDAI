@@ -35,9 +35,10 @@ export type TutorialAction = 'see-chest' | 'open-chest' | 'take' | 'at-target' |
 /**
  * The TERRAIN route's waits (tutorial/terrainRoute.ts): TERRAIN open, the
  * ground surveyed (or found surveyed already), a block mined, a block picked
- * on the hotbar, one placed, then three more.
+ * on the hotbar, one placed, then three more; and the last card's, that the
+ * three were placed this route (so skipping through never ticks it off).
  */
-export type TerrainRouteAction = 'terrain-open' | 'terrain-survey' | 'terrain-mine' | 'terrain-pick' | 'terrain-place' | 'terrain-build'
+export type TerrainRouteAction = 'terrain-open' | 'terrain-survey' | 'terrain-mine' | 'terrain-pick' | 'terrain-place' | 'terrain-build' | 'terrain-built'
 
 /**
  * The Earth route's waits (tutorial/earthRoute.ts): a stop picked as the

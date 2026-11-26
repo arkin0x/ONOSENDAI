@@ -17,7 +17,8 @@
  *   4. pick     a hotbar slot picked that holds a block (or one placed);
  *   5. place    a block placed;
  *   6. build    three more placed, counted on the card;
- *   7. done     what it means, and the bag where Crew is.
+ *   7. done     what it means, and the bag where Crew is; done (the item
+ *               ticked off) only when step 6 really happened this route.
  *
  * TERRAIN is off in the teaching list, so every step of the route lets it
  * through (TutorialStep `allows`: store/modeOrder.ts terrainTaught). Steps 2
@@ -35,12 +36,13 @@ import { enterTerrainMode, leaveTerrain } from '../store/padMode'
 import { useCyberspace } from '../store/useCyberspace'
 import { TERRAIN_OPEN } from './script'
 import type { TutorialStep } from './types'
+import { kvGet, kvRemove, kvSet } from '../lib/kvStore'
 
 /** How many blocks the build step asks for. */
 export const BUILD_BLOCKS = 3
 
 /** The open step's line for a LIVE player, in place of its hint. */
-export const LIVE_NOTE = 'Tap TERRAIN (T) to open it. You are LIVE, so everyone will see your blocks: switch to LOCAL to keep them to yourself.'
+export const LIVE_NOTE = "Tap TERRAIN (T) to open it. You're LIVE: switch to LOCAL to keep your blocks to yourself."
 
 /** The mine step's line when the survey step found the ground surveyed already. */
 export const ALREADY_NOTE: Readonly<Record<'you' | 'someone', string>> = {
@@ -58,6 +60,22 @@ export const placedNote = (n: number): string => `${n} of ${BUILD_BLOCKS} placed
 let returnTo: string | null = null
 /** Who had surveyed the ground here when the survey step counted it, or null when the player surveyed it then. */
 let alreadyBy: 'you' | 'someone' | null = null
+
+/**
+ * Kept per npub while this route is run (lib/kvStore.ts, IndexedDB): the
+ * build step really happened (three placed), so the last card is done and
+ * the item ticked off, after a reload too. Cleared when the route is picked
+ * again or the tutorial restarts. Skipping through to the last card never
+ * ticks it (its wait is this).
+ */
+export const BUILT_PREFIX = 'onosendai:tutorial:terrain-built:'
+const builtKey = (): string | null => { const pk = useTutorial.getState().pubkey; return pk ? BUILT_PREFIX + pk : null }
+export function builtThisRoute(): boolean { const k = builtKey(); return k !== null && kvGet(k) === '1' }
+function setBuilt(on: boolean): void {
+  const k = builtKey()
+  if (!k) return
+  try { if (on) kvSet(k, '1'); else kvRemove(k) } catch { /* private mode: this visit only */ }
+}
 
 /** For tests: what the route remembers. */
 export function terrainRouteMemory(): { returnTo: string | null; alreadyBy: 'you' | 'someone' | null } {
@@ -101,6 +119,8 @@ registerTutorialWatcher('terrain-open', (onDone) => {
  * earlier visit) and nothing is being surveyed now.
  */
 registerTutorialWatcher('terrain-survey', (onDone) => {
+  // Whatever an earlier visit to this step found is stale: the player may stand somewhere else now.
+  alreadyBy = null
   const before = tally().surveyed
   let fired = false
   let stopped = false
@@ -147,7 +167,13 @@ function countWatcher(what: 'mined' | 'placed', n = 1) {
 
 registerTutorialWatcher('terrain-mine', countWatcher('mined'))
 registerTutorialWatcher('terrain-place', countWatcher('placed'))
-registerTutorialWatcher('terrain-build', countWatcher('placed', BUILD_BLOCKS))
+registerTutorialWatcher('terrain-build', (onDone) => countWatcher('placed', BUILD_BLOCKS)(() => { setBuilt(true); onDone() }))
+
+/** The last card: done (and so ticked off on FINISH) only once the build step really happened this route. */
+registerTutorialWatcher('terrain-built', (onDone) => {
+  if (builtThisRoute()) onDone()
+  return () => {}
+})
 
 /** A slot picked that holds a block, or a block placed (which only a block in hand can be). */
 registerTutorialWatcher('terrain-pick', (onDone) => {
@@ -198,18 +224,24 @@ registerTutorialEffect('terrain-open-step', () => {
 
 /**
  * Steps 2 to 6: with TERRAIN shut, back to the first step, to come back here
- * once it opens; and each step's own line or pulse.
+ * once it opens (or to the step after, when this one was already done in the
+ * moment before it moved on); and each step's own line or pulse. The last
+ * card only on coming up (a reload resumed on it): there T leaves TERRAIN, as
+ * it says, and stays on the card.
  */
 registerTutorialEffect('terrain-step', () => {
   const { index, id, still } = stepUp()
   const t = useTutorial.getState()
+  const step = t.script.steps[index]
   const back = (): void => {
     if (useTerrain.getState().active || !still() || !id) return
-    returnTo = id
+    const now = useTutorial.getState()
+    returnTo = now.done && step?.wait && step.then ? step.then : id
     queueMicrotask(() => { if (still()) useTutorial.getState().goTo(TERRAIN_OPEN.id) })
   }
   back()
-  const offs: Array<() => void> = [useTerrain.subscribe((s, prev) => { if (prev.active && !s.active) back() })]
+  const offs: Array<() => void> = []
+  if (id !== 'terrain-done') offs.push(useTerrain.subscribe((s, prev) => { if (prev.active && !s.active) back() }))
 
   if (id === 'terrain-mine' && alreadyBy) t.noteStep(index, ALREADY_NOTE[alreadyBy])
 
@@ -243,7 +275,7 @@ registerTutorialEffect('terrain-step', () => {
 
 /** A run starting or stopping forgets where the route was. */
 onTutorialLifecycle({
-  start: () => { returnTo = null; alreadyBy = null },
+  start: (_pubkey, restart) => { returnTo = null; alreadyBy = null; if (restart) setBuilt(false) },
   stop: () => { returnTo = null },
 })
 
@@ -257,6 +289,8 @@ useTutorial.subscribe((s, prev) => {
   const was = prev.active ? prev.script.steps[prev.index] : undefined
   const now = s.active ? s.script.steps[s.index] : undefined
   if (was === now) return
-  if (!inTerrainRoute(now)) returnTo = null
+  if (!inTerrainRoute(now)) { returnTo = null; alreadyBy = null }
+  // The route picked on the choices card: a fresh run of it, built or not.
+  if (s.active && was?.choices && now?.id === TERRAIN_OPEN.id) setBuilt(false)
   if (s.active && inTerrainRoute(was) && !inTerrainRoute(now) && useTerrain.getState().active) leaveTerrain()
 })

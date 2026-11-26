@@ -43,11 +43,11 @@ import { TEACHING_MODES, TERRAIN_TEACHING_MODES, effectiveModes, terrainTaught }
 import { useNewcomer } from '../../newcomer/useNewcomer'
 import { chunkKey, chunkOf } from '../../lib/terrain/coords'
 import { EMPTY } from '../../lib/terrain/blocks'
-import { hydrateKv, kvFlush, movesToKv, resetKvForTests } from '../../lib/kvStore'
+import { hydrateKv, kvFlush, kvSet, movesToKv, resetKvForTests } from '../../lib/kvStore'
 import { PROGRESS_PREFIX, readProgress, setTutorialSwitch } from '../gate'
 import { CHOICE, TUTORIAL_SCRIPT } from '../script'
 import { CHOICE_ICONS } from '../../hud/TutorialCoach'
-import { ALREADY_NOTE, BUILD_BLOCKS, LIVE_NOTE, NOTHING_CARRIED, OUT_OF_BLOCKS, placedNote, slotToPick, terrainRouteMemory } from '../terrainRoute'
+import { ALREADY_NOTE, BUILD_BLOCKS, BUILT_PREFIX, LIVE_NOTE, NOTHING_CARRIED, OUT_OF_BLOCKS, builtThisRoute, placedNote, slotToPick, terrainRouteMemory } from '../terrainRoute'
 import type { Position } from '../../lib/space'
 
 const HEAD = { x: 0x1234567890abcdef12350n, y: 0xfedcba0987654321fed90n, z: 0x0f0f0f0f0f0f0f0f0f0f0n }
@@ -202,7 +202,12 @@ describe('each step is done by the real thing', () => {
       if (i < BUILD_BLOCKS) { expect(tut().done).toBe(false); expect(tut().stepNote).toBe(`${placedNote(i)} ${OUT_OF_BLOCKS}`) }
     }
     expect(tut().done).toBe(true)
+    expect(builtThisRoute()).toBe(true)
     tut().next()
+    expect(stepId()).toBe('terrain-done')
+    // Built this route: the last card is done (and the item ticked) and stays for FINISH.
+    expect(tut().done).toBe(true)
+    await settle(ADVANCE_MS + 60)
     expect(stepId()).toBe('terrain-done')
 
     // 7. FINISH: back at the choices with the item checked off, and TERRAIN shut.
@@ -232,6 +237,9 @@ describe('each step is done by the real thing', () => {
     tut().next()
     expect(stepId()).toBe('terrain-mine')
     expect(tut().stepNote).toBe(ALREADY_NOTE.you)
+    // Off the route, the finding is forgotten: no stale line on a later visit.
+    tut().goTo('choice')
+    expect(terrainRouteMemory().alreadyBy).toBe(null)
   })
 
   it('a LIVE player hears that LOCAL keeps the blocks on the device', () => {
@@ -244,6 +252,33 @@ describe('each step is done by the real thing', () => {
 })
 
 describe('skip, close, resume', () => {
+  it('the first step cannot be skipped (every later one needs TERRAIN): BACK and the ✕ are the ways out', () => {
+    chooseTerrain()
+    expect(stepOf('terrain-open').gate).toBe(true)
+    tut().next()
+    expect(stepId()).toBe('terrain-open')
+    tut().back()
+    expect(stepId()).toBe('choice')
+  })
+
+  it('skipping through to the last card ticks nothing off', async () => {
+    chooseTerrain()
+    runTutorialEffect('open-terrain')
+    await settle(60)
+    for (let i = 0; i < 6; i++) tut().next()
+    expect(stepId()).toBe('terrain-done')
+    expect(tut().done).toBe(false)
+    tut().next()
+    expect(stepId()).toBe('choice')
+    expect(tut().doneChoices).not.toContain('terrain')
+  })
+
+  it('picking the route again starts it fresh: the last build no longer counts', () => {
+    kvSet(BUILT_PREFIX + A, '1')
+    chooseTerrain()
+    expect(builtThisRoute()).toBe(false)
+  })
+
   it('SKIP passes a step still waiting, and the ✕ ends the run', async () => {
     chooseTerrain()
     runTutorialEffect('open-terrain')
@@ -277,6 +312,38 @@ describe('skip, close, resume', () => {
     runTutorialEffect('open-terrain')
     await settle(60)
     expect(stepId()).toBe('terrain-mine')
+  })
+
+  it('a reload on the last card with TERRAIN shut opens TERRAIN first, then comes back to it', async () => {
+    kvSet(BUILT_PREFIX + A, '1')
+    tut().start({ at: 'terrain-done' })
+    await settle(0)
+    expect(stepId()).toBe('terrain-open')
+    runTutorialEffect('open-terrain')
+    await settle(60)
+    expect(stepId()).toBe('terrain-done')
+    expect(tut().done).toBe(true)
+    // T on the last card leaves TERRAIN, as the card says, and the card stays.
+    await T().exit()
+    await settle(0)
+    expect(stepId()).toBe('terrain-done')
+  })
+
+  it('TERRAIN shut in the moment after a step was done goes on to the next step, not back to it', async () => {
+    chooseTerrain()
+    runTutorialEffect('open-terrain')
+    await settle(60)
+    tut().next()
+    tut().next()
+    expect(stepId()).toBe('terrain-mine')
+    await terrainSession!.ready
+    await T().survey(headKey())
+    expect(mineAt(cellToMine())).toBe(true)
+    expect(tut().done).toBe(true)
+    await T().exit()
+    await settle(0)
+    expect(stepId()).toBe('terrain-open')
+    expect(terrainRouteMemory().returnTo).toBe('terrain-pick')
   })
 
   it('TERRAIN shut mid-route goes back to opening it, and on to the same step', async () => {
@@ -330,8 +397,9 @@ describe('a newcomer mid-tour', () => {
 describe('kept per npub, in IndexedDB', () => {
   afterAll(() => { resetKvForTests() })
 
-  it('the progress record is one the database keeps', () => {
+  it('the progress record is one the database keeps, and so is the route\'s', () => {
     expect(movesToKv(PROGRESS_PREFIX + A)).toBe(true)
+    expect(movesToKv(BUILT_PREFIX + A)).toBe(true)
   })
 
   it('the item ticked off reads back after a reload from IndexedDB, for that npub only', async () => {
@@ -339,7 +407,12 @@ describe('kept per npub, in IndexedDB', () => {
     ;(globalThis as { indexedDB: IDBFactory }).indexedDB = new IDBFactory()
     expect(await hydrateKv()).toBe('idb')
     useTutorial.setState({ doneChoices: [] })
+    // Built this route before a reload (kept in IndexedDB too), resumed on the last card.
+    kvSet(BUILT_PREFIX + A, '1')
     tut().start({ at: 'terrain-done' })
+    await settle(0)
+    runTutorialEffect('open-terrain')
+    await settle(60)
     expect(stepId()).toBe('terrain-done')
     tut().next()
     expect(tut().doneChoices).toEqual(['terrain'])

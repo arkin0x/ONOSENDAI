@@ -425,7 +425,8 @@ export const STRAYLIGHT_OPEN: TutorialStep = {
  * in the teaching list, so these steps let it through (`allows`); the steps
  * after the first need it open, and go back to the first while it is shut,
  * then on to where they were once it opens. They resume on themselves after a
- * reload (`resumes`). The route back at the choices shuts TERRAIN again.
+ * reload (`resumes`). The route back at the choices shuts TERRAIN again. The
+ * item is ticked off only once three blocks were placed on the build step.
  */
 export const TERRAIN_OPEN: TutorialStep = {
   id: 'terrain-open',
@@ -441,6 +442,8 @@ export const TERRAIN_OPEN: TutorialStep = {
   // A LIVE player hears that LOCAL keeps the blocks on the device; TERRAIN opening goes back to where the route was.
   effect: 'terrain-open-step',
   wait: 'terrain-open',
+  // No SKIP: every later step needs TERRAIN open. BACK returns to the choices, and the ✕ closes the tutorial.
+  gate: true,
   allows: ['terrain'],
   branch: true,
   then: 'terrain-survey',
@@ -531,6 +534,11 @@ export const TERRAIN_DONE: TutorialStep = {
   hint: 'FINISH leaves TERRAIN. After the tutorial, T opens it any time.',
   explain: 'The bag is the last slot of the hotbar (I). It holds every block you carry, and Crew is at the bottom of it.',
   scene: { target: 'keep', highlight: '.terrain-slot--bag' },
+  // Resumed with TERRAIN shut: open it first (tutorial/terrainRoute.ts).
+  effect: 'terrain-step',
+  // Done, and the item ticked off, only when the build step really happened this route; skipped to, the button reads SKIP and ticks nothing.
+  wait: 'terrain-built',
+  stay: true,
   allows: ['terrain'],
   resumes: true,
   branch: true,

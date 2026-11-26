@@ -15,18 +15,24 @@
  * scene still looks too. A tap does nothing.
  *
  * Only in WALK, and only while the View panel's "Look sphere in WALK" is on
- * (the default; store/useLayers.ts).
+ * (the default; store/useLayers.ts). It folds away with the pad: a tap on the
+ * scene that folds the controls folds LOOK too, and CONTROLS brings both back
+ * (owner, 2026-11-26: "look should disappear when the controls are
+ * collapsed"). It used to stay up alone, dropped into the gap JUMP and DOWN
+ * left (store/usePad.ts).
  */
 
 import { useCyberspace } from '../store/useCyberspace'
 import { useLayers } from '../store/useLayers'
+import { usePad } from '../store/usePad'
 import { walkLookSphereBy } from '../lib/walkLook'
 import { OrbitSphere } from './ui/OrbitSphere'
 
 export function WalkLookSphere(): JSX.Element | null {
   const walking = useCyberspace((s) => s.walking)
   const on = useLayers((s) => s.walkLookSphere)
-  if (!walking || !on) return null
+  const padOpen = usePad((s) => s.open)
+  if (!walking || !on || !padOpen) return null
   return (
     <OrbitSphere
       className="walklook"

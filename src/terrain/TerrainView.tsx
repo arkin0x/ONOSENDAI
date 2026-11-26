@@ -30,6 +30,7 @@ import { walkLookBy } from '../lib/walkLook'
 import { topEscape } from '../hooks/useEscape'
 import { leaveTerrain } from '../store/padMode'
 import { useTutorial } from '../store/useTutorial'
+import { usePad } from '../store/usePad'
 import { resetTerrainInput, slotKey, terrainInput } from './terrainInput'
 import { blockKind, blockName } from '../lib/terrain/blocks'
 import { tileUrl } from '../lib/terrain/tiles'
@@ -445,6 +446,9 @@ export function terrainKeys(on: EventTarget): () => void {
 function TerrainScreen({ covered }: { covered: boolean }): JSX.Element {
   // The bag open: on a phone it covers the screen as the menu does (styles.css .is-bag; App's crowded hides the rest).
   const bag = useTerrain((st) => st.sheet)
+  // The pad put away (on a phone the open chat takes its column, usePad): PLACE, SURVEY, the hotbar, the steps and the
+  // carried block go with it and LOOK (hud/WalkLookSphere.tsx), each keeping its place, and come back with CONTROLS.
+  const folded = usePad((st) => !st.open)
   const message = useTerrain((s) => s.message)
   const hint = useTerrain((s) => s.hint)
   const loading = useTerrain((s) => s.loading)
@@ -458,6 +462,8 @@ function TerrainScreen({ covered }: { covered: boolean }): JSX.Element {
   useEffect(() => { resetTerrainInput() }, [])
 
   const holding = useSurveyHold((s) => s.since !== null)
+  // A SURVEY hold the fold hides would never hear its finger lift: it ends there.
+  useEffect(() => { if (folded) cancelSurveyHold() }, [folded])
   // A tour run guides TERRAIN itself (tutorial/terrainRoute.ts): its own three steps wait until after, their slot kept.
   const touring = useTutorial((s) => s.active)
 
@@ -470,7 +476,7 @@ function TerrainScreen({ covered }: { covered: boolean }): JSX.Element {
   useEffect(() => terrainWheel(window), [])
 
   return (
-    <div className={`terrainview${covered ? ' is-covered' : ''}${bag ? ' is-bag' : ''}`} role="group" aria-label="TERRAIN: block tools" aria-hidden={covered || undefined}>
+    <div className={`terrainview${covered ? ' is-covered' : ''}${bag ? ' is-bag' : ''}${folded ? ' is-folded' : ''}`} role="group" aria-label="TERRAIN: block tools" aria-hidden={covered || undefined}>
       <span className="terrain-crosshair" aria-hidden />
 
       {/* What just happened (a refusal, a survey), under the cross, in a slot of its own: up to two lines, nothing moves. */}

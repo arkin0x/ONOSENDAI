@@ -13163,6 +13163,142 @@ html.tv-broadcast body { overflow: hidden; }
 .items-kinds .items-kinds__go { flex: 1 1 0; min-width: 0; display: inline-flex; align-items: center; justify-content: center; }
 .items-kinds__go > .shards__build-icon { flex: none; }
 .items-kinds__label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* The pictures under the ITEMS buttons (ItemsGrid.tsx; owner, 2026-11-26:
+   "show item images on a grid under these buttons, side by side ... left
+   side is loot"). One column per button, as wide as it, so a third kind is
+   a third column. Each grid is a well with the house chamfer and a small
+   bracket on its two square corners, holding two rows of three tiles that
+   are always there, filled or blank, so the panel never changes height.
+   Inspiration: augmented-ui's border and inlay layers (by hand, no
+   dependency), Jhey Tompkins' Cyberpunk 2077 buttons (one cut reused on
+   every layer, a tag notched into a corner), camaquer's Sci-Fi Inventory
+   UI pack (slot states, scanlined empty slots) and Elden Ring's small
+   corner mark on a new item that clears once it is seen. */
+.items-grids {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: 6px;
+  margin: -2px 0 8px;
+}
+.items-grid {
+  --well-cut: 8px;
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 5px;
+  padding: 6px;
+  background:
+    linear-gradient(180deg, rgba(0, 229, 255, 0.07), rgba(0, 229, 255, 0.015) 70%),
+    rgba(2, 6, 10, 0.55);
+  clip-path: polygon(var(--well-cut) 0, 100% 0, 100% calc(100% - var(--well-cut)), calc(100% - var(--well-cut)) 100%, 0 100%, 0 var(--well-cut));
+}
+/* The brackets: top right and bottom left, the corners the cut leaves square. */
+.items-grid::before, .items-grid::after {
+  content: "";
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  pointer-events: none;
+  border: 0 solid rgba(0, 229, 255, 0.6);
+}
+.items-grid::before { top: 0; right: 0; border-top-width: 1px; border-right-width: 1px; }
+.items-grid::after { bottom: 0; left: 0; border-bottom-width: 1px; border-left-width: 1px; }
+/* A tile: a third of the well, square, its picture in the house chamfer
+   (ItemThumb) stretched to fill it, with a smaller cut to suit the size. */
+.items-tile {
+  position: relative;
+  display: block;
+  min-width: 0;
+  aspect-ratio: 1;
+  margin: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: filter 0.15s ease;
+}
+.items-tile > .chamfer {
+  --chamfer-cut: 9px;
+  --chamfer-line: rgba(0, 229, 255, 0.4);
+  --chamfer-fill: radial-gradient(120% 90% at 28% 18%, rgba(0, 229, 255, 0.12), transparent 62%), #04090f;
+  width: 100%;
+  height: 100%;
+  transition: background-color 0.15s ease;
+}
+.items-tile .itemthumb__icon { width: 46%; height: 46%; }
+.items-tile:hover > .chamfer, .items-tile:focus-visible > .chamfer { --chamfer-line: var(--accent); }
+.items-tile:hover, .items-tile:focus-visible { filter: drop-shadow(0 0 4px rgba(0, 229, 255, 0.55)); }
+.items-tile:focus-visible { outline: 1px dashed var(--accent); outline-offset: 2px; }
+.items-tile:active > .chamfer { --chamfer-line: #fff; }
+/* NEW: the frame in the game colour, softly lit, and a tag notched into the
+   square top-right corner, cut on its own top left like the house. It sits
+   over the picture, so nothing moves when it comes or goes. */
+.items-tile.is-new > .chamfer { --chamfer-line: var(--game); }
+.items-tile.is-new { filter: drop-shadow(0 0 3px rgba(255, 122, 217, 0.5)); animation: items-new-glow 2.6s ease-in-out infinite; }
+.items-tile__new {
+  position: absolute;
+  top: 0;
+  right: 0;
+  padding: 1px 3px 1px 5px;
+  font-size: 7px;
+  font-weight: 700;
+  line-height: 9px;
+  letter-spacing: 0.12em;
+  color: #05070d;
+  background: var(--game);
+  clip-path: polygon(4px 0, 100% 0, 100% 100%, 0 100%, 0 4px);
+  pointer-events: none;
+}
+@keyframes items-new-glow {
+  0%, 100% { filter: drop-shadow(0 0 2px rgba(255, 122, 217, 0.35)); }
+  50% { filter: drop-shadow(0 0 5px rgba(255, 122, 217, 0.75)); }
+}
+/* "+N more": the same frame in white, the count large over the word. */
+.items-tile--more > .chamfer { --chamfer-line: rgba(255, 255, 255, 0.4); --chamfer-fill: linear-gradient(135deg, rgba(0, 229, 255, 0.14), rgba(0, 229, 255, 0.03)), #04090f; }
+.items-tile--more .chamfer__in { flex-direction: column; gap: 1px; }
+.items-tile__count, .items-tile__word { color: #fff; text-shadow: 0 1px 2px #000, 0 0 5px rgba(0, 0, 0, 0.85); }
+.items-tile__count { font-size: 13px; font-weight: 700; line-height: 1; }
+.items-tile__word { font-size: 7px; line-height: 1; letter-spacing: 0.18em; }
+/* A blank slot: a dim frame with faint scanlines, plainly empty, not broken. */
+.items-tile--blank { cursor: default; }
+.items-tile--blank > .chamfer {
+  --chamfer-line: rgba(0, 229, 255, 0.14);
+  --chamfer-fill: repeating-linear-gradient(0deg, rgba(0, 229, 255, 0.05) 0 1px, transparent 1px 3px), rgba(4, 9, 15, 0.6);
+}
+.items-tile__scan { display: block; width: 100%; height: 100%; }
+/* Nothing of this kind yet: one quiet line over the blank slots. */
+.items-grid.is-empty .items-tile--blank { opacity: 0.6; }
+.items-grid__empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  padding: 0 10px;
+  font-size: 10px;
+  line-height: 1.4;
+  text-align: center;
+  color: #fff;
+  text-shadow: 0 1px 2px #000, 0 0 4px #000, 0 0 8px rgba(0, 0, 0, 0.8);
+  pointer-events: none;
+}
+/* In a list: NEW on a row that was new when the list opened, and the row a tile was tapped for, lit a moment. */
+.held__chips > .items-new__chip { color: #05070d; background: var(--game); border-color: var(--game); font-weight: 700; }
+.held__row--focus { animation: held-row-focus 1.8s ease-out 1; }
+@keyframes held-row-focus {
+  from { background-color: rgba(0, 229, 255, 0.16); box-shadow: inset 2px 0 0 var(--accent); }
+  to { background-color: transparent; box-shadow: inset 2px 0 0 transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .items-tile, .items-tile > .chamfer { transition: none; }
+  .items-tile.is-new { animation: none; }
+  .held__row--focus { animation: none; background-color: rgba(0, 229, 255, 0.1); }
+}
 /* The modal's title wears the same icon before its words. */
 .items-modal__title { display: flex; align-items: center; gap: 6px; }
 .items-modal__icon { flex: none; }

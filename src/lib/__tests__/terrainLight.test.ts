@@ -218,22 +218,29 @@ describe('a localized relight on edit', () => {
     expect(lightReaches([0, -3, 0], 5, 0, 5)).toBe(true)
   })
 
-  it('marks exactly enough at the edge of the reach: a single-cell change 14 to 17 blocks off never changes an unmarked chunk', () => {
-    const w = world()
-    const target = (d: [number, number, number]): ReturnType<TerrainWorld['slotAt']> => w.slotAt(d[0], d[1], d[2])!
-    // Beside (+x) and above (+y) the middle chunk: its cells 15 to 18 are 17 to 14 blocks from the target's walls.
+  it('reaches exactly 15 blocks: Magmaflow 14 or 15 off changes a chunk\'s light and marks it; 16 or 17 off changes nothing', () => {
+    // A world of solid rock (no light anywhere), a tunnel through the middle chunk toward the target, Magmaflow (level 15) put in it.
+    const MAGMA = 12
     for (const [d, axis] of [[[1, 0, 0], 0], [[0, 1, 0], 1]] as const) {
+      const w = new TerrainWorld(origin, AXES as never)
+      for (let cz = -1; cz <= 1; cz++) for (let cy = -1; cy <= 1; cy++) for (let cx = -1; cx <= 1; cx++) {
+        const slot = w.slotAt(cx, cy, cz, true)!
+        w.setBlocks(slot.key, solidChunk(), solidChunk())
+      }
+      for (let k = 0; k < 32; k++) { const c = [16, 16, 16]; c[axis] = k; w.setCs(c[0], c[1], c[2], 0) }
+      const target = w.slotAt(d[0], d[1], d[2])!
       for (const v of [15, 16, 17, 18]) {
         const cell = [16, 16, 16]
         cell[axis] = v
-        // A shaft of open cells along the axis through the cell, so the change can carry light.
-        for (let k = 0; k < 32; k++) { const c = [...cell]; c[axis] = k; if (k !== v) w.setCs(c[0], c[1], c[2], 0) }
         for (const sl of w.slots) sl.lightDirty = false
-        const before = lightOf(w, target(d as [number, number, number]))
-        const was = w.blockCs(cell[0], cell[1], cell[2])
-        w.setCs(cell[0], cell[1], cell[2], was ? 0 : STONE)
-        const after = lightOf(w, target(d as [number, number, number]))
-        if (!Buffer.from(after).equals(Buffer.from(before))) expect(target(d as [number, number, number])!.lightDirty, `edit at ${v} on axis ${axis}`).toBe(true)
+        const before = lightOf(w, target)
+        w.setCs(cell[0], cell[1], cell[2], MAGMA)
+        const after = lightOf(w, target)
+        const changed = !Buffer.from(after).equals(Buffer.from(before))
+        // v is 32 - v blocks from the target's wall: 17 and 18 within 15, 15 and 16 not.
+        expect(changed, `Magmaflow at ${v} on axis ${axis}`).toBe(v >= 17)
+        expect(target.lightDirty, `marked at ${v} on axis ${axis}`).toBe(v >= 17)
+        w.setCs(cell[0], cell[1], cell[2], 0)
       }
     }
   })

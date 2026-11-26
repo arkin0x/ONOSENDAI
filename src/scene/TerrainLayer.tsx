@@ -20,8 +20,8 @@
  * the eye first, and handed to the chunk's material as a 3D texture
  * (terrain/terrainMaterial.ts). A chunk drawn for the first time waits for
  * its light, so it never shows lit and then darkens, and its light waits for
- * the neighbours still being generated round it (up to LIGHT_WAIT_MS), which
- * would otherwise count as open space for a moment; one whose light is being
+ * the neighbours still to come round it (up to LIGHT_WAIT_MS), which would
+ * otherwise count as open space for a moment; one whose light is being
  * worked out again keeps the light it had. Off, no light is worked out or
  * kept at all, and every chunk draws fully lit.
  *
@@ -46,7 +46,7 @@ import {
   Raycaster, Vector2, Vector3, type Data3DTexture, type LineSegments, type ShaderMaterial,
 } from 'three'
 import { cellInReach, slotInReach, surveyTarget, terrainSession, useTerrain, type TerrainSession } from '../store/useTerrain'
-import { AIM_COLORS, aimAt, sceneDraws } from '../store/terrainShare'
+import { AIM_COLORS, aimAt, sceneDraws, sharedKeys } from '../store/terrainShare'
 import { useCyberspace } from '../store/useCyberspace'
 import { useLayers } from '../store/useLayers'
 import { raycast, type RayHit } from '../lib/terrain/raycast'
@@ -66,19 +66,22 @@ import { committedAnchor, committedScale } from '../lib/renderFrame'
 const MESH_IN_FLIGHT = 2
 /** Chunks' light being worked out at once. */
 const LIGHT_IN_FLIGHT = 2
-/** The longest a chunk's light waits for neighbours still being generated. */
+/** The longest a chunk's light waits for neighbours still to come. */
 const LIGHT_WAIT_MS = 1500
 
 /** Which ids let light through, for a chunk's shaded columns (lib/terrain/light.ts). */
 let passTable: Uint8Array | null = null
 
-/** Whether any of a chunk's 26 neighbours is still being generated (store/useTerrain.ts building). */
-function neighbourBuilding(s: TerrainSession, slot: ChunkSlot): boolean {
-  if (s.building.size === 0) return false
+/**
+ * Whether any of a chunk's 26 neighbours is still to come: held but not yet
+ * generated, and being generated now or due to be (yours, or someone's
+ * shared, store/useTerrain.ts sync), so it would read as open space.
+ */
+function neighbourPending(s: TerrainSession, slot: ChunkSlot, shared: ReadonlySet<string>): boolean {
   for (let dz = -1; dz <= 1; dz++) for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
     if (!dx && !dy && !dz) continue
     const n = s.world.slotAt(slot.off[0] + dx, slot.off[1] + dy, slot.off[2] + dz)
-    if (n && !n.blocks && s.building.has(n.key)) return true
+    if (n && !n.blocks && n.inSpace && (s.building.has(n.key) || s.surveyedKeys.has(n.key) || shared.has(n.key))) return true
   }
   return false
 }
@@ -160,8 +163,10 @@ function Chunks({ axes }: { axes: ViewAxes }): JSX.Element {
     for (const m of meshes.current.get(slot) ?? []) m.visible = true
   }
   const shaded = useRef(new WeakMap<ChunkSlot, { version: number; cols: Uint8Array }>())
-  /** When a chunk's light was first held back for neighbours still being generated. */
+  /** When a chunk's light was first held back for neighbours still to come. */
   const heldSince = useRef(new WeakMap<ChunkSlot, number>())
+  /** When the soonest held-back light stops waiting: the scheduling looks again then, not every frame. */
+  const holdUntil = useRef<number | null>(null)
   const seen = useRef(-1)
   const shadingWas = useRef(false)
   const placedFor = useRef('')
@@ -225,10 +230,11 @@ function Chunks({ axes }: { axes: ViewAxes }): JSX.Element {
     }
     for (const slot of [...lights.current.keys()]) if (s.world.chunks.get(slot.off.join(',')) !== slot || !slot.blocks) dropLight(slot)
     if (replace) for (const [slot, ms] of meshes.current) for (const m of ms) { fieldMatrix(s, axes, zoom, m.matrix, [32 * slot.off[0], 32 * slot.off[1], 32 * slot.off[2]]); m.matrixWorldNeedsUpdate = true }
-    if (s.version === seen.current && inFlight.current.size === 0 && lightFlight.current.size === 0) return
+    const holdOver = holdUntil.current !== null && performance.now() >= holdUntil.current
+    if (s.version === seen.current && inFlight.current.size === 0 && lightFlight.current.size === 0 && !holdOver) return
     seen.current = s.version
-    // A light held back for a neighbour being generated looks again next frame, so its wait can run out.
-    if (shading && scheduleLight(s, state.camera.position)) seen.current = -1
+    // A light held back for neighbours still to come is looked at again when its wait runs out (or sooner, when the field changes).
+    holdUntil.current = shading ? scheduleLight(s, state.camera.position) : null
     for (const slot of s.world.slots) {
       if (inFlight.current.size >= MESH_IN_FLIGHT) break
       if (!slot.dirty || !slot.blocks || inFlight.current.has(slot)) continue
@@ -279,11 +285,12 @@ function Chunks({ axes }: { axes: ViewAxes }): JSX.Element {
     return cols
   }
 
-  /** Work out the light of the chunks that need it, nearest the eye first; each answer goes to its chunk's materials. True when one is held back. */
-  const scheduleLight = (s: TerrainSession, eye: Vector3): boolean => {
+  /** Work out the light of the chunks that need it, nearest the eye first; each answer goes to its chunk's materials. Returns when the soonest held-back one stops waiting, or null. */
+  const scheduleLight = (s: TerrainSession, eye: Vector3): number | null => {
     const want = s.world.lightDirtySlots().filter((sl) => !lightFlight.current.has(sl))
-    if (want.length === 0 || lightFlight.current.size >= LIGHT_IN_FLIGHT) return false
-    let held = false
+    if (want.length === 0 || lightFlight.current.size >= LIGHT_IN_FLIGHT) return null
+    let until: number | null = null
+    const shared = sharedKeys()
     // The eye in the field's frame, in chunks.
     const at = eye.clone().applyMatrix4(fieldMatrix(s, axes, drawnScale(), eyeField).invert()).divideScalar(32)
     const far = (sl: ChunkSlot): number => Math.max(Math.abs(sl.off[0] + 0.5 - at.x), Math.abs(sl.off[1] + 0.5 - at.y), Math.abs(sl.off[2] + 0.5 - at.z))
@@ -292,10 +299,10 @@ function Chunks({ axes }: { axes: ViewAxes }): JSX.Element {
     for (const slot of want) {
       if (lightFlight.current.size >= LIGHT_IN_FLIGHT) break
       // A neighbour still being generated would read as open space: wait for it, a while at most.
-      if (neighbourBuilding(s, slot)) {
+      if (neighbourPending(s, slot, shared)) {
         const since = heldSince.current.get(slot) ?? now
         heldSince.current.set(slot, since)
-        if (now - since < LIGHT_WAIT_MS) { held = true; continue }
+        if (now - since < LIGHT_WAIT_MS) { until = Math.min(until ?? Infinity, since + LIGHT_WAIT_MS); continue }
       }
       heldSince.current.delete(slot)
       slot.lightDirty = false
@@ -311,6 +318,7 @@ function Chunks({ axes }: { axes: ViewAxes }): JSX.Element {
         if (had) {
           ;(had.tex.image.data as Uint8Array).set(bytes)
           had.tex.needsUpdate = true
+          reveal(slot)
           return
         }
         const tex = lightTexture(bytes)
@@ -320,7 +328,7 @@ function Chunks({ axes }: { axes: ViewAxes }): JSX.Element {
         reveal(slot)
       }, () => { lightFlight.current.delete(slot); slot.lightDirty = true; seen.current = -1 })
     }
-    return held
+    return until
   }
   return <group ref={group} name="terrain-chunks" />
 }

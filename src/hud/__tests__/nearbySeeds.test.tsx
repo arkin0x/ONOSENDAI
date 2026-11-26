@@ -127,9 +127,9 @@ describe('a seed row', () => {
   it('names the planter, the seed\'s signer, not the bag\'s hider', () => {
     const html = row(bigItem, ME)
     expect(html).not.toMatch(/<span>you<\/span>/)
-    // With no profile, a name is its npub's start (profileLabel): the planter's, never the hider's.
-    expect(html).toContain(safeNpub(planter).slice(0, 12))
-    expect(html).not.toContain(safeNpub(HIDER).slice(0, 12))
+    // With no profile, a name is its short npub (lib/nameLabel): the planter's, never the hider's.
+    expect(html).toContain(safeNpub(planter).slice(0, 10))
+    expect(html).not.toContain(safeNpub(HIDER).slice(0, 10))
   })
 
   it('is one tap for the card: its words are the button', () => {

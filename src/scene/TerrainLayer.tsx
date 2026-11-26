@@ -14,6 +14,17 @@
  * drawn. Frustum culled by its own bounds. What is drawn is what is stored:
  * no skin over a chunk's edge.
  *
+ * The light. With Block shading on (Settings, Effects), each chunk's light
+ * (lib/terrain/light.ts) is worked out in the blocks worker from the chunk
+ * and its 26 neighbours, again only when a change could reach it, nearest
+ * the eye first, and handed to the chunk's material as a 3D texture
+ * (terrain/terrainMaterial.ts). A chunk drawn for the first time waits for
+ * its light, so it never shows lit and then darkens, and its light waits for
+ * the neighbours still to come round it (up to LIGHT_WAIT_MS), which would
+ * otherwise count as open space for a moment; one whose light is being
+ * worked out again keeps the light it had. Off, no light is worked out or
+ * kept at all, and every chunk draws fully lit.
+ *
  * The glow. Ordinary rock writes the world's untagged colour (alpha 0, as a
  * shard face does), which the world bloom skips (scene/worldBloom.tsx); the
  * glowing texels of Glowcore, Gibsonite, the Relic shard, Prismite and the
@@ -32,19 +43,20 @@ import { useEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import {
   BoxGeometry, BufferAttribute, BufferGeometry, EdgesGeometry, Group, InterleavedBuffer, InterleavedBufferAttribute, LineBasicMaterial, Matrix4, Mesh,
-  Raycaster, Vector2, Vector3, type LineSegments, type Object3D, type Ray,
+  Raycaster, Vector2, Vector3, type Data3DTexture, type LineSegments, type Object3D, type Ray, type ShaderMaterial,
 } from 'three'
 import { cellInReach, slotInReach, surveyTarget, terrainSession, useTerrain, type TerrainSession } from '../store/useTerrain'
-import { AIM_COLORS, aimAt, sceneDraws } from '../store/terrainShare'
+import { AIM_COLORS, aimAt, sceneDraws, sharedKeys } from '../store/terrainShare'
 import { useCyberspace } from '../store/useCyberspace'
 import { useLayers } from '../store/useLayers'
 import { raycast, type RayHit } from '../lib/terrain/raycast'
 import { CURSOR_REACH, TerrainWorld, type ChunkSlot } from '../lib/terrain/world'
 import { borderSlab, FLOATS_PER_VERTEX, type Borders } from '../lib/terrain/mesh'
-import { meshChunkAsync } from '../lib/terrain/blocksClient'
+import { lightChunkAsync, meshChunkAsync } from '../lib/terrain/blocksClient'
 import { solid as isSolid } from '../lib/terrain/blocks'
+import { lightTables, shadedColumns } from '../lib/terrain/light'
 import { terrainInput } from '../terrain/terrainInput'
-import { makeTerrainMaterial } from '../terrain/terrainMaterial'
+import { lightTexture, makeTerrainMaterial } from '../terrain/terrainMaterial'
 import { NO_BLOOM_BLEND } from './shardFaces'
 import { alignedOrigin } from '../store/useCyberspace'
 import type { Position, ViewAxes } from '../lib/space'
@@ -54,6 +66,33 @@ import { tapClaimNearer } from './TapTarget'
 
 /** Chunks meshing at once. */
 const MESH_IN_FLIGHT = 2
+/** Chunks' light being worked out at once. */
+const LIGHT_IN_FLIGHT = 2
+/** The longest a chunk's light waits for neighbours still to come. */
+const LIGHT_WAIT_MS = 1500
+
+/** Which ids let light through, for a chunk's shaded columns (lib/terrain/light.ts). */
+let passTable: Uint8Array | null = null
+
+/**
+ * Whether any of a chunk's 26 neighbours is still to come: held but not yet
+ * generated, and being generated now or due to be (yours, or someone's
+ * shared, store/useTerrain.ts sync), so it would read as open space.
+ */
+function neighbourPending(s: TerrainSession, slot: ChunkSlot, shared: ReadonlySet<string>): boolean {
+  for (let dz = -1; dz <= 1; dz++) for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+    if (!dx && !dy && !dz) continue
+    const n = s.world.slotAt(slot.off[0] + dx, slot.off[1] + dy, slot.off[2] + dz)
+    if (n && !n.blocks && n.inSpace && (s.building.has(n.key) || s.surveyedKeys.has(n.key) || shared.has(n.key))) return true
+  }
+  return false
+}
+
+/** The eye in the field's frame, for the light's order. */
+const eyeField = new Matrix4()
+
+/** A chunk's light on the GPU, and its two materials reading it. */
+interface ChunkLight { tex: Data3DTexture; material: ShaderMaterial; clearMaterial: ShaderMaterial }
 
 /** Past this zoom a chunk (32 gibsons) is a few pixels at most: not drawn. */
 export const MAX_SCALE = 6
@@ -117,15 +156,36 @@ function Chunks({ axes }: { axes: ViewAxes }): JSX.Element {
   const made = useMemo(() => makeTerrainMaterial(), [])
   const meshes = useRef(new Map<ChunkSlot, Mesh[]>())
   const inFlight = useRef(new Set<ChunkSlot>())
+  const lights = useRef(new Map<ChunkSlot, ChunkLight>())
+  const lightFlight = useRef(new Set<ChunkSlot>())
+  /** Chunks drawn for the first time while Block shading is on, hidden until their light comes. */
+  const waiting = useRef(new Set<ChunkSlot>())
+  const reveal = (slot: ChunkSlot): void => {
+    if (!waiting.current.delete(slot)) return
+    for (const m of meshes.current.get(slot) ?? []) m.visible = true
+  }
+  const shaded = useRef(new WeakMap<ChunkSlot, { version: number; cols: Uint8Array }>())
+  /** When a chunk's light was first held back for neighbours still to come. */
+  const heldSince = useRef(new WeakMap<ChunkSlot, number>())
+  /** When the soonest held-back light stops waiting: the scheduling looks again then, not every frame. */
+  const holdUntil = useRef<number | null>(null)
   const seen = useRef(-1)
+  const shadingWas = useRef(false)
   const placedFor = useRef('')
   const field = useRef<TerrainSession | null>(null)
+  const dropLight = (slot: ChunkSlot): void => {
+    const l = lights.current.get(slot)
+    if (!l) return
+    l.tex.dispose(); l.material.dispose(); l.clearMaterial.dispose()
+    lights.current.delete(slot)
+  }
   useEffect(() => () => {
     for (const ms of meshes.current.values()) for (const m of ms) m.geometry.dispose()
     meshes.current.clear()
+    for (const slot of [...lights.current.keys()]) dropLight(slot)
     made.dispose()
   }, [made])
-  useFrame(() => {
+  useFrame((state) => {
     const g = group.current
     if (!g) return
     const s = terrainSession
@@ -134,6 +194,8 @@ function Chunks({ axes }: { axes: ViewAxes }): JSX.Element {
     if (field.current !== s) {
       for (const ms of meshes.current.values()) for (const m of ms) { g.remove(m); m.geometry.dispose() }
       meshes.current.clear()
+      for (const slot of [...lights.current.keys()]) dropLight(slot)
+      waiting.current.clear()
       field.current = s
       seen.current = -1
       placedFor.current = ''
@@ -142,21 +204,39 @@ function Chunks({ axes }: { axes: ViewAxes }): JSX.Element {
     const show = !!s && s.plane === cs.plane && zoom <= MAX_SCALE
     g.visible = show
     if (!s || !show) return
-    made.setView(2 ** -zoom, useLayers.getState().glow)
+    const layers = useLayers.getState()
+    const shading = layers.blockShading
+    made.setView(2 ** -zoom, layers.glow, shading, layers.headlamp)
+    if (shading !== shadingWas.current) {
+      shadingWas.current = shading
+      seen.current = -1
+      if (!shading) {
+        // Off: nothing waits, and no light is kept; on again, every chunk's light is worked out afresh.
+        for (const slot of [...waiting.current]) reveal(slot)
+        for (const slot of [...lights.current.keys()]) dropLight(slot)
+        for (const ms of meshes.current.values()) for (const m of ms) m.material = m.renderOrder ? made.clearMaterial : made.material
+        for (const slot of s.world.slots) if (slot.blocks) slot.lightDirty = true
+      }
+    }
     // Placed again when the drawn anchor, the zoom or the axes change.
     const a = drawnAnchor()
     const place = `${a.x},${a.y},${a.z}|${zoom}|${axes.right.axis}${axes.right.dir}${axes.up.axis}${axes.up.dir}${axes.out.axis}${axes.out.dir}`
     const replace = place !== placedFor.current
     placedFor.current = place
-    // Chunks let go: their meshes go.
+    // Chunks let go: their meshes and light go.
     for (const [slot, ms] of meshes.current) {
       if (s.world.chunks.get(slot.off.join(',')) === slot && slot.blocks) continue
       for (const m of ms) { g.remove(m); m.geometry.dispose() }
       meshes.current.delete(slot)
+      waiting.current.delete(slot)
     }
+    for (const slot of [...lights.current.keys()]) if (s.world.chunks.get(slot.off.join(',')) !== slot || !slot.blocks) dropLight(slot)
     if (replace) for (const [slot, ms] of meshes.current) for (const m of ms) { fieldMatrix(s, axes, zoom, m.matrix, [32 * slot.off[0], 32 * slot.off[1], 32 * slot.off[2]]); m.matrixWorldNeedsUpdate = true }
-    if (s.version === seen.current && inFlight.current.size === 0) return
+    const holdOver = holdUntil.current !== null && performance.now() >= holdUntil.current
+    if (s.version === seen.current && inFlight.current.size === 0 && lightFlight.current.size === 0 && !holdOver) return
     seen.current = s.version
+    // A light held back for neighbours still to come is looked at again when its wait runs out (or sooner, when the field changes).
+    holdUntil.current = shading ? scheduleLight(s, state.camera.position) : null
     for (const slot of s.world.slots) {
       if (inFlight.current.size >= MESH_IN_FLIGHT) break
       if (!slot.dirty || !slot.blocks || inFlight.current.has(slot)) continue
@@ -170,14 +250,17 @@ function Chunks({ axes }: { axes: ViewAxes }): JSX.Element {
         if (old) { for (const o of old) { g.remove(o); o.geometry.dispose() } meshes.current.delete(slot) }
         if (m.quads === 0) return
         const made2: Mesh[] = []
+        const lit = lights.current.get(slot)
+        // First drawn with Block shading on: hidden until its light comes (a chunk meshed again while it waits keeps waiting).
+        if (useLayers.getState().blockShading && !lit && (!old || waiting.current.has(slot))) waiting.current.add(slot)
         // The solid blocks, then the see-through ones (drawn after, blended over what is behind).
-        for (const [vertices, indices, material, order] of [[m.vertices, m.indices, made.material, 0], [m.clearVertices, m.clearIndices, made.clearMaterial, 1]] as const) {
+        for (const [vertices, indices, material, order] of [[m.vertices, m.indices, lit?.material ?? made.material, 0], [m.clearVertices, m.clearIndices, lit?.clearMaterial ?? made.clearMaterial, 1]] as const) {
           if (indices.length === 0) continue
           const geo = new BufferGeometry()
           const ib = new InterleavedBuffer(vertices, FLOATS_PER_VERTEX)
           geo.setAttribute('position', new InterleavedBufferAttribute(ib, 3, 0))
           geo.setAttribute('tile', new InterleavedBufferAttribute(ib, 1, 3))
-          geo.setAttribute('shade', new InterleavedBufferAttribute(ib, 1, 4))
+          geo.setAttribute('face', new InterleavedBufferAttribute(ib, 1, 4))
           geo.setIndex(new BufferAttribute(indices, 1))
           geo.computeBoundingSphere()
           const mesh = new Mesh(geo, material)
@@ -185,6 +268,7 @@ function Chunks({ axes }: { axes: ViewAxes }): JSX.Element {
           mesh.renderOrder = order
           fieldMatrix(s, axes, drawnScale(), mesh.matrix, [32 * slot.off[0], 32 * slot.off[1], 32 * slot.off[2]])
           mesh.name = `terrain-chunk-${slot.key}${order ? '-clear' : ''}`
+          mesh.visible = !waiting.current.has(slot)
           g.add(mesh)
           made2.push(mesh)
         }
@@ -192,6 +276,62 @@ function Chunks({ axes }: { axes: ViewAxes }): JSX.Element {
       }, () => { inFlight.current.delete(slot); slot.dirty = true; seen.current = -1 })
     }
   })
+
+  /** A chunk's shaded columns, kept while its blocks stay the same. */
+  const shadedOf = (slot: ChunkSlot): Uint8Array => {
+    const had = shaded.current.get(slot)
+    if (had && had.version === slot.version) return had.cols
+    passTable ??= lightTables().pass
+    const cols = shadedColumns(slot.blocks!, passTable)
+    shaded.current.set(slot, { version: slot.version, cols })
+    return cols
+  }
+
+  /** Work out the light of the chunks that need it, nearest the eye first; each answer goes to its chunk's materials. Returns when the soonest held-back one stops waiting, or null. */
+  const scheduleLight = (s: TerrainSession, eye: Vector3): number | null => {
+    const want = s.world.lightDirtySlots().filter((sl) => !lightFlight.current.has(sl))
+    if (want.length === 0 || lightFlight.current.size >= LIGHT_IN_FLIGHT) return null
+    let until: number | null = null
+    const shared = sharedKeys()
+    // The eye in the field's frame, in chunks.
+    const at = eye.clone().applyMatrix4(fieldMatrix(s, axes, drawnScale(), eyeField).invert()).divideScalar(32)
+    const far = (sl: ChunkSlot): number => Math.max(Math.abs(sl.off[0] + 0.5 - at.x), Math.abs(sl.off[1] + 0.5 - at.y), Math.abs(sl.off[2] + 0.5 - at.z))
+    want.sort((a, b) => far(a) - far(b))
+    const now = performance.now()
+    for (const slot of want) {
+      if (lightFlight.current.size >= LIGHT_IN_FLIGHT) break
+      // A neighbour still being generated would read as open space: wait for it, a while at most.
+      if (neighbourPending(s, slot, shared)) {
+        const since = heldSince.current.get(slot) ?? now
+        heldSince.current.set(slot, since)
+        if (now - since < LIGHT_WAIT_MS) { until = Math.min(until ?? Infinity, since + LIGHT_WAIT_MS); continue }
+      }
+      heldSince.current.delete(slot)
+      slot.lightDirty = false
+      lightFlight.current.add(slot)
+      const { around, skyTop } = s.world.lightInputs(slot, shadedOf)
+      void lightChunkAsync(around, skyTop).then((bytes) => {
+        lightFlight.current.delete(slot)
+        seen.current = -1
+        if (terrainSession !== s || s.world.chunks.get(slot.off.join(',')) !== slot) return
+        if (!useLayers.getState().blockShading) return
+        // Worked out again: the same texture takes the new bytes, and the materials stay.
+        const had = lights.current.get(slot)
+        if (had) {
+          ;(had.tex.image.data as Uint8Array).set(bytes)
+          had.tex.needsUpdate = true
+          reveal(slot)
+          return
+        }
+        const tex = lightTexture(bytes)
+        const mats = made.forChunk(tex)
+        lights.current.set(slot, { tex, ...mats })
+        for (const m of meshes.current.get(slot) ?? []) m.material = m.renderOrder ? mats.clearMaterial : mats.material
+        reveal(slot)
+      }, () => { lightFlight.current.delete(slot); slot.lightDirty = true; seen.current = -1 })
+    }
+    return until
+  }
   return <group ref={group} name="terrain-chunks" />
 }
 
@@ -253,7 +393,31 @@ export function blockOcclusion(s: TerrainSession | null, axes: ViewAxes, ray: Ra
   return occPoint.distanceTo(ray.origin)
 }
 
-const CURSOR_EDGES = new EdgesGeometry(new BoxGeometry(1.02, 1.02, 1.02))
+/** The targeted block's outline: a hair bigger than the block (OUTLINE_PULL keeps it off the block's own faces). */
+const CURSOR_EDGES = new EdgesGeometry(new BoxGeometry(1.004, 1.004, 1.004))
+/** How far the outline is drawn toward the eye, in blocks, so its edges never fight the faces they lie on, while a block in front still hides them. */
+export const OUTLINE_PULL = 0.03
+
+/**
+ * The outline's material (owner, 2026-11-26: "can we make that outline
+ * occluded by the surrounding blocks? its not occluded and it ruins my
+ * depth perception"): depth tested, so the blocks round it (and its own
+ * block's far edges) hide what is behind them, each vertex drawn
+ * OUTLINE_PULL blocks toward the eye (in blocks at any zoom: the field's
+ * scale) as a polygon offset would (lines take none).
+ * Never blooms.
+ */
+export function makeOutlineMaterial(color: string): LineBasicMaterial {
+  const m = new LineBasicMaterial({ color, transparent: true, opacity: 0.6, depthTest: true, depthWrite: false, ...NO_BLOOM_BLEND })
+  m.onBeforeCompile = (shader) => {
+    shader.vertexShader = shader.vertexShader.replace('#include <project_vertex>', `#include <project_vertex>
+  float pullBlocks = ${OUTLINE_PULL.toFixed(3)} * length(modelViewMatrix[0].xyz);
+  mvPosition.xyz *= 1.0 - pullBlocks / max(length(mvPosition.xyz), 2.0 * pullBlocks);
+  gl_Position = projectionMatrix * mvPosition;`)
+  }
+  m.customProgramCacheKey = () => 'terrain-outline-pull'
+  return m
+}
 /** The targeted block's outline: by whose block it is (AIM_COLORS), a dull red out of reach. */
 const OUTLINE = '#ffffff'
 const OUTLINE_FAR = '#c86464'
@@ -283,6 +447,8 @@ function Marks({ axes }: { axes: ViewAxes }): JSX.Element {
   /** When the outline last asked whether a shard stands in front of its block, and the answer. */
   const looked = useRef(-Infinity)
   const hidden = useRef(false)
+  const outlineMaterial = useMemo(() => makeOutlineMaterial(OUTLINE), [])
+  useEffect(() => () => outlineMaterial.dispose(), [outlineMaterial])
   useFrame((state) => {
     const s = terrainSession
     const f = frame.current, o = outline.current, sv = survey.current, rg = reachGroup.current
@@ -356,9 +522,7 @@ function Marks({ axes }: { axes: ViewAxes }): JSX.Element {
   return (
     <group ref={frame} name="terrain-marks" visible={false} matrixAutoUpdate={false}>
       {/* The targeted block: a thin plain outline that never blooms (owner, 2026-11-24: "get rid of the block preview glow"). */}
-      <lineSegments ref={outline} geometry={CURSOR_EDGES} renderOrder={5}>
-        <lineBasicMaterial color={OUTLINE} transparent opacity={0.6} depthTest={false} {...NO_BLOOM_BLEND} />
-      </lineSegments>
+      <lineSegments ref={outline} geometry={CURSOR_EDGES} renderOrder={5} material={outlineMaterial} />
       <group ref={reachGroup}>
         {Array.from({ length: 8 }, (_, i) => (
           <lineSegments key={i} geometry={UNIT_EDGES} scale={32} visible={false}>

@@ -5,19 +5,37 @@
  * bounded and the same under the same seed, and far off it thins evenly.
  */
 import { describe, expect, it } from 'vitest'
-import { GLYPHS } from '../decode'
 import {
-  CHANGES_PER_RING_S, MAX_CHANGES_PER_FRAME, RING_GLYPHS, RING_GLYPHS_FAR, RING_HIDE_PX, RING_THIN_PX,
-  changeBudget, glyphChanges, mulberry32, ringAngle, ringRank, ringShown, ringStart,
+  BLOCK_SHARE, CHANGES_PER_RING_S, MAX_CHANGES_PER_FRAME, RING_BLOCKS, RING_CHARS, RING_GLYPHS, RING_GLYPHS_FAR, RING_HIDE_PX, RING_LATIN, RING_PLAIN, RING_THIN_PX,
+  changeBudget, glyphChanges, mulberry32, randomGlyph, ringAngle, ringRank, ringShown, ringStart,
 } from '../glyphRing'
 
 describe('the glyph ring', () => {
-  it('starts from its message: the same key, the same glyphs, every one a cipher glyph', () => {
+  it('draws capital letters, digits and katakana, with a block texture now and then (owner, 2026-11-27)', () => {
+    for (const ch of 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789') expect(RING_LATIN).toContain(ch)
+    expect(RING_CHARS).toContain('オ')
+    expect(RING_CHARS.endsWith(RING_BLOCKS)).toBe(true)
+    const rng = mulberry32(5)
+    const n = 20000
+    let blocks = 0, latin = 0
+    for (let i = 0; i < n; i++) {
+      const g = randomGlyph(rng)
+      if (g >= RING_PLAIN) blocks++
+      else if (RING_LATIN.includes(RING_CHARS[g])) latin++
+    }
+    // Now and then: about BLOCK_SHARE of them, never most.
+    expect(blocks / n).toBeGreaterThan(BLOCK_SHARE * 0.6)
+    expect(blocks / n).toBeLessThan(BLOCK_SHARE * 1.4)
+    // Letters and digits are a fair share of the rest.
+    expect(latin / n).toBeGreaterThan(0.3)
+  })
+
+  it('starts from its message: the same key, the same glyphs, every one a ring glyph', () => {
     const a = ringStart('msg-1')
     expect(a).toHaveLength(RING_GLYPHS)
     expect(ringStart('msg-1')).toEqual(a)
     expect(ringStart('msg-2')).not.toEqual(a)
-    for (const g of a) { expect(Number.isInteger(g)).toBe(true); expect(g).toBeGreaterThanOrEqual(0); expect(g).toBeLessThan(GLYPHS.length) }
+    for (const g of a) { expect(Number.isInteger(g)).toBe(true); expect(g).toBeGreaterThanOrEqual(0); expect(g).toBeLessThan(RING_CHARS.length) }
   })
 
   it('changes glyphs at random, the same under the same seed', () => {
@@ -37,7 +55,7 @@ describe('the glyph ring', () => {
         expect(c.slot).toBeGreaterThanOrEqual(0)
         expect(c.slot).toBeLessThan(slots)
         expect(c.glyph).toBeGreaterThanOrEqual(0)
-        expect(c.glyph).toBeLessThan(GLYPHS.length)
+        expect(c.glyph).toBeLessThan(RING_CHARS.length)
       }
     }
   })
@@ -48,7 +66,7 @@ describe('the glyph ring', () => {
     const glyphs = new Set<number>()
     for (let f = 0; f < 400; f++) for (const c of glyphChanges(rng, RING_GLYPHS, 3)) { slots.add(c.slot); glyphs.add(c.glyph) }
     expect(slots.size).toBe(RING_GLYPHS)
-    expect(glyphs.size).toBe(GLYPHS.length)
+    expect(glyphs.size).toBe(RING_CHARS.length)
   })
 
   it('changes at a steady rate per ring whatever the frame rate, capped per frame, a long pause not made up at once', () => {

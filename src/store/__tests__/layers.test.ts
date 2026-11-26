@@ -63,7 +63,7 @@ describe('scene layer switches', () => {
     useLayers.getState().toggleLayer('dots')
     expect(useLayers.getState().dots).toBe(false)
     expect(useLayers.getState().boxes).toBe(true)
-    expect(JSON.parse(storage.map.get(LAYERS_KEY) ?? 'null')).toEqual({ dots: false, boxes: true, walkAvatarHidden: false, walkLookSphere: true, headlamp: true, spatialAudio: false, glow: true, walkLimits: true })
+    expect(JSON.parse(storage.map.get(LAYERS_KEY) ?? 'null')).toEqual({ dots: false, boxes: true, walkAvatarHidden: false, walkLookSphere: true, headlamp: true, spatialAudio: false, glow: true, walkLimits: true, blockShading: true })
 
     // A reload: the store is created again from what was stored.
     const reloaded = await freshStore(storage)
@@ -73,7 +73,7 @@ describe('scene layer switches', () => {
     reloaded.useLayers.getState().toggleLayer('boxes')
     reloaded.useLayers.getState().toggleLayer('dots')
     expect(reloaded.useLayers.getState()).toMatchObject({ dots: true, boxes: false })
-    expect(JSON.parse(storage.map.get(LAYERS_KEY) ?? 'null')).toEqual({ dots: true, boxes: false, walkAvatarHidden: false, walkLookSphere: true, headlamp: true, spatialAudio: false, glow: true, walkLimits: true })
+    expect(JSON.parse(storage.map.get(LAYERS_KEY) ?? 'null')).toEqual({ dots: true, boxes: false, walkAvatarHidden: false, walkLookSphere: true, headlamp: true, spatialAudio: false, glow: true, walkLimits: true, blockShading: true })
   })
 
   it('keep WALK\'s avatar shown unless it is explicitly hidden', async () => {
@@ -106,7 +106,7 @@ describe('scene layer switches', () => {
     expect(loadLayers().headlamp).toBe(true)
     expect(useLayers.getState().headlamp).toBe(true)
     useLayers.getState().setLayer('headlamp', false)
-    expect(JSON.parse(storage.map.get(LAYERS_KEY) ?? 'null')).toEqual({ dots: true, boxes: true, walkAvatarHidden: false, walkLookSphere: true, headlamp: false, spatialAudio: false, glow: true, walkLimits: true })
+    expect(JSON.parse(storage.map.get(LAYERS_KEY) ?? 'null')).toEqual({ dots: true, boxes: true, walkAvatarHidden: false, walkLookSphere: true, headlamp: false, spatialAudio: false, glow: true, walkLimits: true, blockShading: true })
     const reloaded = await freshStore(storage)
     expect(reloaded.useLayers.getState()).toMatchObject({ dots: true, boxes: true, walkAvatarHidden: false, headlamp: false })
     // A value stored before the switch existed, or an odd one, reads on.
@@ -137,7 +137,7 @@ describe('scene layer switches', () => {
     expect(loadLayers().spatialAudio).toBe(false)
     expect(useLayers.getState().spatialAudio).toBe(false)
     useLayers.getState().setLayer('spatialAudio', true)
-    expect(JSON.parse(storage.map.get(LAYERS_KEY) ?? 'null')).toEqual({ dots: true, boxes: true, walkAvatarHidden: false, walkLookSphere: true, headlamp: true, spatialAudio: true, glow: true, walkLimits: true })
+    expect(JSON.parse(storage.map.get(LAYERS_KEY) ?? 'null')).toEqual({ dots: true, boxes: true, walkAvatarHidden: false, walkLookSphere: true, headlamp: true, spatialAudio: true, glow: true, walkLimits: true, blockShading: true })
     // An explicit on survives a reload, and a toggle of another switch keeps it.
     const reloaded = await freshStore(storage)
     expect(reloaded.useLayers.getState()).toMatchObject({ dots: true, headlamp: true, spatialAudio: true, glow: true })
@@ -173,7 +173,7 @@ describe('scene layer switches', () => {
     expect(useLayers.getState().dots).toBe(true)
     expect(useLayers.getState().boxes).toBe(true)
     expect(() => loadLayers()).not.toThrow()
-    expect(() => saveLayers({ dots: false, boxes: false, walkAvatarHidden: false, walkLookSphere: true, headlamp: true, spatialAudio: false, glow: true, walkLimits: true })).not.toThrow()
+    expect(() => saveLayers({ dots: false, boxes: false, walkAvatarHidden: false, walkLookSphere: true, headlamp: true, spatialAudio: false, glow: true, walkLimits: true, blockShading: true })).not.toThrow()
     expect(() => useLayers.getState().toggleLayer('boxes')).not.toThrow()
     // Kept in memory for the visit.
     expect(useLayers.getState().boxes).toBe(false)

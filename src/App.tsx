@@ -516,8 +516,8 @@ export default function App(): JSX.Element {
             no route to show. */}
         {shows('route') && showPad && !offerUp && !deploying && <RouteOverlay />}
         {/* WALK's look ball, in the bottom right over JUMP and DOWN
-            (WalkLookSphere.tsx). Not tied to the pad, which a tap on the scene
-            folds; not while the menu covers the scene or while placing. */}
+            (WalkLookSphere.tsx). It folds away with the pad, which a tap on
+            the scene folds; not while the menu covers the scene or while placing. */}
         {!crowded && !offerUp && !deploying && <WalkLookSphere />}
         {/* VIEW's fly, forward and back, in the dock above the menu button
             (ViewFlyButtons.tsx). */}

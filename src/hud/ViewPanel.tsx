@@ -98,7 +98,7 @@ export const SETTINGS_GROUPS: ReadonlyArray<{ id: string; title: string; rows: r
   { id: 'protocol', title: 'Protocol visualization', rows: ['view-chain-trail', 'view-terrain-dots', 'view-hx-boxes', 'view-region-keys', 'view-spatial-audio'] },
   { id: 'movement', title: 'Movement', rows: ['view-walk-gravity', 'view-walk-gravity-hard', 'view-walk-fluid', WALK_LIMITS_ROW] },
   { id: 'interface', title: 'Interface', rows: ['view-walk-look'] },
-  { id: 'effects', title: 'Effects', rows: ['view-headlamp', 'view-glow', 'view-walk-avatar', 'view-sfx'] },
+  { id: 'effects', title: 'Effects', rows: ['view-headlamp', 'view-glow', 'view-block-shading', 'view-walk-avatar', 'view-sfx'] },
   { id: 'sync', title: 'Sync', rows: ['view-hides-sync'] },
 ]
 
@@ -110,6 +110,7 @@ export function ViewPanel(): JSX.Element {
   const headlamp = useLayers((s) => s.headlamp)
   const spatialAudio = useLayers((s) => s.spatialAudio)
   const glow = useLayers((s) => s.glow)
+  const blockShading = useLayers((s) => s.blockShading)
   const walkLimits = useLayers((s) => s.walkLimits)
   const gravity = useWalk((s) => s.gravity)
   const hardGravity = useWalk((s) => s.hardGravity)
@@ -223,11 +224,13 @@ export function ViewPanel(): JSX.Element {
       set: (v) => useCyberspace.getState().setShowSecrets(v),
     },
     // On by default. Off draws every shard face exactly its own color, as
-    // the world always had it (scene/headlamp.ts).
+    // the world always had it (scene/headlamp.ts), and with Block shading
+    // the lamp at your eye on TERRAIN's blocks is only a glimmer
+    // (terrain/terrainMaterial.ts EYE_GLIMMER).
     {
       id: 'view-headlamp',
       title: 'Headlamp',
-      hint: 'Light shards from your view so their shape and depth show.',
+      hint: 'Light shards and nearby blocks from your view.',
       on: headlamp,
       set: (v) => useLayers.getState().setLayer('headlamp', v),
     },
@@ -251,6 +254,17 @@ export function ViewPanel(): JSX.Element {
       hint: 'Light and fog that objects cast.',
       on: glow,
       set: (v) => useLayers.getState().setLayer('glow', v),
+    },
+    // TERRAIN's blocks darkened by the light that reaches them: caves, creases
+    // and corners darker, glowing blocks lighting what is round them
+    // (lib/terrain/light.ts; owner, 2026-11-26). On by default; off draws them
+    // fully lit as before and works out no light, for a slow phone.
+    {
+      id: 'view-block-shading',
+      title: 'Block shading',
+      hint: 'Darker caves and corners.',
+      on: blockShading,
+      set: (v) => useLayers.getState().setLayer('blockShading', v),
     },
     // The game's short sounds through lib/sfx.ts, the bounce's boing among
     // them (owner, 2026-11-24). On by default, kept per identity in

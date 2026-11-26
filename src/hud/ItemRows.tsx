@@ -28,6 +28,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
 import { useProfile } from '../hooks/useProfile'
+import { nameLabel } from '../lib/nameLabel'
 import { isGuideAuthor } from '../tutorial/guideBags'
 import { cashuLabel, readCashuToken } from '../lib/cashu'
 import { BIG_CHEST_SIGNER_WORDS, chestSealer, openWithSecret, usesExtendedLength, openWithSigner, openerFor, readContents, requiresLabel, revealedIn, type ChestEntry, type Opener } from '../lib/chests'
@@ -38,7 +39,6 @@ import { OpensWith } from './KeyListingRow'
 import { holdsEntry, holdsItem, openingKeys, type HeldFrom, type HeldItem, type HeldPlace } from '../lib/inventory'
 import { carriedLabel } from '../lib/keyringLocks'
 import { useKeyringLookup } from '../store/useKeyring'
-import { safeNpub } from '../lib/npub'
 import { useCyberspace } from '../store/useCyberspace'
 import { useInventory } from '../store/useInventory'
 import { forgetRefusal, openedByHand, openedContents, openedKey, readRefused, refuseRead, rememberOpened, useOpenedChests } from '../store/useOpenedChests'
@@ -54,7 +54,6 @@ import { chestLoot } from '../lib/lootObjects'
 import { landedAt } from '../lib/ceremony'
 import { resumeAudio } from '../lib/audioContext'
 import { prefersReducedMotion } from '../hooks/useReducedMotion'
-import { profileLabel } from '../store/useProfiles'
 import { useMutes } from '../store/useMutes'
 import { hidesThing, type Muted } from '../lib/muteList'
 import { isGuideKey, subjectOfHidden } from '../lib/commentSubjects'
@@ -70,7 +69,7 @@ export function useWho(pubkey: string): string {
   const me = useCyberspace((s) => s.identity.pubkey)
   const profile = useProfile(pubkey || null)
   if (isGuideAuthor(pubkey)) return 'the tutorial'
-  return pubkey === me ? 'you' : profileLabel(profile, safeNpub(pubkey))
+  return nameLabel(pubkey, me, profile?.name)
 }
 
 /**

@@ -19,8 +19,7 @@ vi.mock('@react-three/drei', async () => {
 })
 
 import { LetterField, putLetter, dropLetter } from '../LetterField'
-import { GLYPHS } from '../../lib/decode'
-import { MAX_CHANGES_PER_FRAME, RING_GLYPHS, RING_HIDE_PX, RING_THIN_PX, ringStart } from '../../lib/glyphRing'
+import { MAX_CHANGES_PER_FRAME, RING_CHARS, RING_GLYPHS, RING_HIDE_PX, RING_THIN_PX, ringStart } from '../../lib/glyphRing'
 import { atlasIndex } from '../glyphAtlas'
 
 ;(globalThis as { window?: unknown }).window ??= globalThis
@@ -73,7 +72,7 @@ describe('the letters and their rings', () => {
   it('starts each ring from its message, with cipher glyphs', async () => {
     const [first] = await run(0)
     expect(first.slice(0, RING_GLYPHS)).toEqual(ringStart('m0'))
-    for (const g of first.slice(0, N * RING_GLYPHS)) expect(g).toBeLessThan(GLYPHS.length)
+    for (const g of first.slice(0, N * RING_GLYPHS)) expect(g).toBeLessThan(RING_CHARS.length)
   })
 
   it('changes a few glyphs every frame at random, never more than the cap, and turns', async () => {
@@ -85,7 +84,7 @@ describe('the letters and their rings', () => {
       total += n
     }
     expect(total).toBeGreaterThan(20)
-    for (const g of frames[frames.length - 1].slice(0, N * RING_GLYPHS)) { expect(g).toBeGreaterThanOrEqual(0); expect(g).toBeLessThan(GLYPHS.length) }
+    for (const g of frames[frames.length - 1].slice(0, N * RING_GLYPHS)) { expect(g).toBeGreaterThanOrEqual(0); expect(g).toBeLessThan(RING_CHARS.length) }
     expect(find<Mesh>(r!, 'letter-rings').material as ShaderMaterial).toBeDefined()
     expect(((find<Mesh>(r!, 'letter-rings').material as ShaderMaterial).uniforms.uTurn.value as number)).toBeGreaterThan(0)
   })

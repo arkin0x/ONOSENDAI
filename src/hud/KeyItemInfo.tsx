@@ -140,7 +140,6 @@ function LeftBy({ info }: { info: KeyInfoSource }): JSX.Element {
   return <Person pubkey={info.hider} label="Left by" note={note} />
 }
 
-
 /** The card: closed by ✕, a tap outside or Escape (modalStack). */
 export function KeyItemModal({ info, onClose }: { info: KeyInfoSource; onClose: () => void }): JSX.Element {
   useModalStack(true, onClose)

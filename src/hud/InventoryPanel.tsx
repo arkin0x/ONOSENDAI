@@ -299,8 +299,14 @@ function useHeldKeyInfo(item: HeldItem): KeyInfoSource | null {
 /** A key item's card opened from its tile in the grid, over the menu; the item is seen once it opens. */
 function HeldKeyCard({ item, onClose }: { item: HeldItem; onClose: () => void }): JSX.Element | null {
   const info = useHeldKeyInfo(item)
-  useEffect(() => { useItemsSeen.getState().markItem(item) }, [item])
+  useEffect(() => { if (seenIsFor(item.owner)) useItemsSeen.getState().markItem(item) }, [item])
   return info ? <KeyItemModal info={info} onClose={onClose} /> : null
+}
+
+/** Whether the seen record shown is `owner`'s and has been read: only then may it be marked, so nothing is marked seen for the wrong identity or over a record not yet read. */
+function seenIsFor(owner: string): boolean {
+  const s = useItemsSeen.getState()
+  return s.ready && !!owner && s.owner === owner
 }
 
 /** NEW on a row of a list opened with it unseen (owner, 2026-11-26), as its tile wore it. */
@@ -663,20 +669,29 @@ function ItemsModal({ kind }: { kind: ItemsKind }): JSX.Element {
 
   // Opening the list is looking at it (owner, 2026-11-26): every row in it is seen. Which were NEW
   // when it opened is kept for as long as it stays open, so each still says NEW here.
+  // Marked only once this identity's record has been read (seenIsFor); the NEW rows are taken then too.
   const mineHere = kind === 'keys' ? keys : taken
-  const [fresh] = useState(() => {
-    const { seen, ready } = useItemsSeen.getState()
-    return new Set(ready ? mineHere.filter((it) => isNewItem(seen, it)).map((it) => it.id) : [])
-  })
-  useEffect(() => { useItemsSeen.getState().markKind(kind, mineHere) }, [kind, mineHere])
-  // A tile tapped for one row: that row lit, scrolled to, its ACTIONS open.
+  const holder = useInventory((s) => s.owner)
+  const seenReady = useItemsSeen((s) => s.ready && !!holder && s.owner === holder)
+  const fresh = useRef<Set<string> | null>(null)
+  if (fresh.current === null && seenReady) {
+    const { seen } = useItemsSeen.getState()
+    fresh.current = new Set(mineHere.filter((it) => isNewItem(seen, it)).map((it) => it.id))
+  }
+  useEffect(() => { if (seenReady && seenIsFor(holder)) useItemsSeen.getState().markKind(kind, mineHere) }, [seenReady, holder, kind, mineHere])
+  // A tile tapped for one row: that row lit, scrolled to, its ACTIONS open and their button focused.
   const [focus] = useState(() => useItemsModal.getState().focus ?? null)
-  useEffect(() => { if (focus) useOpenActions.setState({ open: focus }) }, [focus])
+  useEffect(() => {
+    if (!focus) return
+    useOpenActions.setState({ open: focus })
+    if (typeof document !== 'undefined') document.getElementById?.(`held-actions-${focus}-toggle`)?.focus?.()
+  }, [focus])
+  const isFresh = (id: string): boolean => fresh.current?.has(id) ?? false
 
   const rows = showing === 'archived' ? archivedHere : mineHere
   const row = (it: HeldItem): JSX.Element => (isKeyItem(it)
-    ? <KeyRow key={it.id} item={it} opens={it.key ? chestsOpenedBy(it.key, chests).length : 0} fresh={fresh.has(it.id)} focused={it.id === focus} />
-    : <TakenRow key={it.id} item={it} fresh={fresh.has(it.id)} focused={it.id === focus} />)
+    ? <KeyRow key={it.id} item={it} opens={it.key ? chestsOpenedBy(it.key, chests).length : 0} fresh={isFresh(it.id)} focused={it.id === focus} />
+    : <TakenRow key={it.id} item={it} fresh={isFresh(it.id)} focused={it.id === focus} />)
   const tab = (id: typeof view, label: string): JSX.Element => (
     <button className={`tag tag--tap ${showing === id ? 'is-on' : ''}`} role="tab" aria-selected={showing === id} onClick={() => setView(id)}>{label}</button>
   )

@@ -13219,6 +13219,7 @@ html.tv-broadcast body { overflow: hidden; }
   border: 0;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
+  outline: none;
   transition: filter 0.15s ease;
 }
 .items-tile > .chamfer {
@@ -13230,39 +13231,41 @@ html.tv-broadcast body { overflow: hidden; }
   transition: background-color 0.15s ease;
 }
 .items-tile .itemthumb__icon { width: 46%; height: 46%; }
-.items-tile:hover > .chamfer, .items-tile:focus-visible > .chamfer { --chamfer-line: var(--accent); }
-.items-tile:hover, .items-tile:focus-visible { filter: drop-shadow(0 0 4px rgba(0, 229, 255, 0.55)); }
-.items-tile:focus-visible { outline: 1px dashed var(--accent); outline-offset: 2px; }
-.items-tile:active > .chamfer { --chamfer-line: #fff; }
-/* NEW: the frame in the game colour, softly lit, and a tag notched into the
+/* Hover only where there is a pointer that hovers, so a tapped tile on a phone does not stay lit.
+   Keyboard focus draws on the chamfered line itself, white, with the glow: no square ring. */
+@media (hover: hover) {
+  button.items-tile:hover > .chamfer { --chamfer-line: var(--accent); }
+  button.items-tile:hover { filter: drop-shadow(0 0 4px rgba(0, 229, 255, 0.55)); }
+}
+.items-tile:focus-visible > .chamfer { --chamfer-line: #fff; }
+.items-tile:focus-visible { filter: drop-shadow(0 0 4px rgba(0, 229, 255, 0.8)); }
+button.items-tile:active > .chamfer { --chamfer-line: #fff; }
+/* NEW: the frame in the game colour, softly lit (a still glow: nothing
+   repaints frame after frame over the scene), and a tag notched into the
    square top-right corner, cut on its own top left like the house. It sits
    over the picture, so nothing moves when it comes or goes. */
 .items-tile.is-new > .chamfer { --chamfer-line: var(--game); }
-.items-tile.is-new { filter: drop-shadow(0 0 3px rgba(255, 122, 217, 0.5)); animation: items-new-glow 2.6s ease-in-out infinite; }
+.items-tile.is-new { filter: drop-shadow(0 0 3px rgba(255, 122, 217, 0.55)); }
 .items-tile__new {
   position: absolute;
   top: 0;
   right: 0;
   padding: 1px 3px 1px 5px;
-  font-size: 7px;
+  font-size: 8px;
   font-weight: 700;
-  line-height: 9px;
+  line-height: 10px;
   letter-spacing: 0.12em;
   color: #05070d;
   background: var(--game);
   clip-path: polygon(4px 0, 100% 0, 100% 100%, 0 100%, 0 4px);
   pointer-events: none;
 }
-@keyframes items-new-glow {
-  0%, 100% { filter: drop-shadow(0 0 2px rgba(255, 122, 217, 0.35)); }
-  50% { filter: drop-shadow(0 0 5px rgba(255, 122, 217, 0.75)); }
-}
 /* "+N more": the same frame in white, the count large over the word. */
 .items-tile--more > .chamfer { --chamfer-line: rgba(255, 255, 255, 0.4); --chamfer-fill: linear-gradient(135deg, rgba(0, 229, 255, 0.14), rgba(0, 229, 255, 0.03)), #04090f; }
 .items-tile--more .chamfer__in { flex-direction: column; gap: 1px; }
 .items-tile__count, .items-tile__word { color: #fff; text-shadow: 0 1px 2px #000, 0 0 5px rgba(0, 0, 0, 0.85); }
 .items-tile__count { font-size: 13px; font-weight: 700; line-height: 1; }
-.items-tile__word { font-size: 7px; line-height: 1; letter-spacing: 0.18em; }
+.items-tile__word { font-size: 8px; line-height: 1; letter-spacing: 0.14em; }
 /* A blank slot: a dim frame with faint scanlines, plainly empty, not broken. */
 .items-tile--blank { cursor: default; }
 .items-tile--blank > .chamfer {
@@ -13270,6 +13273,8 @@ html.tv-broadcast body { overflow: hidden; }
   --chamfer-fill: repeating-linear-gradient(0deg, rgba(0, 229, 255, 0.05) 0 1px, transparent 1px 3px), rgba(4, 9, 15, 0.6);
 }
 .items-tile__scan { display: block; width: 100%; height: 100%; }
+/* A key item's picture waiting for its tile to come near the view before its model is asked for (ItemThumb lazy). */
+.itemthumb__wait { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; }
 /* Nothing of this kind yet: one quiet line over the blank slots. */
 .items-grid.is-empty .items-tile--blank { opacity: 0.6; }
 .items-grid__empty {
@@ -13296,7 +13301,6 @@ html.tv-broadcast body { overflow: hidden; }
 }
 @media (prefers-reduced-motion: reduce) {
   .items-tile, .items-tile > .chamfer { transition: none; }
-  .items-tile.is-new { animation: none; }
   .held__row--focus { animation: none; background-color: rgba(0, 229, 255, 0.1); }
 }
 /* The modal's title wears the same icon before its words. */

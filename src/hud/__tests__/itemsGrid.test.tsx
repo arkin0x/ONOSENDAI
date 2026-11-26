@@ -136,12 +136,28 @@ describe('the ITEMS grids', () => {
     const [left] = grids(m)
     expect(tiles(left!).map((t) => t.props.title)).toEqual(['Note 8', 'Note 7', 'Note 6', 'Note 5', 'Note 4'])
     expect(blanks(left!)).toHaveLength(0)
-    const more = m.buttons(/^\+4MORE$/)
+    // All nine are NEW, so the four behind it are too, and the tile says so.
+    const more = m.buttons(/^\+4MORE/)
     expect(more).toHaveLength(1)
-    expect(more[0]!.props['aria-label']).toBe('4 more: open other loot')
-    await m.press(/^\+4MORE$/)
+    expect(more[0]!.props['aria-label']).toBe('4 more, some new: open other loot')
+    await m.press(/^\+4MORE/)
     expect(useItemsModal.getState().open).toBe('loot')
     expect(m.all().filter((h) => h.type === 'li' && String(h.props.className).includes('held__row'))).toHaveLength(9)
+    await m.unmount()
+  })
+
+  it('exactly six fit with no "+N more"; past six, a NEW item behind "+N more" puts NEW on that tile', async () => {
+    hold(Array.from({ length: 6 }, (_, i) => note(`Six ${i}`, SEEN_SINCE - 100 - i)))
+    const m = await mount(createElement(InventoryPanel))
+    expect(tiles(grids(m)[0]!)).toHaveLength(6)
+    expect(m.buttons(/MORE/)).toHaveLength(0)
+    // Seven, the oldest of them NEW (held after NEW began, older than the rest): it is behind "+2 more".
+    const seen = Array.from({ length: 6 }, (_, i) => note(`Seen ${i}`, SEEN_SINCE + 100 + i))
+    for (const it of seen) useItemsSeen.getState().markItem(it)
+    hold([...seen, note('Hidden new', SEEN_SINCE + 50)])
+    await settled()
+    const [more] = m.buttons(/^\+2MORENEW$/)
+    expect(more!.props['aria-label']).toBe('2 more, some new: open other loot')
     await m.unmount()
   })
 
@@ -188,6 +204,45 @@ describe('NEW', () => {
     const again = await mount(createElement(InventoryPanel))
     expect(marked(grids(again)[0]!)).toEqual([])
     await again.unmount()
+  })
+
+  it('follows the identity: another npub sees its own items NEW, and the first gets its record back', async () => {
+    const fresh = note('Fresh note', SEEN_SINCE + 4)
+    hold([fresh])
+    const first = me
+    const m = await mount(createElement(InventoryPanel))
+    await m.press(/^OTHER LOOT · 1$/)
+    useItemsModal.setState({ open: null })
+    await settled()
+    expect(marked(grids(m)[0]!)).toEqual([])
+    // Another identity, holding the same note: NEW for it.
+    me = getPublicKey(generateSecretKey())
+    await itemsSeenList.setOwner(me)
+    hold([{ ...fresh, owner: me, rowKey: `${me}/${fresh.id}` }])
+    for (let i = 0; i < 200 && !(useItemsSeen.getState().ready && useItemsSeen.getState().owner === me); i++) await new Promise((r) => setTimeout(r, 1))
+    await settled()
+    expect(marked(grids(m)[0]!)).toEqual([fresh.id])
+    // Back: seen again.
+    me = first
+    await itemsSeenList.setOwner(me)
+    hold([fresh])
+    for (let i = 0; i < 200 && !(useItemsSeen.getState().ready && useItemsSeen.getState().owner === me); i++) await new Promise((r) => setTimeout(r, 1))
+    await settled()
+    expect(marked(grids(m)[0]!)).toEqual([])
+    await m.unmount()
+  })
+
+  it('a list opened before the record is read marks nothing seen until it is', async () => {
+    const fresh = note('Fresh note', SEEN_SINCE + 4)
+    hold([fresh])
+    useItemsSeen.setState({ ready: false })
+    const m = await mount(createElement(InventoryPanel))
+    await m.press(/^OTHER LOOT · 1$/)
+    expect(isNewItem(useItemsSeen.getState().seen, fresh)).toBe(true)
+    useItemsSeen.setState({ ready: true })
+    await settled()
+    expect(isNewItem(useItemsSeen.getState().seen, fresh)).toBe(false)
+    await m.unmount()
   })
 
   it('draws no NEW before this identity\'s record is read', async () => {

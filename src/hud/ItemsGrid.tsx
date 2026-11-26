@@ -15,7 +15,8 @@
  * Pictures cost what the rows' pictures cost and no more: a shard's comes
  * from the same cache under the same key (ShardThumb, store/useThumbs) and is
  * only asked for while the grid is near the visible part of the menu; a key
- * item's model through the one model cache (useItemModel).
+ * item's model likewise (ItemThumb lazy), through the one model cache
+ * (useItemModel).
  */
 
 import { useMemo } from 'react'
@@ -45,7 +46,7 @@ function ItemTile({ item, fresh, onOpen }: { item: HeldItem; fresh: boolean; onO
   return (
     <button type="button" className={`items-tile${fresh ? ' is-new' : ''}`} data-tile={item.id} onClick={() => onOpen(item)} title={name} aria-label={fresh ? `${name}, new` : name}>
       {item.type === 'key'
-        ? <ItemThumb type="key" image={item.key?.image} model={item.key?.model} size={TILE_PX} />
+        ? <ItemThumb type="key" image={item.key?.image} model={item.key?.model} size={TILE_PX} lazy />
         : <ItemThumb type={item.type} coin={coin} shard={item.type === 'shard' ? item.shard : undefined} size={TILE_PX} />}
       {fresh && <span className="items-tile__new" aria-hidden="true">{NEW_MARK}</span>}
     </button>
@@ -66,19 +67,24 @@ interface Props {
 
 export function ItemsGrid({ kind, items, empty, onOpen, onMore }: Props): JSX.Element {
   const holder = useInventory((s) => s.owner)
+  // Still reading what this identity holds: blank slots, not "nothing yet".
+  const loading = useInventory((s) => s.storage === 'loading')
   // No NEW mark until this identity's record has been read, so a seen item never blinks NEW.
   const seen = useItemsSeen((s) => (s.ready && s.owner === holder ? s.seen : null))
   const { shown, more, empty: blanks } = gridOf(items, GRID_SLOTS)
   const what = kind === 'keys' ? 'key items' : 'other loot'
+  // A NEW item behind "+N more" says so on that tile, so nothing new is hidden.
+  const newBehind = more > 0 && !!seen && items.slice(shown.length).some((it) => isNewItem(seen, it))
   return (
     <div className={`items-grid items-grid--${kind}${items.length === 0 ? ' is-empty' : ''}`} role="group" aria-label={`Your newest ${what}`} data-grid={kind}>
       {shown.map((it) => <ItemTile key={it.id} item={it} fresh={!!seen && isNewItem(seen, it)} onOpen={onOpen} />)}
       {more > 0 && (
-        <button type="button" className="items-tile items-tile--more" data-tile="more" onClick={onMore} title={`Open ${what.toUpperCase()}`} aria-label={`${more} more: open ${what}`}>
+        <button type="button" className={`items-tile items-tile--more${newBehind ? ' is-new' : ''}`} data-tile="more" onClick={onMore} title={`Open ${what.toUpperCase()}`} aria-label={`${more} more${newBehind ? ', some new' : ''}: open ${what}`}>
           <Chamfer size={TILE_PX}>
             <span className="items-tile__count">+{more}</span>
             <span className="items-tile__word">MORE</span>
           </Chamfer>
+          {newBehind && <span className="items-tile__new" aria-hidden="true">{NEW_MARK}</span>}
         </button>
       )}
       {Array.from({ length: blanks }, (_, i) => (
@@ -86,7 +92,7 @@ export function ItemsGrid({ kind, items, empty, onOpen, onMore }: Props): JSX.El
           <Chamfer size={TILE_PX}><span className="items-tile__scan" /></Chamfer>
         </span>
       ))}
-      {items.length === 0 && <p className="items-grid__empty">{empty}</p>}
+      {items.length === 0 && !loading && <p className="items-grid__empty">{empty}</p>}
     </div>
   )
 }

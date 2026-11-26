@@ -214,9 +214,17 @@ interface Props {
  * hit: anything else in the scene with a tap handler (R3F's intersections
  * hold only objects that have one). `self` is the yielding target's own mesh.
  */
-export function yieldsTap(intersections: ReadonlyArray<{ object: unknown }>, self: unknown): boolean {
-  // Blocks behind it that a tap means nothing on (outside TERRAIN) leave it the tap; nearer, they stopped it first (TapOccluder.tsx).
-  return intersections.some((i) => i.object !== self && !idleOccluder(i.object as Object3D))
+export function yieldsTap(intersections: ReadonlyArray<{ object: unknown; distance?: number }>, self: unknown, ray?: Ray): boolean {
+  return intersections.some((i) => {
+    const o = i.object as Object3D
+    // Blocks behind it that a tap means nothing on (outside TERRAIN) leave it the tap; nearer, they stopped it first (TapOccluder.tsx).
+    if (o === self || idleOccluder(o)) return false
+    // Nor does a target the blocks hide, which would refuse the tap in its turn.
+    const judge = ray ? o.userData?.tapJudge as TapJudge | undefined : undefined
+    if (!judge || i.distance === undefined) return true
+    const claim = judge(ray!, i.distance)
+    return !!claim && !blockedNearer(intersections as ReadonlyArray<TapHit>, claim.distance)
+  })
 }
 
 /** What a target would take a tap at: how far along the ray (for a soft hit, how deep the fog's body lies there), and whether only on something soft (a pick volume, softPick.tsx). */
@@ -527,10 +535,11 @@ export function TapTarget({ onTap, measure, px, side, at, yields = false, occlud
     if (e.delta > TAP_SLOP_PX) return
     // Not stopping propagation is how R3F lets the tap travel on to the
     // next thing the ray hit, nearer or farther.
-    if (yields && yieldsTap(e.intersections, hit.current)) return
+    if (yields && yieldsTap(e.intersections, hit.current, e.ray)) return
     // A coin or message under the same tap takes it: leave the event to
     // travel on to it (not stopping propagation is how R3F does that).
-    if (measure && e.intersections.some((i) => i.object.userData?.tapPriority === 'mark')) return
+    // One the blocks hide is not under it at all (TapOccluder.tsx).
+    if (measure && e.intersections.some((i) => i.object.userData?.tapPriority === 'mark' && !blockedNearer(e.intersections, i.distance))) return
     const claim = judge(e.ray, e.distance)
     if (!claim) return
     // A message's box met before what this target draws takes the tap: leave it to travel on to the box.

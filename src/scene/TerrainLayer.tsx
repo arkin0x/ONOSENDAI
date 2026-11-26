@@ -195,7 +195,7 @@ function Chunks({ axes }: { axes: ViewAxes }): JSX.Element {
   return <group ref={group} name="terrain-chunks" />
 }
 
-/** How far a ray is walked through the blocks for what hides a shard, in blocks: well past the chunks round you (3 by 3 by 3 is 96 across). */
+/** How far a ray is walked through the blocks for what hides a shard, in blocks from where it enters them: well past the chunks round you (3 by 3 by 3 is 96 across). */
 export const OCCLUSION_REACH = 1024
 
 const occField = new Matrix4()
@@ -230,7 +230,7 @@ export function blockOcclusion(s: TerrainSession | null, axes: ViewAxes, ray: Ra
   occFrom.copy(ray.origin).applyMatrix4(occInverse)
   occDir.copy(ray.origin).add(ray.direction).applyMatrix4(occInverse).sub(occFrom).normalize()
   // Clipped to the box: where the ray enters it and leaves it.
-  let enter = 0, leave = OCCLUSION_REACH
+  let enter = 0, leave = Infinity
   const o = [occFrom.x, occFrom.y, occFrom.z], d = [occDir.x, occDir.y, occDir.z]
   for (let a = 0; a < 3; a++) {
     if (d[a] === 0) { if (o[a] < lo[a] || o[a] > hi[a]) return null; continue }
@@ -239,6 +239,8 @@ export function blockOcclusion(s: TerrainSession | null, axes: ViewAxes, ray: Ra
     enter = Math.max(enter, t0)
     leave = Math.min(leave, t1)
   }
+  // As far in as OCCLUSION_REACH blocks from where the ray enters (from the eye, zoomed out, the blocks can be thousands of blocks off).
+  leave = Math.min(leave, enter + OCCLUSION_REACH)
   if (enter > leave) return null
   // From where the ray enters the box (a hair in, so the first cell is the box's own); from the eye when it starts inside.
   const start = enter > 0 ? enter + 1e-6 : 0

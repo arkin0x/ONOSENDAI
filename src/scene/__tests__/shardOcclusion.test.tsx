@@ -79,6 +79,12 @@ function WideShard({ onTap }: { onTap: () => void }): JSX.Element {
 }
 
 let r: R3fRoot
+let field: TerrainSession
+
+/** The blocks of the field on screen. */
+function fieldBlocks(): Uint8Array {
+  return field.world.slotAt(0, 0, 0)!.blocks!
+}
 
 async function mount(...children: JSX.Element[]): Promise<void> {
   r = await r3fRoot()
@@ -91,7 +97,8 @@ beforeEach(() => {
   useCyberspace.setState({ anchor: ANCHOR, position: ANCHOR, cursor: ANCHOR, scaleExp: 0, plane: 0, walking: false })
   commitAnchor(ANCHOR)
   commitScale(0)
-  setTerrainSession(session())
+  field = session()
+  setTerrainSession(field)
   terrainInput.action = null
   terrainInput.hover = null
   terrainInput.swallowTap = false
@@ -129,6 +136,14 @@ describe('blockOcclusion: how far along a ray the first block that hides what is
 
   it('from inside the slab, is not the mass the eye stands in (nothing of it is seen from within)', () => {
     expect(blockOcclusion(session(), AXES, ray(-2))).toBeNull()
+  })
+
+  it('still hides from far off, zoomed out (the walk reaches from where the ray enters the blocks, not from the eye)', () => {
+    commitScale(4)
+    const s = session()
+    const face = new Vector3(16, 16, SLAB[1] + 1).applyMatrix4(fieldMatrix(s, AXES, 4, new Matrix4()))
+    const far = new Ray(new Vector3(face.x, face.y, face.z + 70), new Vector3(0, 0, -1))
+    expect(blockOcclusion(s, AXES, far)).toBeCloseTo(70)
   })
 
   it('is nothing with no blocks held', () => {
@@ -183,7 +198,29 @@ describe.each([
   })
 })
 
+/** A coin's or a message's mark: a fixed fingertip target at render (0, 0, z). */
+function Mark({ z, onTap }: { z: number; onTap: () => void }): JSX.Element {
+  return createElement(TapTarget, { px: 28, at: [0, 0, z], onTap })
+}
+
+describe('a mark (a coin, a message) behind the blocks', () => {
+  it('does not take the tap from a shard in front of the blocks', async () => {
+    const mark = vi.fn()
+    await mount(createElement(Shard, { z: 4, onTap: taps.exposed }), createElement(Mark, { z: -8, onTap: mark }))
+    await r.tap(CENTRE, CENTRE)
+    expect(taps.exposed).toHaveBeenCalledTimes(1)
+    expect(mark).not.toHaveBeenCalled()
+  })
+})
+
 describe('your own avatar, which takes a tap only when nothing else wants it', () => {
+  it('outside TERRAIN, a shard the blocks hide behind it wants nothing either: it takes the tap', async () => {
+    await mount(createElement(Shard, { z: 4, onTap: taps.me, yields: true }), createElement(Shard, { z: -8, onTap: taps.buried }))
+    await r.tap(CENTRE, CENTRE)
+    expect(taps.me).toHaveBeenCalledTimes(1)
+    expect(taps.buried).not.toHaveBeenCalled()
+  })
+
   it('outside TERRAIN, blocks behind it want nothing: it takes the tap', async () => {
     await mount(createElement(Shard, { z: 4, onTap: taps.me, yields: true }))
     await r.tap(CENTRE, CENTRE)
@@ -257,6 +294,21 @@ describe('in TERRAIN, a tap (touch) on blocks with a shard buried behind them', 
     expect(taps.exposed).toHaveBeenCalledTimes(1)
     expect(mined).toHaveBeenCalledTimes(1)
     expect(mined.mock.calls[0][0]).toBeNull()
+  })
+
+  it('the mouse captured: the press that mines the last block in front does not open the shard behind it at the click', async () => {
+    await mountNear(createElement(Shard, { z: -8, onTap: taps.buried }))
+    // The press (mined at the press with the mouse captured), the block gone before the release and the click.
+    await r.pointer('pointerdown', CENTRE, CENTRE)
+    const blocks = fieldBlocks()
+    blocks.fill(0)
+    await r.frame()
+    await r.pointer('pointerup', CENTRE, CENTRE)
+    await r.pointer('click', CENTRE, CENTRE)
+    expect(taps.buried).not.toHaveBeenCalled()
+    // And the next tap, with no blocks left in front, opens it.
+    await r.tap(CENTRE, CENTRE)
+    expect(taps.buried).toHaveBeenCalledTimes(1)
   })
 
   it('the click that captures the mouse again does nothing else: a shard in plain view stays shut', async () => {

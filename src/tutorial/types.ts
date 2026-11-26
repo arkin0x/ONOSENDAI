@@ -30,7 +30,15 @@ export type TutorialWait = Exclude<DemoAction, 'spawn'> | TutorialAction
  * hop target over the course's start reached, gravity on in WALK, the finish chest found and
  * something in it taken; the workshop opened and closed again.
  */
-export type TutorialAction = 'see-chest' | 'open-chest' | 'take' | 'at-target' | 'gravity' | 'see-finish' | 'take-finish' | 'workshop' | 'at-plot' | 'plant' | 'agent-copy' | 'placed' | EarthRouteAction
+export type TutorialAction = 'see-chest' | 'open-chest' | 'take' | 'at-target' | 'gravity' | 'see-finish' | 'take-finish' | 'workshop' | 'at-plot' | 'plant' | 'agent-copy' | 'placed' | EarthRouteAction | TerrainRouteAction
+
+/**
+ * The TERRAIN route's waits (tutorial/terrainRoute.ts): TERRAIN open, the
+ * ground surveyed (or found surveyed already), a block mined, a block picked
+ * on the hotbar, one placed, then three more; and the last card's, that the
+ * three were placed this route (so skipping through never ticks it off).
+ */
+export type TerrainRouteAction = 'terrain-open' | 'terrain-survey' | 'terrain-mine' | 'terrain-pick' | 'terrain-place' | 'terrain-build' | 'terrain-built'
 
 /**
  * The Earth route's waits (tutorial/earthRoute.ts): a stop picked as the
@@ -89,6 +97,24 @@ export interface TutorialStep {
    * you the Finish button once you've pressed the copy button").
    */
   stay?: boolean
+  /**
+   * Picked up on this step itself after a reload (RESUME, a reload mid-run),
+   * not at its route's first step: the TERRAIN route's steps, where what was
+   * done (mined, placed) stays done (tutorial/terrainRoute.ts).
+   */
+  resumes?: boolean
+  /**
+   * Modes the teaching list lets through while this step is up (it has
+   * TERRAIN off otherwise: store/modeOrder.ts TEACHING_MODES): the TERRAIN
+   * route opens TERRAIN by its key, the mode button and its own button.
+   */
+  allows?: Array<'terrain'>
+  /**
+   * The highlight stays on after the step's `wait` has happened (it goes off
+   * then otherwise): the TERRAIN route's last card, done as it comes up,
+   * keeps pointing at the bag where Crew is.
+   */
+  keepPulse?: boolean
   /** The one-line instruction shown while waiting. */
   hint?: string
   /** NEXT stays off until the `wait` has happened; otherwise NEXT reads SKIP while waiting. */

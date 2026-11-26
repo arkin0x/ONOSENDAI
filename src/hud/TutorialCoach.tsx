@@ -12,7 +12,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Bot, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Coffee, Earth, Gamepad2, Target, Wrench, type LucideIcon } from 'lucide-react'
+import { Blocks, Bot, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Coffee, Earth, Gamepad2, Target, Wrench, type LucideIcon } from 'lucide-react'
 import { choiceOffered, runTutorialEffect, useTutorial } from '../store/useTutorial'
 import { useWorkshop } from '../store/useWorkshop'
 import { useDemo } from '../store/useDemo'
@@ -54,7 +54,7 @@ export function progressOf(steps: ReadonlyArray<{ branch?: boolean }>, index: nu
  * Each "Where next?" route's picture, in a column to the left of its words
  * (arkinox, 2026-11-13): the icon the rest of the app already draws for that
  * thing. EARTH in the view menu, a game's chip, an AGENT badge, the TARGET
- * buttons (the friend route adds a TARGET), and BUILD's wrench; the
+ * buttons (the friend route adds a TARGET), BUILD's wrench, TERRAIN's blocks; the
  * community, a steaming cup for Straylight Cafe (owner, 2026-11-14). Decorative:
  * the button's words stay its name. A route with none keeps the empty column.
  */
@@ -66,6 +66,8 @@ export const CHOICE_ICONS: Readonly<Record<string, LucideIcon>> = {
   agents: Bot,
   friend: Target,
   build: Wrench,
+  // TERRAIN's own icon, as on the build bar's TERRAIN button.
+  terrain: Blocks,
 }
 
 /** The room kept between the coach and the panel it keeps clear of, and from the screen's edges, px. */
@@ -163,8 +165,8 @@ export function TutorialCoach(): JSX.Element | null {
 
   // The control a step points at wears the /demo tour's pulsing ring
   // (styles.css .demo-pulse) while the step waits; nothing is clicked.
-  // A step with no wait points for as long as it is up; one that waits, until it is done.
-  const highlight = shown && (!done || !step?.wait) ? stepHighlight ?? step?.scene?.highlight : undefined
+  // A step with no wait points for as long as it is up; one that waits, until it is done (or for as long as it is up, `keepPulse`).
+  const highlight = shown && (!done || !step?.wait || step.keepPulse) ? stepHighlight ?? step?.scene?.highlight : undefined
   useEffect(() => {
     if (!highlight) { setSpot(AT_TOP); return }
     let marked: Element[] = []

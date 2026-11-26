@@ -14136,6 +14136,19 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
   clip-path: polygon(calc(var(--terrain-cut) - 0.6px) 0, 100% 0, 100% calc(100% - var(--terrain-cut) + 0.6px), calc(100% - var(--terrain-cut) + 0.6px) 100%, 0 100%, 0 calc(var(--terrain-cut) - 0.6px));
 }
 
+/* A tour step pointing at a chamfered control (the tutorial's TERRAIN route, tutorial/terrainRoute.ts): the
+   clip-path cuts off the usual ring (.demo-pulse's box-shadow), so the frame's line and fill pulse cyan instead. */
+.terrain-act.demo-pulse,
+.terrain-slot.demo-pulse { animation: terrain-pulse-line 1.4s ease-out infinite; }
+.terrain-act.demo-pulse::before,
+.terrain-slot.demo-pulse::before { animation: terrain-pulse-fill 1.4s ease-out infinite; }
+@keyframes terrain-pulse-line { 0%, 100% { background: var(--terrain-line); } 25% { background: rgb(0, 229, 255); } }
+@keyframes terrain-pulse-fill { 0%, 100% { background: var(--terrain-fill); } 25% { background: rgba(0, 120, 140, 0.9); } }
+@media (prefers-reduced-motion: reduce) {
+  .terrain-act.demo-pulse, .terrain-slot.demo-pulse { animation: none; box-shadow: none; background: rgb(0, 229, 255); }
+  .terrain-act.demo-pulse::before, .terrain-slot.demo-pulse::before { animation: none; }
+}
+
 /* Centred at the top, clear of the instrument chips on the left and the compass on the right. */
 .terrain-bar {
   position: absolute;

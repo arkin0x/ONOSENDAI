@@ -126,6 +126,12 @@ export interface TerrainState {
   surveying: string[]
   /** Changes waiting in the log (not yet folded into layers). */
   waiting: number
+  /**
+   * How many times this page has seen each of these done (the tutorial's
+   * TERRAIN route waits on them: tutorial/terrainRoute.ts): a chunk
+   * surveyed, a block mined, one placed, a hotbar slot picked.
+   */
+  tally: { surveyed: number; mined: number; placed: number; picked: number }
 
   /** TERRAIN on: WALK with the block tools (store/padMode.ts enterTerrainMode is the pad's way in). */
   enter: () => Promise<void>
@@ -226,6 +232,7 @@ export const useTerrain = create<TerrainState>((set, get) => ({
   sheet: false,
   surveying: [],
   waiting: 0,
+  tally: { surveyed: 0, mined: 0, placed: 0, picked: 0 },
 
   enter: async () => {
     if (get().active) return
@@ -283,6 +290,7 @@ export const useTerrain = create<TerrainState>((set, get) => ({
       // A survey is shared like any change (DECK-0009 §3.1).
       noteChange(key)
       clearWalker(s, key)
+      count('surveyed')
       get().say('Terrain revealed from cyberspace\'s structure.')
     } catch {
       s.surveyedKeys.delete(key)
@@ -308,6 +316,7 @@ export const useTerrain = create<TerrainState>((set, get) => ({
     if (!change) return false
     record(s, change)
     advanceHint(0)
+    count('mined')
     // What it carries as: its kind's own id. A block this client has no kind for is mined, and carried as nothing.
     if (yours <= EMPTY) return true
     const was = kindId(yours)
@@ -351,12 +360,14 @@ export const useTerrain = create<TerrainState>((set, get) => ({
     else delete counts[id]
     saveInventory({ ...inv, counts })
     advanceHint(1)
+    count('placed')
     return true
   },
 
   selectSlot: (slot) => {
     if (slot < 0 || slot >= HOTBAR_SLOTS) return
     saveInventory({ ...get().inventory, slot })
+    count('picked')
   },
 
   assignSlot: (id, slot) => {
@@ -366,6 +377,7 @@ export const useTerrain = create<TerrainState>((set, get) => ({
     const hotbar = inv.hotbar.map((h) => (h === id ? 0 : h))
     hotbar[at] = id
     saveInventory({ ...inv, hotbar, slot: at })
+    count('picked')
   },
 
   setSheet: (open) => {
@@ -446,6 +458,12 @@ function record(s: TerrainSession, change: Change): void {
   if (s.db) keep(writeOps(s.db, [row]))
   useTerrain.setState({ waiting: countWaiting(s) })
   if (list.length >= FOLD_AT) void foldKey(s, change.chunk)
+}
+
+/** One more of something done, for the tutorial's TERRAIN route (TerrainState `tally`). */
+function count(what: keyof TerrainState['tally']): void {
+  const t = useTerrain.getState().tally
+  useTerrain.setState({ tally: { ...t, [what]: t[what] + 1 } })
 }
 
 function saveInventory(inv: Inventory): void {
@@ -645,6 +663,21 @@ export function surveyTarget(s: TerrainSession | null = terrainSession): string 
     if (sl && open(sl)) return sl.key
   }
   return null
+}
+
+/**
+ * Who surveyed the chunk you stand in, if anyone: 'you' (kept on this
+ * device), 'someone' (drawn for you from another player's layer, so yours to
+ * build in at once: surveyShown), or null while it is unsurveyed, or there is
+ * no field or no chunk here.
+ */
+export function hereSurveyedBy(s: TerrainSession | null = terrainSession): 'you' | 'someone' | null {
+  if (!s) return null
+  const w = offsetOf(s, headNow())
+  const here = s.world.slotAtCs(w[0], w[1], w[2])
+  if (!here || !here.inSpace) return null
+  if (s.surveyedKeys.has(here.key)) return 'you'
+  return surveyedForYou(here.key) ? 'someone' : null
 }
 
 /**

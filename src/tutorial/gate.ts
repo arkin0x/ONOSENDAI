@@ -26,10 +26,15 @@
 
 import { create } from 'zustand'
 import type { Plane } from 'cyberspace-core'
+import { kvGet, kvRemove, kvSet } from '../lib/kvStore'
 
 /** The device switch: "on", "off" or absent. */
 export const TUTORIAL_SWITCH_KEY = 'onosendai:tutorial'
-/** One player's progress, by pubkey. */
+/**
+ * One player's progress, by pubkey: in IndexedDB through lib/kvStore.ts (the
+ * prefix is in its MOVED_PREFIXES; owner, 2026-11-19: all local data per
+ * npub, in IndexedDB), read synchronously from memory.
+ */
 export const PROGRESS_PREFIX = 'onosendai:tutorial:progress:'
 
 /** The switch as stored: true on, false off, null never set here. */
@@ -209,7 +214,7 @@ function anchorOf(v: unknown): TutorialAnchor | null {
 
 export function readProgress(pubkey: string): TutorialProgress | null {
   try {
-    const raw = localStorage.getItem(PROGRESS_PREFIX + pubkey)
+    const raw = kvGet(PROGRESS_PREFIX + pubkey)
     if (!raw) return null
     const v = JSON.parse(raw) as Partial<TutorialProgress>
     if (typeof v.step !== 'string') return null
@@ -223,11 +228,11 @@ export function readProgress(pubkey: string): TutorialProgress | null {
 
 export function writeProgress(pubkey: string, p: TutorialProgress | null): void {
   try {
-    if (p === null) localStorage.removeItem(PROGRESS_PREFIX + pubkey)
+    if (p === null) kvRemove(PROGRESS_PREFIX + pubkey)
     else {
       const { anchor, ...rest } = p
       const kept = anchor ? { ...rest, anchor: { x: anchor.x.toString(), y: anchor.y.toString(), z: anchor.z.toString(), plane: anchor.plane } } : rest
-      localStorage.setItem(PROGRESS_PREFIX + pubkey, JSON.stringify(kept))
+      kvSet(PROGRESS_PREFIX + pubkey, JSON.stringify(kept))
     }
   } catch { /* private mode: this visit only */ }
 }

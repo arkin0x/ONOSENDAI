@@ -313,6 +313,13 @@ interface TutorialState {
   back: () => void
   /** A choice on a modal step (TutorialChoice): its registered run first, if any, then its branch step or the end. */
   choose: (choiceId: string) => void
+  /**
+   * Straight to the step `id` of the run going, as a route's own part says
+   * (the TERRAIN route back to its first step while TERRAIN is shut, and on
+   * to where it was once it opens: tutorial/terrainRoute.ts). Nothing is
+   * checked off on the way.
+   */
+  goTo: (id: string) => void
   /** End the run for this player, kept as finished or skipped. */
   end: (how: 'finished' | 'skipped') => void
   /** Put it away without ending it (another identity, the /demo tour): the next load resumes. */
@@ -455,7 +462,8 @@ export const useTutorial = create<TutorialState>((set, get) => {
       const steps = get().script.steps
       // A route resumes at its first step: what a later one stood on (the
       // stop picked, the Earth view) is not kept across a reload.
-      const resumeAt = opts.at ? routeHead(steps, opts.at) : undefined
+      // A step that says it `resumes` (the TERRAIN route's: tutorial/terrainRoute.ts) is picked up on itself.
+      const resumeAt = opts.at ? (steps.find((st) => st.id === opts.at)?.resumes ? opts.at : routeHead(steps, opts.at)) : undefined
       const at = resumeAt ? steps.findIndex((s) => s.id === resumeAt) : 0
       // A first arrival starts clutter-free: the menu shut (feedback item
       // 16). A RESTART shuts the menu too (it is started from the menu); a
@@ -541,6 +549,12 @@ export const useTutorial = create<TutorialState>((set, get) => {
         (result) => settle(typeof result === 'string' && result ? result : null),
         (err: unknown) => { console.warn('[tutorial] choice failed:', err); settle(CHOICE_FAILED_MESSAGE) },
       )
+    },
+
+    goTo: (id) => {
+      if (!get().active) return
+      const at = get().script.steps.findIndex((st) => st.id === id)
+      if (at >= 0) enter(at, get().index)
     },
 
     end: (how) => {

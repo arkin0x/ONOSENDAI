@@ -37,6 +37,7 @@ import './tutorial/director'
 // The Earth route's waits: a stop picked, BOARD, RIDE.
 import './tutorial/earthRoute'
 import './tutorial/buildRoute'
+import './tutorial/terrainRoute'
 // The Straylight route's OPEN STRAYLIGHT CAFE: the invite in a new tab.
 import './tutorial/straylight'
 // The final card's DUNGEON, when games are on for this device.

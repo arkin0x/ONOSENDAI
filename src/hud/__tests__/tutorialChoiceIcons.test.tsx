@@ -48,6 +48,7 @@ const ICON_CLASS: Record<string, string> = {
   agents: 'lucide-bot',
   friend: 'lucide-target',
   build: 'lucide-wrench',
+  terrain: 'lucide-blocks',
 }
 
 const kids = (h: Host): Host[] => h.children.filter((c): c is Host => typeof c !== 'string')

@@ -28,7 +28,7 @@ import { sha256Hex } from '../../lib/blossom'
 import { toneWav } from '../../lib/__tests__/audioFixture'
 import { WAVE_BARS } from '../../lib/waveform'
 import { cardKey, cardTime, playAudio, seekCard, stopAllAudio, stopAudio, useHiddenAudio } from '../useHiddenAudio'
-import { DECODE_WHOLE_WAV_BYTES } from '../useHiddenAudio'
+import { DECODE_WHOLE_BYTES, DECODE_WHOLE_WAV_BYTES } from '../useHiddenAudio'
 import { forgetWaves, HEARD_ENOUGH, heardShape, noteLevel, useWaveforms, waveDecodable, wantWave } from '../useWaveforms'
 
 /** An audio element stand-in that keeps where it was set to play from. */
@@ -104,6 +104,14 @@ describe('the scrubber and the card’s PLAY', () => {
     expect(cardTime('k')!.at).toBe(30)
   })
 
+  it('a PLAY that fails forgets the seek made before it', async () => {
+    seekCard('k', 50)
+    await playAudio('k', { ...audio, url: 'https://blossom.test/' + 'ee'.repeat(32), hash: 'ee'.repeat(32) })
+    expect(useHiddenAudio.getState().entries[cardKey('k')]?.phase).toBe('error')
+    await playAudio('k', audio)
+    expect(FakeAudio.made.at(-1)!.currentTime).toBe(0)
+  })
+
   it('a stop forgets a seek made before PLAY', async () => {
     seekCard('k', 50)
     stopAudio('k')
@@ -114,9 +122,12 @@ describe('the scrubber and the card’s PLAY', () => {
 
 describe('the waveform store', () => {
   it('opens a file for its shape before PLAY only when the item says it is small enough to decode whole, and never twice', () => {
-    expect(waveDecodable(0)).toBe(false)
-    expect(waveDecodable(DECODE_WHOLE_WAV_BYTES)).toBe(true)
-    expect(waveDecodable(DECODE_WHOLE_WAV_BYTES + 1)).toBe(false)
+    expect(waveDecodable(0, 'audio/wav')).toBe(false)
+    expect(waveDecodable(DECODE_WHOLE_WAV_BYTES, 'audio/wav')).toBe(true)
+    expect(waveDecodable(DECODE_WHOLE_WAV_BYTES + 1, 'audio/wav')).toBe(false)
+    // A compressed file is decoded whole only up to DECODE_WHOLE_BYTES, so nothing larger is fetched for it.
+    expect(waveDecodable(DECODE_WHOLE_BYTES, 'audio/mpeg')).toBe(true)
+    expect(waveDecodable(DECODE_WHOLE_BYTES + 1, 'audio/mpeg')).toBe(false)
     // Too large by its item: nothing is fetched.
     wantWave({ ...audio, size: 9 * 1024 * 1024 })
     expect(gets).toBe(0)

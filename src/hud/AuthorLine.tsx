@@ -18,6 +18,7 @@ import { sealedWords } from '../lib/sealedAt'
 import { trustedTip } from '../lib/seeds/seedSources'
 import { useNow } from '../hooks/useNow'
 import { useHyperspace } from '../store/useHyperspace'
+import { useProfile } from '../hooks/useProfile'
 import { ProfilePic, ProfileTap } from './ProfileBadge'
 import { CopyValue } from './ui/CopyValue'
 import { safeNpub } from '../lib/npub'
@@ -27,12 +28,14 @@ export function AuthorLine({ pubkey, name, mine, createdAt }: { pubkey: string; 
   const tip = useHyperspace((s) => s.tipHeight) ?? trustedTip()
   const now = useNow(60_000)
   const when = sealedWords(createdAt, tip, now / 1000)
+  const nip05 = useProfile(pubkey || null)?.nip05?.replace(/^_@/, '')
   const style = { '--author': authorColour(pubkey) } as CSSProperties
   return (
     <div className="authorline" style={style}>
       <ProfileTap pubkey={pubkey} className="authorline__pic"><ProfilePic pubkey={pubkey} size={30} /></ProfileTap>
       <div className="authorline__text">
         <span className="authorline__name"><i className="authordot" aria-hidden="true" />{name}{mine ? ' (you)' : ''}</span>
+        {nip05 && <span className="secret__nip05 authorline__nip05">{nip05}</span>}
         {/* The line keeps its height before the time is known, so nothing under it moves. */}
         <span className="authorline__when">{when && <Box size={11} strokeWidth={2} aria-hidden />}{when || ' '}</span>
         {/* Their key, to copy, as the card's LEFT BY gave it: this line replaces that block for a message or a sound. */}

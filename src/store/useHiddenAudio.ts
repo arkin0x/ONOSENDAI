@@ -466,6 +466,8 @@ export async function playAudio(itemKey: string, audio: AudioItem, who?: MuteSub
     play()
   } catch (err) {
     if (sessions.get(key) !== mine) return
+    // A scrub before this PLAY is not kept for the next: the card shows the top again.
+    startAt.delete(key)
     release(key)
     setEntry(key, { phase: 'error', title: audio.title, mode: 'card', itemKey, trackId, error: failWith(err) })
   }
@@ -663,7 +665,8 @@ const analysers = new Map<string, { node: AnalyserNode; samples: Float32Array }>
  * of the last few milliseconds), or null when nothing plays from the card or
  * its sound is not on the audio context. The waveform of a file too large to
  * decode whole is drawn from these as it is heard (store/useWaveforms). The
- * analyser hangs off the voice's own output and goes with it.
+ * analyser hangs off the voice's source, before its mute and level gain, and
+ * goes with the voice.
  */
 export function cardLevel(itemKey: string): number | null {
   const key = cardKey(itemKey)
@@ -675,7 +678,8 @@ export function cardLevel(itemKey: string): number | null {
     try {
       const node = ctx.createAnalyser()
       node.fftSize = 256
-      ;(v.node.getOutput() as AudioNode).connect(node)
+      // From the file itself, before the voice's mute and level: a muted or fading play still reads as the file sounds.
+      ;((v.node.source as AudioNode | null) ?? (v.node.getOutput() as AudioNode)).connect(node)
       a = { node, samples: new Float32Array(node.fftSize) }
       analysers.set(key, a)
     } catch { return null }

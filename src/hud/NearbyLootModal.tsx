@@ -247,7 +247,9 @@ export function SeedRow({ item, me, onView }: { item: NearbyItem; me: string; on
         <span className="nearby__label">{seedName(view?.dna)}</span>
         <span className="nearby__where">{bloomGrowthWords(view)}</span>
         <span className="nearby__meta" style={{ '--author': authorColour(planter) } as CSSProperties}>
-          {planter ? <ProfileTap pubkey={planter} nested className="nearby__dot"><i className="authordot" aria-hidden="true" /><span className="nearby__who">{name}</span></ProfileTap> : <span className="nearby__who">{name}</span>}
+          {/* The dot alone is the profile tap here: the seed's words are the button for its card (review of #701). */}
+          {planter && <ProfileTap pubkey={planter} nested className="nearby__dot"><i className="authordot" aria-hidden="true" /></ProfileTap>}
+          <span className="nearby__who">{name}</span>
           {when && <span className="nearby__when">· {when}</span>}
         </span>
         <WhichWay item={item} />

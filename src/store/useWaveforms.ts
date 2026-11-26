@@ -23,7 +23,7 @@ import { create } from 'zustand'
 import { openAudio } from '../lib/audioFile'
 import type { AudioItem } from '../lib/audioItem'
 import { normalise, peaksOf, WAVE_BARS, WAVE_FLOOR } from '../lib/waveform'
-import { decodeForShape, DECODE_WHOLE_WAV_BYTES } from './useHiddenAudio'
+import { decodeForShape, DECODE_WHOLE_BYTES, DECODE_WHOLE_WAV_BYTES } from './useHiddenAudio'
 
 /** The share of bars that must have been heard before a heard shape is shown as the file's own. */
 export const HEARD_ENOUGH = 0.9
@@ -92,9 +92,15 @@ export function heardShape(bars: readonly number[]): number[] {
   return normalise(filled)
 }
 
-/** Whether a file of `bytes` (0 when the item does not say) is small enough to be opened for its shape before it is played. */
-export function waveDecodable(bytes: number): boolean {
-  return bytes > 0 && bytes <= DECODE_WHOLE_WAV_BYTES
+/**
+ * Whether a file of `bytes` (0 when the item does not say) and type `mime`
+ * is small enough to be opened for its shape before it is played: the
+ * budget decodeForShape holds it to, so nothing is fetched that would not be
+ * decoded (a WAV up to DECODE_WHOLE_WAV_BYTES, anything else up to DECODE_WHOLE_BYTES).
+ */
+export function waveDecodable(bytes: number, mime = ''): boolean {
+  const cap = /wav/i.test(mime) ? DECODE_WHOLE_WAV_BYTES : DECODE_WHOLE_BYTES
+  return bytes > 0 && bytes <= cap
 }
 
 /**
@@ -105,7 +111,7 @@ export function waveDecodable(bytes: number): boolean {
 export function wantWave(audio: Pick<AudioItem, 'url' | 'hash' | 'originalHash' | 'keyHex' | 'nonceHex' | 'mime' | 'size'>, opened = false): void {
   const hash = audio.hash
   if (!hash || tried.has(hash) || useWaveforms.getState().waves[hash]?.peaks.length) return
-  if (!opened && !waveDecodable(audio.size)) return
+  if (!opened && !waveDecodable(audio.size, audio.mime)) return
   tried.add(hash)
   void openAudio(audio)
     .then(async (blob) => {

@@ -48,7 +48,7 @@ export const AUTHOR_COLOURS: readonly string[] = [
   '#9ae873', // leaf, well short of the region box's mint
   '#7cc8ff', // sky
   '#8ea6ff', // periwinkle
-  '#c4e4ff', // ice, the sky made pale
+  '#dfee6a', // citron, between straw and lime
 ]
 
 /** A hex colour's hue in degrees [0, 360), or null for a grey. */

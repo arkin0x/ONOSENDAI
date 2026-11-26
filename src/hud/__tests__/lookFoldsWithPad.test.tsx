@@ -7,9 +7,10 @@
  *   CONTROLS chip brings both back. LOOK used to stay up alone, dropped into
  *   the gap JUMP and DOWN left.
  * - TERRAIN never folds on a tap (a tap mines), but on a phone the open chat
- *   puts the pad away there too: LOOK, PLACE, SURVEY, the hotbar and the
- *   carried block go with it, each out of sight in its own place so nothing
- *   moves, and all come back when the chat folds.
+ *   puts the pad away there too: LOOK, PLACE, SURVEY, the hotbar, the first
+ *   visit's steps and the carried block go with it (a SURVEY hold ends),
+ *   each out of sight in its own place so nothing moves, and all come back
+ *   when the chat folds.
  */
 
 import { readFileSync } from 'node:fs'
@@ -41,6 +42,7 @@ import { useLayers } from '../../store/useLayers'
 import { linkChatAndPad, tapScene, usePad } from '../../store/usePad'
 import { useChat } from '../../store/useChat'
 import { useTerrain } from '../../store/useTerrain'
+import { useSurveyHold } from '../../terrain/surveyHold'
 
 const CSS = readFileSync(resolve(__dirname, '../../styles.css'), 'utf8')
 
@@ -99,12 +101,14 @@ describe('TERRAIN with the pad put away', () => {
       expect(usePad.getState().open).toBe(true)
       expect(lookUp(m)).toBe(true)
 
-      // The chat over the pad's column on a phone.
+      // The chat over the pad's column on a phone, with a SURVEY hold under way: the fold ends the hold.
+      useSurveyHold.setState({ since: Date.now() })
       useChat.getState().setOpen(true)
       await settled()
       expect(usePad.getState().open).toBe(false)
       expect(lookUp(m)).toBe(false)
       expect(String(terrainView(m)?.props.className)).toContain('is-folded')
+      expect(useSurveyHold.getState().since).toBeNull()
       // PLACE and the hotbar are still there, only out of sight: nothing moves.
       expect(m.buttons('PLACE').length).toBe(1)
       expect(m.all().some((h) => String(h.props.className ?? '').includes('terrain-hotbar'))).toBe(true)
@@ -121,8 +125,8 @@ describe('TERRAIN with the pad put away', () => {
     }
   })
 
-  it('hides PLACE, SURVEY, the hotbar and the carried block with visibility, so each keeps its place', () => {
-    expect(CSS).toContain('.terrainview.is-folded :is(.terrain-tools, .terrain-hotbar) { visibility: hidden; }')
+  it('hides PLACE, SURVEY, the hotbar, the steps and the carried block with visibility, so each keeps its place', () => {
+    expect(CSS).toContain('.terrainview.is-folded :is(.terrain-tools, .terrain-hotbar, .terrain-hint) { visibility: hidden; }')
     expect(CSS).toContain('body:has(.terrainview.is-folded) .terrain-held { visibility: hidden; }')
   })
 })

@@ -446,8 +446,8 @@ export function terrainKeys(on: EventTarget): () => void {
 function TerrainScreen({ covered }: { covered: boolean }): JSX.Element {
   // The bag open: on a phone it covers the screen as the menu does (styles.css .is-bag; App's crowded hides the rest).
   const bag = useTerrain((st) => st.sheet)
-  // The pad put away (on a phone the open chat takes its column, usePad): PLACE, SURVEY, the hotbar and the carried
-  // block go with it and LOOK (hud/WalkLookSphere.tsx), each keeping its place, and come back with CONTROLS.
+  // The pad put away (on a phone the open chat takes its column, usePad): PLACE, SURVEY, the hotbar, the steps and the
+  // carried block go with it and LOOK (hud/WalkLookSphere.tsx), each keeping its place, and come back with CONTROLS.
   const folded = usePad((st) => !st.open)
   const message = useTerrain((s) => s.message)
   const hint = useTerrain((s) => s.hint)

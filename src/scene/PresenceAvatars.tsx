@@ -9,13 +9,11 @@
  */
 
 import { useMemo } from 'react'
-import type { Quaternion } from 'three'
 import { GRID_RADIUS, placeCentre, type ViewAxes } from '../lib/space'
 import { targetColor } from '../lib/targets'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
 import { presenceDrawn, usePresence, type Person as Present } from '../store/usePresence'
 import { useProfile } from '../hooks/useProfile'
-import { avatarTurn } from '../lib/facing'
 import { OtherAvatar } from './OtherAvatar'
 import { useMutes } from '../store/useMutes'
 import { useDrawReach } from './buildZoom'
@@ -28,13 +26,13 @@ interface PersonProps {
   center: [number, number, number]
   position: Present['position']
   place: (p: Present['position']) => [number, number, number]
-  turn: Quaternion
+  spawned: boolean
 }
 
-function Person({ pubkey, center, position, place, turn }: PersonProps): JSX.Element {
+function Person({ pubkey, center, position, place, spawned }: PersonProps): JSX.Element {
   const profile = useProfile(pubkey)
   const text = (profile?.name ?? `${pubkey.slice(0, 8)}…`).toUpperCase()
-  return <OtherAvatar pubkey={pubkey} color={targetColor(pubkey)} center={center} position={position} place={place} turn={turn} label={text} labelOpacity={0.6} />
+  return <OtherAvatar pubkey={pubkey} color={targetColor(pubkey)} center={center} position={position} place={place} spawned={spawned} label={text} labelOpacity={0.6} />
 }
 
 export function PresenceAvatars({ axes }: { axes: ViewAxes }): JSX.Element | null {
@@ -64,16 +62,16 @@ export function PresenceAvatars({ axes }: { axes: ViewAxes }): JSX.Element | nul
       .filter((p) => Math.hypot(...p.centre) <= reach)
   }, [people, targets, me, focus, anchorPlane, scaleExp, place, blocked, reach])
 
-  // Turned with the view like every shard and your own avatar, so a compass
-  // turn that puts the world upside down puts them upside down with it.
-  const turn = useMemo(() => avatarTurn(axes, null), [axes])
-
+  // Each faces the way its own last move seen here went, turned with the
+  // view like every shard and your own avatar (OtherAvatar, lib/facing.ts
+  // seenTurn), so a compass turn that puts the world upside down puts them
+  // upside down with it.
   if (near.length === 0) return null
 
   return (
     <>
       {near.map((p) => (
-        <Person key={p.pubkey} pubkey={p.pubkey} center={p.centre} position={p.position} place={place} turn={turn} />
+        <Person key={p.pubkey} pubkey={p.pubkey} center={p.centre} position={p.position} place={place} spawned={p.type === 'spawn'} />
       ))}
     </>
   )

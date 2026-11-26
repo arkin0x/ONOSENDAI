@@ -531,7 +531,9 @@ export const TERRAIN_DONE: TutorialStep = {
   id: 'terrain-done',
   title: 'Your blocks',
   caption: 'Your blocks are part of cyberspace, like shards. In LIVE everyone sees them. Crew in your bag (I) lets friends build with you.',
-  hint: 'FINISH leaves TERRAIN. After the tutorial, T opens it any time.',
+  captionDone: 'Your blocks are part of cyberspace, like shards. In LIVE everyone sees them. Crew in your bag (I) lets friends build with you. FINISH leaves TERRAIN.',
+  // Only seen when the build step was skipped (the card then waits, and its button reads SKIP).
+  hint: 'Go BACK and place 3 blocks to tick this off.',
   explain: 'The bag is the last slot of the hotbar (I). It holds every block you carry, and Crew is at the bottom of it.',
   scene: { target: 'keep', highlight: '.terrain-slot--bag' },
   // Resumed with TERRAIN shut: open it first (tutorial/terrainRoute.ts).
@@ -539,6 +541,8 @@ export const TERRAIN_DONE: TutorialStep = {
   // Done, and the item ticked off, only when the build step really happened this route; skipped to, the button reads SKIP and ticks nothing.
   wait: 'terrain-built',
   stay: true,
+  // The bag keeps pulsing once the card is done: it says where Crew is.
+  keepPulse: true,
   allows: ['terrain'],
   resumes: true,
   branch: true,

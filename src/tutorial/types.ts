@@ -109,6 +109,12 @@ export interface TutorialStep {
    * route opens TERRAIN by its key, the mode button and its own button.
    */
   allows?: Array<'terrain'>
+  /**
+   * The highlight stays on after the step's `wait` has happened (it goes off
+   * then otherwise): the TERRAIN route's last card, done as it comes up,
+   * keeps pointing at the bag where Crew is.
+   */
+  keepPulse?: boolean
   /** The one-line instruction shown while waiting. */
   hint?: string
   /** NEXT stays off until the `wait` has happened; otherwise NEXT reads SKIP while waiting. */

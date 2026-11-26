@@ -165,8 +165,8 @@ export function TutorialCoach(): JSX.Element | null {
 
   // The control a step points at wears the /demo tour's pulsing ring
   // (styles.css .demo-pulse) while the step waits; nothing is clicked.
-  // A step with no wait points for as long as it is up; one that waits, until it is done.
-  const highlight = shown && (!done || !step?.wait) ? stepHighlight ?? step?.scene?.highlight : undefined
+  // A step with no wait points for as long as it is up; one that waits, until it is done (or for as long as it is up, `keepPulse`).
+  const highlight = shown && (!done || !step?.wait || step.keepPulse) ? stepHighlight ?? step?.scene?.highlight : undefined
   useEffect(() => {
     if (!highlight) { setSpot(AT_TOP); return }
     let marked: Element[] = []

@@ -137,6 +137,8 @@ describe('the end list', () => {
     expect(said('terrain-build')).toContain('PLACE (E)')
     expect(said('terrain-done')).toContain('bag (I)')
     expect(said('terrain-done')).toContain('Crew')
+    expect(stepOf('terrain-done').captionDone).toContain('FINISH leaves TERRAIN')
+    expect(stepOf('terrain-done').keepPulse).toBe(true)
     for (const line of [...ROUTE.map(said), LIVE_NOTE, ...Object.values(ALREADY_NOTE), NOTHING_CARRIED, OUT_OF_BLOCKS, CHOICE.choices!.find((c) => c.id === 'terrain')!.about]) {
       expect(line).not.toContain('—')
     }

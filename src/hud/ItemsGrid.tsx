@@ -47,7 +47,7 @@ function ItemTile({ item, fresh, onOpen }: { item: HeldItem; fresh: boolean; onO
     <button type="button" className={`items-tile${fresh ? ' is-new' : ''}`} data-tile={item.id} onClick={() => onOpen(item)} title={name} aria-label={fresh ? `${name}, new` : name}>
       {item.type === 'key'
         ? <ItemThumb type="key" image={item.key?.image} model={item.key?.model} size={TILE_PX} lazy />
-        : <ItemThumb type={item.type} coin={coin} shard={item.type === 'shard' ? item.shard : undefined} size={TILE_PX} />}
+        : <ItemThumb type={item.type} coin={coin} shard={item.type === 'shard' ? item.shard : undefined} size={TILE_PX} audio={item.type === 'audio' ? item.audio : undefined} />}
       {fresh && <span className="items-tile__new" aria-hidden="true">{NEW_MARK}</span>}
     </button>
   )

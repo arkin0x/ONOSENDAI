@@ -1,13 +1,24 @@
 /**
  * AudioCard.tsx: what the item modal shows for hidden audio (DECK-0007,
- * arkinox, 2026-10-23): its title and how it is heard, PLAY, DOWNLOAD and,
- * for a one-shot that plays once, RESET TRIGGER.
+ * arkinox, 2026-10-23), as a voice line (owner, 2026-11-26: "the audio look
+ * is amazing from the hidden message looks. lets replace audio with this",
+ * direction 7): its title; a large play button beside the file's waveform,
+ * which is the scrubber, with the time and the length under it
+ * (WaveBars WaveScrubber); the hider's caption as the written line under
+ * them; the marks that say how it is heard; DOWNLOAD and, for a one-shot
+ * that plays once, RESET TRIGGER.
  *
  * PLAY is the file as it is, from the tap (store/useHiddenAudio): a manual
  * play, whatever the item's autoplay, loop and walk settings, which are for
- * hearing it in the world. DOWNLOAD saves the decrypted file. RESET TRIGGER
- * forgets that this device heard the one-shot fire (lib/audioTrigger), so
- * leaving its sphere and entering again plays it once more.
+ * hearing it in the world. A tap or a drag on the waveform moves the play
+ * there, and before PLAY starts it there (once its length is known). DOWNLOAD saves the decrypted file.
+ * RESET TRIGGER forgets that this device heard the one-shot fire
+ * (lib/audioTrigger), so leaving its sphere and entering again plays it once
+ * more. Nothing here shortens or lengthens what plays: the whole file, as
+ * before.
+ *
+ * The waveform is the file's own once it is known here: a small file is
+ * decoded for it, a larger one is drawn as it is heard (store/useWaveforms).
  *
  * `moderation` is the row under the actions where MUTE THIS AUDIO and
  * BLOCK AUTHOR go (SecretModal, store/useMutes); absent, nothing is drawn.
@@ -24,14 +35,16 @@
  * is unmuted. MUTED among the marks says so here.
  */
 
-import { useState, useSyncExternalStore, type ReactNode } from 'react'
+import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { Download, Play, RotateCcw, Square } from 'lucide-react'
 import type { AudioItem } from '../lib/audioItem'
 import { audioExtension } from '../lib/audioItem'
 import { hasTrigger, onTriggers, resetTrigger, triggerFired, triggersVersion } from '../lib/audioTrigger'
-import { cardKey, downloadAudio, playAudio, stopAudio, useHiddenAudio, type MuteSubject } from '../store/useHiddenAudio'
+import { cardKey, cardLevel, cardTime, downloadAudio, playAudio, seekCard, stopAudio, useHiddenAudio, type MuteSubject } from '../store/useHiddenAudio'
 import { trackSilenced, useSoundMutes } from '../store/useSoundMutes'
-import { ItemIcon } from './ItemIcon'
+import { noteDuration, noteLevel, wantWave } from '../store/useWaveforms'
+import { clockWords, scrubTime } from '../lib/waveform'
+import { useWave, WaveScrubber } from './WaveBars'
 
 const ICON = 12
 
@@ -77,9 +90,52 @@ export function AudioCard({ id, triggerId, audio, who, moderation }: {
   const [saveError, setSaveError] = useState<string | null>(null)
 
   const sounding = entry?.phase === 'playing' || entry?.phase === 'loading'
+  const playing = entry?.phase === 'playing'
+  const wave = useWave(audio)
+  // Where the card's PLAY is, read about thirty times a second while it plays; where a tap before PLAY will start it, while it does not.
+  const [pos, setPos] = useState({ at: 0, duration: 0 })
+  const length = pos.duration > 0 ? pos.duration : wave.duration
+  useEffect(() => { wantWave(audio) }, [audio])
+  useEffect(() => {
+    if (!playing || typeof window === 'undefined') return
+    // Its PLAY has opened the file: its shape can be made without fetching anything more.
+    wantWave(audio, true)
+    let raf = 0
+    let last = 0
+    const tick = (t: number): void => {
+      if (t - last > 33) {
+        last = t
+        const now = cardTime(id)
+        if (now) {
+          setPos((p) => (Math.abs(p.at - now.at) < 0.02 && p.duration === now.duration ? p : now))
+          if (now.duration > 0) {
+            noteDuration(audio.hash, now.duration)
+            // A file too large to decode whole is drawn as it is heard.
+            const level = cardLevel(id)
+            if (level !== null) noteLevel(audio.hash, now.at / now.duration, level, now.duration)
+          }
+        }
+      }
+      raf = window.requestAnimationFrame(tick)
+    }
+    raf = window.requestAnimationFrame(tick)
+    return () => window.cancelAnimationFrame(raf)
+  }, [playing, audio, id])
   const toggle = (): void => {
     if (sounding) stopAudio(id)
     else void playAudio(id, audio, who, triggerId)
+  }
+  // Stopped, or come to its end: the waveform lights nothing, as the next PLAY starts at the top.
+  useEffect(() => { if (!sounding) setPos((p) => (p.at === 0 ? p : { ...p, at: 0 })) }, [sounding])
+  const seek = (fraction: number): void => {
+    // With no length known there is nowhere to go to: PLAY starts it.
+    if (!(length > 0)) return
+    const t = scrubTime(fraction, length)
+    setPos((p) => ({ ...p, at: t }))
+    // Playing, it moves there; not yet playing, PLAY starts there. Asked now, not from this render, so a drag starts it once.
+    const phase = useHiddenAudio.getState().entries[cardKey(id)]?.phase
+    const now = phase === 'playing' || phase === 'loading'
+    if (!seekCard(id, t) && !now) void playAudio(id, audio, who, triggerId)
   }
   const save = (): void => {
     setSaving(true)
@@ -87,22 +143,26 @@ export function AudioCard({ id, triggerId, audio, who, moderation }: {
     void downloadAudio(audio).then((why) => { setSaving(false); setSaveError(why) })
   }
   const status = entry?.phase === 'error' ? entry.error : entry?.phase === 'loading' ? 'Opening the file…' : saveError
+  const verb = entry?.phase === 'loading' ? 'OPENING' : sounding ? 'STOP' : 'PLAY'
 
   return (
-    <div className="audio">
-      <div className="audio__head">
-        <span className="audio__glyph" aria-hidden="true"><ItemIcon type="audio" size={16} /></span>
-        <span className="audio__title" title={audio.title}>{audio.title}</span>
+    <div className="audio voice">
+      <span className="voice__title" title={audio.title}>{audio.title}</span>
+      <div className="voice__player">
+        <button className={`voice__play${sounding ? ' is-on' : ''}`} onClick={toggle} title={sounding ? 'Stop it' : 'Play the file here, as it is'}>
+          {sounding ? <Square size={18} strokeWidth={2.25} aria-hidden /> : <Play size={18} strokeWidth={2.25} aria-hidden />}
+          <span className="voice__verb">{verb}</span>
+        </button>
+        <div className="voice__track">
+          <WaveScrubber peaks={wave.peaks} real={wave.real} time={pos.at} duration={length} onSeek={seek} label={`Where to play ${audio.title} from`} />
+          <span className="voice__times"><span>{clockWords(pos.at)}</span><span>{clockWords(length > 0 ? length : null)}</span></span>
+        </div>
       </div>
-      {audio.about && <span className="audio__about">{audio.about}</span>}
+      {audio.about && <p className="voice__line">{audio.about}</p>}
       <span className="audio__marks">
         {[...audioMarks(audio), ...(muted ? ['MUTED'] : [])].map((m) => <span key={m} className={`audio__mark${m === 'MUTED' ? ' audio__mark--muted' : ''}`} title={MARK_TIPS[m]}>{m}</span>)}
       </span>
       <div className="secret__actions audio__acts">
-        <button className={`secret__act ${sounding ? 'is-on' : ''}`} onClick={toggle} title={sounding ? 'Stop it' : 'Play the file here, as it is'}>
-          {sounding ? <Square size={ICON} strokeWidth={2.25} aria-hidden /> : <Play size={ICON} strokeWidth={2.25} aria-hidden />}
-          {entry?.phase === 'loading' ? 'OPENING' : sounding ? 'STOP' : 'PLAY'}
-        </button>
         <button className="secret__act" onClick={save} disabled={saving} title="Save the decrypted file">
           <Download size={ICON} strokeWidth={2.25} aria-hidden />{saving ? 'SAVING' : 'DOWNLOAD'}
         </button>
@@ -112,7 +172,8 @@ export function AudioCard({ id, triggerId, audio, who, moderation }: {
           </button>
         )}
       </div>
-      {status && <p className="secret__status" role="status">{status}</p>}
+      {/* Always there, so the card does not jump as a play opens or a save fails. */}
+      <p className="secret__status voice__status" role="status">{status ?? '\u00a0'}</p>
       {/* MUTE THIS AUDIO and BLOCK AUTHOR (NIP-51 kind 10000) go in this row. */}
       {moderation && <div className="secret__actions audio__moderation">{moderation}</div>}
     </div>

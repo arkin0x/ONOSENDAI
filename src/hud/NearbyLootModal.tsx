@@ -37,7 +37,7 @@ import { useCyberspace } from '../store/useCyberspace'
 import { profileLabel } from '../store/useProfiles'
 import { useShards } from '../store/useShards'
 import { rememberNearbyReturn } from '../lib/nearbyReturn'
-import { ProfilePic, ProfileTap } from './ProfileBadge'
+import { ProfileTap } from './ProfileBadge'
 import { ChestBlock, KeyLine, listedOnce, useChestOpen } from './ItemRows'
 import { isGuideKey, subjectOfWorldItem } from '../lib/commentSubjects'
 import { KeyInfo, type KeyInfoSource } from './KeyItemInfo'
@@ -50,6 +50,21 @@ import { seedOfEvent, viewScaleOf, type SeedItem } from '../lib/seeds/seedItem'
 import { bloomGrowthWords } from '../lib/seeds/bloomWords'
 import { ModalClose } from './ui/ModalClose'
 import { INFO } from './KeyItemInfo'
+import { LocateFixed, Navigation2 } from 'lucide-react'
+import type { CSSProperties } from 'react'
+import { authorColour } from '../lib/authorColour'
+import { sealInitial } from '../lib/letterReveal'
+import { readId } from '../lib/messagesRead'
+import { blockWords, sealedBlock } from '../lib/sealedAt'
+import { formatAgo } from '../lib/time'
+import { trustedTip } from '../lib/seeds/seedSources'
+import { directionFromView } from '../lib/viewPose'
+import { itemCentre } from '../lib/space'
+import { alignedOrigin } from '../store/useCyberspace'
+import { useHyperspace } from '../store/useHyperspace'
+import { sealBroken, useMessagesRead } from '../store/useMessagesRead'
+import { useWaveforms } from '../store/useWaveforms'
+import { clockWords } from '../lib/waveform'
 
 /**
  * INFO on a row: the thing's own card, the one a tap on it in the world opens
@@ -95,9 +110,42 @@ function labelOf(item: NearbyItem): string {
   return shard ? `\u201c${shard.name}\u201d shard \u00b7 ${shard.vertices.length} vertices \u00b7 ${shard.faces.length} faces` : 'shard'
 }
 
-/** The second line: where it is, in the words the panels use. */
-function whereOf(item: NearbyItem): string {
-  return `${item.plane === 1 ? 'Ideaspace' : 'Dataspace'}, height ${item.height}`
+/**
+ * When it was sealed, in plain words (shared piece "Time as a block"):
+ * "sealed at block 975,410", reckoned from the newest block known
+ * (lib/sealedAt.ts), or how long ago before a block is known. It replaced
+ * "Ideaspace, height 6", which was protocol talk (owner, 2026-11-26).
+ */
+function whenOf(item: NearbyItem, tip: number | null, verb = 'sealed'): string {
+  if (!item.createdAt) return ''
+  const block = sealedBlock(item.createdAt, tip, Date.now() / 1000)
+  return block === null ? `${verb} ${formatAgo(item.createdAt)}` : `${verb} at block ${blockWords(block)}`
+}
+
+/** The newest block this client knows, for when a row's thing was sealed. */
+function useTip(): number | null {
+  return useHyperspace((s) => s.tipHeight) ?? trustedTip()
+}
+
+/**
+ * Which way it is from where you are looking, and how far (shared piece
+ * "Distance and direction"): an arrow turned toward it and plain words,
+ * "Up and to the left · 466 pm away"; "Right here" for a thing in your own cell.
+ */
+function WhichWay({ item }: { item: NearbyItem }): JSX.Element {
+  if (item.distance === 0n) {
+    return <span className="nearby__way"><LocateFixed size={11} strokeWidth={2.25} aria-hidden />Right here</span>
+  }
+  const cs = useCyberspace.getState()
+  const centre = itemCentre(item.at, alignedOrigin(cs.anchor, cs.scaleExp), cs.scaleExp, cs.axes())
+  const dir = directionFromView(centre)
+  const style = { transform: `rotate(${dir?.deg ?? 0}deg)` } as CSSProperties
+  return (
+    <span className="nearby__way">
+      {dir && <Navigation2 className="nearby__arrow" size={11} strokeWidth={2.25} fill="currentColor" style={style} aria-hidden />}
+      {dir ? `${dir.words} · ${distanceWords(item.distance)}` : distanceWords(item.distance)}
+    </span>
+  )
 }
 
 /** LOCKED, OPEN or CLOSED (closed with CLOSE, opens again with no key), as the world draws it (store/useOpenedChests lockWord). */
@@ -111,6 +159,10 @@ export function Row({ item, me, onView }: { item: NearbyItem; me: string; onView
   const profile = useProfile(item.author ?? null)
   const author = item.author ?? ''
   const name = author === me ? 'you' : profileLabel(profile, safeNpub(author))
+  const tip = useTip()
+  // A message's seal: whole until this identity has opened it (store/useMessagesRead, per npub); your own are read.
+  const broken = useMessagesRead((s) => sealBroken(s, readId(item), author === me))
+  const length = useWaveforms((s) => (item.type === 'audio' && item.audio?.hash ? s.waves[item.audio.hash]?.duration ?? 0 : 0))
   // A chest's OPEN, a door's OPEN or CLOSE, and a key's TAKE are drawn here,
   // beside VIEW and the same size (ItemRows ChestBlock and KeyLine actionsIn;
   // tutorial feedback 2026-11-12, item 2), under the words, so they never
@@ -128,21 +180,38 @@ export function Row({ item, me, onView }: { item: NearbyItem; me: string; onView
   const info = useMemo((): KeyInfoSource | null => (key && item.keyItem
     ? { id: item.key, event: item.event, key: item.keyItem, forger: item.event?.pubkey ?? author, verified: !claim, hider: author || null, guide: isGuideKey(author), subject: subjectOfWorldItem(item) }
     : null), [key, item, author, claim])
+  // A message (not a coin) and a sound read as two lines of words, as their cards do (direction 6 and 7).
+  const letter = item.type === 'message' && !coin
+  const sound = item.type === 'audio' && !!item.audio
+  const words = sound && item.audio ? [item.audio.title, item.audio.about].filter(Boolean).join(' · ') : labelOf(item)
+  const when = whenOf(item, tip)
   return (
     <li className="secrets__row nearby__row">
-      <ItemThumb type={item.type} coin={coin} shard={item.type === 'shard' ? item.shard : undefined} image={item.keyItem?.image} model={item.keyItem?.model} />
+      <ItemThumb
+        type={item.type}
+        coin={coin}
+        shard={item.type === 'shard' ? item.shard : undefined}
+        image={item.keyItem?.image}
+        model={item.keyItem?.model}
+        letter={letter ? { colour: authorColour(author), initial: sealInitial(profile?.name, safeNpub(author)), broken } : undefined}
+        audio={sound ? { hash: item.audio?.hash || item.key } : undefined}
+      />
       <div className="nearby__body">
         {key && item.keyItem
           ? <KeyLine id={item.key} name={item.keyItem.name} author={author} actionsIn={acts} />
           : chest && item.chest
             ? <ChestBlock id={item.key} chest={item.chest} author={author} verified place={placeOf(item)} actionsIn={acts} contentsIn={contents} />
-            : <span className="nearby__label" title={labelOf(item)}>{labelOf(item)}</span>}
-        <span className="nearby__where">{whereOf(item)}</span>
-        <span className="nearby__meta">
-          {author && <ProfileTap pubkey={author}><ProfilePic pubkey={author} size={14} /></ProfileTap>}
-          <span className="nearby__who">{name}</span>
-          <span className="nearby__far">· {distanceWords(item.distance)}</span>
+            : letter || sound
+              ? <span className="nearby__label nearby__label--two" title={words}>{words}</span>
+              : <span className="nearby__label" title={labelOf(item)}>{labelOf(item)}</span>}
+        <span className="nearby__meta" style={{ '--author': authorColour(author) } as CSSProperties}>
+          {letter && !broken && <span className="nearby__unread">UNREAD</span>}
+          {/* The dot and the name together are the tap for their profile: a fingertip's worth, not an 8px dot. */}
+          {author ? <ProfileTap pubkey={author} className="nearby__dot"><i className="authordot" aria-hidden="true" /><span className="nearby__who">{name}</span></ProfileTap> : <span className="nearby__who">{name}</span>}
+          {sound && length > 0 && <span className="nearby__far">· {clockWords(length)}</span>}
+          {when && <span className="nearby__when" title={item.createdAt ? formatAgo(item.createdAt) : undefined}>· {when}</span>}
         </span>
+        <WhichWay item={item} />
         {chest && item.chest && <span className="held__chips"><LockStatus id={item.key} lock={item.chest.lockPubkey} me={me} /></span>}
       </div>
       <span className="nearby__acts">
@@ -168,6 +237,7 @@ export function SeedRow({ item, me, onView }: { item: NearbyItem; me: string; on
   const planter = seed?.planter ?? item.author ?? ''
   const profile = useProfile(planter || null)
   const name = planter === me ? 'you' : profileLabel(profile, safeNpub(planter))
+  const when = whenOf(item, useTip(), 'planted')
   const card = (): void => openCard(item)
   return (
     <li className="secrets__row nearby__row">
@@ -175,12 +245,14 @@ export function SeedRow({ item, me, onView }: { item: NearbyItem; me: string; on
       {/* The whole of its words is the tap, a fingertip's worth on a phone (review of #701). */}
       <button className="nearby__body nearby__name" onClick={card} title="Open its card">
         <span className="nearby__label">{seedName(view?.dna)}</span>
-        <span className="nearby__where">{whereOf(item)} · {bloomGrowthWords(view)}</span>
-        <span className="nearby__meta">
-          {planter && <ProfileTap pubkey={planter} nested><ProfilePic pubkey={planter} size={14} /></ProfileTap>}
+        <span className="nearby__where">{bloomGrowthWords(view)}</span>
+        <span className="nearby__meta" style={{ '--author': authorColour(planter) } as CSSProperties}>
+          {/* The dot alone is the profile tap here: the seed's words are the button for its card (review of #701). */}
+          {planter && <ProfileTap pubkey={planter} nested className="nearby__dot"><i className="authordot" aria-hidden="true" /></ProfileTap>}
           <span className="nearby__who">{name}</span>
-          <span className="nearby__far">· {distanceWords(item.distance)}</span>
+          {when && <span className="nearby__when">· {when}</span>}
         </span>
+        <WhichWay item={item} />
       </button>
       <span className="nearby__acts">
         <CardButton item={item} />

@@ -72,6 +72,8 @@ describe('the box of a held item and of a sound', () => {
     // The note is the group of three flat shapes: head, stem and flag.
     const note = m.all().find((h) => h.type === 'group' && h.children.filter((c) => typeof c !== 'string' && c.type === 'mesh').length === 3)!
     const g = asObject(note)
+    // The level ring turns to the camera too (LevelRing): an object for its frame to move.
+    for (const h of m.all().filter((h) => h.type === 'group' && h.props.name === 'level-ring')) asObject(h)
     const side = placedBoxSide(0)
     const centre = new Vector3(...at)
     for (const eye of [[1, 2, 20], [-9, 8, -4], [14, -3, 3], [1, 30, 3]] as const) {

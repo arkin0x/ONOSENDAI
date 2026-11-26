@@ -198,13 +198,14 @@ describe('the card (SecretModal)', () => {
     expect(html).not.toContain('secret__publish')
   })
 
-  it('shows the LOCAL / LIVE switch once, under the preview and before Left by, never inside METADATA (arkinox, 2026-10-29)', async () => {
+  it('shows the LOCAL / LIVE switch once, under the preview and before the actions, never inside METADATA (arkinox, 2026-10-29)', async () => {
     const dep = await deployment({ published: true, relays: ['wss://relay.test'] })
     useShards.setState({ mine: [dep], selectedSecret: dep.eventId })
     const html = card()
     expect(html.match(/class="pubswitch"/g)).toHaveLength(1)
-    // Above Left by, above the actions, and METADATA with TEST DISCOVERY inside it come after.
-    const at = ['class="secret__publish"', 'class="pubswitch"', 'secret__creator', 'secret__actions', 'aria-label="Metadata"', 'aria-label="On the wire"', TEST_WORDS.idle].map((s) => html.indexOf(s))
+    // A message opens on its author line (who left it, since 2026-11-26), then the letter and the
+    // switch under it; above the actions, and METADATA with TEST DISCOVERY inside it come after.
+    const at = ['class="authorline"', 'class="letter', 'class="secret__publish"', 'class="pubswitch"', 'secret__actions', 'aria-label="Metadata"', 'aria-label="On the wire"', TEST_WORDS.idle].map((s) => html.indexOf(s))
     expect(at.every((i) => i >= 0)).toBe(true)
     expect([...at].sort((a, b) => a - b)).toEqual(at)
     const metadata = html.slice(html.indexOf('aria-label="Metadata"'))

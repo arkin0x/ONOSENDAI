@@ -290,6 +290,8 @@ function release(key: string): void {
   waitingPlays.delete(key)
   awaitingHeard.delete(key)
   armGesture()
+  const an = analysers.get(key)
+  if (an) { analysers.delete(key); try { an.node.disconnect() } catch { /* already apart */ } }
   const v = voices.get(key)
   if (!v) return
   voices.delete(key)
@@ -319,6 +321,7 @@ export function isPlaying(key: string): boolean {
 export function stopVoice(key: string): void {
   sessions.set(key, (sessions.get(key) ?? 0) + 1)
   subjects.delete(key)
+  startAt.delete(key)
   if (key.startsWith('world:')) pendingGain.delete(key)
   release(key)
   setEntry(key, null)
@@ -327,6 +330,37 @@ export function stopVoice(key: string): void {
 /** Stop an item's card PLAY. */
 export function stopAudio(itemKey: string): void {
   stopVoice(cardKey(itemKey))
+}
+
+/**
+ * Where an item's card PLAY is in its file and how long the file is, in
+ * seconds (the card's waveform scrubber reads it each frame while it plays);
+ * null when nothing plays from the card. A length not known yet is 0.
+ */
+export function cardTime(itemKey: string): { at: number; duration: number } | null {
+  const el = voices.get(cardKey(itemKey))?.el
+  if (!el) return null
+  return { at: Number.isFinite(el.currentTime) ? el.currentTime : 0, duration: Number.isFinite(el.duration) ? el.duration : 0 }
+}
+
+/** Where a card PLAY not yet started begins (seekCard before playAudio), by voice key. */
+const startAt = new Map<string, number>()
+
+/**
+ * Move an item's card PLAY to `seconds` into its file: at once while it
+ * plays, or, with nothing playing from the card, where the next PLAY starts
+ * (the scrubber tapped before PLAY). True when a playing file moved.
+ */
+export function seekCard(itemKey: string, seconds: number): boolean {
+  const key = cardKey(itemKey)
+  const at = Math.max(0, Number.isFinite(seconds) ? seconds : 0)
+  const el = voices.get(key)?.el
+  if (el) {
+    try { el.currentTime = at } catch { /* not seekable yet: it plays on from where it is */ }
+    return true
+  }
+  startAt.set(key, at)
+  return false
 }
 
 function failWith(err: unknown): string {
@@ -409,6 +443,10 @@ export async function playAudio(itemKey: string, audio: AudioItem, who?: MuteSub
     if (sessions.get(key) !== mine) return
     const url = URL.createObjectURL(blob)
     const el = element(key, mine, url, audio.loop, audio.title, 'card', itemKey, () => stopVoice(key), trackId)
+    // The scrubber tapped before PLAY: it starts there.
+    const from = startAt.get(key)
+    startAt.delete(key)
+    if (from) { try { el.currentTime = from } catch { /* starts at the top */ } }
     let node: ThreeAudio<GainNode> | null = null
     if (l) {
       try {
@@ -428,6 +466,8 @@ export async function playAudio(itemKey: string, audio: AudioItem, who?: MuteSub
     play()
   } catch (err) {
     if (sessions.get(key) !== mine) return
+    // A scrub before this PLAY is not kept for the next: the card shows the top again.
+    startAt.delete(key)
     release(key)
     setEntry(key, { phase: 'error', title: audio.title, mode: 'card', itemKey, trackId, error: failWith(err) })
   }
@@ -603,6 +643,51 @@ function shortLoopBuffer(blob: Blob): Promise<AudioBuffer | null> {
   // The next decode waits for this one, whether it succeeds or not.
   decoding = run.catch(() => undefined)
   return run
+}
+
+/**
+ * A small file decoded whole for its waveform (store/useWaveforms), on the
+ * same one-at-a-time queue as a short loop, so the two never decode at once;
+ * null when its worst case does not fit the budget by its bytes
+ * (decodeWholeOk) or its decoded buffer does not (decodedFits).
+ */
+export function decodeForShape(blob: Blob, file: Uint8Array): Promise<AudioBuffer | null> {
+  const ctx = audioContext()
+  if (!ctx || !decodeWholeOk(file, blob.size, ctx.sampleRate)) return Promise.resolve(null)
+  return shortLoopBuffer(blob)
+}
+
+/** An analyser on each card voice whose level is asked for (cardLevel), by voice key. */
+const analysers = new Map<string, { node: AnalyserNode; samples: Float32Array }>()
+
+/**
+ * How loud an item's card PLAY is this moment, 0 to 1 (the loudest sample
+ * of the last few milliseconds), or null when nothing plays from the card or
+ * its sound is not on the audio context. The waveform of a file too large to
+ * decode whole is drawn from these as it is heard (store/useWaveforms). The
+ * analyser hangs off the voice's source, before its mute and level gain, and
+ * goes with the voice.
+ */
+export function cardLevel(itemKey: string): number | null {
+  const key = cardKey(itemKey)
+  const v = voices.get(key)
+  const ctx = audioContext()
+  if (!v?.node || !ctx) return null
+  let a = analysers.get(key)
+  if (!a) {
+    try {
+      const node = ctx.createAnalyser()
+      node.fftSize = 256
+      // From the file itself, before the voice's mute and level: a muted or fading play still reads as the file sounds.
+      ;((v.node.source as AudioNode | null) ?? (v.node.getOutput() as AudioNode)).connect(node)
+      a = { node, samples: new Float32Array(node.fftSize) }
+      analysers.set(key, a)
+    } catch { return null }
+  }
+  a.node.getFloatTimeDomainData(a.samples as Float32Array<ArrayBuffer>)
+  let peak = 0
+  for (let i = 0; i < a.samples.length; i++) { const x = Math.abs(a.samples[i]); if (x > peak) peak = x }
+  return Math.min(1, peak)
 }
 
 /** Decode a file into a buffer on the shared context; the callback form, which every Safari has. Throws when it cannot. */

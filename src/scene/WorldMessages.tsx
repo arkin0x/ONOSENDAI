@@ -78,7 +78,6 @@ import { LABEL_PRIORITY, WorldLabel } from './WorldLabel'
 import { findCashuToken } from '../lib/cashu'
 import { NFT_WORDS, replaceNftLinks } from '../lib/nftLink'
 import { useProfile } from '../hooks/useProfile'
-import { profileLabel } from '../store/useProfiles'
 import { coinKind, HELD_OPACITY, heldBox, itemDrawAs, madeBy, markShown, type MarkKind } from '../lib/worldMarks'
 import { useCashu } from '../hud/useCashu'
 import { TapTarget } from './TapTarget'
@@ -101,6 +100,8 @@ import { sealInitial } from '../lib/letterReveal'
 import { readId } from '../lib/messagesRead'
 import { sealBroken, useMessagesRead } from '../store/useMessagesRead'
 import { recordViewPose } from '../lib/viewPose'
+import { nameLabel, shortNpub } from '../lib/nameLabel'
+import { ItemToken } from './ItemToken'
 
 /** A message's tap target, in CSS pixels: a fingertip over the mark, at any zoom. */
 const TAP_PX = 44
@@ -234,17 +235,8 @@ interface Props {
  * item it belonged to (arkinox, 2026-09-14).
  */
 export function author(w: { author: string; mine: boolean }): string {
-  return `— ${shortAuthor(w.author, w.mine)}`
-}
-
-function shortAuthor(pubkey: string, mine: boolean): string {
-  if (mine) return 'you'
-  try {
-    const npub = nip19.npubEncode(pubkey)
-    return `${npub.slice(0, 10)}…${npub.slice(-4)}`
-  } catch {
-    return pubkey.slice(0, 8)
-  }
+  // The name alone, as every name over a thing reads (lib/nameLabel): no dash before it.
+  return w.mine ? 'you' : shortNpub(w.author)
 }
 
 /** How much of a long message is shown in the world before the tap. */
@@ -367,8 +359,11 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
         // Being moved, a message, or a key with no model that is not held,
         // keeps its one-gibson box, faint; anything else (a held key's half
         // box among them) its PlacedBox.
+        // A model-less item being moved is its token, faint (ItemToken); a message its faint box.
         if (w.key === moving) return worldCube(w) && draw === 'item'
-          ? <WorldMark key={w.key} kind="note" at={w.centre} side={noteBoxSide(scaleExp)} opacity={MOVING_OPACITY} />
+          ? w.type === 'key'
+            ? <ItemToken key={w.key} id={w.key} at={w.centre} side={noteBoxSide(scaleExp)} colour={authorColour(w.itemAuthor ?? w.author)} opacity={MOVING_OPACITY} />
+            : <WorldMark key={w.key} kind="note" at={w.centre} side={noteBoxSide(scaleExp)} opacity={MOVING_OPACITY} />
           : <PlacedBox key={w.key} at={w.centre} opacity={MOVING_OPACITY} />
         if (w.coin) return <CoinItem key={w.key} text={w.text} at={w.centre} scaleExp={scaleExp} onTap={open} />
         if (w.type === 'message') return <NoteItem key={w.key} w={w} birth={births[w.key]} onTap={open} />
@@ -381,11 +376,11 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
         return (
           <group key={w.key}>
             {draw === 'item'
-              ? <ItemMark id={w.key} text={w.text} sub={author(w)} at={w.centre} wears={w.wears} region={w.region} axes={axes} side={side} onTap={open} />
+              ? <ItemMark id={w.key} text={w.text} sub={author(w)} who={{ pubkey: w.itemAuthor ?? w.author, mine: w.mine }} at={w.centre} wears={w.wears} region={w.region} axes={axes} side={side} onTap={open} />
               : <HeldItemMark id={w.key} own={draw === 'own'} at={w.centre} wears={w.wears} region={w.region} axes={axes} appear={play} />}
-            {/* TAKE on a key with no model: its one-gibson cube fades out (MARK_FADE_MS), and its name, over where the cube stood, with the rest. */}
-            {draw !== 'item' && play && side !== undefined && <WorldMark kind="note" at={w.centre} side={side} fadeOut={play.at} />}
-            {draw !== 'item' && play && <ItemVanish id={w.key} label={{ text: w.text, color: NOTE, sub: author(w), subColor: ACCENT }} at={w.centre} wears={w.wears} region={w.region} axes={axes} minPx={NOTE_EDGE_PX} play={play} clear={side === undefined ? { trueSide: placedBoxSide(scaleExp), minPx: 0 } : { trueSide: side, minPx: 0, nearFace: true }} />}
+            {/* TAKE on an item with no model: its token fades out (MARK_FADE_MS), and its name, over where it stood, with the rest. */}
+            {draw !== 'item' && play && side !== undefined && <ItemToken id={w.key} at={w.centre} side={side} colour={authorColour(w.itemAuthor ?? w.author)} fadeOut={play.at} />}
+            {draw !== 'item' && play && <ItemVanish id={w.key} label={{ text: w.text, color: NAME_WHITE, sub: author(w), subColor: NAME_WHITE }} at={w.centre} wears={w.wears} region={w.region} axes={axes} minPx={NOTE_EDGE_PX} play={play} clear={side === undefined ? { trueSide: placedBoxSide(scaleExp), minPx: 0 } : { trueSide: side * TOKEN_REACH, minPx: 0, nearFace: true }} />}
             {/* A fingertip over the mark at any distance, and over a one-gibson
                 cube the whole cube once it is larger (TapTarget `side`). A
                 held key keeps its fingertip: its box is the half one. */}
@@ -415,7 +410,8 @@ function worldCube(w: { type: string; coin: boolean; wears?: ItemWears }): boole
 
 /** What a key or a chest is called in the world: its glyph and its name. */
 export function itemMarkText(w: { type: string; keyItem?: { name?: string }; chest?: { name?: string } }): string {
-  return w.type === 'key' ? `⚷ ${w.keyItem?.name ?? 'key'}` : `▣ ${w.chest?.name ?? 'chest'}`
+  // The name alone: no symbol before it (owner, 2026-11-27: an item may be a key item and stand for anything).
+  return w.type === 'key' ? w.keyItem?.name ?? 'item' : w.chest?.name ?? 'chest'
 }
 
 /** The SNO a key wears and how it moves (lib/itemModel.ts). */
@@ -444,10 +440,12 @@ const NO_MOTION: readonly ItemAnimation[] = []
  * stands just above it rather than through it. Without one (Cyberspace TV's
  * finds, a key whose model has not come) the cube is sized on screen.
  */
-export function ItemMark({ id, text, sub, at, opacity = 1, wears, region = null, axes, side, onTap }: {
+export function ItemMark({ id, text, sub, who, at, opacity = 1, wears, region = null, axes, side, onTap }: {
   id?: string
   text: string
   sub: string
+  /** Who left it: their name (lib/nameLabel) takes the place of `sub`, and their colour is the token's. */
+  who?: { pubkey: string; mine: boolean }
   at: [number, number, number]
   opacity?: number
   wears?: ItemWears
@@ -459,17 +457,24 @@ export function ItemMark({ id, text, sub, at, opacity = 1, wears, region = null,
   onTap?: () => void
 }): JSX.Element {
   const model = useItemModel(wears?.model)
+  const profile = useProfile(who?.pubkey || null)
+  const me = useCyberspace((s) => s.identity.pubkey)
+  // Its name and who left it, white over the scene as every name label is (owner, 2026-11-27).
+  const by = who ? (who.mine ? 'you' : nameLabel(who.pubkey, me, profile?.name)) : sub
   // A model's faces would hide a label at its middle, so its label stands
-  // just above its box instead (ItemModelMark `label`). The cube's is
-  // drawn through, as before, or stands just above a one-gibson cube (`side`).
-  const label = { text, color: NOTE, sub, subColor: ACCENT }
+  // just above its box instead (ItemModelMark `label`). The token's stands
+  // just above the token and its ring (`side`).
+  const label = { text, color: NAME_WHITE, sub: by, subColor: NAME_WHITE }
   if (model && axes && itemMarkShape(model, axes) === 'model') {
     return <ItemModelMark id={id ?? text} model={model} animation={wears?.animation ?? NO_MOTION} at={at} region={region} axes={axes} minPx={NOTE_EDGE_PX} opacity={opacity} onTap={onTap} label={FLOATING_NAME.item ? label : undefined} />
   }
   return (
     <>
-      <WorldMark kind="note" at={at} opacity={opacity} side={side} />
-      {FLOATING_NAME.item && <WorldLabel text={label.text} color={label.color} at={at} align="center" px={13} sub={label.sub} subColor={label.subColor} opacity={opacity} clear={side === undefined ? undefined : { trueSide: side, minPx: 0, nearFace: true }} recede="name" />}
+      {/* In the world with no model: the token (ItemToken). Cyberspace TV's finds, sized on screen, keep the cube. */}
+      {side !== undefined
+        ? <ItemToken id={id ?? text} at={at} side={side} colour={authorColour(who?.pubkey)} opacity={opacity} />
+        : <WorldMark kind="note" at={at} opacity={opacity} side={side} />}
+      {FLOATING_NAME.item && <WorldLabel text={label.text} color={label.color} at={at} align="center" px={11} sub={label.sub} subColor={label.subColor} opacity={opacity} clear={side === undefined ? undefined : { trueSide: side * TOKEN_REACH, minPx: 0, nearFace: true }} recede="name" />}
     </>
   )
 }
@@ -548,7 +553,7 @@ export function NoteItem({ w, birth, onTap }: { w: { key: string; lineage?: stri
     return () => window.clearTimeout(t)
   }, [flourish, until])
   const yours = w.mine || (!!w.author && w.author === me)
-  const name = yours ? 'you' : profileLabel(profile, shortAuthor(w.author, false))
+  const name = yours ? 'you' : nameLabel(w.author, me, profile?.name)
   const side = noteBoxSide(useCyberspace((s) => s.scaleExp))
   const id = readId(w)
   const broken = useMessagesRead((s) => sealBroken(s, id, yours))
@@ -571,6 +576,9 @@ export function NoteItem({ w, birth, onTap }: { w: { key: string; lineage?: stri
 
 /** Text over the scene is white, with the label's dark outline (owner's rule, 2026-11-14). */
 const NAME_WHITE = '#ffffff'
+
+/** How far the token's ring reaches across, for a token 1 across: what its name stands clear of. */
+const TOKEN_REACH = 1.3
 
 /** An npub for a seal's initial; empty for no author. */
 function safeNpubOf(pubkey: string): string {

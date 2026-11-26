@@ -28,10 +28,10 @@ vi.mock('@react-three/drei', async () => {
 })
 
 import { NoteItem, noteBoxSide, patchNoteDepthPull, NOTE_BOX_GIBSONS, NOTE_DEPTH_PULL } from '../WorldMessages'
-import { LetterField, lettersDrawn, LETTER_GIBSONS, PAPER } from '../LetterField'
+import { FOLD_LINE_VERTS, foldLinePoints, LetterField, lettersDrawn, LETTER_GIBSONS, LETTER_TURN_S, PAPER } from '../LetterField'
 import { authorColour } from '../../lib/authorColour'
 import { useMessagesRead } from '../../store/useMessagesRead'
-import { Color, InstancedMesh, PerspectiveCamera, ShaderMaterial } from 'three'
+import { Color, DoubleSide, InstancedMesh, PerspectiveCamera, ShaderMaterial, type BufferGeometry, type LineSegments } from 'three'
 import { ShardMesh } from '../ShardMesh'
 import { TapTarget } from '../TapTarget'
 import { useCyberspace } from '../../store/useCyberspace'
@@ -138,17 +138,60 @@ describe('a message’s box', () => {
     expect(letterWidth(paper(r))).toBeCloseTo(0.5, 6)
   })
 
-  it('faces the camera from any side, so its seal is always seen', async () => {
+  it('is a thing in the place: it turns slowly about the up axis whatever the camera does, about a turn in 24 s, upright', async () => {
     useCyberspace.setState({ scaleExp: 0 })
     r = await r3fRoot()
     await r.render(scene())
-    for (const eye of [[0, 0, 5], [6, 2, -3], [-4, 8, 1]] as Array<[number, number, number]>) {
-      const camera = await placeCamera(r, eye)
-      const m = new Matrix4()
-      paper(r).getMatrixAt(0, m)
-      // The paper's face (its +z) points at the camera, give or take the letter's tilt and bob.
-      const normal = new Vector3(0, 0, 1).transformDirection(m)
-      expect(normal.dot(camera.position.clone().normalize())).toBeGreaterThan(0.99)
+    const facing = (): Vector3 => { const m = new Matrix4(); paper(r!).getMatrixAt(0, m); return new Vector3(0, 0, 1).transformDirection(m) }
+    await placeCamera(r, [0, 0, 5])
+    const a = facing()
+    // Upright: its face stays level, turning about the up axis (a slight tilt about its own face leaves the normal level).
+    expect(Math.abs(a.y)).toBeLessThan(1e-6)
+    // The camera moving does not turn it.
+    await placeCamera(r, [6, 2, -3])
+    const b = facing()
+    expect(Math.abs(b.y)).toBeLessThan(1e-6)
+    const turned = (u: Vector3, v: Vector3): number => (Math.acos(Math.max(-1, Math.min(1, u.dot(v)))) * 180) / Math.PI
+    // One frame (1/60 s) turns it a fortieth of a degree, never toward the camera.
+    expect(turned(a, b)).toBeLessThan(1)
+    // A second of frames turns it about 15 degrees: a turn in LETTER_TURN_S.
+    for (let f = 0; f < 60; f++) await r.frame()
+    expect(turned(b, facing())).toBeCloseTo(360 / LETTER_TURN_S, 0)
+  })
+
+  it('is paper on both sides, with its flap, seal and initial on both faces, and its edge and flap drawn as lines that keep a pixel at any distance', async () => {
+    useCyberspace.setState({ scaleExp: 0 })
+    r = await r3fRoot()
+    await r.render(scene())
+    await placeCamera(r, [0, 0, 200])
+    expect((paper(r).material as Material).side).toBe(DoubleSide)
+    let lines: (LineSegments & { geometry: BufferGeometry }) | undefined
+    r.state().scene.traverse((o) => { if (o.name === 'letter-fold-lines') lines = o as never })
+    expect(lines!.type).toBe('LineSegments')
+    expect(lines!.geometry.drawRange.count).toBe(FOLD_LINE_VERTS)
+    // The lines stand on both faces, off the paper, in the scene's frame where the letter is.
+    const pos = lines!.geometry.getAttribute('position')
+    const zs = new Set<number>()
+    for (let i = 0; i < FOLD_LINE_VERTS; i++) zs.add(Math.sign(new Vector3(pos.getX(i), pos.getY(i), pos.getZ(i)).sub(new Vector3(0, 0, 0)).dot(new Vector3(0, 0, 1).transformDirection((() => { const m = new Matrix4(); paper(r!).getMatrixAt(0, m); return m })()))))
+    expect([...zs].sort()).toEqual([-1, 1])
+    // The flap's fold is among them: from the left edge to the seal and up to the corner, on each face.
+    const pts = foldLinePoints()
+    expect(pts.length / 3).toBe(FOLD_LINE_VERTS)
+  })
+
+  it('with reduced motion holds still: no turn, no bob', async () => {
+    ;(globalThis as { matchMedia?: unknown }).matchMedia = (q: string) => ({ matches: q.includes('reduce'), addEventListener: () => {}, removeEventListener: () => {} })
+    try {
+      useCyberspace.setState({ scaleExp: 0 })
+      r = await r3fRoot()
+      await r.render(scene())
+      await placeCamera(r, [0, 0, 5])
+      const before = new Matrix4(); paper(r).getMatrixAt(0, before)
+      for (let f = 0; f < 30; f++) await r.frame()
+      const after = new Matrix4(); paper(r).getMatrixAt(0, after)
+      expect(after.equals(before)).toBe(true)
+    } finally {
+      delete (globalThis as { matchMedia?: unknown }).matchMedia
     }
   })
 

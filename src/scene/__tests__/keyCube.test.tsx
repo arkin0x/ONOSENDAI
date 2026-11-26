@@ -41,7 +41,7 @@ vi.mock('../ItemModel', async (real) => ({
 
 import { createElement } from 'react'
 import { act } from '@react-three/fiber'
-import { Box3, Vector3, type Camera, type LineSegments, type Material, type Object3D, type PerspectiveCamera } from 'three'
+import { Box3, Vector3, type Camera, type Group, type LineSegments, type Material, type Mesh, type Object3D, type PerspectiveCamera } from 'three'
 import type { NostrEvent } from '../../lib/events'
 import type { KeyItem } from '../../lib/hidden'
 import type { ViewAxes } from '../../lib/space'
@@ -51,6 +51,7 @@ import { useInventory } from '../../store/useInventory'
 import { useShards, type WorldItem } from '../../store/useShards'
 import { ItemMark, keyBoxSide, markFadeLeft, MARK_FADE_MS, noteBoxSide, NOTE_EDGE_PX, WorldMessages } from '../WorldMessages'
 import { lettersDrawn, LETTER_GIBSONS } from '../LetterField'
+import { TOKEN_CORE } from '../ItemToken'
 import { useTakeVanish } from '../../store/useOpenCeremony'
 
 const AXES: ViewAxes = { right: { axis: 'x', dir: 1 }, up: { axis: 'y', dir: 1 }, out: { axis: 'z', dir: -1 } }
@@ -160,45 +161,77 @@ async function measure(root: R3fRoot, backs: number[], cube = true): Promise<{ e
 
 const BACKS = [2.5, 8, 30, 120]
 
+/** The model-less item's token (ItemToken): its group, its core and its line material. */
+function token(root: R3fRoot): { group: Group; core: Mesh; lines: LineSegments } {
+  let group: Group | undefined, core: Mesh | undefined, lines: LineSegments | undefined
+  root.state().scene.traverse((o) => {
+    if (o.name === 'item-token') group = o as Group
+    if (o.name === 'item-token-core') core = o as Mesh
+    if (o.name === 'item-token-lines') lines = o as LineSegments
+  })
+  expect(group).toBeDefined()
+  return { group: group!, core: core!, lines: lines! }
+}
+
+/** The token's width on screen, CSS pixels, from its drawn core's box. */
+function tokenScreenWidth(root: R3fRoot, camera: Camera): number {
+  const { core } = token(root)
+  core.updateWorldMatrix(true, false)
+  return screenWidth(core as unknown as LineSegments, camera, root.state().size.width)
+}
+
 describe('a key with no model of its own', () => {
   it('is sized one gibson, as a message’s box is; a key that wears a model is not', () => {
     for (const scaleExp of [0, 1, 2, 5]) expect(keyBoxSide(undefined, scaleExp)).toBe(noteBoxSide(scaleExp))
     expect(keyBoxSide({ model: MODEL, animation: [] }, 0)).toBeUndefined()
   })
 
-  it('draws one gibson across in the world at 2^0 and 2^1, near or far, as wide as a message’s letter in the same place', async () => {
+  it('is a token one gibson across in the world at 2^0 and 2^1, near or far, centred where a message’s letter would be (owner, 2026-11-27)', async () => {
     for (const scaleExp of [0, 1]) {
       useCyberspace.setState({ scaleExp })
       r = await scene([worldKey('1'.repeat(64))])
-      const key = await measure(r, BACKS)
-      for (const e of key.edges) expect(e).toBeCloseTo(noteBoxSide(scaleExp), 6)
+      await r.frame()
+      const { group } = token(r)
+      expect(group.scale.x).toBeCloseTo(noteBoxSide(scaleExp), 9)
+      const centre = group.position.clone()
+      const widths: number[] = []
+      for (const back of BACKS) widths.push(tokenScreenWidth(r, await lookFrom(r, centre, back)))
       // Nearer is larger on screen, farther smaller: a thing in the place.
-      for (let i = 1; i < key.widths.length; i++) expect(key.widths[i]).toBeLessThan(key.widths[i - 1])
-      const keyBox = worldBox(markEdges(r.state().scene))
-      const keyMaterial = markEdges(r.state().scene).material as Material
+      for (let i = 1; i < widths.length; i++) expect(widths[i]).toBeLessThan(widths[i - 1])
       await r.unmount()
 
-      // A message is a letter now (LetterField), one gibson wide, centred where the key's cube is.
+      // A message is a letter (LetterField), one gibson wide, centred where the token is, give or take the token's bob.
       r = await scene([worldMessage('2'.repeat(64), 'hello')])
       await r.frame()
       const [letter] = lettersDrawn()
       expect(letter.width).toBeCloseTo(noteBoxSide(scaleExp) * LETTER_GIBSONS, 9)
-      expect(new Vector3(...letter.centre).distanceTo(keyBox.getCenter(new Vector3()))).toBeLessThan(1e-6)
-      // The cube is light: see-through, no depth written.
-      expect(keyMaterial.transparent).toBe(true)
-      expect(keyMaterial.depthWrite).toBe(false)
-      expect(keyMaterial.depthTest).toBe(true)
+      expect(new Vector3(...letter.centre).distanceTo(centre)).toBeLessThan(0.05 * noteBoxSide(scaleExp))
       await r.unmount()
       r = null
     }
   })
 
+  it('is a dark solid core that writes depth, so it reads on a white wall, edged in light that glows, so it reads in the dark; no blue wire cube', async () => {
+    r = await scene([worldKey('1'.repeat(64))])
+    await r.frame()
+    const { core, lines } = token(r)
+    const coreMat = core.material as Material & { color: { getHexString: () => string } }
+    expect(coreMat.depthWrite).not.toBe(false)
+    expect(`#${coreMat.color.getHexString()}`).toBe(TOKEN_CORE)
+    expect((lines.material as Material).depthWrite).toBe(false)
+    // No one-gibson wire cube left in the scene.
+    const cubes = drawn(r.state().scene).filter((o) => o.type === 'LineSegments' && o.name !== 'item-token-lines' && o.name !== 'letter-fold-lines')
+    expect(cubes).toEqual([])
+  })
+
   it('follows the scale as it changes, still one gibson', async () => {
     r = await scene([worldKey('1'.repeat(64))])
-    expect((await measure(r, [10])).edges[0]).toBeCloseTo(1, 6)
+    await r.frame()
+    expect(token(r).group.scale.x).toBeCloseTo(1, 6)
     useCyberspace.setState({ scaleExp: 1 })
     await r.render(createElement(WorldMessages, { axes: AXES }))
-    expect((await measure(r, [10])).edges[0]).toBeCloseTo(0.5, 6)
+    await r.frame()
+    expect(token(r).group.scale.x).toBeCloseTo(0.5, 6)
   })
 
   it('stands its name and its credit line just over the cube on screen, clear of its highest corner, near or far', async () => {
@@ -283,20 +316,20 @@ describe('a key with no model of its own', () => {
     expect(useShards.getState().selectedSecret).toBe(id)
   })
 
-  it('being moved, keeps its one-gibson cube, faint', async () => {
+  it('being moved, keeps its token, faint', async () => {
     const id = '1'.repeat(64)
     const w = worldKey(id)
     r = await scene([w])
-    const still = await measure(r, [10])
-    const opaque = (markEdges(r.state().scene).material as Material).opacity
+    await r.frame()
+    const full = (token(r).lines.material as Material).opacity
     // Aiming a deploy brings the view to you (the store's BUILD focus); this view stays where the key is.
     await act(async () => {
       useShards.setState({ pending: { type: 'key', key: w.keyItem, move: { eventId: id } } } as never)
       useCyberspace.setState({ anchor: HERE, anchorPlane: 0, scaleExp: 0 })
     })
-    const moving = await measure(r, [10])
-    expect(moving.edges[0]).toBeCloseTo(still.edges[0], 6)
-    expect((markEdges(r.state().scene).material as Material).opacity).toBeLessThan(opaque)
+    await r.frame()
+    expect(token(r).group.scale.x).toBeCloseTo(noteBoxSide(0), 6)
+    expect((token(r).lines.material as Material).opacity).toBeLessThan(full)
   })
 })
 
@@ -310,16 +343,16 @@ describe('TAKE on a key with no model', () => {
     expect(markFadeLeft(-5)).toBe(1)
   })
 
-  it('the one-gibson cube fades out where it stood rather than going in one frame; the half box comes in; the name keeps its place', async () => {
+  it('the token fades out where it stood rather than going in one frame; the half box comes in; the name keeps its place', async () => {
     const id = '1'.repeat(64)
     const w = worldKey(id)
     let now = performance.now()
     const clock = vi.spyOn(performance, 'now').mockImplementation(() => now)
     try {
       r = await scene([w])
-      const before = markEdges(r.state().scene)
-      const full = (before.material as Material).opacity
-      const centre = worldBox(before).getCenter(new Vector3())
+      await r.frame()
+      const full = (token(r).lines.material as Material).opacity
+      const centre = token(r).group.position.clone()
       await lookFrom(r, centre, 4)
       const nameAt = (): number[] => {
         const ys: number[] = []
@@ -335,23 +368,20 @@ describe('TAKE on a key with no model', () => {
         useInventory.setState({ owner: me, items: { [id]: { rowKey: `${me}/${id}`, owner: me, id, type: 'key', name: 'Brass Key', event: w.event as NostrEvent, author: OTHER, verified: true, source: 'found', place: null, from: null, at: 1, key: w.keyItem } }, storage: 'memory' } as never)
         useTakeVanish.getState().begin(me, id, false, now)
       })
-      const cubes = (): LineSegments[] => (drawn(r!.state().scene).filter((o) => o.type === 'LineSegments') as unknown as LineSegments[])
-        .filter((l) => Math.abs(worldBox(l).getSize(new Vector3()).x - noteBoxSide(0)) < 1e-6)
-      // The first frame: still the whole cube, at full, one gibson where it stood.
+      // The first frame: still the whole token, at full, where it stood.
       await r.frame()
-      expect(cubes()).toHaveLength(1)
-      expect((cubes()[0].material as Material).opacity).toBeCloseTo(full, 6)
-      expect(worldBox(cubes()[0]).getCenter(new Vector3()).distanceTo(centre)).toBeLessThan(1e-6)
-      // Its name stands where it stood.
+      expect(token(r).group.visible).toBe(true)
+      expect((token(r).lines.material as Material).opacity).toBeCloseTo(full, 6)
+      expect(token(r).group.position.distanceTo(centre)).toBeLessThan(0.05)
       expect(nameAt()[0]).toBeCloseTo(nameBefore[0], 6)
       // Half way: half as bright.
       now += 100
       await r.frame()
-      expect((cubes()[0].material as Material).opacity).toBeCloseTo(full / 2, 6)
+      expect((token(r).lines.material as Material).opacity).toBeCloseTo(full / 2, 6)
       // Past 200 ms: gone. The half box is what marks the place.
       now += 150
       await r.frame()
-      expect(cubes()).toHaveLength(0)
+      expect(token(r).group.visible).toBe(false)
       const half = (drawn(r.state().scene).filter((o) => o.type === 'LineSegments') as unknown as LineSegments[])
         .filter((l) => Math.abs(worldBox(l).getSize(new Vector3()).x - 0.5) < 1e-6)
       expect(half).toHaveLength(1)

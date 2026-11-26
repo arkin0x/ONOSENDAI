@@ -9,6 +9,7 @@
  *
  * Mounted for real (test/elementRoot.ts), the clock held by the test. No network.
  */
+import { readFileSync } from 'node:fs'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 if (typeof localStorage === 'undefined') {
@@ -146,6 +147,29 @@ describe('opening a letter', () => {
   it('draws the glyphs apart from the letters already resolved, in few runs', () => {
     expect(glyphRuns('abXYe', 'abcde')).toEqual([{ text: 'ab', glyph: false }, { text: 'XY', glyph: true }, { text: 'e', glyph: false }])
     expect(glyphRuns('abc', 'abc')).toEqual([{ text: 'abc', glyph: false }])
+  })
+})
+
+describe('the words’ type (owner, 2026-11-27: "it should be blue ... can we use monaspace krypton")', () => {
+  it('set in the bundled Monaspace Krypton, light blue, from the left, with the emoji faces after it', () => {
+    const css = readFileSync(new URL('../../styles.css', import.meta.url), 'utf8')
+    const rule = css.slice(css.indexOf('.letter__words {'), css.indexOf('}', css.indexOf('.letter__words {')))
+    expect(rule).toMatch(/font-family: 'Monaspace Krypton'/)
+    expect(rule).toMatch(/Noto Color Emoji/)
+    expect(rule).toMatch(/text-align: left/)
+    expect(rule).toMatch(/color: #9fdcff/)
+    // The face is the app's own file, no CDN.
+    expect(css).toMatch(/@font-face \{\s*font-family: 'Monaspace Krypton';\s*src: url\('\/fonts\/MonaspaceKrypton-Regular\.woff'\)/)
+    const short = css.slice(css.indexOf('.letter__words--short {'), css.indexOf('}', css.indexOf('.letter__words--short {')))
+    expect(short).not.toMatch(/text-align: center/)
+  })
+
+  it('an emoji in a note comes out whole once the words resolve', async () => {
+    const text = 'just saw you standing here and wanted to say hi \u{1FAE1}'
+    m = await mount(createElement(LetterCard, { item: item(text), author: AUTHOR, mine: false }))
+    await at(UNFOLD_FIRST_MS + DECODE_FIRST_MS + 1)
+    expect(overlay(m)).toBeNull()
+    expect(ghost(m)).toBe(text)
   })
 })
 

@@ -34,7 +34,6 @@ import type { HeldPlace } from '../lib/inventory'
 import { safeNpub } from '../lib/npub'
 import { formatDistance } from 'sno-core/scale'
 import { useCyberspace } from '../store/useCyberspace'
-import { profileLabel } from '../store/useProfiles'
 import { useShards } from '../store/useShards'
 import { rememberNearbyReturn } from '../lib/nearbyReturn'
 import { ProfileTap } from './ProfileBadge'
@@ -65,6 +64,7 @@ import { useHyperspace } from '../store/useHyperspace'
 import { sealBroken, useMessagesRead } from '../store/useMessagesRead'
 import { useWaveforms } from '../store/useWaveforms'
 import { clockWords } from '../lib/waveform'
+import { nameLabel } from '../lib/nameLabel'
 
 /**
  * INFO on a row: the thing's own card, the one a tap on it in the world opens
@@ -158,7 +158,7 @@ function LockStatus({ id, lock, me }: { id: string; lock: string; me: string }):
 export function Row({ item, me, onView }: { item: NearbyItem; me: string; onView: (item: NearbyItem) => void }): JSX.Element {
   const profile = useProfile(item.author ?? null)
   const author = item.author ?? ''
-  const name = author === me ? 'you' : profileLabel(profile, safeNpub(author))
+  const name = nameLabel(author, me, profile?.name)
   const tip = useTip()
   // A message's seal: whole until this identity has opened it (store/useMessagesRead, per npub); your own are read.
   const broken = useMessagesRead((s) => sealBroken(s, readId(item), author === me))
@@ -236,7 +236,7 @@ export function SeedRow({ item, me, onView }: { item: NearbyItem; me: string; on
   const view = useBlooms((s) => (seed ? s.views[seed.id] : undefined))
   const planter = seed?.planter ?? item.author ?? ''
   const profile = useProfile(planter || null)
-  const name = planter === me ? 'you' : profileLabel(profile, safeNpub(planter))
+  const name = nameLabel(planter, me, profile?.name)
   const when = whenOf(item, useTip(), 'planted')
   const card = (): void => openCard(item)
   return (

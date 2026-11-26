@@ -6,14 +6,17 @@
  * love the broken seal for read").
  *
  * A folded letter, one gibson wide (LETTER_GIBSONS, as the message's box it
- * replaces was one gibson cubed), turned to face the camera with a slight
- * tilt and a slow bob. On it a hexagonal seal in its author's colour
+ * replaces was one gibson cubed): a thing in the place that turns slowly
+ * about the scene's up axis (LETTER_TURN_S), with a slight tilt and a slow
+ * bob, its flap and seal on both faces (owner, 2026-11-27: "the letter
+ * should not always face me and should spin slowly"). The glyph ring still
+ * faces the camera, so its glyphs always read. On the letter a hexagonal seal in its author's colour
  * (lib/authorColour) bearing their initial: whole until this identity has
  * opened the message, broken in two after (store/useMessagesRead). Round it
- * the ring of direction 1, katakana, hex and block glyphs, turning once every
+ * the ring of direction 1: capital letters, digits, katakana and now and then a block texture, turning once every
  * RING_TURN_S, a few of them changing to other glyphs every frame
  * (lib/glyphRing). With reduced motion the ring holds still, its glyphs
- * stay as they are and the letter does not bob.
+ * stay as they are and the letter neither turns nor bobs.
  *
  * Built for a hall of letters: every letter is drawn by the same handful of
  * instanced meshes, so fifty letters cost what one does in draw calls. The
@@ -36,9 +39,11 @@
  */
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useSyncExternalStore } from 'react'
-import { useFrame } from '@react-three/fiber'
+import { useFrame, useThree } from '@react-three/fiber'
 import {
+  BufferAttribute,
   BufferGeometry,
+  DoubleSide,
   Color,
   DynamicDrawUsage,
   Float32BufferAttribute,
@@ -46,6 +51,7 @@ import {
   InstancedBufferGeometry,
   InstancedMesh,
   Matrix4,
+  LineBasicMaterial,
   MeshBasicMaterial,
   PlaneGeometry,
   Quaternion,
@@ -56,11 +62,13 @@ import {
   type Mesh,
   type PerspectiveCamera,
 } from 'three'
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { ACCENT } from '../lib/palette'
 import { changeBudget, glyphChanges, mulberry32, ringAngle, ringRank, ringStart, RING_GLYPHS, RING_GLYPHS_FAR, RING_HIDE_PX, RING_THIN_PX, RING_TURN_S, type Rng } from '../lib/glyphRing'
 import { useReducedMotion } from '../hooks/useReducedMotion'
 import { basicFaceProps, NO_BLOOM_BLEND, TAG_BLEND } from './shardFaces'
-import { ATLAS_COLS, glyphAtlas } from './glyphAtlas'
+import { ATLAS_COLS, glyphAtlas, refreshGlyphAtlas } from './glyphAtlas'
+import { seedOf } from '../lib/decode'
 import { LABEL_PRIORITY } from './WorldLabel'
 
 /** A letter's width, in gibsons: the message's box was one gibson cubed, and the letter is as wide as that box. */
@@ -77,6 +85,12 @@ export const LETTER_REACH = 2 * (RING_RADIUS + GLYPH_SIZE / 2)
 
 /** The tilt the letter hangs at, radians (direction 6's -6 degrees). */
 const TILT = (-6 * Math.PI) / 180
+/**
+ * One turn of the letter about the scene's up axis, seconds (owner,
+ * 2026-11-27: "the letter should not always face me and should spin
+ * slowly"). Each letter starts at its own angle, from its key.
+ */
+export const LETTER_TURN_S = 24
 /** The bob: its height for a letter 1 wide, and its period in seconds. */
 const BOB = 0.035
 const BOB_S = 5
@@ -137,7 +151,7 @@ const snapshot = (): number => version
 // ---------- Geometry, built once and shared ----------
 
 /** A polygon as a flat shape, points in a letter 1 wide, centred. */
-function shapeOf(points: ReadonlyArray<readonly [number, number]>): ShapeGeometry {
+export function shapeOf(points: ReadonlyArray<readonly [number, number]>): ShapeGeometry {
   const s = new Shape()
   points.forEach(([x, y], i) => (i === 0 ? s.moveTo(x, y) : s.lineTo(x, y)))
   s.closePath()
@@ -159,7 +173,7 @@ export const SEAL_CENTRE = fromMock(75, 56)
 export const SEAL_RADIUS = 20 / 150
 
 /** Thin quads along a polyline: lines of light with a width, which an instanced mesh can draw. */
-function bandOf(points: ReadonlyArray<readonly [number, number]>, width: number, closed: boolean): BufferGeometry {
+export function bandOf(points: ReadonlyArray<readonly [number, number]>, width: number, closed: boolean): BufferGeometry {
   const pos: number[] = []
   const n = points.length
   const segs = closed ? n : n - 1
@@ -182,7 +196,7 @@ function bandOf(points: ReadonlyArray<readonly [number, number]>, width: number,
 }
 
 /** Two geometries as one (positions only). */
-function merged(...parts: BufferGeometry[]): BufferGeometry {
+export function merged(...parts: BufferGeometry[]): BufferGeometry {
   const pos: number[] = []
   for (const p of parts) {
     const g = p.index ? p.toNonIndexed() : p
@@ -243,28 +257,64 @@ const Z_FOLD = 0.006
 const Z_SEAL = 0.012
 const Z_INITIAL = 0.018
 
+/**
+ * A face's geometry on both faces of the letter: as made, a hair in front
+ * of the paper, and turned half round about the up axis to stand a hair
+ * behind it, so the letter turning in the world shows its flap, its seal and
+ * its initial from either side, each reading the right way round.
+ */
+export function bothFaces(front: BufferGeometry, z: number): BufferGeometry {
+  const a = front.clone()
+  a.translate(0, 0, z)
+  const b = a.clone()
+  b.rotateY(Math.PI)
+  return mergeGeometries([a.index ? a.toNonIndexed() : a, b.index ? b.toNonIndexed() : b])!
+}
+
+/** The paper: one sheet, seen from both sides (DoubleSide on its material). */
 const PAPER_GEOMETRY = shapeOf(PAPER_OUTLINE)
-const FOLD_GEOMETRY = (() => {
-  const g = merged(bandOf(PAPER_OUTLINE, 0.022, true), bandOf(FLAP, 0.016, false))
-  g.translate(0, 0, Z_FOLD)
-  return g
-})()
-const SEAL_GEOMETRY = (() => {
-  const g = shapeOf(wholeSealPoints())
-  g.translate(0, 0, Z_SEAL)
-  return g
-})()
+/** Its edge and the flap's fold as bands, for a letter seen up close; the fold lines (foldLinePoints) keep them seen from far. */
+const FOLD_GEOMETRY = bothFaces(merged(bandOf(PAPER_OUTLINE, 0.022, true), bandOf(FLAP, 0.016, false)), Z_FOLD)
+const SEAL_GEOMETRY = bothFaces(shapeOf(wholeSealPoints()), Z_SEAL)
 const BROKEN_GEOMETRY = (() => {
   const [l, r] = brokenSealHalves()
-  const g = merged(shapeOf(l), shapeOf(r))
-  g.translate(0, 0, Z_SEAL)
-  return g
+  return bothFaces(mergeGeometries([shapeOf(l), shapeOf(r)])!, Z_SEAL)
 })()
 const INITIAL_GEOMETRY = (() => {
   const g = new PlaneGeometry(SEAL_RADIUS * 1.25, SEAL_RADIUS * 1.25)
-  g.translate(SEAL_CENTRE[0], SEAL_CENTRE[1] - SEAL_RADIUS * 0.04, Z_INITIAL)
-  return g
+  g.translate(SEAL_CENTRE[0], SEAL_CENTRE[1] - SEAL_RADIUS * 0.04, 0)
+  return bothFaces(g, Z_INITIAL)
 })()
+
+/** Where the fold lines stand off the paper, for a letter 1 wide: a little past the bands. */
+const Z_LINE = 0.009
+
+/**
+ * The letter's edge and the flap's fold as line segments, on both faces, in
+ * the letter's own frame (x, y, z for each end, a segment after another).
+ *
+ * Lines because a line is drawn at least a pixel wide at any distance, and
+ * a band of geometry is not: the flap was a band 1.6% of the letter wide, so
+ * far off it was less than a pixel and was dropped by the rasteriser in
+ * stretches that came and went with the angle and the distance (owner,
+ * 2026-11-27: "the envelope flap disappears sometimes depending on my angle
+ * and distance"). The bands stay for the thick look up close.
+ */
+export function foldLinePoints(): Float32Array {
+  const out: number[] = []
+  const edges = (pts: ReadonlyArray<readonly [number, number]>, closed: boolean, z: number): void => {
+    const n = closed ? pts.length : pts.length - 1
+    for (let i = 0; i < n; i++) {
+      const a = pts[i], b = pts[(i + 1) % pts.length]
+      out.push(a[0], a[1], z, b[0], b[1], z)
+    }
+  }
+  for (const z of [Z_LINE, -Z_LINE]) { edges(PAPER_OUTLINE, true, z); edges(FLAP, false, z) }
+  return new Float32Array(out)
+}
+const FOLD_LINES = foldLinePoints()
+/** Vertices of fold lines per letter. */
+export const FOLD_LINE_VERTS = FOLD_LINES.length / 3
 
 // ---------- Shaders ----------
 
@@ -390,7 +440,9 @@ function LetterMeshes({ list, capacity }: { list: LetterSpec[]; capacity: number
     const atlas = glyphAtlas()
     const opaque = basicFaceProps(1, { ghost: false, world: true })
     return {
-      paper: new MeshBasicMaterial({ color: PAPER, toneMapped: false, ...opaque, polygonOffset: true, polygonOffsetFactor: 2, polygonOffsetUnits: 4 }),
+      // Both sides: the letter turns, and its back is the same paper.
+      paper: new MeshBasicMaterial({ color: PAPER, toneMapped: false, ...opaque, side: DoubleSide, polygonOffset: true, polygonOffsetFactor: 2, polygonOffsetUnits: 4 }),
+      lines: new LineBasicMaterial({ vertexColors: true, toneMapped: false, transparent: true, opacity: 0.9, depthWrite: false }),
       // Lines of light, as the box's edges were: they glow a little, and write no depth.
       folds: new MeshBasicMaterial({ color: '#ffffff', toneMapped: false, transparent: true, opacity: 0.9, depthWrite: false }),
       seal: new MeshBasicMaterial({ color: '#ffffff', toneMapped: false, ...opaque }),
@@ -439,7 +491,33 @@ function LetterMeshes({ list, capacity }: { list: LetterSpec[]; capacity: number
     g.instanceCount = 0
     return g
   }, [capacity])
-  useEffect(() => () => { initialGeometry.dispose(); ringGeometry.dispose() }, [initialGeometry, ringGeometry])
+  // The fold lines of every letter, in the scene's frame, written each frame the letters move.
+  const lineGeometry = useMemo(() => {
+    const g = new BufferGeometry()
+    const pos = new BufferAttribute(new Float32Array(capacity * FOLD_LINE_VERTS * 3), 3)
+    pos.setUsage(DynamicDrawUsage)
+    g.setAttribute('position', pos)
+    g.setAttribute('color', new BufferAttribute(new Float32Array(capacity * FOLD_LINE_VERTS * 3), 3))
+    g.setDrawRange(0, 0)
+    return g
+  }, [capacity])
+  useEffect(() => () => { initialGeometry.dispose(); ringGeometry.dispose(); lineGeometry.dispose() }, [initialGeometry, ringGeometry, lineGeometry])
+
+  // The glyph atlas sent to the GPU again when the WebGL context comes back
+  // or the page shows again: a phone that took the context while the app was
+  // in the background gave back a blank ring until a reload (glyphAtlas).
+  const gl = useThree((st) => st.gl)
+  useEffect(() => {
+    const canvas = gl?.domElement as HTMLCanvasElement | undefined
+    const refresh = (): void => refreshGlyphAtlas()
+    const shown = (): void => { if (typeof document !== 'undefined' && document.visibilityState === 'visible') refreshGlyphAtlas() }
+    canvas?.addEventListener?.('webglcontextrestored', refresh)
+    if (typeof document !== 'undefined') document.addEventListener?.('visibilitychange', shown)
+    return () => {
+      canvas?.removeEventListener?.('webglcontextrestored', refresh)
+      if (typeof document !== 'undefined') document.removeEventListener?.('visibilitychange', shown)
+    }
+  }, [gl])
 
   // Which letters wear a whole seal and which a broken one, and each ring's place and glyphs: rebuilt when the letters change.
   const layout = useMemo(() => {
@@ -458,6 +536,13 @@ function LetterMeshes({ list, capacity }: { list: LetterSpec[]; capacity: number
     const colour = new Color()
     const fold = (read: boolean): Color => colour.set(read ? FOLD_READ : FOLD_UNREAD)
     list.forEach((l, i) => folds.current?.setColorAt(i, fold(l.broken)))
+    const lineColour = lineGeometry.getAttribute('color') as BufferAttribute
+    list.forEach((l, i) => {
+      fold(l.broken)
+      for (let v = 0; v < FOLD_LINE_VERTS; v++) lineColour.setXYZ(i * FOLD_LINE_VERTS + v, colour.r, colour.g, colour.b)
+    })
+    lineColour.needsUpdate = true
+    lineGeometry.setDrawRange(0, list.length * FOLD_LINE_VERTS)
     layout.unread.forEach((li, k) => whole.current?.setColorAt(k, colour.set(list[li].colour)))
     layout.read.forEach((li, k) => broken.current?.setColorAt(k, colour.set(list[li].colour)))
     const ig = initialGeometry.getAttribute('aGlyph') as InstancedBufferAttribute
@@ -491,31 +576,37 @@ function LetterMeshes({ list, capacity }: { list: LetterSpec[]; capacity: number
     glyph.clearUpdateRanges()
     glyph.needsUpdate = true
     ringGeometry.instanceCount = list.length * RING_GLYPHS
-  }, [list, layout, initialGeometry, ringGeometry])
+  }, [list, layout, initialGeometry, ringGeometry, lineGeometry])
 
-  // Per frame: each letter turned to the camera, tilted and bobbing; the ring's turn; a few glyphs changed.
-  const scratch = useMemo(() => ({ m: new Matrix4(), q: new Quaternion(), tilt: new Quaternion().setFromAxisAngle(new Vector3(0, 0, 1), TILT), p: new Vector3(), s: new Vector3(), up: new Vector3() }), [])
+  // Per frame: each letter turning slowly about the up axis, tilted and bobbing; the ring's turn; a few glyphs changed.
+  const scratch = useMemo(() => ({ m: new Matrix4(), q: new Quaternion(), spin: new Quaternion(), tilt: new Quaternion().setFromAxisAngle(new Vector3(0, 0, 1), TILT), p: new Vector3(), s: new Vector3(), up: new Vector3(0, 1, 0), v: new Vector3() }), [])
+  /** Each letter's own starting angle, from its key, so a row of letters never turns in step. */
+  const phases = useMemo(() => list.map((l) => (seedOf(l.key) / 4294967296) * Math.PI * 2), [list])
   const rng = useRef<Rng>(mulberry32((Date.now() >>> 0) ^ 0x5eed))
   const carry = useRef(0)
   const last = useRef<number | null>(null)
-  // With reduced motion nothing bobs, so the matrices change only when the camera turns or the letters change.
-  const still = useRef({ q: new Quaternion(), list: null as LetterSpec[] | null })
+  const still = useRef({ list: null as LetterSpec[] | null })
   useFrame((state) => {
     const cam = state.camera as PerspectiveCamera
     const t = state.clock.elapsedTime
-    const { m, q, tilt, p, s, up } = scratch
-    const unchanged = reduced && still.current.list === list && still.current.q.equals(cam.quaternion)
+    const { m, q, spin, tilt, p, s, up, v } = scratch
+    // With reduced motion nothing turns or bobs: the matrices change only with the letters.
+    const unchanged = reduced && still.current.list === list
     still.current.list = list
-    still.current.q.copy(cam.quaternion)
     if (!unchanged) placeLetters()
     function placeLetters(): void {
-    q.copy(cam.quaternion).multiply(tilt)
-    up.set(0, 1, 0).applyQuaternion(cam.quaternion)
+    const pos = lineGeometry.getAttribute('position') as BufferAttribute
     list.forEach((l, i) => {
       const bob = reduced ? 0 : Math.sin((t / BOB_S) * Math.PI * 2 + (i * 1.7)) * BOB * l.width
       p.set(l.centre[0], l.centre[1], l.centre[2]).addScaledVector(up, bob)
+      const angle = phases[i] + (reduced ? 0 : (t / LETTER_TURN_S) * Math.PI * 2)
+      q.copy(spin.setFromAxisAngle(up, angle)).multiply(tilt)
       s.setScalar(l.width)
       m.compose(p, q, s)
+      for (let k = 0; k < FOLD_LINE_VERTS; k++) {
+        v.set(FOLD_LINES[k * 3], FOLD_LINES[k * 3 + 1], FOLD_LINES[k * 3 + 2]).applyMatrix4(m)
+        pos.setXYZ(i * FOLD_LINE_VERTS + k, v.x, v.y, v.z)
+      }
       paper.current?.setMatrixAt(i, m)
       folds.current?.setMatrixAt(i, m)
       if (l.broken) broken.current?.setMatrixAt(layout.slot[i], m)
@@ -525,6 +616,7 @@ function LetterMeshes({ list, capacity }: { list: LetterSpec[]; capacity: number
       }
     })
     for (const mesh of [paper.current, folds.current, whole.current, broken.current, initials.current]) if (mesh) mesh.instanceMatrix.needsUpdate = true
+    pos.needsUpdate = true
     }
 
     const u = materials.ring.uniforms
@@ -556,6 +648,7 @@ function LetterMeshes({ list, capacity }: { list: LetterSpec[]; capacity: number
     <group name="letters">
       <instancedMesh ref={paper} args={[PAPER_GEOMETRY, materials.paper, capacity]} frustumCulled={false} name="letter-paper" />
       <instancedMesh ref={folds} args={[FOLD_GEOMETRY, materials.folds, capacity]} frustumCulled={false} name="letter-folds" />
+      <lineSegments geometry={lineGeometry} material={materials.lines} frustumCulled={false} name="letter-fold-lines" />
       <instancedMesh ref={whole} args={[SEAL_GEOMETRY, materials.seal, capacity]} frustumCulled={false} name="letter-seal" />
       <instancedMesh ref={broken} args={[BROKEN_GEOMETRY, materials.seal, capacity]} frustumCulled={false} name="letter-seal-broken" />
       <instancedMesh ref={initials} args={[initialGeometry, materials.initial, capacity]} frustumCulled={false} name="letter-initial" />

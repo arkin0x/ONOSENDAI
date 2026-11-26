@@ -100,6 +100,8 @@ export const MOVED_PREFIXES: readonly string[] = [
   'onosendai:deployments-gone:',
   // The tutorial's staged pieces per player (tutorial/stage.ts): whole shards, a few hundred thousand characters.
   'onosendai:tutorial:stage:',
+  // The tutorial's progress per player (tutorial/gate.ts): the step, how it ended, the routes checked off.
+  'onosendai:tutorial:progress:',
   // The newcomer view's record per player (newcomer/useNewcomer.ts): stage, steps seen, Settings choice.
   'onosendai:newcomer:',
   // Settings > Effects > Sound effects per player (store/sfxSwitch.ts): on or off.

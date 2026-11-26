@@ -29,6 +29,7 @@ import { cancelSurveyHold, startSurveyHold, useSurveyHold } from './surveyHold'
 import { walkLookBy } from '../lib/walkLook'
 import { topEscape } from '../hooks/useEscape'
 import { leaveTerrain } from '../store/padMode'
+import { useTutorial } from '../store/useTutorial'
 import { resetTerrainInput, slotKey, terrainInput } from './terrainInput'
 import { blockKind, blockName } from '../lib/terrain/blocks'
 import { tileUrl } from '../lib/terrain/tiles'
@@ -453,6 +454,8 @@ function TerrainScreen({ covered }: { covered: boolean }): JSX.Element {
   useEffect(() => { resetTerrainInput() }, [])
 
   const holding = useSurveyHold((s) => s.since !== null)
+  // A tour run guides TERRAIN itself (tutorial/terrainRoute.ts): its own three steps wait until after, their slot kept.
+  const touring = useTutorial((s) => s.active)
 
   // TERRAIN's own keys, ahead of the rest (capture): the tools, T and Esc. WALK's keys go on to WALK (hooks/useKeyboard.ts).
   useEffect(() => terrainKeys(window), [])
@@ -471,7 +474,7 @@ function TerrainScreen({ covered }: { covered: boolean }): JSX.Element {
 
       {/* The first visit's three steps, just over the hotbar, in a slot of its own. */}
       <div className="terrain-hint" aria-live="polite">
-        {!loading && hint < HINT_DONE && (
+        {!loading && hint < HINT_DONE && !touring && (
           <span className="terrain-hint__box"><span className="terrain-hint__step">{hint + 1} of 3</span>{HINT_STEPS[hint]}</span>
         )}
       </div>

@@ -127,6 +127,13 @@ export const DEFAULT_MODES: ModeSettings = { order: DEFAULT_MODE_ORDER, off: [] 
  */
 export const TEACHING_MODES: ModeSettings = { order: DEFAULT_MODE_ORDER, off: ['terrain'] }
 
+/**
+ * The teaching list while a tour step lets TERRAIN through (TutorialStep
+ * `allows`: the TERRAIN route, tutorial/terrainRoute.ts): every mode on, so
+ * T, the mode button and the build bar's TERRAIN all open it.
+ */
+export const TERRAIN_TEACHING_MODES: ModeSettings = { order: DEFAULT_MODE_ORDER, off: [] }
+
 /** What the list makes of the pad. */
 export interface ModeRoles {
   /** The mode the app starts in: the default mode, the first in the ring. */
@@ -366,9 +373,14 @@ export function customModesApply(): boolean {
   return true
 }
 
+/** Whether the tour step on screen lets TERRAIN through the teaching list (TutorialStep `allows`). */
+export function terrainTaught(s: Pick<ReturnType<typeof useTutorial.getState>, 'active' | 'index' | 'script'> = useTutorial.getState()): boolean {
+  return s.active && (s.script.steps[s.index]?.allows?.includes('terrain') ?? false)
+}
+
 /** The list the pad follows now (customModesApply). */
 export function effectiveModes(): ModeSettings {
-  return customModesApply() ? storedModes() : TEACHING_MODES
+  return customModesApply() ? storedModes() : terrainTaught() ? TERRAIN_TEACHING_MODES : TEACHING_MODES
 }
 
 /** What the pad follows now. */
@@ -384,14 +396,17 @@ export function useEffectiveModes(): ModeSettings {
   const record = useNewcomer((s) => s.record)
   const tourSwitch = useTutorialSwitch((s) => s.value)
   const touring = useTutorial((s) => s.active)
+  const taught = useTutorial((s) => terrainTaught(s))
   const demo = useDemo((s) => s.active)
   const tv = useTv((s) => s.on)
   return useMemo(() => {
+    // The tour (and only a run going) lets TERRAIN through on a step that teaches it.
+    if (taught && !demo && !tv) return TERRAIN_TEACHING_MODES
     if (newcomerViewOf(record) || touring || demo || tv) return TEACHING_MODES
     return pubkey !== me ? storedModesFor(me) : saved ?? DEFAULT_MODES
     // tourSwitch: newcomerViewOf reads the tutorial's switch.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [me, pubkey, saved, record, touring, demo, tv, tourSwitch])
+  }, [me, pubkey, saved, record, touring, taught, demo, tv, tourSwitch])
 }
 
 /** A render that saw a new identity before the store did: read its list without writing state mid-render. */

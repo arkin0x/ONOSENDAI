@@ -537,9 +537,9 @@ describe('the engine', () => {
     expect(useTutorial.getState().index).toBe(0)
   })
 
-  it('the script offers STRAYLIGHT first, HYPERSPACE and AGENTS, and the dungeon only once Track C registers it', () => {
+  it('the script offers STRAYLIGHT first, HYPERSPACE and AGENTS, SURVEY AND BUILD last, and the dungeon only once Track C registers it', () => {
     const choice = TUTORIAL_SCRIPT.steps.find((st) => st.id === 'choice')!
-    expect(choice.choices!.filter(choiceOffered).map((c) => c.id)).toEqual(['straylight', 'hyperspace', 'agents', 'friend', 'build'])
+    expect(choice.choices!.filter(choiceOffered).map((c) => c.id)).toEqual(['straylight', 'hyperspace', 'agents', 'friend', 'build', 'terrain'])
     for (const c of choice.choices!) if (c.step) expect(TUTORIAL_SCRIPT.steps.find((st) => st.id === c.step)?.branch, c.id).toBe(true)
   })
 

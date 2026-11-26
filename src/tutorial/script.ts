@@ -238,6 +238,8 @@ export const CHOICE: TutorialStep = {
     { id: 'agents', label: 'BRING YOUR AI', about: 'Add your AI to cyberspace and talk to it here.', step: 'agents' },
     { id: 'friend', label: 'SEE A FRIEND', about: 'Add a friend and watch where they have been.', step: 'friend' },
     { id: 'build', label: 'BUILD SOMETHING', about: 'Place a shard from your ITEMS in the world.', step: 'build-place' },
+    // Last (owner, 2026-11-26: "add surveying as an optional tutorial item"; "it needs to walk them through mining and building too").
+    { id: 'terrain', label: 'SURVEY AND BUILD', about: 'Reveal the ground in TERRAIN (T), then mine it and build with blocks.', step: 'terrain-open' },
   ],
 }
 
@@ -415,6 +417,125 @@ export const STRAYLIGHT_OPEN: TutorialStep = {
   branch: true,
 }
 
+/**
+ * SURVEY AND BUILD (owner, 2026-11-26): TERRAIN one thing per panel, each
+ * done by the real thing (tutorial/terrainRoute.ts): open it, survey the
+ * ground, mine a block, pick it, place it, build a little, and what it all
+ * means. Every key is said beside its button for the desktop. TERRAIN is off
+ * in the teaching list, so these steps let it through (`allows`); the steps
+ * after the first need it open, and go back to the first while it is shut,
+ * then on to where they were once it opens. They resume on themselves after a
+ * reload (`resumes`). The route back at the choices shuts TERRAIN again.
+ */
+export const TERRAIN_OPEN: TutorialStep = {
+  id: 'terrain-open',
+  title: 'Open TERRAIN',
+  caption: 'TERRAIN is WALK with block tools. Survey the ground, mine it and build with it. LOCAL keeps your blocks to yourself while you practice.',
+  captionDone: "You're in TERRAIN.",
+  hint: 'Tap TERRAIN (T) to open it.',
+  // No EXPLAIN here: the card's row keeps TERRAIN (T) on one line at 375px beside BACK and SKIP.
+  action: { label: 'TERRAIN (T)', effect: 'open-terrain' },
+  // The card's own TERRAIN (T) glows: the newcomer view has no mode ring yet (newcomer/reveal.ts pad.modes),
+  // so the button is the one way in on a phone; T and the mode button (store/modeOrder.ts TERRAIN_TEACHING_MODES) work too.
+  scene: { target: 'keep', highlight: '.tutorial__action' },
+  // A LIVE player hears that LOCAL keeps the blocks on the device; TERRAIN opening goes back to where the route was.
+  effect: 'terrain-open-step',
+  wait: 'terrain-open',
+  allows: ['terrain'],
+  branch: true,
+  then: 'terrain-survey',
+}
+
+export const TERRAIN_SURVEY: TutorialStep = {
+  id: 'terrain-survey',
+  title: 'Survey the ground',
+  caption: "Hold SURVEY (G) for 5 seconds to reveal the ground. It comes from cyberspace's own structure, so everyone sees the same ground.",
+  captionDone: 'The ground here is surveyed.',
+  hint: 'Hold SURVEY (G) until the bar fills.',
+  explain: 'The ground in a chunk is worked out from where the chunk is in cyberspace, so every player computes the same blocks. Once anyone surveys a chunk, everyone can build in it.',
+  scene: { target: 'keep', highlight: '.terrain-act--survey' },
+  // Ground someone surveyed already counts at once (tutorial/terrainRoute.ts), and the next step says so.
+  effect: 'terrain-step',
+  wait: 'terrain-survey',
+  allows: ['terrain'],
+  resumes: true,
+  branch: true,
+  then: 'terrain-mine',
+}
+
+export const TERRAIN_MINE: TutorialStep = {
+  id: 'terrain-mine',
+  title: 'Mine a block',
+  caption: 'Tap or click a block to mine it (Q). It goes into your hotbar at the bottom.',
+  captionDone: "It's in your hotbar now.",
+  hint: 'Tap or click a block near you (Q).',
+  scene: { target: 'keep', highlight: '.terrain-crosshair' },
+  effect: 'terrain-step',
+  wait: 'terrain-mine',
+  allows: ['terrain'],
+  resumes: true,
+  branch: true,
+  then: 'terrain-pick',
+}
+
+export const TERRAIN_PICK: TutorialStep = {
+  id: 'terrain-pick',
+  title: 'Pick it',
+  caption: 'Tap the slot with your block, press 1 to 9, or turn the wheel.',
+  captionDone: 'That block is in your hand.',
+  hint: 'Tap the glowing slot (1 to 9).',
+  // The slot holding a block glows (tutorial/terrainRoute.ts).
+  effect: 'terrain-step',
+  wait: 'terrain-pick',
+  allows: ['terrain'],
+  resumes: true,
+  branch: true,
+  then: 'terrain-place',
+}
+
+export const TERRAIN_PLACE: TutorialStep = {
+  id: 'terrain-place',
+  title: 'Place it',
+  caption: 'Tap PLACE (E), or right click, to put your block on the face at the cross.',
+  captionDone: 'Placed!',
+  hint: 'Aim at a block, then PLACE (E).',
+  scene: { target: 'keep', highlight: '.terrain-act--place' },
+  effect: 'terrain-step',
+  wait: 'terrain-place',
+  allows: ['terrain'],
+  resumes: true,
+  branch: true,
+  then: 'terrain-build',
+}
+
+export const TERRAIN_BUILD: TutorialStep = {
+  id: 'terrain-build',
+  title: 'Build a little',
+  caption: 'Place 3 blocks to make something: a step, a wall or a tower. The block in your hand shows in the corner.',
+  captionDone: 'You built something!',
+  hint: 'Place 3 blocks with PLACE (E). Mine more with Q.',
+  scene: { target: 'keep', highlight: '.terrain-act--place' },
+  // How many are placed so far, and a word when the blocks run out (tutorial/terrainRoute.ts).
+  effect: 'terrain-step',
+  wait: 'terrain-build',
+  allows: ['terrain'],
+  resumes: true,
+  branch: true,
+  then: 'terrain-done',
+}
+
+export const TERRAIN_DONE: TutorialStep = {
+  id: 'terrain-done',
+  title: 'Your blocks',
+  caption: 'Your blocks are part of cyberspace, like shards. In LIVE everyone sees them. Crew in your bag (I) lets friends build with you.',
+  hint: 'FINISH leaves TERRAIN. After the tutorial, T opens it any time.',
+  explain: 'The bag is the last slot of the hotbar (I). It holds every block you carry, and Crew is at the bottom of it.',
+  scene: { target: 'keep', highlight: '.terrain-slot--bag' },
+  allows: ['terrain'],
+  resumes: true,
+  branch: true,
+}
+
 /** The last word: how to open the tutorial again (feedback items 10 and 17). */
 export const FAREWELL: TutorialStep = {
   id: 'done',
@@ -425,5 +546,5 @@ export const FAREWELL: TutorialStep = {
 }
 
 export const TUTORIAL_SCRIPT: TutorialScript = {
-  steps: [WELCOME, BOX, OPEN, TAKE, TO_PLOT, PLANT, BUD, INVENTORY, TO_COURSE, WALK, GRAVITY, RUN, FINISH, WORKSHOP, CHOICE, STRAYLIGHT, STRAYLIGHT_IDENTITY, STRAYLIGHT_OPEN, EARTH, EARTH_PICK, EARTH_BOARD, EARTH_RIDE, EARTH_LOOK, AGENTS, FRIEND, BUILD_PLACE, FAREWELL],
+  steps: [WELCOME, BOX, OPEN, TAKE, TO_PLOT, PLANT, BUD, INVENTORY, TO_COURSE, WALK, GRAVITY, RUN, FINISH, WORKSHOP, CHOICE, STRAYLIGHT, STRAYLIGHT_IDENTITY, STRAYLIGHT_OPEN, EARTH, EARTH_PICK, EARTH_BOARD, EARTH_RIDE, EARTH_LOOK, AGENTS, FRIEND, BUILD_PLACE, TERRAIN_OPEN, TERRAIN_SURVEY, TERRAIN_MINE, TERRAIN_PICK, TERRAIN_PLACE, TERRAIN_BUILD, TERRAIN_DONE, FAREWELL],
 }

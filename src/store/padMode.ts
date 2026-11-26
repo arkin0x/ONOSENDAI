@@ -53,7 +53,7 @@ import { regionAtOriginalSize, useRegion } from './useRegion'
 import { landFly } from '../lib/viewFly'
 import { buildPlane, placedCursor } from '../lib/buildCursor'
 import { SCAN_FOCUS_LABEL, scanBuying, useScan } from './useScan'
-import { customModesApply, effectiveModes, modeInfo, modeRoles, nextInRing, useModes, type ModeId } from './modeOrder'
+import { customModesApply, effectiveModes, terrainTaught, modeInfo, modeRoles, nextInRing, useModes, type ModeId } from './modeOrder'
 import { refuseTerrain, terrainRefusal, useTerrain } from './useTerrain'
 
 export type PadMode = 'hop' | 'view' | 'walk' | 'build' | 'scan' | 'terrain'
@@ -519,8 +519,9 @@ function openTerrain(from: PadMode): void {
 export function enterTerrainMode(): boolean {
   const from = currentPadMode()
   if (from === 'terrain') return true
-  // Newcomers, the tour, /demo and TV keep to the teaching list, which has TERRAIN off: not by its key or button either.
-  if (!customModesApply()) return false
+  // Newcomers, the tour, /demo and TV keep to the teaching list, which has TERRAIN off: not by its key or button either,
+  // except on a tour step that teaches it (the TERRAIN route, tutorial/terrainRoute.ts).
+  if (!customModesApply() && !terrainTaught()) return false
   const why = terrainRefusal()
   if (why) { refuseTerrain(why); return false }
   if (from === 'build' && buildHeld()) return false

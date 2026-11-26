@@ -21,6 +21,7 @@
  */
 
 import { Canvas, useThree } from '@react-three/fiber'
+import { sceneEvents } from './sceneEvents'
 import { GlowWorldCanvas } from './PointBillboards'
 import { OrbitControls } from '@react-three/drei'
 import { EffectComposer } from '@react-three/postprocessing'
@@ -1489,6 +1490,7 @@ export const Scene = memo(function Scene(): JSX.Element {
       gl={{ antialias: false, powerPreference: 'high-performance' }}
       style={{ background: BG }}
       frameloop="never"
+      events={sceneEvents}
       // A lost context is said in the console (lib/glContext). Shader
       // programs are compiled once, not again at every cut (lib/keepPrograms).
       // On the stream, a loss that does not come back reloads (lib/tv/broadcast).

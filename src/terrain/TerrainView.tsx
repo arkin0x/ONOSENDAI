@@ -341,6 +341,7 @@ export function terrainPointer(on: EventTarget): () => void {
   const end = (): void => { press = null }
   const down = (ev: Event): void => {
     const e = ev as PointerEvent
+    terrainInput.swallowTap = false
     const c = onScene(e)
     if (!c || useTerrain.getState().sheet) return
     // The mouse captured (terrainMouseLock): a click mines and a right click places at the cross.
@@ -350,7 +351,8 @@ export function terrainPointer(on: EventTarget): () => void {
       return
     }
     // Freed with Esc: a click on the scene captures the mouse again, and does nothing else.
-    if (e.pointerType === 'mouse' && e.button === 0 && lockWanted) { lockMouse(c); return }
+    // R3F hears the same press below the window: it is swallowed there, so no shard under the pointer opens (scene/TapOccluder.tsx).
+    if (e.pointerType === 'mouse' && e.button === 0 && lockWanted) { terrainInput.swallowTap = true; lockMouse(c); return }
     if (e.pointerType === 'mouse' && e.button === 2) { terrainInput.action = { kind: 'place', at: ndc(c, e.clientX, e.clientY) }; return }
     if (e.pointerType === 'mouse' && e.button !== 0) return
     press = { id: e.pointerId, x: e.clientX, y: e.clientY, moved: 0, t: performance.now(), canvas: c }
@@ -380,6 +382,8 @@ export function terrainPointer(on: EventTarget): () => void {
   on.addEventListener('contextmenu', menu, true)
   return () => {
     end()
+    // Leaving TERRAIN never leaves a press swallowed.
+    terrainInput.swallowTap = false
     on.removeEventListener('pointerdown', down, true)
     on.removeEventListener('pointermove', move, true)
     on.removeEventListener('pointerup', up, true)

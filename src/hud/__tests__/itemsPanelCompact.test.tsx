@@ -107,9 +107,9 @@ describe('the ITEMS panel', () => {
     expect(kindLabel(OTHER_LOOT_LABEL, 0)).toBe('OTHER LOOT · 0')
     const { restore } = seed()
     const m = await mount(createElement(InventoryPanel))
-    const buttons = m.all().filter((h) => h.type === 'button').map(textOf)
-    // Beside the house EXPLAIN toggle, which holds the one-line Explanation.
-    expect(buttons.filter((b) => !/^EXPLAIN|^HIDE/i.test(b))).toEqual(['KEY ITEMS · 2', 'OTHER LOOT · 1'])
+    // Beside the house EXPLAIN toggle and the grids' tiles (itemsGrid.test): OTHER LOOT on the left, KEY ITEMS on the right (owner, 2026-11-26).
+    const buttons = m.all().filter((h) => h.type === 'button' && h.props['data-tile'] === undefined).map(textOf)
+    expect(buttons.filter((b) => !/^EXPLAIN|^HIDE/i.test(b))).toEqual(['OTHER LOOT · 1', 'KEY ITEMS · 2'])
     expect(m.all().filter((h) => h.type === 'li')).toHaveLength(0)
     expect(m.all().filter((h) => h.type === 'input' || h.type === 'form')).toHaveLength(0)
     expect(m.says('Silver Key')).toBe(false)

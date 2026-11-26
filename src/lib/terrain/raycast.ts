@@ -15,12 +15,21 @@ export interface RayHit {
   distance: number
 }
 
-/** The first cell along the ray for which `solid` is true, within `max` blocks, or null. */
+/**
+ * The first cell along the ray for which `solid` is true, within `max` blocks, or null.
+ *
+ * `fromInside` is what a ray that starts inside a block does: 'hit' (the
+ * default, the cursor's) takes that block at distance 0; 'skip' (the blocks
+ * that hide a shard, scene/TerrainLayer.tsx blockOcclusion) walks on out of
+ * it and takes the first block after open space, since a block's faces are
+ * drawn on the outside only and from within a mass of them nothing is seen.
+ */
 export function raycast(
   origin: readonly [number, number, number],
   dir: readonly [number, number, number],
   max: number,
   solid: (i: number, j: number, k: number) => boolean,
+  fromInside: 'hit' | 'skip' = 'hit',
 ): RayHit | null {
   const len = Math.hypot(dir[0], dir[1], dir[2])
   if (!(len > 0)) return null
@@ -35,9 +44,12 @@ export function raycast(
   }
   let normal: [number, number, number] = [0, 0, 0]
   let t = 0
-  // Starting inside a block: that block, with no face to place on.
-  if (solid(c[0], c[1], c[2])) return { cell: [c[0], c[1], c[2]], normal, distance: 0 }
-  for (let n = 0; n < 64; n++) {
+  // Starting inside a block: that block, with no face to place on (or, skipping, every block until open space).
+  let inside = solid(c[0], c[1], c[2])
+  if (inside && fromInside === 'hit') return { cell: [c[0], c[1], c[2]], normal, distance: 0 }
+  // Enough steps to cross `max` blocks on the longest diagonal, and never fewer than the cursor's 64.
+  const steps = Math.max(64, Math.ceil(3 * max) + 3)
+  for (let n = 0; n < steps; n++) {
     const a = tMax[0] < tMax[1] ? (tMax[0] < tMax[2] ? 0 : 2) : (tMax[1] < tMax[2] ? 1 : 2)
     t = tMax[a]
     if (t > max) return null
@@ -45,7 +57,9 @@ export function raycast(
     tMax[a] += tDelta[a]
     normal = [0, 0, 0]
     normal[a] = -step[a]
-    if (solid(c[0], c[1], c[2])) return { cell: [c[0], c[1], c[2]], normal, distance: t }
+    const here = solid(c[0], c[1], c[2])
+    if (here && !inside) return { cell: [c[0], c[1], c[2]], normal, distance: t }
+    if (!here) inside = false
   }
   return null
 }

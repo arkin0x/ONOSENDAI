@@ -4,9 +4,12 @@
  * the glyph ring's glyphs randomly change to different characters. keep the
  * ring spin effect").
  *
- * The glyphs are decode.ts's GLYPHS, the katakana, hex and block characters
- * a message is made of before it decodes, so the ring is the same cipher the
- * card's words resolve out of. A few change each frame, at random: a steady
+ * The glyphs are capital letters, digits and katakana, with now and then one
+ * of the block textures ░ ▒ ▓, as direction 1's mockup drew them (owner,
+ * 2026-11-27: "the glyphs around the outside should include numbers, capital
+ * english alphabet characters and occasional unicode texture blocks like in
+ * the mockup"). A glyph is its index in RING_CHARS, which is its cell in the
+ * glyph atlas (scene/glyphAtlas). A few change each frame, at random: a steady
  * rate per ring, not per frame, so a slow phone and a fast screen look the
  * same, and a cap on the whole scene's changes in one frame, so a hall of
  * letters never writes more than a handful of numbers to the GPU per frame.
@@ -22,7 +25,20 @@
  * Pure: no store, no DOM, no three.
  */
 
-import { GLYPHS, seedOf } from './decode'
+import { seedOf } from './decode'
+
+/** The ring's katakana: the wordmark's and the syllabary's, as decode.ts's cipher has them. */
+export const RING_KATAKANA = 'オノセンダイアウエカキクケコサシスタチツテトナニヌネハヒフヘホマミムメモヤユヨラリルレロワヲン'
+/** Capital letters and digits. */
+export const RING_LATIN = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
+/** The block textures, drawn now and then. */
+export const RING_BLOCKS = '░▒▓'
+/** Every glyph the ring can show, blocks last: a glyph is its index here. */
+export const RING_CHARS = RING_KATAKANA + RING_LATIN + RING_BLOCKS
+/** How many glyphs are not blocks: the first RING_PLAIN of RING_CHARS. */
+export const RING_PLAIN = RING_KATAKANA.length + RING_LATIN.length
+/** How often a glyph is a block texture: now and then. */
+export const BLOCK_SHARE = 0.06
 
 /** How many glyphs orbit one letter. */
 export const RING_GLYPHS = 24
@@ -59,9 +75,10 @@ export function mulberry32(seed: number): Rng {
   }
 }
 
-/** A glyph index in [0, GLYPHS.length). */
+/** A glyph index in [0, RING_CHARS.length): a block one time in about sixteen (BLOCK_SHARE), otherwise a letter, a digit or katakana, each as likely. */
 export function randomGlyph(rng: Rng): number {
-  return Math.min(GLYPHS.length - 1, Math.floor(rng() * GLYPHS.length))
+  if (rng() < BLOCK_SHARE) return RING_PLAIN + Math.min(RING_BLOCKS.length - 1, Math.floor(rng() * RING_BLOCKS.length))
+  return Math.min(RING_PLAIN - 1, Math.floor(rng() * RING_PLAIN))
 }
 
 /** A ring's first glyphs, from its message's key: the same key, the same ring. */
@@ -109,7 +126,7 @@ export interface GlyphChange { slot: number; glyph: number }
 /**
  * `count` changes among `slots` glyphs: which slot and which glyph, each at
  * random from `rng`. Never more than MAX_CHANGES_PER_FRAME, every slot in
- * [0, slots) and every glyph in [0, GLYPHS.length).
+ * [0, slots) and every glyph in [0, RING_CHARS.length).
  */
 export function glyphChanges(rng: Rng, slots: number, count: number): GlyphChange[] {
   const n = slots > 0 ? Math.max(0, Math.min(count, MAX_CHANGES_PER_FRAME)) : 0

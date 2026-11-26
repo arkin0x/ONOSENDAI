@@ -15295,18 +15295,23 @@ body:has(.terrainview.is-folded) .terrain-held { visibility: hidden; }
 .letter__page::after { right: -1px; bottom: -1px; border-left: 0; border-top: 0; }
 .letter--opening .letter__page { animation: letter-unfold calc(var(--unfold-ms, 650ms) * 0.75) calc(var(--unfold-ms, 650ms) * 0.25) cubic-bezier(.2, .8, .2, 1) both; }
 @keyframes letter-unfold { from { transform: perspective(600px) rotateX(-78deg); opacity: 0.25; } to { transform: none; opacity: 1; } }
-/* The words: a comfortable reading face, white on the dark page. */
+/* The words: the HUD's own Monaspace Krypton (bundled, public/fonts and
+   @fontsource), in the mockup's light blue, set from the left (owner,
+   2026-11-27: "it should be blue ... center alignment might not be good for
+   certain notes. can we use monaspace krypton"). The emoji faces after it,
+   so an emoji in a note still draws as one. */
 .letter__words {
   margin: 0;
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
-  font-size: 16px;
-  line-height: 1.65;
-  color: #f4fbff;
+  font-family: 'Monaspace Krypton', var(--mono), "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
+  font-size: 15px;
+  line-height: 1.7;
+  color: #9fdcff;
+  text-align: left;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   outline: none;
 }
-.letter__words--short { padding: 6px 0 2px; font-size: 20px; line-height: 1.4; text-align: center; }
+.letter__words--short { padding: 4px 0 2px; font-size: 18px; line-height: 1.5; }
 /* The real words hold the height from the first frame; the glyphs are drawn over them until they resolve. */
 .letter__stack { position: relative; display: block; }
 .letter__ghost { color: transparent; }

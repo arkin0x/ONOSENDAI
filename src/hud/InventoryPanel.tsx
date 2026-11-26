@@ -48,6 +48,7 @@
  * Clear All ... get rid of it").
  */
 
+import { nameLabel } from '../lib/nameLabel'
 import { fetchRef } from '../lib/parts'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { create } from 'zustand'
@@ -69,7 +70,6 @@ import { safeNpub } from '../lib/npub'
 import { formatAgo, formatStamp } from '../lib/time'
 import { useCyberspace } from '../store/useCyberspace'
 import { useInventory } from '../store/useInventory'
-import { profileLabel } from '../store/useProfiles'
 import { itemStillNeeded, placeCopyOf, useShards } from '../store/useShards'
 import { useWorkshop } from '../store/useWorkshop'
 import { MessageText } from './CashuCard'
@@ -330,7 +330,7 @@ function useFocusedRow(focused: boolean): RefObject<HTMLLIElement> {
 function KeyRow({ item, opens, fresh = false, focused = false }: { item: HeldItem; opens: number; fresh?: boolean; focused?: boolean }): JSX.Element {
   const me = useCyberspace((s) => s.identity.pubkey)
   const profile = useProfile(item.author || null)
-  const who = item.author === me ? 'you' : profileLabel(profile, safeNpub(item.author))
+  const who = nameLabel(item.author, me, profile?.name)
   const [open, setOpen] = useState(false)
   const [copied, setCopied] = useState(false)
   const copy = (): void => {

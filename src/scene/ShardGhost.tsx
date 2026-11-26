@@ -168,7 +168,7 @@ export function ShardGhost({ axes }: Props): JSX.Element | null {
       {seedArrows && <SeedArrows follow={landingAt} up={seedArrows.up} front={seedArrows.front} length={arrowLength} />}
       {sealed}
       <WorldLabel
-        text={pending.type === 'message' ? messagePreview(pending.text, 40) : pending.type === 'key' ? `⚷ ${pending.key.name}` : pending.type === 'audio' ? `AUDIO · ${pending.audio.title}` : pending.type === 'seed' ? `SEED · ${seedDraftName(pending.seed)}` : `▣ ${pending.name}`}
+        text={pending.type === 'message' ? messagePreview(pending.text, 40) : pending.type === 'key' ? pending.key.name : pending.type === 'audio' ? `AUDIO · ${pending.audio.title}` : pending.type === 'seed' ? `SEED · ${seedDraftName(pending.seed)}` : pending.name}
         color="#ffd27d"
         follow={landingAt}
         align="center"
@@ -191,7 +191,7 @@ export function ShardGhost({ axes }: Props): JSX.Element | null {
         </GhostGlow>
       </group>
       {sealed}
-      {pending.type === 'chest' && pending.name && <WorldLabel text={`▣ ${pending.name}`} color="#ffd27d" follow={landingAt} align="center" px={13} opacity={0.5} />}
+      {pending.type === 'chest' && pending.name && <WorldLabel text={pending.name} color="#ffd27d" follow={landingAt} align="center" px={13} opacity={0.5} />}
     </>
   )
 }

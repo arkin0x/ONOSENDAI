@@ -35,7 +35,8 @@ import type { ViewAxes } from '../../lib/space'
 import { mount, type Mounted } from '../../test/elementRoot'
 import { LookMark } from '../LookMark'
 import { ChestLooks } from '../ChestLooks'
-import { AudioMark, FLOATING_NAME, ItemMark } from '../WorldMessages'
+import { AudioMark, FLOATING_NAME, ItemMark, itemMarkText } from '../WorldMessages'
+import { shortNpub } from '../../lib/nameLabel'
 import { useCyberspace } from '../../store/useCyberspace'
 import { useShards } from '../../store/useShards'
 
@@ -86,9 +87,26 @@ describe('floating names in the world', () => {
   })
 
   it('an item still has its name and who left it', async () => {
-    const m = await mount(createElement(ItemMark, { text: '⚷ Silver Key', sub: 'by someone', at: [0, 0, 0] }))
+    const m = await mount(createElement(ItemMark, { text: 'Silver Key', sub: 'by someone', at: [0, 0, 0] }))
     expect(labels(m)).toHaveLength(1)
-    expect(labels(m)[0].props.text).toBe('⚷ Silver Key')
+    expect(labels(m)[0].props.text).toBe('Silver Key')
     await m.unmount()
+  })
+
+  it('an item is named as messages and sounds are: its name alone, who left it by display name, "you" or a short npub, all white (owner, 2026-11-27)', async () => {
+    const someone = 'c3'.repeat(32)
+    expect(itemMarkText({ type: 'key', keyItem: { name: 'free' } })).toBe('free')
+    expect(itemMarkText({ type: 'key', keyItem: {} })).toBe('item')
+    expect(itemMarkText({ type: 'chest', chest: { name: 'Strongbox' } })).toBe('Strongbox')
+    const theirs = await mount(createElement(ItemMark, { text: 'free', sub: 'unused', who: { pubkey: someone, mine: false }, at: [0, 0, 0], side: 1 }))
+    const [label] = labels(theirs)
+    expect(label.props).toMatchObject({ text: 'free', color: '#ffffff', subColor: '#ffffff', sub: shortNpub(someone) })
+    expect(String(label.props.sub)).not.toMatch(/^[\u2014\u2013-]|NPUB/)
+    // With no model it is the token, not the cube.
+    expect(theirs.all().some((h) => h.props.name === 'item-token')).toBe(true)
+    await theirs.unmount()
+    const mine = await mount(createElement(ItemMark, { text: 'free', sub: 'unused', who: { pubkey: someone, mine: true }, at: [0, 0, 0], side: 1 }))
+    expect(labels(mine)[0].props.sub).toBe('you')
+    await mine.unmount()
   })
 })

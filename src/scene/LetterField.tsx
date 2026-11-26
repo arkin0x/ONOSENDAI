@@ -257,18 +257,47 @@ const Z_FOLD = 0.006
 const Z_SEAL = 0.012
 const Z_INITIAL = 0.018
 
+/** A non-indexed geometry with each triangle's winding reversed, so its front faces the other way. */
+function reversed(g: BufferGeometry): BufferGeometry {
+  const out = g.index ? g.toNonIndexed() : g.clone()
+  for (const name of Object.keys(out.attributes)) {
+    const a = out.getAttribute(name) as BufferAttribute
+    const n = a.itemSize
+    const arr = a.array as Float32Array
+    for (let t = 0; t + 2 < a.count; t += 3) {
+      for (let k = 0; k < n; k++) {
+        const i1 = (t + 1) * n + k, i2 = (t + 2) * n + k
+        const tmp = arr[i1]; arr[i1] = arr[i2]; arr[i2] = tmp
+      }
+    }
+    a.needsUpdate = true
+  }
+  return out
+}
+
 /**
- * A face's geometry on both faces of the letter: as made, a hair in front
- * of the paper, and turned half round about the up axis to stand a hair
- * behind it, so the letter turning in the world shows its flap, its seal and
- * its initial from either side, each reading the right way round.
+ * A face's geometry on both faces of a flat thing (the letter, an item's
+ * token): as made, a hair in front, and mirrored through the paper's plane to
+ * stand a hair behind, facing out the back. Mirrored, not turned half round:
+ * the paper is one sheet seen from both sides, so from behind its cut
+ * corners are where they were, and the back's edge, flap and seal must lie
+ * on the same corners (review of the first round: a turned copy cut the
+ * opposite corners and crossed the flap). `turn` turns the back copy half
+ * round instead, for what must read the right way round from behind and
+ * stands on the middle line, as the seal's initial does.
  */
-export function bothFaces(front: BufferGeometry, z: number): BufferGeometry {
-  const a = front.clone()
+export function bothFaces(front: BufferGeometry, z: number, turn = false): BufferGeometry {
+  const a = front.index ? front.toNonIndexed() : front.clone()
   a.translate(0, 0, z)
-  const b = a.clone()
-  b.rotateY(Math.PI)
-  return mergeGeometries([a.index ? a.toNonIndexed() : a, b.index ? b.toNonIndexed() : b])!
+  let b: BufferGeometry
+  if (turn) {
+    b = a.clone()
+    b.rotateY(Math.PI)
+  } else {
+    b = reversed(a)
+    b.scale(1, 1, -1)
+  }
+  return mergeGeometries([a, b])!
 }
 
 /** The paper: one sheet, seen from both sides (DoubleSide on its material). */
@@ -283,7 +312,7 @@ const BROKEN_GEOMETRY = (() => {
 const INITIAL_GEOMETRY = (() => {
   const g = new PlaneGeometry(SEAL_RADIUS * 1.25, SEAL_RADIUS * 1.25)
   g.translate(SEAL_CENTRE[0], SEAL_CENTRE[1] - SEAL_RADIUS * 0.04, 0)
-  return bothFaces(g, Z_INITIAL)
+  return bothFaces(g, Z_INITIAL, true)
 })()
 
 /** Where the fold lines stand off the paper, for a letter 1 wide: a little past the bands. */
@@ -441,7 +470,7 @@ function LetterMeshes({ list, capacity }: { list: LetterSpec[]; capacity: number
     const opaque = basicFaceProps(1, { ghost: false, world: true })
     return {
       // Both sides: the letter turns, and its back is the same paper.
-      paper: new MeshBasicMaterial({ color: PAPER, toneMapped: false, ...opaque, side: DoubleSide, polygonOffset: true, polygonOffsetFactor: 2, polygonOffsetUnits: 4 }),
+      paper: new MeshBasicMaterial({ color: PAPER, toneMapped: false, ...opaque, side: DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 2 }),
       lines: new LineBasicMaterial({ vertexColors: true, toneMapped: false, transparent: true, opacity: 0.9, depthWrite: false }),
       // Lines of light, as the box's edges were: they glow a little, and write no depth.
       folds: new MeshBasicMaterial({ color: '#ffffff', toneMapped: false, transparent: true, opacity: 0.9, depthWrite: false }),
@@ -597,9 +626,10 @@ function LetterMeshes({ list, capacity }: { list: LetterSpec[]; capacity: number
     function placeLetters(): void {
     const pos = lineGeometry.getAttribute('position') as BufferAttribute
     list.forEach((l, i) => {
-      const bob = reduced ? 0 : Math.sin((t / BOB_S) * Math.PI * 2 + (i * 1.7)) * BOB * l.width
+      const bob = reduced ? 0 : Math.sin((t / BOB_S) * Math.PI * 2 + phases[i]) * BOB * l.width
       p.set(l.centre[0], l.centre[1], l.centre[2]).addScaledVector(up, bob)
-      const angle = phases[i] + (reduced ? 0 : (t / LETTER_TURN_S) * Math.PI * 2)
+      // Held still with reduced motion, every letter square on to the view's front, never edge on.
+      const angle = reduced ? 0 : phases[i] + (t / LETTER_TURN_S) * Math.PI * 2
       q.copy(spin.setFromAxisAngle(up, angle)).multiply(tilt)
       s.setScalar(l.width)
       m.compose(p, q, s)

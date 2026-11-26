@@ -32,7 +32,7 @@ import { seedOf } from '../lib/decode'
 import { basicFaceProps } from './shardFaces'
 import { bandOf, bothFaces, shapeOf } from './LetterField'
 import { LABEL_PRIORITY } from './WorldLabel'
-import { markFadeLeft } from './WorldMessages'
+import { markFadeLeft } from '../lib/worldMarks'
 
 /** One turn of the token, seconds: a little quicker than a letter, so a row of both never turns as one. */
 export const TOKEN_TURN_S = 20
@@ -108,11 +108,12 @@ export function ItemToken({ id, at, side, colour, opacity = 1, fadeOut }: {
   const group = useRef<Group>(null)
   const ring = useRef<Group>(null)
   const materials = useMemo(() => ({
-    core: new MeshBasicMaterial({ color: TOKEN_CORE, toneMapped: false, ...basicFaceProps(opacity, { ghost: false, world: true }), side: DoubleSide, polygonOffset: true, polygonOffsetFactor: 2, polygonOffsetUnits: 4 }),
+    // Fading out (TAKE), the core is see-through from the start, so its opacity takes: the tag blend ignores it.
+    core: new MeshBasicMaterial({ color: TOKEN_CORE, toneMapped: false, ...basicFaceProps(fadeOut !== undefined ? Math.min(opacity, 0.999) : opacity, { ghost: false, world: true }), side: DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 2 }),
     edge: new MeshBasicMaterial({ color: colour, toneMapped: false, transparent: true, opacity: 0.95 * opacity, depthWrite: false }),
     line: new LineBasicMaterial({ color: colour, toneMapped: false, transparent: true, opacity: 0.95 * opacity, depthWrite: false }),
     ring: new LineBasicMaterial({ color: colour, toneMapped: false, transparent: true, opacity: 0.5 * opacity, depthWrite: false }),
-  }), [colour, opacity])
+  }), [colour, opacity, fadeOut])
   useEffect(() => () => { for (const m of Object.values(materials)) m.dispose() }, [materials])
   const phase = useMemo(() => (seedOf(id) / 4294967296) * Math.PI * 2, [id])
 
@@ -125,13 +126,13 @@ export function ItemToken({ id, at, side, colour, opacity = 1, fadeOut }: {
       materials.edge.opacity = 0.95 * opacity * left
       materials.line.opacity = 0.95 * opacity * left
       materials.ring.opacity = 0.5 * opacity * left
-      // The core goes see-through as it fades, so what is behind shows through it.
-      materials.core.opacity = opacity * left
-      materials.core.depthWrite = left >= 1
+      // The core, see-through while it fades (its material above), goes with the rest.
+      materials.core.opacity = Math.min(opacity, 0.999) * left
     }
     const t = reduced ? 0 : state.clock.elapsedTime
     g.position.set(at[0], at[1] + (reduced ? 0 : Math.sin(t * 1.25 + phase) * 0.03 * side), at[2])
-    g.rotation.set(0, phase + (t / TOKEN_TURN_S) * Math.PI * 2, 0)
+    // Held still with reduced motion, square on, never edge on.
+    g.rotation.set(0, reduced ? 0 : phase + (t / TOKEN_TURN_S) * Math.PI * 2, 0)
     g.scale.setScalar(side)
     // The ring leans back and turns the other way, so it never lines up with the tag.
     if (ring.current) ring.current.rotation.set(1.15, 0, -(t / (TOKEN_TURN_S * 0.75)) * Math.PI * 2)

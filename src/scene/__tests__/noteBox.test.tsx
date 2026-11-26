@@ -28,7 +28,7 @@ vi.mock('@react-three/drei', async () => {
 })
 
 import { NoteItem, noteBoxSide, patchNoteDepthPull, NOTE_BOX_GIBSONS, NOTE_DEPTH_PULL } from '../WorldMessages'
-import { FOLD_LINE_VERTS, foldLinePoints, LetterField, lettersDrawn, LETTER_GIBSONS, LETTER_TURN_S, PAPER } from '../LetterField'
+import { bothFaces, shapeOf, FOLD_LINE_VERTS, foldLinePoints, LetterField, lettersDrawn, LETTER_GIBSONS, LETTER_TURN_S, PAPER } from '../LetterField'
 import { authorColour } from '../../lib/authorColour'
 import { useMessagesRead } from '../../store/useMessagesRead'
 import { Color, DoubleSide, InstancedMesh, PerspectiveCamera, ShaderMaterial, type BufferGeometry, type LineSegments } from 'three'
@@ -177,6 +177,31 @@ describe('a message’s box', () => {
     // The flap's fold is among them: from the left edge to the seal and up to the corner, on each face.
     const pts = foldLinePoints()
     expect(pts.length / 3).toBe(FOLD_LINE_VERTS)
+  })
+
+  it('its back faces lie on the paper’s own corners: the back is the front mirrored through the paper, not turned (review, round two)', () => {
+    // A shape with no symmetry, facing +z as every face is made: a corner cut top left only.
+    const front = shapeOf([[-0.4, 0.3], [0.5, 0.3], [0.5, -0.3], [-0.5, -0.3], [-0.5, 0.2]])
+    const both = bothFaces(front, 0.01)
+    const pos = both.getAttribute('position')
+    const half = pos.count / 2
+    const key = (x: number, y: number): string => `${x.toFixed(4)},${y.toFixed(4)}`
+    const fronts = new Set<string>(), backs = new Set<string>()
+    for (let i = 0; i < pos.count; i++) (i < half ? fronts : backs).add(key(pos.getX(i), pos.getY(i)))
+    // The same corners from behind as in front, in x and y, the back a hair behind the paper.
+    expect([...backs].sort()).toEqual([...fronts].sort())
+    for (let i = half; i < pos.count; i++) expect(pos.getZ(i)).toBeCloseTo(-0.01, 9)
+    // Facing out the back: each back triangle's normal points along -z.
+    const a = new Vector3(), b = new Vector3(), c = new Vector3()
+    for (let t = half; t < pos.count; t += 3) {
+      a.fromBufferAttribute(pos, t); b.fromBufferAttribute(pos, t + 1); c.fromBufferAttribute(pos, t + 2)
+      expect(b.clone().sub(a).cross(c.clone().sub(a)).z).toBeLessThan(0)
+    }
+    // The fold lines on the back are the front's, at -z: on the same corners as the bands.
+    const lines = foldLinePoints()
+    const lf = new Set<string>(), lb = new Set<string>()
+    for (let i = 0; i < lines.length / 3; i++) (lines[i * 3 + 2] > 0 ? lf : lb).add(key(lines[i * 3], lines[i * 3 + 1]))
+    expect([...lb].sort()).toEqual([...lf].sort())
   })
 
   it('with reduced motion holds still: no turn, no bob', async () => {

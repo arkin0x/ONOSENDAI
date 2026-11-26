@@ -112,7 +112,7 @@ export function ItemVanish({ id, label, at, wears, region, axes, minPx, play, cl
       <group ref={root}>
         {model
           ? <ItemModelMark id={id} model={model} animation={animation} at={at} region={region} axes={axes} minPx={minPx} label={label} vanish={fade} />
-          : <WorldLabel text={label.text} color={label.color} at={at} align="center" px={11} sub={label.sub} subColor={label.subColor} fade={fade} clear={clear} recede="name" />}
+          : <WorldLabel text={label.text} color={label.color} at={at} align="center" px={11} sub={label.sub} subColor={label.subColor} subScale={1} subOpacity={1} fade={fade} clear={clear} recede="name" />}
       </group>
       {!play.calm && (
         <group ref={sparkles} position={at}>

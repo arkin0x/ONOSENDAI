@@ -40,7 +40,7 @@ const fakeDocument = {
       getImageData: (_x: number, _y: number, w: number, h: number) => ({ data: new Uint8ClampedArray(w * h * 4).fill(page.emptied ? 0 : page.fill) }),
     }),
   }),
-  fonts: { ready: new Promise(() => {}) },
+  fonts: { ready: new Promise(() => {}), load: () => new Promise(() => {}) },
 }
 
 let r: R3fRoot | null = null
@@ -73,11 +73,18 @@ describe('the glyph atlas', () => {
 
   it('is drawn again and sent again on refresh; a draw that comes back empty keeps what it had', () => {
     const atlas = glyphAtlas()
-    const v = atlas.version
+    let v = atlas.version
     page.fill = 200
     refreshGlyphAtlas()
     expect(atlas.version).toBeGreaterThan(v)
     expect((atlas.image.data as Uint8Array)[0]).toBe(200)
+    // The browser emptied the canvas (its 2D context lost): nothing is drawn, so the held glyphs stay, and are sent again.
+    page.emptied = true
+    v = atlas.version
+    refreshGlyphAtlas()
+    expect(atlas.version).toBeGreaterThan(v)
+    expect((atlas.image.data as Uint8Array)[0]).toBe(200)
+    expect((atlas.image.data as Uint8Array)[3]).toBe(200)
   })
 
   it('a letter field sends the atlas again when the WebGL context comes back and when the page shows again', async () => {

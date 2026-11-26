@@ -18,6 +18,7 @@
  * one line saying why it has no reactions or comments.
  */
 
+import { nameLabel } from '../lib/nameLabel'
 import { useEffect, useMemo, useState } from 'react'
 import { Key } from 'lucide-react'
 import { nip19 } from 'nostr-tools'
@@ -134,14 +135,11 @@ function LeftBy({ info }: { info: KeyInfoSource }): JSX.Element {
     )
   }
   if (!info.hider) return <Person pubkey={info.forger} label="Forged by" />
-  const forgerName = info.forger === me ? 'you' : profileLabel(forger, safeNpub(info.forger))
+  const forgerName = nameLabel(info.forger, me, forger?.name)
   const note = info.forger === info.hider ? 'Forged it and hid it.' : `Hid it. Forged by ${forgerName}.`
   return <Person pubkey={info.hider} label="Left by" note={note} />
 }
 
-function safeNpub(pubkey: string): string {
-  try { return nip19.npubEncode(pubkey) } catch { return pubkey }
-}
 
 /** The card: closed by ✕, a tap outside or Escape (modalStack). */
 export function KeyItemModal({ info, onClose }: { info: KeyInfoSource; onClose: () => void }): JSX.Element {

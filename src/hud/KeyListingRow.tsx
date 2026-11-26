@@ -21,6 +21,7 @@
  * one listing per lock, so no relay is asked about a particular lock.
  */
 
+import { nameLabel } from '../lib/nameLabel'
 import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 import { useProfile } from '../hooks/useProfile'
 import { listingForLock, type ItemListing } from '../lib/itemListing'
@@ -31,7 +32,6 @@ import { useCyberspace } from '../store/useCyberspace'
 import { useInventory } from '../store/useInventory'
 import { useItemFeed } from '../store/useItemFeed'
 import { useMutes } from '../store/useMutes'
-import { profileLabel } from '../store/useProfiles'
 import { Copyable, HeldRowLine } from './HeldRowLine'
 import { ItemThumb } from './ItemThumb'
 import { ProfilePic, ProfileTap } from './ProfileBadge'
@@ -56,7 +56,7 @@ export const YOU_HAVE_IT = 'YOU HAVE IT'
  */
 export function KeyListingRow({ listing, held, size }: { listing: ItemListing; held: boolean | 'other'; size?: number }): JSX.Element {
   const profile = useProfile(listing.lister)
-  const who = profileLabel(profile, safeNpub(listing.lister))
+  const who = nameLabel(listing.lister, '', profile?.name)
   const [open, setOpen] = useState(false)
   return (
     <li className="secrets__row held__row held__row--item" style={size ? ({ '--chamfer-size': `${size}px` } as CSSProperties) : undefined}>

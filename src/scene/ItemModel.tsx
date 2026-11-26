@@ -232,7 +232,7 @@ export function ItemModelMark({ id, model, animation, at, region, axes, minPx, o
           model draws can be far larger than the cube was, so the box takes
           taps as a shard's does. */}
       {onTap && <group position={at}><TapTarget measure={frame} onTap={onTap} /></group>}
-      {label && <WorldLabel text={label.text} color={label.color} at={at} align="center" px={11} sub={label.sub} subColor={label.subColor} opacity={opacity} fade={vanish} clear={clear} recede="name" />}
+      {label && <WorldLabel text={label.text} color={label.color} at={at} align="center" px={11} sub={label.sub} subColor={label.subColor} subScale={1} subOpacity={1} opacity={opacity} fade={vanish} clear={clear} recede="name" />}
     </>
   )
 }

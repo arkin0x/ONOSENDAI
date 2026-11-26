@@ -78,7 +78,7 @@ import { LABEL_PRIORITY, WorldLabel } from './WorldLabel'
 import { findCashuToken } from '../lib/cashu'
 import { NFT_WORDS, replaceNftLinks } from '../lib/nftLink'
 import { useProfile } from '../hooks/useProfile'
-import { coinKind, HELD_OPACITY, heldBox, itemDrawAs, madeBy, markShown, type MarkKind } from '../lib/worldMarks'
+import { coinKind, HELD_OPACITY, heldBox, itemDrawAs, madeBy, markFadeLeft, MARK_FADE_MS, markShown, type MarkKind } from '../lib/worldMarks'
 import { useCashu } from '../hud/useCashu'
 import { TapTarget } from './TapTarget'
 import { regionBox, type Box } from '../lib/clip'
@@ -380,7 +380,7 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
               : <HeldItemMark id={w.key} own={draw === 'own'} at={w.centre} wears={w.wears} region={w.region} axes={axes} appear={play} />}
             {/* TAKE on an item with no model: its token fades out (MARK_FADE_MS), and its name, over where it stood, with the rest. */}
             {draw !== 'item' && play && side !== undefined && <ItemToken id={w.key} at={w.centre} side={side} colour={authorColour(w.itemAuthor ?? w.author)} fadeOut={play.at} />}
-            {draw !== 'item' && play && <ItemVanish id={w.key} label={{ text: w.text, color: NAME_WHITE, sub: author(w), subColor: NAME_WHITE }} at={w.centre} wears={w.wears} region={w.region} axes={axes} minPx={NOTE_EDGE_PX} play={play} clear={side === undefined ? { trueSide: placedBoxSide(scaleExp), minPx: 0 } : { trueSide: side * TOKEN_REACH, minPx: 0, nearFace: true }} />}
+            {draw !== 'item' && play && <NamedVanish id={w.key} who={{ pubkey: w.itemAuthor ?? w.author, mine: w.mine }} label={{ text: w.text, color: NAME_WHITE, subColor: NAME_WHITE }} at={w.centre} wears={w.wears} region={w.region} axes={axes} minPx={NOTE_EDGE_PX} play={play} clear={side === undefined ? { trueSide: placedBoxSide(scaleExp), minPx: 0 } : { trueSide: side * TOKEN_REACH, minPx: 0, nearFace: true }} />}
             {/* A fingertip over the mark at any distance, and over a one-gibson
                 cube the whole cube once it is larger (TapTarget `side`). A
                 held key keeps its fingertip: its box is the half one. */}
@@ -457,10 +457,10 @@ export function ItemMark({ id, text, sub, who, at, opacity = 1, wears, region = 
   onTap?: () => void
 }): JSX.Element {
   const model = useItemModel(wears?.model)
-  const profile = useProfile(who?.pubkey || null)
-  const me = useCyberspace((s) => s.identity.pubkey)
+  const named = useByName(who)
+  const scaleExp = useCyberspace((s) => s.scaleExp)
   // Its name and who left it, white over the scene as every name label is (owner, 2026-11-27).
-  const by = who ? (who.mine ? 'you' : nameLabel(who.pubkey, me, profile?.name)) : sub
+  const by = named ?? sub
   // A model's faces would hide a label at its middle, so its label stands
   // just above its box instead (ItemModelMark `label`). The token's stands
   // just above the token and its ring (`side`).
@@ -470,11 +470,12 @@ export function ItemMark({ id, text, sub, who, at, opacity = 1, wears, region = 
   }
   return (
     <>
-      {/* In the world with no model: the token (ItemToken). Cyberspace TV's finds, sized on screen, keep the cube. */}
-      {side !== undefined
-        ? <ItemToken id={id ?? text} at={at} side={side} colour={authorColour(who?.pubkey)} opacity={opacity} />
+      {/* In the world with no model drawn (none, or one still loading or that never came): the token (ItemToken), one gibson.
+          Cyberspace TV's finds (no `who`), sized on screen, keep the cube. */}
+      {who
+        ? <ItemToken id={id ?? text} at={at} side={side ?? noteBoxSide(scaleExp)} colour={authorColour(who.pubkey)} opacity={opacity} />
         : <WorldMark kind="note" at={at} opacity={opacity} side={side} />}
-      {FLOATING_NAME.item && <WorldLabel text={label.text} color={label.color} at={at} align="center" px={11} sub={label.sub} subColor={label.subColor} opacity={opacity} clear={side === undefined ? undefined : { trueSide: side * TOKEN_REACH, minPx: 0, nearFace: true }} recede="name" />}
+      {FLOATING_NAME.item && <WorldLabel text={label.text} color={label.color} at={at} align="center" px={11} sub={label.sub} subColor={label.subColor} subScale={1} subOpacity={1} opacity={opacity} clear={who ? { trueSide: (side ?? noteBoxSide(scaleExp)) * TOKEN_REACH, minPx: 0, nearFace: true } : undefined} recede="name" />}
     </>
   )
 }
@@ -572,6 +573,24 @@ export function NoteItem({ w, birth, onTap }: { w: { key: string; lineage?: stri
       <TapTarget px={TAP_PX} side={side} at={w.centre} onTap={onTap} />
     </group>
   )
+}
+
+/**
+ * The name over a person's item, as messages and sounds name them
+ * (lib/nameLabel): "you", their display name, or a short npub; undefined
+ * with no one to name.
+ */
+export function useByName(who: { pubkey: string; mine: boolean } | undefined): string | undefined {
+  const profile = useProfile(who?.pubkey || null)
+  const me = useCyberspace((s) => s.identity.pubkey)
+  if (!who) return undefined
+  return who.mine ? 'you' : nameLabel(who.pubkey, me, profile?.name)
+}
+
+/** An item going out under TAKE, its label naming who left it as the standing label did (useByName). */
+function NamedVanish({ who, label, ...rest }: Omit<Parameters<typeof ItemVanish>[0], 'label'> & { who: { pubkey: string; mine: boolean }; label: { text: string; color: string; subColor: string } }): JSX.Element {
+  const by = useByName(who) ?? ''
+  return <ItemVanish {...rest} label={{ ...label, sub: by }} />
 }
 
 /** Text over the scene is white, with the label's dark outline (owner's rule, 2026-11-14). */
@@ -834,17 +853,8 @@ export function PlacedBox({ at, opacity = 1, appear, size }: { at: [number, numb
   )
 }
 
-/**
- * How long a model-less key's one-gibson cube takes to fade out under TAKE,
- * ms: quick, so the half box it leaves fades in where it stood (PlacedBox
- * `appear`) rather than the whole gibson vanishing in one frame.
- */
-export const MARK_FADE_MS = 200
-
-/** What is left of a mark `elapsed` ms into its fade: 1 down to 0 over MARK_FADE_MS. */
-export function markFadeLeft(elapsed: number): number {
-  return Math.min(1, Math.max(0, 1 - elapsed / MARK_FADE_MS))
-}
+/** The fade of a mark under TAKE, kept in lib/worldMarks and read here as before. */
+export { MARK_FADE_MS, markFadeLeft }
 
 /** The line color and opacity of each mark. A spent coin is steel and faint. */
 const MARK_LOOK: Record<MarkKind, { color: string; opacity: number }> = {

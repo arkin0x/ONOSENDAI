@@ -51,7 +51,8 @@ import { useInventory } from '../../store/useInventory'
 import { useShards, type WorldItem } from '../../store/useShards'
 import { ItemMark, keyBoxSide, markFadeLeft, MARK_FADE_MS, noteBoxSide, NOTE_EDGE_PX, WorldMessages } from '../WorldMessages'
 import { lettersDrawn, LETTER_GIBSONS } from '../LetterField'
-import { TOKEN_CORE } from '../ItemToken'
+import { ItemToken, TOKEN_CORE } from '../ItemToken'
+import { SEE_THROUGH_BLEND } from '../shardFaces'
 import { useTakeVanish } from '../../store/useOpenCeremony'
 
 const AXES: ViewAxes = { right: { axis: 'x', dir: 1 }, up: { axis: 'y', dir: 1 }, out: { axis: 'z', dir: -1 } }
@@ -401,13 +402,21 @@ describe('what keeps its look', () => {
     expect(drawn(r.state().scene).filter((o) => o.type === 'LineSegments')).toHaveLength(0)
   })
 
-  it('a key that wears a model, while it loads, is the cube sized on screen, as before', async () => {
+  it('a key that wears a model, while it loads or if it never comes, is the token one gibson across, not the blue cube', async () => {
     r = await scene([worldKey('1'.repeat(64), true)])
-    const { edges, widths } = await measure(r, BACKS)
-    // Held to one size on screen (within the headlamp's reach), so its size in the world changes with distance.
-    expect(widths[1]).toBeCloseTo(widths[0], 3)
-    expect(edges[1]).toBeGreaterThan(edges[0])
-    expect(edges.some((e) => Math.abs(e - 1) < 1e-3)).toBe(false)
+    await r.frame()
+    expect(token(r).group.scale.x).toBeCloseTo(noteBoxSide(0), 9)
+    const cubes = drawn(r.state().scene).filter((o) => o.type === 'LineSegments' && o.name !== 'item-token-lines')
+    expect(cubes).toEqual([])
+  })
+
+  it('fading out under TAKE, the token’s core is see-through, so its opacity takes (the tag blend ignores it)', async () => {
+    const id = '1'.repeat(64)
+    r = await r3fRoot()
+    await r.render(createElement(ItemToken, { id, at: [0, 0, 0], side: 1, colour: '#ffcf6b', fadeOut: performance.now() }))
+    const m = token(r).core.material as Material & { blendDst: number }
+    expect(m).toMatchObject(SEE_THROUGH_BLEND)
+    expect(m.depthWrite).toBe(false)
   })
 
   it('a coin keeps its screen-sized diamond', async () => {

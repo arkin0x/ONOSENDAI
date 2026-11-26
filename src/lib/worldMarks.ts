@@ -76,3 +76,16 @@ export function heldBox(own: boolean, drawn: boolean): 'model' | 'placed' | null
   if (!drawn) return 'placed'
   return own ? 'model' : null
 }
+
+/**
+ * How long a model-less item's mark takes to fade out under TAKE, ms:
+ * quick, so the half box it leaves fades in where it stood rather than the
+ * whole gibson vanishing in one frame. Here, not in the scene, so the token
+ * (scene/ItemToken) and WorldMessages share it with no import cycle.
+ */
+export const MARK_FADE_MS = 200
+
+/** What is left of a mark `elapsed` ms into its fade: 1 down to 0 over MARK_FADE_MS. */
+export function markFadeLeft(elapsed: number): number {
+  return Math.min(1, Math.max(0, 1 - elapsed / MARK_FADE_MS))
+}

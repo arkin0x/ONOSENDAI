@@ -18,9 +18,15 @@ export interface TerrainInput {
   hover: { x: number; y: number } | null
   /** A press waiting for the next frame: mine or place, at a point (NDC) or at the cursor. */
   action: { kind: 'mine' | 'place'; at: { x: number; y: number } | null } | null
+  /**
+   * The press now on the scene is TERRAIN's alone (the click that captures
+   * the mouse again): nothing in the scene takes it, not even a shard in
+   * plain view (scene/TapOccluder.tsx). Cleared at the next press.
+   */
+  swallowTap: boolean
 }
 
-export const terrainInput: TerrainInput = { held: new Map(), yaw: 0, pitch: -0.25, hover: null, action: null }
+export const terrainInput: TerrainInput = { held: new Map(), yaw: 0, pitch: -0.25, hover: null, action: null, swallowTap: false }
 
 /** Pitch is kept short of straight up and down. */
 export const PITCH_LIMIT = 1.45
@@ -31,6 +37,7 @@ export function resetTerrainInput(): void {
   terrainInput.pitch = -0.25
   terrainInput.hover = null
   terrainInput.action = null
+  terrainInput.swallowTap = false
 }
 
 /** Turn the look by radians. */

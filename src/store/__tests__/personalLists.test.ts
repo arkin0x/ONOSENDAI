@@ -107,7 +107,7 @@ describe('personal lists follow the identity', () => {
 
   it('every list registered follows the starter', () => {
     const names = [...personalListsMade()].map((l) => l.name).sort()
-    expect(names).toEqual(['starred-places', 'targets', 'view-recent'])
+    expect(names).toEqual(['items-seen', 'starred-places', 'targets', 'view-recent'])
     expect(starredList.owner()).toBe(A)
     expect(recentViewsList.owner()).toBe(A)
   })

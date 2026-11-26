@@ -15,13 +15,14 @@
  *   its kind's lucide icon, large and centred, in its kind's colour.
  */
 
+import { useEffect, useRef, useState } from 'react'
 import type { ShardModel } from 'sno-core/shards'
 import type { HiddenType } from '../lib/hidden'
 import type { ItemModelRef } from '../lib/itemModel'
 import { isPictureUri } from '../lib/itemPicture'
 import { useItemModel } from '../hooks/useItemModel'
 import { ItemIcon } from './ItemIcon'
-import { ShardThumb } from './ShardThumb'
+import { ShardThumb, scrollRootOf, watchNear } from './ShardThumb'
 import { Chamfer, THUMB_PX } from './ui/Chamfer'
 
 /** How big a kind's icon is drawn inside the frame: big enough to read as the picture, with air around it. */
@@ -36,6 +37,13 @@ interface Props {
   model?: ItemModelRef | null
   /** The frame's side in CSS pixels: THUMB_PX, but for a chest's contents squeezed into a narrow column (ItemRows CHEST_INLINE_PX). */
   size?: number
+  /**
+   * Ask for a key item's model only once the frame comes near the visible
+   * part of the box it scrolls in, as a shard's picture is asked for
+   * (ShardThumb): the ITEMS grids sit in the menu, which opens often, and a
+   * model no relay has is asked for again by every mount.
+   */
+  lazy?: boolean
 }
 
 function ModelThumb({ model, size, fallback }: { model: ItemModelRef; size: number; fallback: JSX.Element }): JSX.Element {
@@ -43,14 +51,28 @@ function ModelThumb({ model, size, fallback }: { model: ItemModelRef; size: numb
   return loaded ? <ShardThumb shard={loaded.shard} size={size} /> : fallback
 }
 
-export function ItemThumb({ type, coin = false, shard, image, model, size = THUMB_PX }: Props): JSX.Element {
+/** The model's picture once the frame has come near the visible part of its box; the fallback until then. Once near, it stays asked for. */
+function NearModelThumb({ model, size, fallback }: { model: ItemModelRef; size: number; fallback: JSX.Element }): JSX.Element {
+  const box = useRef<HTMLSpanElement>(null)
+  const [near, setNear] = useState(false)
+  useEffect(() => {
+    const el = box.current
+    if (!el || near) return
+    if (typeof IntersectionObserver === 'undefined') { setNear(true); return }
+    return watchNear(el, scrollRootOf(el), (n) => { if (n) setNear(true) })
+  }, [near])
+  if (near) return <ModelThumb model={model} size={size} fallback={fallback} />
+  return <span ref={box} className="itemthumb__wait">{fallback}</span>
+}
+
+export function ItemThumb({ type, coin = false, shard, image, model, size = THUMB_PX, lazy = false }: Props): JSX.Element {
   const kind = coin ? 'cashu' : type
   const icon = <ItemIcon className={`itemthumb__icon itemthumb__icon--${kind}`} type={type} coin={coin} size={Math.round(size * (THUMB_ICON_PX / THUMB_PX))} strokeWidth={1.75} />
   const own = image && isPictureUri(image) ? <img className="itemthumb__pic" src={image} alt="" width={size} height={size} draggable={false} /> : null
   const inner = shard
     ? <ShardThumb shard={shard} size={size} />
     : model
-      ? <ModelThumb model={model} size={size} fallback={own ?? icon} />
+      ? lazy ? <NearModelThumb model={model} size={size} fallback={own ?? icon} /> : <ModelThumb model={model} size={size} fallback={own ?? icon} />
       : own ?? icon
   return <Chamfer className="itemthumb" size={size}>{inner}</Chamfer>
 }

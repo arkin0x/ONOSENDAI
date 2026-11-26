@@ -9,6 +9,7 @@ import { personalListsMade } from './personalLists'
 // The lists held outside useCyberspace, made when their modules load.
 import './useStarred'
 import './recentViewsList'
+import './useItemsSeen'
 
 let started = false
 

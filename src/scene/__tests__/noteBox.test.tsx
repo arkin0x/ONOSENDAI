@@ -28,9 +28,9 @@ vi.mock('@react-three/drei', async () => {
 })
 
 import { ItemMark, NoteItem, noteBoxSide, patchNoteDepthPull, NOTE_BOX_GIBSONS, NOTE_DEPTH_PULL } from '../WorldMessages'
-import { bothFaces, shapeOf, FOLD_LINE_VERTS, foldLinePoints, LetterField, lettersDrawn, LETTER_BALL, LETTER_GIBSONS, LETTER_TURN_S, PAPER } from '../LetterField'
-import { TOKEN_BALL } from '../ItemToken'
-import { LABEL_GAP_PX, sphereTopPx } from '../../lib/markerSize'
+import { bothFaces, shapeOf, FOLD_LINE_VERTS, foldLinePoints, LetterField, lettersDrawn, LETTER_GIBSONS, LETTER_SHAPE, LETTER_TURN_S, PAPER } from '../LetterField'
+import { TOKEN_OUTLINE } from '../ItemToken'
+import { LABEL_GAP_PX } from '../../lib/markerSize'
 import { authorColour } from '../../lib/authorColour'
 import { useMessagesRead } from '../../store/useMessagesRead'
 import { Color, DoubleSide, InstancedMesh, PerspectiveCamera, ShaderMaterial, type BufferGeometry, type LineSegments } from 'three'
@@ -87,28 +87,29 @@ async function placeCamera(root: R3fRoot, at: [number, number, number]): Promise
 }
 
 /**
- * Where a label stands on screen against the ball of `radius` about the
- * origin it names: each text line's foot (CSS pixels, y down), the ball's top
- * on screen (lib/markerSize sphereTopPx) and its centre.
+ * Where a label stands on screen: each text line's foot (CSS pixels, y down),
+ * and a way to put any scene point on the same screen.
  */
-async function measureLabel(root: R3fRoot, eye: [number, number, number], radius: number): Promise<{ bottoms: number[]; ballTop: number; centreY: number }> {
-  const camera = await placeCamera(root, eye)
+async function measureLabel(root: R3fRoot, eye: [number, number, number], look: [number, number, number] = [0, 0, 0]): Promise<{ bottoms: number[]; toY: (v: Vector3) => number; centreY: number; perPx: number }> {
+  const camera = root.state().camera
+  camera.position.set(...eye)
+  camera.lookAt(...look)
+  camera.updateMatrixWorld()
+  await root.frame()
   const size = root.state().size
   const persp = camera as PerspectiveCamera
   const proj = size.height / (2 * Math.tan((persp.fov * Math.PI) / 360))
   const texts: Object3D[] = []
   root.state().scene.traverse((o) => { if (o.name === 'text') texts.push(o) })
   const toY = (v: Vector3): number => ((1 - v.clone().project(camera).y) / 2) * size.height
-  const centreY = toY(new Vector3(0, 0, 0))
-  const depth = camera.position.length()
-  const ballTop = centreY - sphereTopPx(radius, depth, proj)
   const bottoms = texts.map((t) => {
-    // A line is one local unit high at its own scale: its world scale over its depth, in pixels.
+    // A line is one local unit high at its own scale: its world scale over its depth along the view, in pixels.
     const world = t.getWorldPosition(new Vector3())
-    const unitPx = (new Vector3().setFromMatrixScale(t.matrixWorld).y * proj) / camera.position.distanceTo(world)
+    const along = -world.clone().applyMatrix4(camera.matrixWorldInverse).z
+    const unitPx = (new Vector3().setFromMatrixScale(t.matrixWorld).y * proj) / along
     return toY(world) + unitPx / 2
   })
-  return { bottoms, ballTop, centreY }
+  return { bottoms, toY, centreY: toY(new Vector3()), perPx: proj }
 }
 
 describe('a message’s box', () => {
@@ -323,33 +324,50 @@ describe('a message’s box', () => {
     expect(text!.userData.text).toBe('you')
   })
 
-  it('stands the name a constant few pixels over the letter and its ring at any distance: close by it does not float off (owner, 2026-11-27)', async () => {
+  it('stands the name a constant few pixels over the letter’s ring at any distance and angle: close by it does not float off (owner, 2026-11-27)', async () => {
     for (const scaleExp of [0, 1]) {
       useCyberspace.setState({ scaleExp })
       r = await r3fRoot()
-      await r.render(createElement(NoteItem, { w: NOTE, birth: undefined, onTap: () => undefined }))
-      const radius = noteBoxSide(scaleExp) * LETTER_GIBSONS * LETTER_BALL
-      // From a couple of gibsons away, as he stood, out to far off, straight on and from above.
-      for (const eye of [[0, 0, 2], [0, 0, 3], [0, 1.2, 1.8], [0, 0, 8], [3, 4, 20], [0, 0, 40]] as Array<[number, number, number]>) {
-        const { bottoms, ballTop } = await measureLabel(r, eye, radius)
-        // The lowest line's foot stands the gap over the ball's top, to a pixel, wherever the eye is.
-        expect(Math.abs(ballTop - bottoms[bottoms.length - 1] - LABEL_GAP_PX)).toBeLessThan(1)
+      await r.render(scene())
+      const width = noteBoxSide(scaleExp) * LETTER_GIBSONS
+      // From a couple of gibsons away, as he stood, out to far off; level, from above, and with the letter off the middle of the view.
+      for (const [eye, look] of [[[0, 0, 2], [0, 0, 0]], [[0, 0, 3], [0, 0, 0]], [[0, 1.2, 1.8], [0, 0, 0]], [[0, 0, 2.5], [0.6, -0.4, 0]], [[0, 0, 8], [0, 0, 0]], [[3, 4, 20], [0, 0, 0]], [[0, 0, 40], [0, 0, 0]]] as Array<[[number, number, number], [number, number, number]]>) {
+        const { bottoms, toY, centreY, perPx } = await measureLabel(r, eye, look)
+        // The real top: the ring's glyphs, turned to the camera, LETTER_SHAPE.flat across from the centre; or the paper's highest corner as drawn.
+        const camera = r.state().camera
+        const up = new Vector3(0, 1, 0).applyQuaternion(camera.quaternion)
+        const ringTop = toY(up.clone().multiplyScalar(LETTER_SHAPE.flat * width))
+        const m = new Matrix4(); paper(r).getMatrixAt(0, m)
+        const corners = [[-0.5, 0.33], [0.5, 0.33], [0.5, -0.33], [-0.5, -0.33]].map(([x, y]) => toY(new Vector3(x, y, 0).applyMatrix4(m)))
+        const top = Math.min(ringTop, ...corners)
+        const foot = bottoms[bottoms.length - 1]
+        // Never on the letter, and no more than a pixel or two over the gap (the paper's bound is an ellipsoid, a few pixels loose up close).
+        expect(top - foot).toBeGreaterThanOrEqual(LABEL_GAP_PX - 1)
+        expect(top - foot).toBeLessThan(LABEL_GAP_PX + (eye[2] <= 2.5 ? 12 : 2))
+        void centreY; void perPx
       }
       await r.unmount()
       r = null
     }
   })
 
-  it('an item’s name and who left it stand over its token by the same rule, the lower line a few pixels over its top', async () => {
+  it('an item’s name and who left it stand a few pixels over its token as drawn, as it turns and bobs, at any distance and angle', async () => {
     useCyberspace.setState({ scaleExp: 0 })
     r = await r3fRoot()
     await r.render(createElement(ItemMark, { id: 'k', text: 'free', sub: 'unused', who: { pubkey: 'c3'.repeat(32), mine: false }, at: [0, 0, 0], side: 1 }))
-    for (const eye of [[0, 0, 2], [0, 0.8, 2.2], [0, 0, 6], [2, 3, 25]] as Array<[number, number, number]>) {
-      const { bottoms, ballTop, centreY } = await measureLabel(r, eye, TOKEN_BALL)
-      expect(bottoms).toHaveLength(2)
-      expect(Math.abs(ballTop - Math.max(...bottoms) - LABEL_GAP_PX)).toBeLessThan(2)
-      // Two gibsons off, the whole label sits within a token's height of the token's top: close by, not floating off.
-      if (eye[2] === 2 && eye[1] === 0) expect(centreY - Math.min(...bottoms)).toBeLessThan((centreY - ballTop) * 2.2)
+    let group: Object3D | undefined
+    r.state().scene.traverse((o) => { if (o.name === 'item-token') group = o })
+    for (const [eye, look] of [[[0, 0, 2], [0, 0, 0]], [[0, 0.8, 2.2], [0, 0, 0]], [[0, 0, 2.2], [0.5, 0.4, 0]], [[0, 0, 6], [0, 0, 0]], [[2, 3, 25], [0, 0, 0]]] as Array<[[number, number, number], [number, number, number]]>) {
+      // Several moments of its turn.
+      for (let f = 0; f < 3; f++) {
+        for (let k = 0; k < 40; k++) await r.frame()
+        const { bottoms, toY } = await measureLabel(r, eye, look)
+        expect(bottoms).toHaveLength(2)
+        // The highest point of the token as drawn: its tag and its ring, through the group's own matrix this frame.
+        group!.updateWorldMatrix(true, false)
+        const top = Math.min(...TOKEN_OUTLINE.map((p) => toY(new Vector3(p[0], p[1], p[2]).applyMatrix4(group!.matrixWorld))))
+        expect(Math.abs(top - Math.max(...bottoms) - LABEL_GAP_PX)).toBeLessThan(1)
+      }
     }
   })
 

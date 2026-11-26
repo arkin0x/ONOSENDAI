@@ -42,7 +42,7 @@ import { useCyberspace } from '../store/useCyberspace'
 import { CUBE_EDGES, ShardMesh } from './ShardMesh'
 import { TapTarget } from './TapTarget'
 import { LABEL_PRIORITY, WorldLabel } from './WorldLabel'
-import { CUBE_REACH, MARK_RECEDE_FLOOR, recedeShare } from '../lib/markerSize'
+import { MARK_RECEDE_FLOOR, recedeShare } from '../lib/markerSize'
 import { headlampUniforms } from './headlamp'
 
 /** The note's own blue, the cube's color (WorldMessages NOTE_BLUE). */
@@ -195,13 +195,13 @@ export function ItemModelMark({ id, model, animation, at, region, axes, minPx, o
   const atTrue = useMemo(() => trueScale(unit, scaleExp), [unit, scaleExp])
   const longest = Math.max(...boxShape(cut.box).size)
   // The label clears the box on screen from any side, at the same scale the
-  // box is drawn at: WorldLabel lifts by a marker's side times CUBE_REACH
-  // (half a cube's space diagonal, the cube's rule for any view), so the
-  // side handed over is this box's half diagonal about the place over that,
-  // at true size and at the floor alike (modelScale). Its top alone sat the
-  // label on the box from a camera looking down (review of #439).
+  // box is drawn at: the reach handed over is this box's half diagonal about
+  // the place, at true size and at the floor alike (modelScale). Its top
+  // alone sat the label on the box from a camera looking down (review of #439).
   const reach = useMemo(() => Math.hypot(...[0, 1, 2].map((k) => Math.max(Math.abs(cut.box.min[k]), Math.abs(cut.box.max[k])))), [cut.box])
-  const clear = useMemo(() => ({ trueSide: (reach * atTrue) / CUBE_REACH, minPx: longest > 0 ? (reach * minPx) / longest / CUBE_REACH : minPx }), [reach, atTrue, longest, minPx])
+  // Its name stands over a ball of that reach by the same rule as a letter's and a token's (WorldLabel `clear`
+  // shape): a constant few pixels over its top on screen, never under the floor the model is drawn at.
+  const clear = useMemo(() => ({ shape: { radius: reach * atTrue, height: reach * atTrue, minPx: longest > 0 ? (reach * minPx) / longest : minPx } }), [reach, atTrue, longest, minPx])
   const outer = useRef<Group>(null)
   const frame = useRef<Group | null>(null)
   useFrame((state) => {

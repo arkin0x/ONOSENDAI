@@ -77,10 +77,9 @@ export function ItemVanish({ id, label, at, wears, region, axes, minPx, play, cl
   minPx: number
   play: Vanishing
   /**
-   * The blue box it fades out over (WorldMessages PlacedBox), or for a key
-   * with no model the one-gibson cube that fades out first (WorldMark
-   * `fadeOut`, `nearFace`): an item with no model has its name lifted clear
-   * above it, never inside it, where it stood before the TAKE.
+   * The blue box it fades out over (WorldMessages PlacedBox), or for an item
+   * with no model its token fading out (ItemToken `fadeOut`): its name stands
+   * over it by the same rule as before the TAKE, so it keeps its place.
    */
   clear?: LabelClear
 }): JSX.Element {

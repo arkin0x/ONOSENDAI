@@ -92,7 +92,7 @@ import { MARK_RECEDE_FLOOR, recedeShare } from '../lib/markerSize'
 import { headlampUniforms } from './headlamp'
 import { basicFaceProps, TRANSLUCENT_ORDER } from './shardFaces'
 import { useDrawReach } from './buildZoom'
-import { dropLetter, LetterField, LETTER_BALL, LETTER_GIBSONS, putLetter } from './LetterField'
+import { dropLetter, LetterField, LETTER_GIBSONS, LETTER_SHAPE, putLetter } from './LetterField'
 import { LevelRing } from './LevelRing'
 import { atlasIndex } from './glyphAtlas'
 import { authorColour } from '../lib/authorColour'
@@ -101,7 +101,7 @@ import { readId } from '../lib/messagesRead'
 import { sealBroken, useMessagesRead } from '../store/useMessagesRead'
 import { recordViewPose } from '../lib/viewPose'
 import { nameLabel, shortNpub } from '../lib/nameLabel'
-import { ItemToken, TOKEN_BALL } from './ItemToken'
+import { ItemToken, TOKEN_OUTLINE } from './ItemToken'
 
 /** A message's tap target, in CSS pixels: a fingertip over the mark, at any zoom. */
 const TAP_PX = 44
@@ -379,8 +379,7 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
               ? <ItemMark id={w.key} text={w.text} sub={author(w)} who={{ pubkey: w.itemAuthor ?? w.author, mine: w.mine }} at={w.centre} wears={w.wears} region={w.region} axes={axes} side={side} onTap={open} />
               : <HeldItemMark id={w.key} own={draw === 'own'} at={w.centre} wears={w.wears} region={w.region} axes={axes} appear={play} />}
             {/* TAKE on an item with no model: its token fades out (MARK_FADE_MS), and its name, over where it stood, with the rest. */}
-            {draw !== 'item' && play && side !== undefined && <ItemToken id={w.key} at={w.centre} side={side} colour={authorColour(w.itemAuthor ?? w.author)} fadeOut={play.at} />}
-            {draw !== 'item' && play && <NamedVanish id={w.key} who={{ pubkey: w.itemAuthor ?? w.author, mine: w.mine }} label={{ text: w.text, color: NAME_WHITE, subColor: NAME_WHITE }} at={w.centre} wears={w.wears} region={w.region} axes={axes} minPx={NOTE_EDGE_PX} play={play} clear={side === undefined ? { trueSide: placedBoxSide(scaleExp), minPx: 0 } : { radius: side * TOKEN_BALL }} />}
+            {draw !== 'item' && play && <TakenItem w={w} side={side} play={play} axes={axes} scaleExp={scaleExp} />}
             {/* A fingertip over the mark at any distance, and over a one-gibson
                 cube the whole cube once it is larger (TapTarget `side`). A
                 held key keeps its fingertip: its box is the half one. */}
@@ -459,6 +458,7 @@ export function ItemMark({ id, text, sub, who, at, opacity = 1, wears, region = 
   const model = useItemModel(wears?.model)
   const named = useByName(who)
   const scaleExp = useCyberspace((s) => s.scaleExp)
+  const token = useRef<Group | null>(null)
   // Its name and who left it, white over the scene as every name label is (owner, 2026-11-27).
   const by = named ?? sub
   // A model's faces would hide a label at its middle, so its label stands
@@ -473,9 +473,10 @@ export function ItemMark({ id, text, sub, who, at, opacity = 1, wears, region = 
       {/* In the world with no model drawn (none, or one still loading or that never came): the token (ItemToken), one gibson.
           Cyberspace TV's finds (no `who`), sized on screen, keep the cube. */}
       {who
-        ? <ItemToken id={id ?? text} at={at} side={side ?? noteBoxSide(scaleExp)} colour={authorColour(who.pubkey)} opacity={opacity} />
+        ? <ItemToken id={id ?? text} at={at} side={side ?? noteBoxSide(scaleExp)} colour={authorColour(who.pubkey)} opacity={opacity} groupRef={token} />
         : <WorldMark kind="note" at={at} opacity={opacity} side={side} />}
-      {FLOATING_NAME.item && <WorldLabel text={label.text} color={label.color} at={at} align="center" px={11} sub={label.sub} subColor={label.subColor} subScale={1} subOpacity={1} opacity={opacity} clear={who ? { radius: (side ?? noteBoxSide(scaleExp)) * TOKEN_BALL } : undefined} recede="name" />}
+      {/* Over the token as it is drawn, turning and bobbing: a few pixels over its highest point on screen (WorldLabel clear). */}
+      {FLOATING_NAME.item && <WorldLabel text={label.text} color={label.color} at={at} align="center" px={11} sub={label.sub} subColor={label.subColor} subScale={1} subOpacity={1} opacity={opacity} clear={who ? { object: token, points: TOKEN_OUTLINE } : undefined} recede="name" />}
     </>
   )
 }
@@ -569,7 +570,7 @@ export function NoteItem({ w, birth, onTap }: { w: { key: string; lineage?: stri
     <group>
       {flourish && birth !== undefined
         ? <DecodingLabel text={messageBillboard(w.text)} seed={seedOf(w.key)} birth={birth} at={w.centre} />
-        : <WorldLabel text={name} color={NAME_WHITE} at={w.centre} align="center" px={11} clear={{ radius: side * LETTER_GIBSONS * LETTER_BALL }} recede="credit" />}
+        : <WorldLabel text={name} color={NAME_WHITE} at={w.centre} align="center" px={11} clear={{ shape: { flat: LETTER_SHAPE.flat * side * LETTER_GIBSONS, radius: LETTER_SHAPE.radius * side * LETTER_GIBSONS, height: LETTER_SHAPE.height * side * LETTER_GIBSONS } }} recede="credit" />}
       {/* A fingertip over the letter at any distance, and its whole gibson once it is larger (TapTarget `side`). */}
       <TapTarget px={TAP_PX} side={side} at={w.centre} onTap={onTap} />
     </group>
@@ -592,6 +593,23 @@ export function useByName(who: { pubkey: string; mine: boolean } | undefined): s
 function NamedVanish({ who, label, ...rest }: Omit<Parameters<typeof ItemVanish>[0], 'label'> & { who: { pubkey: string; mine: boolean }; label: { text: string; color: string; subColor: string } }): JSX.Element {
   const by = useByName(who) ?? ''
   return <ItemVanish {...rest} label={{ ...label, sub: by }} />
+}
+
+/**
+ * An item going out under TAKE: with no model, its token fading (MARK_FADE_MS)
+ * and its name over the token as drawn, where it stood (the same rule as the
+ * standing label, so the name keeps its place); with one, its model fading
+ * (ItemVanish) and its name over the half box it leaves.
+ */
+function TakenItem({ w, side, play, axes, scaleExp }: { w: { key: string; text: string; centre: [number, number, number]; wears?: ItemWears; region: Box | null; author: string; itemAuthor?: string; mine: boolean }; side: number | undefined; play: Vanishing; axes: ViewAxes; scaleExp: number }): JSX.Element {
+  const token = useRef<Group | null>(null)
+  const who = { pubkey: w.itemAuthor ?? w.author, mine: w.mine }
+  return (
+    <>
+      {side !== undefined && <ItemToken id={w.key} at={w.centre} side={side} colour={authorColour(who.pubkey)} fadeOut={play.at} groupRef={token} />}
+      <NamedVanish id={w.key} who={who} label={{ text: w.text, color: NAME_WHITE, subColor: NAME_WHITE }} at={w.centre} wears={w.wears} region={w.region} axes={axes} minPx={NOTE_EDGE_PX} play={play} clear={side === undefined ? { trueSide: placedBoxSide(scaleExp), minPx: 0 } : { object: token, points: TOKEN_OUTLINE }} />
+    </>
+  )
 }
 
 /** Text over the scene is white, with the label's dark outline (owner's rule, 2026-11-14). */

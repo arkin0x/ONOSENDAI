@@ -23,7 +23,7 @@
  * the token never loses its edge far off (the letter's flap did).
  */
 
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef, type MutableRefObject } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { BufferAttribute, BufferGeometry, DoubleSide, EllipseCurve, LineBasicMaterial, MeshBasicMaterial, Vector3, type Group } from 'three'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
@@ -34,12 +34,24 @@ import { bandOf, bothFaces, shapeOf } from './LetterField'
 import { LABEL_PRIORITY } from './WorldLabel'
 import { markFadeLeft } from '../lib/worldMarks'
 
+/** How far the ring leans back from upright, radians. */
+const RING_LEAN = 1.15
+
 /**
- * The ball a token and its ring fit in, for a token 1 across: the ring's
- * radius (it can stand straight up as it turns), over the tag's own corner
- * (0.51), and the bob. Its name stands a constant gap above it on screen.
+ * The token's outline in its own frame, for a token 1 across: the tag's
+ * corners on both faces and the ring's points as it leans. Its name stands
+ * a constant gap over the highest of them on screen, projected every frame
+ * as the token turns and bobs (WorldLabel `clear` object and points).
  */
-export const TOKEN_BALL = 0.6 + 0.03
+export const TOKEN_OUTLINE: ReadonlyArray<readonly [number, number, number]> = (() => {
+  const out: Array<[number, number, number]> = []
+  for (const z of [0.012, -0.012]) for (const [x, y] of [[-0.31 + 0.11, 0.41], [0.31, 0.41], [0.31, -0.41 + 0.11], [0.31 - 0.11, -0.41], [-0.31, -0.41], [-0.31, 0.41 - 0.11]]) out.push([x, y, z])
+  for (let k = 0; k < 16; k++) {
+    const t = (k / 16) * Math.PI * 2
+    out.push([0.6 * Math.cos(t), 0.6 * Math.sin(t) * Math.cos(RING_LEAN), 0.6 * Math.sin(t) * Math.sin(RING_LEAN)])
+  }
+  return out
+})()
 
 /** One turn of the token, seconds: a little quicker than a letter, so a row of both never turns as one. */
 export const TOKEN_TURN_S = 20
@@ -99,7 +111,7 @@ const RING_GEOMETRY = (() => {
   return new BufferGeometry().setFromPoints(pts.map((p) => new Vector3(p.x, p.y, 0)))
 })()
 
-export function ItemToken({ id, at, side, colour, opacity = 1, fadeOut }: {
+export function ItemToken({ id, at, side, colour, opacity = 1, fadeOut, groupRef }: {
   /** What it stands for, for its own starting angle. */
   id: string
   at: [number, number, number]
@@ -110,9 +122,12 @@ export function ItemToken({ id, at, side, colour, opacity = 1, fadeOut }: {
   opacity?: number
   /** From this moment (performance.now()), fading out over MARK_FADE_MS and then gone: TAKE. */
   fadeOut?: number
+  /** Handed the token's group, so its name can stand over its outline as drawn (TOKEN_OUTLINE). */
+  groupRef?: MutableRefObject<Group | null>
 }): JSX.Element {
   const reduced = useReducedMotion()
-  const group = useRef<Group>(null)
+  const own = useRef<Group | null>(null)
+  const group = groupRef ?? own
   const ring = useRef<Group>(null)
   const materials = useMemo(() => ({
     // Fading out (TAKE), the core is see-through from the start, so its opacity takes: the tag blend ignores it.
@@ -142,7 +157,7 @@ export function ItemToken({ id, at, side, colour, opacity = 1, fadeOut }: {
     g.rotation.set(0, reduced ? 0 : phase + (t / TOKEN_TURN_S) * Math.PI * 2, 0)
     g.scale.setScalar(side)
     // The ring leans back and turns the other way, so it never lines up with the tag.
-    if (ring.current) ring.current.rotation.set(1.15, 0, -(t / (TOKEN_TURN_S * 0.75)) * Math.PI * 2)
+    if (ring.current) ring.current.rotation.set(RING_LEAN, 0, -(t / (TOKEN_TURN_S * 0.75)) * Math.PI * 2)
   }, LABEL_PRIORITY)
 
   return (
@@ -150,7 +165,7 @@ export function ItemToken({ id, at, side, colour, opacity = 1, fadeOut }: {
       <mesh geometry={CORE_GEOMETRY} material={materials.core} name="item-token-core" />
       <mesh geometry={EDGE_GEOMETRY} material={materials.edge} name="item-token-edges" />
       <lineSegments geometry={LINE_GEOMETRY} material={materials.line} frustumCulled={false} name="item-token-lines" />
-      <group ref={ring} rotation={[1.15, 0, 0]}>
+      <group ref={ring} rotation={[RING_LEAN, 0, 0]}>
         <lineLoop geometry={RING_GEOMETRY} material={materials.ring} frustumCulled={false} name="item-token-ring" />
       </group>
     </group>

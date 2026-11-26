@@ -51,7 +51,7 @@ import { useInventory } from '../../store/useInventory'
 import { useShards, type WorldItem } from '../../store/useShards'
 import { ItemMark, keyBoxSide, markFadeLeft, MARK_FADE_MS, noteBoxSide, NOTE_EDGE_PX, WorldMessages } from '../WorldMessages'
 import { lettersDrawn, LETTER_GIBSONS } from '../LetterField'
-import { ItemToken, TOKEN_CORE } from '../ItemToken'
+import { ItemToken, TOKEN_CORE, TOKEN_OUTLINE } from '../ItemToken'
 import { SEE_THROUGH_BLEND } from '../shardFaces'
 import { useTakeVanish } from '../../store/useOpenCeremony'
 
@@ -235,33 +235,27 @@ describe('a key with no model of its own', () => {
     expect(token(r).group.scale.x).toBeCloseTo(0.5, 6)
   })
 
-  it('stands its name and its credit line just over the cube on screen, clear of its highest corner, near or far', async () => {
+  it('stands its name and who left it just over the token as drawn, clear of its highest point on screen, near or far', async () => {
     r = await scene([worldKey('1'.repeat(64))])
+    await r.frame()
     const scene3 = r.state().scene
     const size = r.state().size
-    const lines = markEdges(scene3)
-    const centre = worldBox(lines).getCenter(new Vector3())
+    const { group } = token(r)
+    const centre = group.position.clone()
     const texts: Object3D[] = []
     scene3.traverse((o) => { if (o.name === 'text') texts.push(o) })
-    // The name and, under it, who left it (WorldLabel's credit line, at subScale 0.72 of the name).
+    // The name and, under it, who left it, the same size (subScale 1).
     expect(texts).toHaveLength(2)
-    const half = (t: Object3D): number => (t.position.y < 0 ? 0.72 / 2 : 0.5)
     for (const back of [1.5, 2.5, 8, 20, 40]) {
       const camera = await lookFrom(r, centre, back)
-      const b = worldBox(lines)
-      let highest = Infinity
-      for (let i = 0; i < 8; i++) {
-        const v = new Vector3(i & 1 ? b.max.x : b.min.x, i & 2 ? b.max.y : b.min.y, i & 4 ? b.max.z : b.min.z).project(camera)
-        highest = Math.min(highest, ((1 - v.y) / 2) * size.height)
-      }
-      const label = texts[0].parent!.parent!.parent!
-      const depth = camera.position.distanceTo(label.getWorldPosition(new Vector3()))
-      const unitPx = (label.scale.x * size.height) / (2 * Math.tan(((camera as PerspectiveCamera).fov * Math.PI) / 360) * depth)
+      group.updateWorldMatrix(true, false)
+      const highest = Math.min(...TOKEN_OUTLINE.map((p) => ((1 - new Vector3(p[0], p[1], p[2]).applyMatrix4(group.matrixWorld).project(camera).y) / 2) * size.height))
       for (const text of texts) {
-        // Its centre on screen, and its bottom half a line under it (one local unit of the label is one of its pixels).
-        const at = text.getWorldPosition(new Vector3()).project(camera)
-        const y = ((1 - at.y) / 2) * size.height
-        expect(y + half(text) * unitPx).toBeLessThanOrEqual(highest)
+        const world = text.getWorldPosition(new Vector3())
+        const along = -world.clone().applyMatrix4(camera.matrixWorldInverse).z
+        const unitPx = (new Vector3().setFromMatrixScale(text.matrixWorld).y * size.height) / (2 * Math.tan(((camera as PerspectiveCamera).fov * Math.PI) / 360) * along)
+        const y = ((1 - world.clone().project(camera).y) / 2) * size.height
+        expect(y + unitPx / 2).toBeLessThanOrEqual(highest + 0.5)
       }
     }
   })
@@ -374,7 +368,8 @@ describe('TAKE on a key with no model', () => {
       expect(token(r).group.visible).toBe(true)
       expect((token(r).lines.material as Material).opacity).toBeCloseTo(full, 6)
       expect(token(r).group.position.distanceTo(centre)).toBeLessThan(0.05)
-      expect(nameAt()[0]).toBeCloseTo(nameBefore[0], 6)
+      // Over the token as drawn, which turns a hair between frames: where it stood, to a hundredth.
+      expect(nameAt()[0]).toBeCloseTo(nameBefore[0], 1)
       // Half way: half as bright.
       now += 100
       await r.frame()

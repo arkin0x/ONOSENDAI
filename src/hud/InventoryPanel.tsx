@@ -77,7 +77,10 @@ import { AudioCard } from './AudioCard'
 import { itemLineage } from '../lib/hidden'
 import { Explanation } from './Explanation'
 import { ChestBlock, Unsigned } from './ItemRows'
-import { KeyInfo, type KeyInfoSource } from './KeyItemInfo'
+import { KeyInfo, KeyItemModal, type KeyInfoSource } from './KeyItemInfo'
+import { ItemsGrid, NEW_MARK } from './ItemsGrid'
+import { isNewItem, type ItemsKind } from '../lib/itemsSeen'
+import { useItemsSeen } from '../store/useItemsSeen'
 import { heldBagAuthor, isGuideKey, subjectOfHeld, subjectOfWorldItem } from '../lib/commentSubjects'
 import { useCashu, cashuStateLabel } from './useCashu'
 import { useMutes } from '../store/useMutes'
@@ -273,8 +276,58 @@ function useRowActions(id: string, name: string, shown = true): { button: JSX.El
   }
 }
 
+/**
+ * What a held key item's card (INFO) shows: who hid it, and the thread of the
+ * bag it was found in, the one its card there opens (lib/commentSubjects).
+ * The very item standing in the world here (yours, or found here) names its
+ * card's thread itself. Null for a row with no key.
+ */
+function useHeldKeyInfo(item: HeldItem): KeyInfoSource | null {
+  const me = useCyberspace((s) => s.identity.pubkey)
+  const bagAuthor = useShards((s) => heldBagAuthor(item, { discovered: s.discovered, mine: s.mine, me }))
+  const standing = useShards((s) => !!s.discovered[item.id] || s.mine.some((d) => d.eventId === item.id))
+  return useMemo((): KeyInfoSource | null => {
+    if (!item.key) return null
+    const world = standing ? useShards.getState().secretByEvent(item.id) : null
+    const hider = world?.author ?? bagAuthor
+    const guide = !!item.place?.guide || isGuideKey(hider)
+    const subject = guide ? null : world ? subjectOfWorldItem(world) : subjectOfHeld(item, bagAuthor)
+    return { id: item.id, event: item.event, key: item.key, forger: item.author, verified: item.verified, hider, guide, subject }
+  }, [item, bagAuthor, standing])
+}
+
+/** A key item's card opened from its tile in the grid, over the menu; the item is seen once it opens. */
+function HeldKeyCard({ item, onClose }: { item: HeldItem; onClose: () => void }): JSX.Element | null {
+  const info = useHeldKeyInfo(item)
+  useEffect(() => { if (seenIsFor(item.owner)) useItemsSeen.getState().markItem(item) }, [item])
+  return info ? <KeyItemModal info={info} onClose={onClose} /> : null
+}
+
+/** Whether the seen record shown is `owner`'s and has been read: only then may it be marked, so nothing is marked seen for the wrong identity or over a record not yet read. */
+function seenIsFor(owner: string): boolean {
+  const s = useItemsSeen.getState()
+  return s.ready && !!owner && s.owner === owner
+}
+
+/** NEW on a row of a list opened with it unseen (owner, 2026-11-26), as its tile wore it. */
+function NewChip(): JSX.Element {
+  return <span className="item__chip items-new__chip" title="Not looked at before you opened this list">{NEW_MARK}</span>
+}
+
+/**
+ * A row a grid tile was tapped for: scrolled to the middle of the list and
+ * lit a moment, so the eye lands on it. The browser only: a test has no layout.
+ */
+function useFocusedRow(focused: boolean): RefObject<HTMLLIElement> {
+  const ref = useRef<HTMLLIElement>(null)
+  useEffect(() => {
+    if (focused) ref.current?.scrollIntoView?.({ block: 'center' })
+  }, [focused])
+  return ref
+}
+
 /** A held keypair item: its picture or the kind's icon, name, who forged it, where and when, what it opens, and ACTIONS: DETAILS, INFO, COPY, PLACE, PUBLISH, ARCHIVE, and DELETE once archived. */
-function KeyRow({ item, opens }: { item: HeldItem; opens: number }): JSX.Element {
+function KeyRow({ item, opens, fresh = false, focused = false }: { item: HeldItem; opens: number; fresh?: boolean; focused?: boolean }): JSX.Element {
   const me = useCyberspace((s) => s.identity.pubkey)
   const profile = useProfile(item.author || null)
   const who = item.author === me ? 'you' : profileLabel(profile, safeNpub(item.author))
@@ -295,18 +348,8 @@ function KeyRow({ item, opens }: { item: HeldItem; opens: number }): JSX.Element
   const [confirming, setConfirming] = useState(false)
   const [refusal, setRefusal] = useState<string | null>(null)
   const actions = useRowActions(item.id, item.name)
-  // INFO: who hid it, and the thread of the bag it was found in, the one its card there opens (lib/commentSubjects).
-  // The very item standing in the world here (yours, or found here) names its card's thread itself.
-  const bagAuthor = useShards((s) => heldBagAuthor(item, { discovered: s.discovered, mine: s.mine, me }))
-  const standing = useShards((s) => !!s.discovered[item.id] || s.mine.some((d) => d.eventId === item.id))
-  const info = useMemo((): KeyInfoSource | null => {
-    if (!item.key) return null
-    const world = standing ? useShards.getState().secretByEvent(item.id) : null
-    const hider = world?.author ?? bagAuthor
-    const guide = !!item.place?.guide || isGuideKey(hider)
-    const subject = guide ? null : world ? subjectOfWorldItem(world) : subjectOfHeld(item, bagAuthor)
-    return { id: item.id, event: item.event, key: item.key, forger: item.author, verified: item.verified, hider, guide, subject }
-  }, [item, bagAuthor, standing])
+  const info = useHeldKeyInfo(item)
+  const focusRef = useFocusedRow(focused)
   const list = async (): Promise<void> => {
     if (!item.key) return
     setRefusal(null)
@@ -319,7 +362,7 @@ function KeyRow({ item, opens }: { item: HeldItem; opens: number }): JSX.Element
     // Feed's size, the name on its own line, where and when under it, what
     // it opens and LISTED as chips, ACTIONS under the words on the right, so
     // it never squeezes the name (owner, 2026-11-15).
-    <li className="secrets__row held__row held__row--item" data-actions-row={item.id}>
+    <li ref={focusRef} className={`secrets__row held__row held__row--item${focused ? ' held__row--focus' : ''}`} data-actions-row={item.id}>
       <ItemThumb type="key" image={item.key?.image} model={item.key?.model} />
       <HeldRowLine
         name={item.name}
@@ -327,6 +370,7 @@ function KeyRow({ item, opens }: { item: HeldItem; opens: number }): JSX.Element
         how={item.source === 'forged' ? 'hidden' : SOURCE[item.source]}
         at={item.at}
         chips={<>
+          {fresh && <NewChip />}
           {opens > 0 && <span className="item__chip secrets__found" title="Discovered chests whose lock is this item">opens {opens} chest{opens === 1 ? '' : 's'}</span>}
           {listed && <span className="item__chip secrets__found" title="Listed in the ITEM FEED: anyone can seal a chest to it">LISTED</span>}
           {item.archived && <span className="item__chip item__chip--dim" title="Filed away under ARCHIVED. It still opens what it opens">ARCHIVED</span>}
@@ -427,8 +471,9 @@ export function takenAudioModeration(item: Pick<HeldItem, 'id' | 'author' | 'ver
  * ACTIONS, and only an archived row has DELETE, which asks first and says
  * when a coin's sats would be lost.
  */
-export function TakenRow({ item }: { item: HeldItem }): JSX.Element {
+export function TakenRow({ item, fresh = false, focused = false }: { item: HeldItem; fresh?: boolean; focused?: boolean }): JSX.Element {
   const [open, setOpen] = useState(false)
+  const focusRef = useFocusedRow(focused)
   const [details, setDetails] = useState(false)
   const me = useCyberspace((s) => s.identity.pubkey)
   const [moved, setMoved] = useState(false)
@@ -460,7 +505,7 @@ export function TakenRow({ item }: { item: HeldItem }): JSX.Element {
   }
   return (
     // Laid out as a key item row (HeldRowLine), the same picture size for every kind (owner, 2026-11-15).
-    <li className="secrets__row held__row held__row--loot" data-actions-row={item.id} data-kind={item.type}>
+    <li ref={focusRef} className={`secrets__row held__row held__row--loot${focused ? ' held__row--focus' : ''}`} data-actions-row={item.id} data-kind={item.type}>
       <ItemThumb type={item.type} coin={coin} shard={item.type === 'shard' ? item.shard : undefined} />
       {item.type === 'chest' && item.chest
         ? <ChestBlock id={item.id} chest={item.chest} author={item.author} verified={item.verified} place={item.place} sealer={item.verified ? item.event.pubkey : undefined} contentsIn={contents} />
@@ -470,6 +515,7 @@ export function TakenRow({ item }: { item: HeldItem }): JSX.Element {
             source={item.from ? `from “${item.from.chestName}”` : SOURCE[item.source]}
             at={item.at}
             chips={<>
+              {fresh && <NewChip />}
               {coin && <span className={`item__chip shards__cashu shards__cashu--${cashu.state}`}>{cashuStateLabel(cashu.state)}</span>}
               {item.archived && <span className="item__chip item__chip--dim" title="Filed away under ARCHIVED">ARCHIVED</span>}
               {!item.verified && <Unsigned />}
@@ -515,9 +561,13 @@ export function TakenRow({ item }: { item: HeldItem }): JSX.Element {
   )
 }
 
-/** Which ITEMS modal is open: KEY ITEMS, OTHER LOOT, or neither. A store, so the tutorial or a test can open one. */
-export type ItemsKind = 'keys' | 'loot'
-export const useItemsModal = create<{ open: ItemsKind | null }>(() => ({ open: null }))
+/**
+ * Which ITEMS modal is open: KEY ITEMS, OTHER LOOT, or neither. A store, so
+ * the tutorial or a test can open one. `focus` is the row a grid tile was
+ * tapped for, scrolled to with its ACTIONS open.
+ */
+export type { ItemsKind }
+export const useItemsModal = create<{ open: ItemsKind | null; focus?: string | null }>(() => ({ open: null, focus: null }))
 
 /** How many FEED rows are drawn at first, and how many more each time the end scrolls into view. */
 export const FEED_PAGE = 100
@@ -590,7 +640,7 @@ function ItemsModal({ kind }: { kind: ItemsKind }): JSX.Element {
   // Nothing by someone blocked, or muted by its id, is listed (store/useMutes); never what you forged.
   const muted = useMutes((s) => s.muted)
   const me = useCyberspace((s) => s.identity.pubkey)
-  const close = useCallback((): void => useItemsModal.setState({ open: null }), [])
+  const close = useCallback((): void => useItemsModal.setState({ open: null, focus: null }), [])
   useModalStack(true, close)
   const { keys, taken, archived } = useMemo(
     () => splitPanels([], Object.values(items).filter((it) => !hidesThing(muted, { authors: [it.author], ids: [it.id, itemLineage(it.event)] }, me))).loot,
@@ -617,8 +667,31 @@ function ItemsModal({ kind }: { kind: ItemsKind }): JSX.Element {
     if (r.ok) setPaste('')
   }
 
-  const rows = showing === 'archived' ? archivedHere : kind === 'keys' ? keys : taken
-  const row = (it: HeldItem): JSX.Element => (isKeyItem(it) ? <KeyRow key={it.id} item={it} opens={it.key ? chestsOpenedBy(it.key, chests).length : 0} /> : <TakenRow key={it.id} item={it} />)
+  // Opening the list is looking at it (owner, 2026-11-26): every row in it is seen. Which were NEW
+  // when it opened is kept for as long as it stays open, so each still says NEW here.
+  // Marked only once this identity's record has been read (seenIsFor); the NEW rows are taken then too.
+  const mineHere = kind === 'keys' ? keys : taken
+  const holder = useInventory((s) => s.owner)
+  const seenReady = useItemsSeen((s) => s.ready && !!holder && s.owner === holder)
+  const fresh = useRef<Set<string> | null>(null)
+  if (fresh.current === null && seenReady) {
+    const { seen } = useItemsSeen.getState()
+    fresh.current = new Set(mineHere.filter((it) => isNewItem(seen, it)).map((it) => it.id))
+  }
+  useEffect(() => { if (seenReady && seenIsFor(holder)) useItemsSeen.getState().markKind(kind, mineHere) }, [seenReady, holder, kind, mineHere])
+  // A tile tapped for one row: that row lit, scrolled to, its ACTIONS open and their button focused.
+  const [focus] = useState(() => useItemsModal.getState().focus ?? null)
+  useEffect(() => {
+    if (!focus) return
+    useOpenActions.setState({ open: focus })
+    if (typeof document !== 'undefined') document.getElementById?.(`held-actions-${focus}-toggle`)?.focus?.()
+  }, [focus])
+  const isFresh = (id: string): boolean => fresh.current?.has(id) ?? false
+
+  const rows = showing === 'archived' ? archivedHere : mineHere
+  const row = (it: HeldItem): JSX.Element => (isKeyItem(it)
+    ? <KeyRow key={it.id} item={it} opens={it.key ? chestsOpenedBy(it.key, chests).length : 0} fresh={isFresh(it.id)} focused={it.id === focus} />
+    : <TakenRow key={it.id} item={it} fresh={isFresh(it.id)} focused={it.id === focus} />)
   const tab = (id: typeof view, label: string): JSX.Element => (
     <button className={`tag tag--tap ${showing === id ? 'is-on' : ''}`} role="tab" aria-selected={showing === id} onClick={() => setView(id)}>{label}</button>
   )
@@ -687,7 +760,7 @@ function ItemsModal({ kind }: { kind: ItemsKind }): JSX.Element {
 function KindButton({ kind, label }: { kind: ItemsKind; label: string }): JSX.Element {
   const Icon = KIND_ICON[kind]
   return (
-    <button className={`avatars__go shards__compose-open items-kinds__go items-kinds__go--${kind}`} onClick={() => useItemsModal.setState({ open: kind })} aria-haspopup="dialog">
+    <button className={`avatars__go shards__compose-open items-kinds__go items-kinds__go--${kind}`} onClick={() => useItemsModal.setState({ open: kind, focus: null })} aria-haspopup="dialog">
       <Icon className="shards__build-icon" size={13} strokeWidth={2.5} aria-hidden /><span className="items-kinds__label">{label}</span>
     </button>
   )
@@ -700,7 +773,13 @@ export function InventoryPanel(): JSX.Element {
   const self = useCyberspace((s) => s.identity.pubkey)
   const open = useItemsModal((s) => s.open)
   // The menu unmounts this panel when it hides (an offer, a secret, a phone's BUILD): the modal goes with it, and does not come back by itself with the menu.
-  useEffect(() => () => useItemsModal.setState({ open: null }), [])
+  useEffect(() => () => useItemsModal.setState({ open: null, focus: null }), [])
+  // A key item's tile opens its card (KeyItemModal) over the menu; a loot tile, its row in OTHER LOOT, which has no card of its own.
+  const [card, setCard] = useState<HeldItem | null>(null)
+  const openTile = useCallback((it: HeldItem): void => {
+    if (isKeyItem(it) && it.key) setCard(it)
+    else useItemsModal.setState({ open: isKeyItem(it) ? 'keys' : 'loot', focus: it.id })
+  }, [])
   const { keys, taken } = useMemo(
     () => splitPanels([], Object.values(items).filter((it) => !hidesThing(muted, { authors: [it.author], ids: [it.id, itemLineage(it.event)] }, self))).loot,
     [items, muted, self],
@@ -712,11 +791,17 @@ export function InventoryPanel(): JSX.Element {
         <h2>Items</h2>
         {storage === 'memory' && <span className="loot__tags"><span className="tag" title="IndexedDB could not be opened; what you hold lasts this session only">THIS SESSION</span></span>}
       </header>
+      {/* OTHER LOOT on the left, KEY ITEMS on the right, each button over its own grid (owner, 2026-11-26: "left side is loot"). */}
       <div className="shards__modes items-kinds">
-        <KindButton kind="keys" label={kindLabel(KEY_ITEMS_LABEL, keys.length)} />
         <KindButton kind="loot" label={kindLabel(OTHER_LOOT_LABEL, taken.length)} />
+        <KindButton kind="keys" label={kindLabel(KEY_ITEMS_LABEL, keys.length)} />
+      </div>
+      <div className="items-grids">
+        <ItemsGrid kind="loot" items={taken} empty={NO_OTHER_LOOT} onOpen={openTile} onMore={() => useItemsModal.setState({ open: 'loot', focus: null })} />
+        <ItemsGrid kind="keys" items={keys} empty={NO_KEY_ITEMS} onOpen={openTile} onMore={() => useItemsModal.setState({ open: 'keys', focus: null })} />
       </div>
       {open && <ItemsModal key={open} kind={open} />}
+      {card && <HeldKeyCard item={card} onClose={() => setCard(null)} />}
       <Explanation>Key items open doors and chests. Other loot is everything you've taken from chests.</Explanation>
     </section>
   )

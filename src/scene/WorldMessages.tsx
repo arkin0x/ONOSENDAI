@@ -93,6 +93,14 @@ import { MARK_RECEDE_FLOOR, recedeShare } from '../lib/markerSize'
 import { headlampUniforms } from './headlamp'
 import { basicFaceProps, TRANSLUCENT_ORDER } from './shardFaces'
 import { useDrawReach } from './buildZoom'
+import { dropLetter, LetterField, LETTER_GIBSONS, putLetter } from './LetterField'
+import { LevelRing } from './LevelRing'
+import { atlasIndex } from './glyphAtlas'
+import { authorColour } from '../lib/authorColour'
+import { sealInitial } from '../lib/letterReveal'
+import { readId } from '../lib/messagesRead'
+import { sealBroken, useMessagesRead } from '../store/useMessagesRead'
+import { recordViewPose } from '../lib/viewPose'
 
 /** A message's tap target, in CSS pixels: a fingertip over the mark, at any zoom. */
 const TAP_PX = 44
@@ -343,10 +351,15 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [anchor, anchorPlane, scaleExp, axes, mine, discovered, curated, muted, reach, sounds, spot])
 
+  // Where the camera is, for the lists' arrows (lib/viewPose): kept every frame, letters or none.
+  useFrame((state) => recordViewPose(state.camera.position, state.camera.quaternion), LABEL_PRIORITY)
+
   if (placed.length === 0) return null
 
   return (
     <>
+      {/* Every message's letter and glyph ring, in a few instanced draws (LetterField); each NoteItem says what its letter is. */}
+      <LetterField />
       {placed.map((w) => {
         const open = (): void => useShards.getState().selectSecret(w.key)
         // A key: drawn whole, or at half while it is held (lib/worldMarks itemDrawAs).
@@ -359,7 +372,7 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
           : <PlacedBox key={w.key} at={w.centre} opacity={MOVING_OPACITY} />
         if (w.coin) return <CoinItem key={w.key} text={w.text} at={w.centre} scaleExp={scaleExp} onTap={open} />
         if (w.type === 'message') return <NoteItem key={w.key} w={w} birth={births[w.key]} onTap={open} />
-        if (w.type === 'audio') return <AudioMark key={w.key} title={w.text} at={w.centre} onTap={open} />
+        if (w.type === 'audio') return <AudioMark key={w.key} id={w.key} title={w.text} at={w.centre} onTap={open} />
         // A key: the cube and its short name, or at half while it is held.
         // With no model of its own, the cube is one gibson, as a message's
         // box is (owner, 2026-11-22; keyBoxSide); with one, as before.
@@ -498,22 +511,35 @@ export function HeldItemMark({ id, own, at, wears, region = null, axes, appear }
 const FLOURISH_HOLD_MS = 2600
 
 /**
- * A message in the world: the cube and the hider's name over it, and nothing
- * else; the words are one tap away in the item modal (arkinox, 2026-10-10,
- * decision B: the full-text billboards piled up on each other and over
- * everything near them, and were unreadable at distance anyway). A message
- * just found keeps its flourish: the words resolve out of glyphs
- * (DecodingLabel), hold for a moment, then give way to the cube and the name.
- * The name is the profile's where one is known, "you" for your own.
+ * A message in the world: a sealed letter in its author's colour with a ring
+ * of glyphs orbiting it, and the name of who left it over it, in white
+ * (owner, 2026-11-26: "in the world: letter with glyph ring from concept 1
+ * ... love the broken seal for read"). The words are one tap away in the item
+ * modal (arkinox, 2026-10-10, decision B: the full-text billboards piled up
+ * on each other and over everything near them, and were unreadable at
+ * distance anyway). A message just found keeps its flourish: the words
+ * resolve out of glyphs (DecodingLabel), hold for a moment, then give way to
+ * the name.
  *
- * The box is one gibson (NOTE_BOX_GIBSONS), so the name stands just above
- * it, clear of its reach on screen at any distance (WorldLabel `clear`,
- * `nearFace`): above and not under, so the ground a box rests on never hides
- * it (follow-up to #887), and the tap target covers the box once it is
- * larger than a fingertip.
+ * The letter itself is drawn by LetterField with every other letter in view,
+ * in a few instanced draws; this says what it is (putLetter) and holds its
+ * tap target and its name. Its seal is whole until this identity has opened
+ * the message, broken after (store/useMessagesRead; your own are read).
+ *
+ * The name is "you" for your own, as DISCOVERED NEARBY says it, whether this
+ * device hid it or it was found from another (author against the signed-in
+ * key, not only `mine`: your own message found anew showed your npub over it
+ * while NEARBY said "you"), else the profile's name.
+ *
+ * The letter is one gibson wide (LETTER_GIBSONS, the width of the box it
+ * replaces), so the name stands just above it and its ring, clear of them on
+ * screen at any distance (WorldLabel `clear`, `nearFace`, measured on the
+ * gibson's cube that holds them both), and the tap target covers the gibson
+ * once it is larger than a fingertip.
  */
-export function NoteItem({ w, birth, onTap }: { w: { key: string; text: string; mine: boolean; author: string; centre: [number, number, number] }; birth: number | undefined; onTap: () => void }): JSX.Element {
+export function NoteItem({ w, birth, onTap }: { w: { key: string; lineage?: string; text: string; mine: boolean; author: string; centre: [number, number, number] }; birth: number | undefined; onTap: () => void }): JSX.Element {
   const profile = useProfile(w.author || null)
+  const me = useCyberspace((s) => s.identity.pubkey)
   const until = birth === undefined ? 0 : birth + TEXT_DECODE_MS + FLOURISH_HOLD_MS
   const [flourish, setFlourish] = useState(() => performance.now() < until)
   useEffect(() => {
@@ -521,29 +547,50 @@ export function NoteItem({ w, birth, onTap }: { w: { key: string; text: string; 
     const t = window.setTimeout(() => setFlourish(false), Math.max(0, until - performance.now()))
     return () => window.clearTimeout(t)
   }, [flourish, until])
-  const name = w.mine ? 'you' : profileLabel(profile, shortAuthor(w.author, false))
+  const yours = w.mine || (!!w.author && w.author === me)
+  const name = yours ? 'you' : profileLabel(profile, shortAuthor(w.author, false))
   const side = noteBoxSide(useCyberspace((s) => s.scaleExp))
+  const id = readId(w)
+  const broken = useMessagesRead((s) => sealBroken(s, id, yours))
+  const initial = atlasIndex(sealInitial(profile?.name, safeNpubOf(w.author)))
+  const [cx, cy, cz] = w.centre
+  useEffect(() => {
+    putLetter({ key: w.key, centre: [cx, cy, cz], width: side * LETTER_GIBSONS, colour: authorColour(w.author), initial, broken })
+  }, [w.key, cx, cy, cz, side, w.author, initial, broken])
+  useEffect(() => () => dropLetter(w.key), [w.key])
   return (
     <group>
-      <WorldMark kind="note" at={w.centre} side={side} />
       {flourish && birth !== undefined
         ? <DecodingLabel text={messageBillboard(w.text)} seed={seedOf(w.key)} birth={birth} at={w.centre} />
-        : <WorldLabel text={name} color={ACCENT} at={w.centre} align="center" px={10} clear={{ trueSide: side, minPx: 0, nearFace: true }} recede="credit" />}
-      {/* A fingertip over the box at any distance, and the whole box once it is larger (TapTarget `side`). */}
+        : <WorldLabel text={name} color={NAME_WHITE} at={w.centre} align="center" px={11} clear={{ trueSide: side, minPx: 0, nearFace: true }} recede="credit" />}
+      {/* A fingertip over the letter at any distance, and its whole gibson once it is larger (TapTarget `side`). */}
       <TapTarget px={TAP_PX} side={side} at={w.centre} onTap={onTap} />
     </group>
   )
 }
 
+/** Text over the scene is white, with the label's dark outline (owner's rule, 2026-11-14). */
+const NAME_WHITE = '#ffffff'
+
+/** An npub for a seal's initial; empty for no author. */
+function safeNpubOf(pubkey: string): string {
+  if (!pubkey) return ''
+  try { return nip19.npubEncode(pubkey) } catch { return '' }
+}
+
 /**
- * Hidden audio in the world: the note's blue box with a music note on it.
- * Its name is on its card, not beside it (FLOATING_NAME).
+ * Hidden audio in the world: the note's blue box with a music note on it and,
+ * round it, a ring of level bars that move while it plays (owner,
+ * 2026-11-26: "the audio look is amazing from the hidden message looks. lets
+ * replace audio with this", direction 7, Voice line; LevelRing). Its name is
+ * on its card, not beside it (FLOATING_NAME).
  */
-export function AudioMark({ title, at, opacity = 1, onTap }: { title: string; at: [number, number, number]; opacity?: number; onTap?: () => void }): JSX.Element {
+export function AudioMark({ id, title, at, opacity = 1, onTap }: { id?: string; title: string; at: [number, number, number]; opacity?: number; onTap?: () => void }): JSX.Element {
   return (
     <group>
       <PlacedBox at={at} opacity={opacity} />
       <AudioNote at={at} opacity={opacity} />
+      <LevelRing id={id} at={at} opacity={opacity} />
       {FLOATING_NAME.sound && <WorldLabel text={title} color={ACCENT} at={at} align="center" px={10} offsetPx={[0, -26]} opacity={opacity} recede="name" />}
       {onTap && <TapTarget px={TAP_PX} at={at} onTap={onTap} />}
     </group>

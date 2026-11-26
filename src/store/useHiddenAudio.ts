@@ -319,6 +319,7 @@ export function isPlaying(key: string): boolean {
 export function stopVoice(key: string): void {
   sessions.set(key, (sessions.get(key) ?? 0) + 1)
   subjects.delete(key)
+  startAt.delete(key)
   if (key.startsWith('world:')) pendingGain.delete(key)
   release(key)
   setEntry(key, null)
@@ -327,6 +328,37 @@ export function stopVoice(key: string): void {
 /** Stop an item's card PLAY. */
 export function stopAudio(itemKey: string): void {
   stopVoice(cardKey(itemKey))
+}
+
+/**
+ * Where an item's card PLAY is in its file and how long the file is, in
+ * seconds (the card's waveform scrubber reads it each frame while it plays);
+ * null when nothing plays from the card. A length not known yet is 0.
+ */
+export function cardTime(itemKey: string): { at: number; duration: number } | null {
+  const el = voices.get(cardKey(itemKey))?.el
+  if (!el) return null
+  return { at: Number.isFinite(el.currentTime) ? el.currentTime : 0, duration: Number.isFinite(el.duration) ? el.duration : 0 }
+}
+
+/** Where a card PLAY not yet started begins (seekCard before playAudio), by voice key. */
+const startAt = new Map<string, number>()
+
+/**
+ * Move an item's card PLAY to `seconds` into its file: at once while it
+ * plays, or, with nothing playing from the card, where the next PLAY starts
+ * (the scrubber tapped before PLAY). True when a playing file moved.
+ */
+export function seekCard(itemKey: string, seconds: number): boolean {
+  const key = cardKey(itemKey)
+  const at = Math.max(0, Number.isFinite(seconds) ? seconds : 0)
+  const el = voices.get(key)?.el
+  if (el) {
+    try { el.currentTime = at } catch { /* not seekable yet: it plays on from where it is */ }
+    return true
+  }
+  startAt.set(key, at)
+  return false
 }
 
 function failWith(err: unknown): string {
@@ -409,6 +441,10 @@ export async function playAudio(itemKey: string, audio: AudioItem, who?: MuteSub
     if (sessions.get(key) !== mine) return
     const url = URL.createObjectURL(blob)
     const el = element(key, mine, url, audio.loop, audio.title, 'card', itemKey, () => stopVoice(key), trackId)
+    // The scrubber tapped before PLAY: it starts there.
+    const from = startAt.get(key)
+    startAt.delete(key)
+    if (from) { try { el.currentTime = from } catch { /* starts at the top */ } }
     let node: ThreeAudio<GainNode> | null = null
     if (l) {
       try {

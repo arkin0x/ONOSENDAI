@@ -1,27 +1,22 @@
 /**
- * noteBox.test.tsx: a message's box is one gibson on a side, always, while it
- * is drawn (owner, 2026-11-22: "I dont like that the message boxes don't
- * change size as you get closer or farther. I want a message box to be 1
- * gibson cubed, always, while it is normally visible"), and nothing that
- * cannot be seen hides it ("why is this message box being partially hidden?
- * It's being occluded by something invisible").
+ * noteBox.test.tsx: a message in the world is a sealed letter one gibson
+ * wide, always, while it is drawn (owner, 2026-11-22: "I want a message box
+ * to be 1 gibson cubed, always, while it is normally visible"; 2026-11-26:
+ * the box became the letter with direction 1's glyph ring), its name over it
+ * in white, and nothing that cannot be seen hides it ("why is this message
+ * box being partially hidden? It's being occluded by something invisible").
  *
- * What hid it was the ground. The box was held to a size on screen, so from
- * a little way off it was larger than its gibson and its bottom reached
- * under the landscape tile it stood on: the tile wrote depth as it should,
- * and with one flat colour there, the box's bottom edges vanished with no
- * edge to show where (a LOCAL capture with the tile alone hidden showed the
- * whole box, and the same capture with a 0% floor and a 0% wall laid through
- * the box was the same to the pixel). One gibson keeps the box in its own
- * place, and its edges are drawn a hair toward the camera so a box resting on
- * a floor keeps its bottom edges.
+ * The letter is drawn by LetterField with every other letter, from what each
+ * NoteItem says it is (putLetter); NoteItem holds the tap target and the
+ * name. A box that is moved (MOVE) is still the faint one-gibson box, its
+ * edges pulled a hair toward the camera (patchNoteDepthPull).
  *
  * Run in a real R3F root (test/r3fRoot.ts): real three objects, frames and
  * camera, so the size is measured in the world, as drawn.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createElement, useRef } from 'react'
-import { Box3, Matrix4, Raycaster, ShaderLib, Vector3, Vector4, type Camera, type LineSegments, type Material, type Mesh, type Object3D, type PerspectiveCamera } from 'three'
+import { Box3, Matrix4, Raycaster, ShaderLib, Vector3, Vector4, type Camera, type Material, type Mesh, type Object3D } from 'three'
 import { newShard, type ShardModel } from 'sno-core/shards'
 import { r3fRoot, type R3fRoot } from '../../test/r3fRoot'
 
@@ -29,10 +24,14 @@ import { r3fRoot, type R3fRoot } from '../../test/r3fRoot'
 vi.mock('@react-three/drei', async () => {
   const { createElement: h, forwardRef } = await import('react')
   // Its place is kept, so a credit line sits under its name as drawn.
-  return { Text: forwardRef((props: { position?: unknown }, ref) => h('group', { name: 'text', ref, position: props.position })) }
+  return { Text: forwardRef((props: { position?: unknown; children?: unknown }, ref) => h('group', { name: 'text', ref, position: props.position, userData: { text: props.children } })) }
 })
 
 import { NoteItem, noteBoxSide, patchNoteDepthPull, NOTE_BOX_GIBSONS, NOTE_DEPTH_PULL } from '../WorldMessages'
+import { LetterField, lettersDrawn, LETTER_GIBSONS, PAPER } from '../LetterField'
+import { authorColour } from '../../lib/authorColour'
+import { useMessagesRead } from '../../store/useMessagesRead'
+import { Color, InstancedMesh, PerspectiveCamera, ShaderMaterial } from 'three'
 import { ShardMesh } from '../ShardMesh'
 import { TapTarget } from '../TapTarget'
 import { useCyberspace } from '../../store/useCyberspace'
@@ -47,6 +46,25 @@ afterEach(async () => {
 
 const NOTE = { key: 'n1', text: 'hello', mine: true, author: '', centre: [0, 0, 0] as [number, number, number] }
 
+/** A message and the field that draws its letter, as WorldMessages mounts them. */
+const scene = (note: Parameters<typeof NoteItem>[0]['w'] = NOTE, onTap: () => void = () => undefined): JSX.Element =>
+  createElement('group', null, createElement(LetterField), createElement(NoteItem, { w: note, birth: undefined, onTap }))
+
+/** The letter's paper: one instance per letter. */
+function paper(root: R3fRoot): InstancedMesh {
+  let found: InstancedMesh | undefined
+  root.state().scene.traverse((o) => { if (o.name === 'letter-paper') found = o as InstancedMesh })
+  expect(found).toBeDefined()
+  return found!
+}
+
+/** Letter `i`'s width in the world, from its drawn instance (the paper is 1 wide in its own units). */
+function letterWidth(mesh: InstancedMesh, i = 0): number {
+  const m = new Matrix4()
+  mesh.getMatrixAt(i, m)
+  return new Vector3().setFromMatrixScale(m).x
+}
+
 /** Every object three would draw: it and every parent visible, with a material. */
 function drawn(scene: Object3D): Array<Object3D & { material: Material | Material[] }> {
   const out: Array<Object3D & { material: Material | Material[] }> = []
@@ -57,26 +75,11 @@ function drawn(scene: Object3D): Array<Object3D & { material: Material | Materia
   return out
 }
 
-/** The box's edges: the one line drawing under the message. */
-function boxEdges(scene: Object3D): LineSegments {
-  const lines = drawn(scene).filter((o) => o.type === 'LineSegments') as unknown as LineSegments[]
-  expect(lines).toHaveLength(1)
-  return lines[0]
-}
+/** The gibson's cube about the letter: what its name stands clear of. */
+const GIBSON = new Box3(new Vector3(-0.5, -0.5, -0.5), new Vector3(0.5, 0.5, 0.5))
 
-/** The box's edge in the world, measured from its drawn geometry (float32 vertices: to a millionth). */
-function worldEdge(edges: LineSegments): number {
-  edges.updateWorldMatrix(true, false)
-  const size = new Box3().setFromObject(edges).getSize(new Vector3())
-  expect(size.x).toBeCloseTo(size.y, 9)
-  expect(size.y).toBeCloseTo(size.z, 9)
-  return size.x
-}
-
-/** The box's eight corners on screen, CSS pixels (y down), from its drawn geometry. */
-function screenCorners(edges: LineSegments, camera: Camera, size: { width: number; height: number }): Array<[number, number]> {
-  edges.updateWorldMatrix(true, false)
-  const b = new Box3().setFromObject(edges)
+/** A box's eight corners on screen, CSS pixels (y down). */
+function screenCorners(b: Box3, camera: Camera, size: { width: number; height: number }): Array<[number, number]> {
   const out: Array<[number, number]> = []
   for (let i = 0; i < 8; i++) {
     const v = new Vector3(i & 1 ? b.max.x : b.min.x, i & 2 ? b.max.y : b.min.y, i & 4 ? b.max.z : b.min.z).project(camera)
@@ -102,21 +105,21 @@ describe('a message’s box', () => {
     expect(noteBoxSide(1)).toBe(0.5)
   })
 
-  it('is drawn one gibson across in the world at 2^0 and 2^1, near or far: it grows as you come close and shrinks as you go', async () => {
+  it('is drawn one gibson wide in the world at 2^0 and 2^1, near or far: it grows as you come close and shrinks as you go', async () => {
     for (const scaleExp of [0, 1]) {
       useCyberspace.setState({ scaleExp })
       r = await r3fRoot()
-      await r.render(createElement(NoteItem, { w: NOTE, birth: undefined, onTap: () => undefined }))
-      const edges = boxEdges(r.state().scene)
+      await r.render(scene())
       const widths: number[] = []
       for (const eye of [[0, 0, 3], [4, 3, 12], [0, 20, 60], [-50, 10, 150]] as Array<[number, number, number]>) {
         const camera = await placeCamera(r, eye)
-        expect(worldEdge(edges)).toBeCloseTo(noteBoxSide(scaleExp), 6)
-        // Its size on screen, from its drawn corners: the old box was 24 px wherever the camera stood.
-        const xs = screenCorners(edges, camera, r.state().size).map((c) => c[0])
-        widths.push(Math.max(...xs) - Math.min(...xs))
+        const mesh = paper(r)
+        expect(mesh.count).toBe(1)
+        expect(letterWidth(mesh)).toBeCloseTo(noteBoxSide(scaleExp) * LETTER_GIBSONS, 6)
+        // Its size on screen: nearer is larger.
+        const depth = camera.position.length()
+        widths.push(letterWidth(mesh) / depth)
       }
-      // Nearer is larger on screen, farther is smaller.
       for (let i = 1; i < widths.length; i++) expect(widths[i]).toBeLessThan(widths[i - 1])
       await r.unmount()
       r = null
@@ -126,35 +129,88 @@ describe('a message’s box', () => {
   it('follows the scale as it changes, still one gibson', async () => {
     useCyberspace.setState({ scaleExp: 0 })
     r = await r3fRoot()
-    await r.render(createElement(NoteItem, { w: NOTE, birth: undefined, onTap: () => undefined }))
+    await r.render(scene())
     await placeCamera(r, [0, 2, 10])
-    expect(worldEdge(boxEdges(r.state().scene))).toBeCloseTo(1, 6)
+    expect(letterWidth(paper(r))).toBeCloseTo(1, 6)
     useCyberspace.setState({ scaleExp: 1 })
-    await r.render(createElement(NoteItem, { w: NOTE, birth: undefined, onTap: () => undefined }))
+    await r.render(scene())
     await r.frame()
-    expect(worldEdge(boxEdges(r.state().scene))).toBeCloseTo(0.5, 6)
+    expect(letterWidth(paper(r))).toBeCloseTo(0.5, 6)
   })
 
-  it('draws as light that hides nothing: see-through, writing no depth', async () => {
+  it('faces the camera from any side, so its seal is always seen', async () => {
     useCyberspace.setState({ scaleExp: 0 })
     r = await r3fRoot()
-    await r.render(createElement(NoteItem, { w: NOTE, birth: undefined, onTap: () => undefined }))
-    const m = boxEdges(r.state().scene).material as Material
-    expect(m.transparent).toBe(true)
-    expect(m.depthWrite).toBe(false)
-    expect(m.depthTest).toBe(true)
+    await r.render(scene())
+    for (const eye of [[0, 0, 5], [6, 2, -3], [-4, 8, 1]] as Array<[number, number, number]>) {
+      const camera = await placeCamera(r, eye)
+      const m = new Matrix4()
+      paper(r).getMatrixAt(0, m)
+      // The paper's face (its +z) points at the camera, give or take the letter's tilt and bob.
+      const normal = new Vector3(0, 0, 1).transformDirection(m)
+      expect(normal.dot(camera.position.clone().normalize())).toBeGreaterThan(0.99)
+    }
   })
 
-  it('pulls its edges a hair toward the camera along each sight line, so they keep their place on screen and win over a floor they rest on', async () => {
+  it('wears its author’s colour on its seal and their initial, whole until read and broken after', async () => {
+    const A = 'ab'.repeat(32)
+    useCyberspace.setState({ scaleExp: 0 })
+    useMessagesRead.setState({ owner: 'me', read: { ids: [] }, ready: true })
+    r = await r3fRoot()
+    await r.render(scene({ ...NOTE, mine: false, author: A }))
+    await placeCamera(r, [0, 0, 5])
+    const [spec] = lettersDrawn()
+    expect(spec.colour).toBe(authorColour(A))
+    expect(spec.broken).toBe(false)
+    let whole: InstancedMesh | undefined
+    let broken: InstancedMesh | undefined
+    r.state().scene.traverse((o) => { if (o.name === 'letter-seal') whole = o as InstancedMesh; if (o.name === 'letter-seal-broken') broken = o as InstancedMesh })
+    expect(whole!.count).toBe(1)
+    expect(broken!.count).toBe(0)
+    const c = new Color()
+    whole!.getColorAt(0, c)
+    expect(`#${c.getHexString()}`).toBe(authorColour(A))
+    // Read: the seal breaks.
+    useMessagesRead.getState().markRead(NOTE.key)
+    await r.render(scene({ ...NOTE, mine: false, author: A }))
+    await r.frame()
+    expect(lettersDrawn()[0].broken).toBe(true)
+    expect(whole!.count).toBe(0)
+    expect(broken!.count).toBe(1)
+  })
+
+  it('is gone from the field when its message goes', async () => {
     useCyberspace.setState({ scaleExp: 0 })
     r = await r3fRoot()
-    await r.render(createElement(NoteItem, { w: NOTE, birth: undefined, onTap: () => undefined }))
-    const m = boxEdges(r.state().scene).material as Material & { onBeforeCompile: (s: { vertexShader: string }) => void; customProgramCacheKey: () => string }
+    await r.render(scene())
+    expect(lettersDrawn().map((l) => l.key)).toEqual(['n1'])
+    await r.render(createElement(LetterField))
+    expect(lettersDrawn()).toEqual([])
+  })
+
+  it('draws its paper opaque, out of the bloom; its folds and its ring as light that writes no depth', async () => {
+    useCyberspace.setState({ scaleExp: 0 })
+    r = await r3fRoot()
+    await r.render(scene())
+    const sheet = paper(r).material as Material & { color: Color }
+    expect(sheet.depthWrite).not.toBe(false)
+    expect(`#${sheet.color.getHexString()}`).toBe(PAPER)
+    let folds: Material | undefined
+    let ring: ShaderMaterial | undefined
+    r.state().scene.traverse((o) => {
+      if (o.name === 'letter-folds') folds = (o as Mesh).material as Material
+      if (o.name === 'letter-rings') ring = (o as Mesh).material as ShaderMaterial
+    })
+    expect(folds!.depthWrite).toBe(false)
+    expect(ring!.depthWrite).toBe(false)
+    expect(ring!.depthTest).toBe(true)
+  })
+
+  it('a moved box keeps its edges pulled a hair toward the camera along each sight line, so they keep their place on screen and win over a floor they rest on', () => {
     // Three's own shader for a line material (ShaderLib.basic): the anchor is there, once.
     const shader = { vertexShader: ShaderLib.basic.vertexShader }
-    m.onBeforeCompile(shader as never)
+    expect(patchNoteDepthPull(shader)).toBe(true)
     expect(shader.vertexShader).toMatch(/#include <project_vertex>\ngl_Position = projectionMatrix \* vec4\( mvPosition\.xyz \* \( 1\.0 - 0\.00100000 \), mvPosition\.w \);/)
-    expect(m.customProgramCacheKey()).toBe('note-depth-pull-0.00100000')
     // A shader without the anchor is left alone.
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     const odd = { vertexShader: 'void main() {}' }
@@ -162,7 +218,7 @@ describe('a message’s box', () => {
     expect(odd.vertexShader).toBe('void main() {}')
     warn.mockRestore()
     // What the line does, in numbers: the same place on screen, a nearer depth.
-    const camera = r.state().camera as PerspectiveCamera
+    const camera = new PerspectiveCamera(50, 1, 0.1, 1000)
     camera.position.set(1, 2, 9); camera.lookAt(0, 0, 0); camera.updateMatrixWorld()
     for (const p of [[0.5, -0.5, 0.5], [-0.5, -0.5, -0.5], [0.5, 0.5, -0.5]] as Array<[number, number, number]>) {
       const mv = new Vector4(...p, 1).applyMatrix4(new Matrix4().copy(camera.matrixWorldInverse))
@@ -174,13 +230,23 @@ describe('a message’s box', () => {
     }
   })
 
-  it('carries the name over the box, clear of its highest corner on screen near or far', async () => {
+  it('names your own message "you", even one found anew that this device did not hide, as DISCOVERED NEARBY does', async () => {
+    useCyberspace.setState({ scaleExp: 0 })
+    const me = useCyberspace.getState().identity.pubkey
+    r = await r3fRoot()
+    await r.render(scene({ ...NOTE, mine: false, author: me }))
+    await placeCamera(r, [0, 0, 5])
+    let text: Object3D | undefined
+    r.state().scene.traverse((o) => { if (o.name === 'text') text = o })
+    expect(text!.userData.text).toBe('you')
+  })
+
+  it('carries the name over the letter, clear of its gibson’s highest corner on screen near or far (the ring stays inside the gibson)', async () => {
     useCyberspace.setState({ scaleExp: 0 })
     r = await r3fRoot()
     await r.render(createElement(NoteItem, { w: NOTE, birth: undefined, onTap: () => undefined }))
     const scene = r.state().scene
     const size = r.state().size
-    const edges = boxEdges(scene)
     // From the next gibson (1.5 away) out to far off, straight on and from above.
     for (const eye of [[0, 0, 1.5], [0, 0, 2.5], [0, 1.2, 1.4], [0, 0, 8], [3, 4, 20], [0, 0, 40]] as Array<[number, number, number]>) {
       const camera = await placeCamera(r, eye)
@@ -194,7 +260,7 @@ describe('a message’s box', () => {
       const label = inner.parent!.parent!
       const depth = camera.position.distanceTo(label.getWorldPosition(new Vector3()))
       const unitPx = (label.scale.x * size.height) / (2 * Math.tan(((camera as PerspectiveCamera).fov * Math.PI) / 360) * depth)
-      const highest = Math.min(...screenCorners(edges, camera, size).map((c) => c[1]))
+      const highest = Math.min(...screenCorners(GIBSON, camera, size).map((c) => c[1]))
       expect(nameY + unitPx / 2).toBeLessThanOrEqual(highest)
     }
   })
@@ -353,20 +419,16 @@ describe('what cannot be seen hides nothing', () => {
     for (const o of drawn(r.state().scene)) for (const m of ([] as Material[]).concat(o.material)) expect(m.depthWrite).toBe(false)
   })
 
-  it('among a 0% floor and a message, the only thing drawn is the message, and it writes no depth', async () => {
+  it('among a 0% floor and a message, the only things drawn are the letter’s', async () => {
     useCyberspace.setState({ scaleExp: 0 })
     r = await r3fRoot()
     await r.render(createElement('group', null,
       createElement(ShardMesh, { shard: floor(0), world: true }),
-      createElement(NoteItem, { w: NOTE, birth: undefined, onTap: () => undefined }),
+      scene(),
     ))
     await placeCamera(r, [0, 3, 10])
     const all = drawn(r.state().scene)
-    // The box's edges and the name's stand-in groups have no material; the box is all that draws.
-    expect(all.map((o) => o.type)).toEqual(['LineSegments'])
-    for (const o of all) for (const m of ([] as Material[]).concat(o.material)) {
-      expect(m.depthWrite).toBe(false)
-      expect(m.colorWrite).not.toBe(false)
-    }
+    expect(all.length).toBeGreaterThan(0)
+    for (const o of all) expect(o.name.startsWith('letter-')).toBe(true)
   })
 })

@@ -51,7 +51,6 @@ import { usePublicShard, worldItemOfObject } from '../store/usePublicShard'
 import { findCashuToken, textWithoutToken } from '../lib/cashu'
 import { hasNftLink, textWithoutNftLinks } from '../lib/nftLink'
 import { deleteWords, removeWords } from '../lib/deleteWords'
-import { MessageText } from './CashuCard'
 import { ChestBlock, KeyLine } from './ItemRows'
 import { ConfirmModal } from './ConfirmModal'
 import { ItemFace } from './ItemIcon'
@@ -68,6 +67,8 @@ import { AudioCard } from './AudioCard'
 import { BlockButton, MuteItemButton } from './BlockButton'
 import { useMutes } from '../store/useMutes'
 import { ModalClose } from './ui/ModalClose'
+import { LetterCard } from './LetterCard'
+import { AuthorLine } from './AuthorLine'
 import { CopyValue } from './ui/CopyValue'
 
 const ICON = 12
@@ -255,8 +256,12 @@ export function ItemCard({ item, onClose, published: object }: { item: WorldItem
           <ModalClose onClose={close} />
         </div>
 
+        {/* A message's or a sound's card opens on who left it and when it was sealed (hidden messages UI, 2026-11-26). */}
+        {(item.type === 'message' || item.type === 'audio') && !guided && <AuthorLine pubkey={author} name={name} mine={mine} createdAt={item.createdAt} />}
+
         {item.type === 'message' ? (
-          <MessageText text={item.text ?? ''} tags={item.event?.tags} words={(t) => <blockquote className="secret__message">{t}</blockquote>} />
+          // The sealed letter: the seal cracks, the page unfolds, the words decode, every time it opens (LetterCard).
+          <LetterCard item={item} author={author} mine={mine} />
         ) : item.type === 'key' && item.keyItem ? (
           <div className="secret__shard"><KeyLine id={item.key} name={item.keyItem.name} author={author} /></div>
         ) : item.type === 'chest' && item.chest ? (

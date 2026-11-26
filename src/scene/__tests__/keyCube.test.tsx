@@ -50,6 +50,7 @@ import { useCyberspace } from '../../store/useCyberspace'
 import { useInventory } from '../../store/useInventory'
 import { useShards, type WorldItem } from '../../store/useShards'
 import { ItemMark, keyBoxSide, markFadeLeft, MARK_FADE_MS, noteBoxSide, NOTE_EDGE_PX, WorldMessages } from '../WorldMessages'
+import { lettersDrawn, LETTER_GIBSONS } from '../LetterField'
 import { useTakeVanish } from '../../store/useOpenCeremony'
 
 const AXES: ViewAxes = { right: { axis: 'x', dir: 1 }, up: { axis: 'y', dir: 1 }, out: { axis: 'z', dir: -1 } }
@@ -165,7 +166,7 @@ describe('a key with no model of its own', () => {
     expect(keyBoxSide({ model: MODEL, animation: [] }, 0)).toBeUndefined()
   })
 
-  it('draws one gibson across in the world at 2^0 and 2^1, near or far, the same cube as a message’s box in the same place', async () => {
+  it('draws one gibson across in the world at 2^0 and 2^1, near or far, as wide as a message’s letter in the same place', async () => {
     for (const scaleExp of [0, 1]) {
       useCyberspace.setState({ scaleExp })
       r = await scene([worldKey('1'.repeat(64))])
@@ -174,23 +175,19 @@ describe('a key with no model of its own', () => {
       // Nearer is larger on screen, farther smaller: a thing in the place.
       for (let i = 1; i < key.widths.length; i++) expect(key.widths[i]).toBeLessThan(key.widths[i - 1])
       const keyBox = worldBox(markEdges(r.state().scene))
-      const keyMaterial = markEdges(r.state().scene).material as Material & { customProgramCacheKey: () => string }
+      const keyMaterial = markEdges(r.state().scene).material as Material
       await r.unmount()
 
+      // A message is a letter now (LetterField), one gibson wide, centred where the key's cube is.
       r = await scene([worldMessage('2'.repeat(64), 'hello')])
-      const note = await measure(r, BACKS)
-      const noteBox = worldBox(markEdges(r.state().scene))
-      const noteMaterial = markEdges(r.state().scene).material as Material & { customProgramCacheKey: () => string }
-      expect(keyBox.min.distanceTo(noteBox.min)).toBeLessThan(1e-6)
-      expect(keyBox.max.distanceTo(noteBox.max)).toBeLessThan(1e-6)
-      for (let i = 0; i < BACKS.length; i++) expect(key.widths[i]).toBeCloseTo(note.widths[i], 6)
-      // The same light: see-through, no depth written, its edges pulled a hair toward the eye.
-      for (const m of [keyMaterial, noteMaterial]) {
-        expect(m.transparent).toBe(true)
-        expect(m.depthWrite).toBe(false)
-        expect(m.depthTest).toBe(true)
-      }
-      expect(keyMaterial.customProgramCacheKey()).toBe(noteMaterial.customProgramCacheKey())
+      await r.frame()
+      const [letter] = lettersDrawn()
+      expect(letter.width).toBeCloseTo(noteBoxSide(scaleExp) * LETTER_GIBSONS, 9)
+      expect(new Vector3(...letter.centre).distanceTo(keyBox.getCenter(new Vector3()))).toBeLessThan(1e-6)
+      // The cube is light: see-through, no depth written.
+      expect(keyMaterial.transparent).toBe(true)
+      expect(keyMaterial.depthWrite).toBe(false)
+      expect(keyMaterial.depthTest).toBe(true)
       await r.unmount()
       r = null
     }

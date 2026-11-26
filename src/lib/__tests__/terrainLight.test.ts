@@ -7,7 +7,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { CELLS, idx } from '../terrain/coords'
-import { aroundIndex, computeLight, cornerOpen, EMIT, FOOT, lightAt, lightReaches, lightTables, LIGHT_BYTES, shadedColumns, type Around } from '../terrain/light'
+import { aroundIndex, computeLight, cornerLight, cornerOpen, EMIT, FOOT, lightAt, lightReaches, lightTables, LIGHT_BYTES, shadedColumns, type Around } from '../terrain/light'
 import { generate } from '../terrain/generate'
 import { handleBlocks } from '../terrain/blocksJob'
 import { TerrainWorld } from '../terrain/world'
@@ -52,10 +52,24 @@ describe('ambient occlusion at a face corner', () => {
     expect(cornerOpen(light, [10, 10, 10], TOP, [1, 0])).toBe(0.75)
   })
 
-  it('carries light into a solid cell, so the light itself does not smear dark into a wall', () => {
+  it('keeps a solid cell at 0, so its light is the open cells\' alone', () => {
     const one = floor(); one[idx(11, 11, 10)] = STONE
     const light = computeLight(alone(one), null, tables)
-    expect(lightAt(light, 11, 11, 10)).toEqual([15, 15, 15])
+    expect(lightAt(light, 11, 11, 10)).toEqual([0, 0, 0])
+    // The corner by the wall reads the open cells' full light, darkened only by the share of open cells (AO).
+    expect(cornerLight(light, [10, 10, 10], TOP, [1, 1])).toEqual([15, 15, 15])
+  })
+
+  it('lets no light through a one-block wall: a dark cave beside a lit shaft stays dark at the wall\'s foot', () => {
+    // Solid rock; a shaft open to the top at x = 10; a sealed cave at x = 12..20 on the far side of a 1 block wall (x = 11).
+    const b = solidChunk()
+    for (let y = 5; y < 32; y++) b[idx(10, y, 16)] = 0
+    for (let y = 6; y <= 8; y++) for (let z = 14; z <= 18; z++) for (let x = 12; x <= 20; x++) b[idx(x, y, z)] = 0
+    const light = computeLight(alone(b), null, tables)
+    expect(lightAt(light, 10, 6, 16)[0]).toBe(15)
+    expect(lightAt(light, 12, 6, 16)[0]).toBe(0)
+    // The cave floor's corner against the wall: the wall cell sits between the shaft and the cave, and must not bring the shaft's light in.
+    expect(cornerLight(light, [12, 5, 16], TOP, [0, 0])).toEqual([0, 0, 0])
   })
 })
 
@@ -202,6 +216,26 @@ describe('a localized relight on edit', () => {
     expect(lightReaches([0, 1, 0], 5, 16, 5)).toBe(false)
     expect(lightReaches([0, 1, 0], 5, 17, 5)).toBe(true)
     expect(lightReaches([0, -3, 0], 5, 0, 5)).toBe(true)
+  })
+
+  it('marks exactly enough at the edge of the reach: a single-cell change 14 to 17 blocks off never changes an unmarked chunk', () => {
+    const w = world()
+    const target = (d: [number, number, number]): ReturnType<TerrainWorld['slotAt']> => w.slotAt(d[0], d[1], d[2])!
+    // Beside (+x) and above (+y) the middle chunk: its cells 15 to 18 are 17 to 14 blocks from the target's walls.
+    for (const [d, axis] of [[[1, 0, 0], 0], [[0, 1, 0], 1]] as const) {
+      for (const v of [15, 16, 17, 18]) {
+        const cell = [16, 16, 16]
+        cell[axis] = v
+        // A shaft of open cells along the axis through the cell, so the change can carry light.
+        for (let k = 0; k < 32; k++) { const c = [...cell]; c[axis] = k; if (k !== v) w.setCs(c[0], c[1], c[2], 0) }
+        for (const sl of w.slots) sl.lightDirty = false
+        const before = lightOf(w, target(d as [number, number, number]))
+        const was = w.blockCs(cell[0], cell[1], cell[2])
+        w.setCs(cell[0], cell[1], cell[2], was ? 0 : STONE)
+        const after = lightOf(w, target(d as [number, number, number]))
+        if (!Buffer.from(after).equals(Buffer.from(before))) expect(target(d as [number, number, number])!.lightDirty, `edit at ${v} on axis ${axis}`).toBe(true)
+      }
+    }
   })
 
   it('a chunk let go relights the neighbours that read it', () => {

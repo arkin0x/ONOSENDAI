@@ -1,5 +1,5 @@
 /**
- * blocksClient.ts - asks the blocks worker for a chunk's ground or mesh.
+ * blocksClient.ts - asks the blocks worker for a chunk's ground, mesh or light.
  *
  * One worker, made the first time TERRAIN needs it and let go when TERRAIN
  * closes (releaseBlocksWorker), so nothing runs while you are not building.
@@ -31,14 +31,19 @@ function getWorker(): Worker | null {
       waiting.delete(event.data.id)
       job.resolve(event.data)
     }
-    // A worker that fails gives every job back to the page, and the page does the rest itself.
+    // A worker that fails gives every job back to the page, and the page does the rest itself. A mesh or light job
+    // handed the worker its blocks (transferred, so empty here now): it is answered with an error, and its caller
+    // asks again, on the page this time.
     w.onerror = () => {
       broken = true
       if (worker === w) worker = null
       w.terminate()
       const jobs = [...waiting.values()]
       waiting.clear()
-      for (const job of jobs) void inline(job.req).then(job.resolve)
+      for (const job of jobs) {
+        if (job.req.type === 'generate') void inline(job.req).then(job.resolve)
+        else job.resolve({ type: 'error', id: job.req.id, message: 'the blocks worker failed' })
+      }
     }
     worker = w
     return w

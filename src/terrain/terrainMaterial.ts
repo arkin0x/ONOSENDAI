@@ -58,9 +58,8 @@ void main() {
   int f = int(face + 0.5);
   float shades[6] = float[6](${SHADE.map((v) => v.toFixed(3)).join(', ')});
   vShade = shades[f];
-  vec3 n = vec3(0.0);
-  n[f / 2] = (f - (f / 2) * 2) == 1 ? 1.0 : -1.0;
-  vNormal = n;
+  vec3 normals[6] = vec3[6](vec3(-1.0, 0.0, 0.0), vec3(1.0, 0.0, 0.0), vec3(0.0, -1.0, 0.0), vec3(0.0, 1.0, 0.0), vec3(0.0, 0.0, -1.0), vec3(0.0, 0.0, 1.0));
+  vNormal = normals[f];
   vec4 mv = modelViewMatrix * vec4(position, 1.0);
   vDist = -mv.z;
   gl_Position = projectionMatrix * mv;
@@ -70,7 +69,7 @@ void main() {
 const fragment = /* glsl */ `
 precision highp sampler3D;
 uniform sampler2D atlas;
-/** The chunk's light (lib/terrain/light.ts): the light's red, green and blue, and whether a cell is open, over the chunk and one cell round it. */
+/** The chunk's light (lib/terrain/light.ts): the light's red, green and blue and 1 in an open cell, 0 in all four in a solid one, over the chunk and one cell round it. */
 uniform sampler3D light;
 /** Block shading in Settings: 1 reads the light, 0 draws fully lit as before. */
 uniform float shading;
@@ -110,7 +109,9 @@ void main() {
     // Half a block out from the face, in the open cell in front of it: the texture filters between the four cells round the point.
     vec3 p = (vLocal + 0.5 * vNormal + 1.0) / ${LIGHT_SIDE.toFixed(1)};
     vec4 l = texture(light, vec3(p.x, p.z, p.y));
-    shine = vec3(bright(l.r), bright(l.g), bright(l.b));
+    // The open cells' light alone: the filtered colour over the filtered share of open cells (solid cells hold 0), so no light leaks through a wall.
+    vec3 lv = l.rgb / max(l.a, 1.0 / 255.0);
+    shine = vec3(bright(lv.r), bright(lv.g), bright(lv.b));
     shine = max(shine, vec3(max(${LIGHT_FLOOR.toFixed(3)}, ${EYE_LIGHT.toFixed(3)} * clamp(1.0 - gib / ${EYE_REACH.toFixed(1)}, 0.0, 1.0))));
     shine *= mix(${AO_DARK.toFixed(3)}, 1.0, l.a);
   }

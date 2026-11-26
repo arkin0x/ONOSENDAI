@@ -28,13 +28,14 @@
  * 3D texture the block shader samples half a block out from each face,
  * filtered between the four cells round each point (terrainMaterial.ts).
  * Red, green and blue are the light that reaches the cell, open and block
- * light together (the brighter of the two in each colour); alpha says
- * whether the cell is open. Filtered, alpha is the share of open cells round
- * the point, so a face darkens toward a crease or a corner where solid
- * blocks close in: ambient occlusion from the same texture, in the dark as
- * in the light, with no change to the greedy mesh. A solid cell carries its
- * brightest open neighbour's light, so the light itself never smears dark
- * into a wall.
+ * light together (the brighter of the two in each colour), and alpha says
+ * whether the cell is open; a solid cell holds 0 in all four. Filtered,
+ * alpha is the share of open cells round the point, so a face darkens
+ * toward a crease or a corner where solid blocks close in: ambient
+ * occlusion from the same texture, in the dark as in the light, with no
+ * change to the greedy mesh. And the filtered colour over the filtered
+ * alpha is the light of the open cells alone, so light never leaks through
+ * a wall from the far side, and solid cells never smear dark into it.
  */
 
 import { KINDS } from './blocks'
@@ -43,7 +44,7 @@ import { KINDS } from './blocks'
 export const MAX_LIGHT = 15
 /** Texels on each side of a chunk's light: the chunk and one cell round it. */
 export const LIGHT_SIDE = 34
-/** Bytes of a chunk's light: RGBA, the light's red, green and blue levels times 17, and 255 for an open cell or 0 for a solid one. */
+/** Bytes of a chunk's light: RGBA, the light's red, green and blue levels times 17 and 255 for an open cell, all 0 for a solid one. */
 export const LIGHT_BYTES = LIGHT_SIDE * LIGHT_SIDE * LIGHT_SIDE * 4
 /** Blocks round the chunk that are read: light spreads 15 blocks, and the texels reach one more. */
 export const MARGIN = 16
@@ -155,7 +156,7 @@ function spread(level: Uint8Array, pass: Uint8Array, buckets: Buckets): void {
 /**
  * The light of the chunk at the middle of `around`, as LIGHT_BYTES of RGBA
  * texels (texelIndex): the light's red, green and blue levels times 17
- * (0 to 255), and 255 where the cell is open, 0 where it is solid. `skyTop`
+ * (0 to 255) and 255 where the cell is open; all 0 where it is solid. `skyTop`
  * (FOOT by FOOT) says which columns are open above the top row of chunks;
  * null when nothing is loaded up there. Integers only: the same bytes on
  * every device.
@@ -243,24 +244,15 @@ export function computeLight(around: Around, skyTop: Uint8Array | null, tables: 
     else buckets.clear()
   }
 
-  // The texels: the chunk and one cell round it, open and block light together. A solid cell carries its brightest open neighbour's light.
+  // The texels: the chunk and one cell round it, open and block light together, only in open cells (solid ones hold 0).
   const L = LIGHT_SIDE
   const b0 = block[0], b1 = block[1], b2 = block[2]
   for (let ty = 0; ty < L; ty++) for (let tz = 0; tz < L; tz++) for (let tx = 0; tx < L; tx++) {
     const w = (tx + MARGIN - 1) | ((tz + MARGIN - 1) << 6) | ((ty + MARGIN - 1) << 12)
     const o = 4 * (tx + L * (tz + L * ty))
-    if (pass[w]) {
-      const s0 = sky[w]
-      out[o] = Math.max(s0, b0[w]) * 17; out[o + 1] = Math.max(s0, b1[w]) * 17; out[o + 2] = Math.max(s0, b2[w]) * 17; out[o + 3] = 255
-      continue
-    }
-    let r = 0, g = 0, b = 0
-    for (const n of [w - 1, w + 1, w - W, w + W, w - W2, w + W2]) {
-      if (!pass[n]) continue
-      const s0 = sky[n]
-      r = Math.max(r, s0, b0[n]); g = Math.max(g, s0, b1[n]); b = Math.max(b, s0, b2[n])
-    }
-    out[o] = r * 17; out[o + 1] = g * 17; out[o + 2] = b * 17; out[o + 3] = 0
+    if (!pass[w]) { out[o] = 0; out[o + 1] = 0; out[o + 2] = 0; out[o + 3] = 0; continue }
+    const s0 = sky[w]
+    out[o] = Math.max(s0, b0[w]) * 17; out[o + 1] = Math.max(s0, b1[w]) * 17; out[o + 2] = Math.max(s0, b2[w]) * 17; out[o + 3] = 255
   }
   return out
 }
@@ -292,6 +284,27 @@ export function shadedColumns(blocks: Uint8Array, pass: Uint8Array): Uint8Array 
 export function lightAt(light: Uint8Array, x: number, y: number, z: number): [number, number, number] {
   const o = 4 * texelIndex(x, y, z)
   return [light[o] / 17, light[o + 1] / 17, light[o + 2] / 17]
+}
+
+/**
+ * The light the block shader reads at a corner of a face, as [red, green,
+ * blue] levels 0 to 15: the open cells' light among the four cells round the
+ * corner in the layer in front of the face, averaged over the open ones
+ * (the filtered colour over the filtered alpha, terrainMaterial.ts).
+ * Arguments as cornerOpen.
+ */
+export function cornerLight(light: Uint8Array, cell: readonly [number, number, number], face: number, corner: readonly [number, number]): [number, number, number] {
+  const d = face >> 1, dir = face & 1 ? 1 : -1
+  const [a, b] = d === 0 ? [1, 2] : d === 1 ? [0, 2] : [0, 1]
+  const sum = [0, 0, 0]
+  let open = 0
+  for (const da of [corner[0] - 1, corner[0]]) for (const db of [corner[1] - 1, corner[1]]) {
+    const p = [cell[0], cell[1], cell[2]]
+    p[d] += dir; p[a] += da; p[b] += db
+    const o = 4 * texelIndex(p[0], p[1], p[2])
+    sum[0] += light[o]; sum[1] += light[o + 1]; sum[2] += light[o + 2]; open += light[o + 3]
+  }
+  return open === 0 ? [0, 0, 0] : [(sum[0] * 15) / open, (sum[1] * 15) / open, (sum[2] * 15) / open]
 }
 
 /**

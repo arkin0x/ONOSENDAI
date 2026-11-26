@@ -58,16 +58,24 @@ interface Props {
  * is refused before the blocks are walked (as a tap target refuses it).
  */
 export function occluderRaycast(distance: (ray: Ray) => number | null, claims: () => boolean, lastEvent: () => Event | null = () => null): (this: Mesh, raycaster: Raycaster, intersects: Intersection[]) => void {
-  // Where the blocks stood at the press. A tap is decided as it began: the
-  // block a press mines (TERRAIN, the mouse captured, mines at the press) is
-  // gone by the click, and the shard it hid must not open from that click.
-  let pressed: number | null = null
+  // Where the blocks were met at the press, in the world. A tap is decided
+  // as it began: the block a press mines (TERRAIN, the mouse captured, mines
+  // at the press) is gone by the click, and the shard it hid must not open
+  // from that click. A point, not a distance, measured again from where the
+  // eye is at the click, so a camera still moving does not shift the wall.
+  const pressed = new Vector3()
+  let held = false
   return function raycast(this: Mesh, raycaster: Raycaster, intersects: Intersection[]): void {
     const type = lastEvent()?.type
     if (type === 'wheel') return
     let d = distance(raycaster.ray)
-    if (type === 'pointerdown') pressed = d
-    else if (pressed !== null && (d === null || pressed < d)) d = pressed
+    if (type === 'pointerdown') {
+      held = d !== null
+      if (d !== null) raycaster.ray.at(d, pressed)
+    } else if (held) {
+      const then = pressed.distanceTo(raycaster.ray.origin)
+      if (d === null || then < d) d = then
+    }
     this.userData.claimsTap = claims()
     if (d === null || !(d >= raycaster.near && d <= raycaster.far)) return
     intersects.push({ distance: d, point: raycaster.ray.at(d, new Vector3()), object: this })

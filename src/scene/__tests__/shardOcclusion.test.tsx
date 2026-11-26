@@ -213,6 +213,19 @@ describe('a mark (a coin, a message) behind the blocks', () => {
   })
 })
 
+describe('a shard flush in front of the blocks, the camera backing off during the tap', () => {
+  it('still opens: the blocks met at the press are measured again from where the eye is at the click', async () => {
+    await mount(createElement(Shard, { z: 0.6, onTap: taps.exposed }))
+    await r.pointer('pointerdown', CENTRE, CENTRE)
+    r.state().camera.position.set(0, 0, 13)
+    r.state().camera.updateMatrixWorld()
+    await r.frame()
+    await r.pointer('pointerup', CENTRE, CENTRE)
+    await r.pointer('click', CENTRE, CENTRE)
+    expect(taps.exposed).toHaveBeenCalledTimes(1)
+  })
+})
+
 describe('your own avatar, which takes a tap only when nothing else wants it', () => {
   it('outside TERRAIN, a shard the blocks hide behind it wants nothing either: it takes the tap', async () => {
     await mount(createElement(Shard, { z: 4, onTap: taps.me, yields: true }), createElement(Shard, { z: -8, onTap: taps.buried }))

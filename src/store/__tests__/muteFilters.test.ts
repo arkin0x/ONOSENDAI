@@ -24,9 +24,13 @@ import { presenceDrawn, usePresence } from '../usePresence'
 import { useChat } from '../useChat'
 import { useSecrets } from '../useSecrets'
 import { useCeremony } from '../useCeremony'
+import { clearNearbyNew, nearbyNewFor } from '../nearbyNew'
 import { useToast } from '../useToast'
 import { useInventory } from '../useInventory'
 import { muteIdOf } from '../../hud/SecretModal'
+
+/** How many finds NEARBY counts new (the orange +N) for the identity on screen. */
+const newFinds = (): number => nearbyNewFor(useCyberspace.getState().identity.pubkey).size
 
 const ME = '1'.repeat(64)
 const BLOCKED = 'b'.repeat(64)
@@ -121,13 +125,13 @@ describe('the HIDDEN BAGS and DISCOVERED BAGS lists', () => {
 })
 
 describe('the find ceremony', () => {
-  it('raises no chip and no decode for a blocked hider\'s find', () => {
-    useCeremony.setState({ chip: null, births: {} })
+  it('counts nothing new and plays no decode for a blocked hider\'s find', () => {
+    useCeremony.setState({ births: {} }); clearNearbyNew()
     useShards.setState({ curated: null })
     useCeremony.getState().mark([find({ eventId: 'a'.repeat(64), author: BLOCKED })])
-    expect(useCeremony.getState().chip).toBeNull()
+    expect(newFinds()).toBe(0)
     useCeremony.getState().mark([find({ eventId: 'c'.repeat(64) })])
-    expect(useCeremony.getState().chip?.count).toBe(1)
+    expect(newFinds()).toBe(1)
   })
 })
 

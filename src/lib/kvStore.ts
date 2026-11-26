@@ -110,6 +110,10 @@ export const MOVED_PREFIXES: readonly string[] = [
   'onosendai:sfx:',
   // The MODES list per player (store/modeOrder.ts): the pad's modes in order, and the ones switched off.
   'onosendai:modes:',
+  // The top-left chips put away or on show per player (store/chipsFold.ts).
+  'onosendai:chips-folded:',
+  // The finds NEARBY counts new (the orange +N) per player (store/nearbyNew.ts).
+  'onosendai:nearby-new:',
 ]
 
 /**

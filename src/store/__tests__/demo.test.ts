@@ -39,6 +39,10 @@ import { coordPlace } from '../../lib/coordRoute'
 import { useHyperspace } from '../useHyperspace'
 import { useToast } from '../useToast'
 import { useCeremony } from '../useCeremony'
+import { clearNearbyNew, nearbyNewFor } from '../nearbyNew'
+
+/** How many finds NEARBY counts new (the orange +N) for the identity on screen. */
+const newFinds = (): number => nearbyNewFor(useCyberspace.getState().identity.pubkey).size
 
 beforeEach(() => {
   if (useDemo.getState().active) useDemo.getState().exit()
@@ -745,17 +749,17 @@ describe('the district shows only the curators\' things (2026-10-15)', () => {
     expect(useDemo.getState().empty).toBe(true)
   })
 
-  it('a stranger\'s find on the district raises no found chip; outside the tour it does (review of #364)', () => {
-    useCeremony.setState({ chip: null })
+  it('a stranger\'s find on the district is not counted new on NEARBY; outside the tour it is (review of #364)', () => {
+    clearNearbyNew()
     useDemo.getState().start('district')
     useCeremony.getState().mark([thing(STRANGER, 20) as never])
-    expect(useCeremony.getState().chip).toBeNull()
+    expect(newFinds()).toBe(0)
     useCeremony.getState().mark([thing(STRANGER, 21) as never, thing(DEMO_CURATORS[1], 22) as never])
-    expect(useCeremony.getState().chip?.count).toBe(1)
+    expect(newFinds()).toBe(1)
     useDemo.getState().exit()
-    useCeremony.setState({ chip: null })
+    clearNearbyNew()
     useCeremony.getState().mark([thing(STRANGER, 23) as never])
-    expect(useCeremony.getState().chip?.count).toBe(1)
-    useCeremony.setState({ chip: null })
+    expect(newFinds()).toBe(1)
+    clearNearbyNew()
   })
 })

@@ -6,7 +6,7 @@
  * or a coin. What it shows is added to your finds as watched, not played:
  * no chest TV showed opens by itself, and no key it showed opens anything by
  * itself. A key is held and a bag kept only when TV shows the whole bag. No
- * place is recorded and no chip raised. Nothing is scanned under a sealed
+ * place is recorded and nothing counted new on NEARBY. Nothing is scanned under a sealed
  * bag's segment or a hyperjump's line. The bags here are made and sealed in
  * the test with the real region keys; nothing is published but the set's
  * anonymous watching ping (lib/tv/watching.ts).
@@ -62,8 +62,12 @@ import { FIND_LINE_S, TV_SCAN_HEIGHTS, findLines, foundAsOf, sealedSegment, setT
 import { SCAN_MAX_HEIGHT, useShards } from '../useShards'
 import { useSecrets } from '../useSecrets'
 import { useCeremony } from '../useCeremony'
+import { clearNearbyNew, nearbyNewFor } from '../nearbyNew'
 import { useInventory } from '../useInventory'
 import { useCyberspace } from '../useCyberspace'
+
+/** How many finds NEARBY counts new (the orange +N) for the identity on screen. */
+const newFinds = (): number => nearbyNewFor(useCyberspace.getState().identity.pubkey).size
 
 const A = '1'.repeat(64)
 const B = '2'.repeat(64)
@@ -139,7 +143,7 @@ beforeEach(() => {
   setFoundSink((outer, _k, _i, _r, _h, _o, watched) => { kept.push({ outer, watched }) })
   useShards.setState({ discovered: {} })
   useInventory.setState({ items: {} })
-  useCeremony.setState({ chip: null, births: {} })
+  useCeremony.setState({ births: {} }); clearNearbyNew()
   hold = vi.spyOn(useSecrets.getState(), 'hold').mockImplementation(() => {})
   recordPlace = vi.spyOn(useSecrets.getState(), 'recordPlace').mockImplementation(async () => {})
   addDiscovered = vi.spyOn(useShards.getState(), 'addDiscovered')
@@ -193,7 +197,7 @@ describe('TV opens bags where its avatars stand', () => {
     // Kept, it would open whole on the next load, the note and the coin with it.
     expect(kept).toEqual([])
     expect(recordPlace).not.toHaveBeenCalled()
-    expect(useCeremony.getState().chip).toBeNull()
+    expect(newFinds()).toBe(0)
     // A line on the ticker instead.
     expect(tickerItems(s, () => 'X')).toContain('FOUND: RELIC')
     expect(published.filter((e) => (e as { kind?: number }).kind !== 23334)).toEqual([])
@@ -229,7 +233,7 @@ describe('TV opens bags where its avatars stand', () => {
     expect(useInventory.getState().items[keyEvent.id]).toBeUndefined()
     useShards.getState().takeFound([keyEvent.id])
     expect(useInventory.getState().items[keyEvent.id]?.watched).toBe(true)
-    expect(useCeremony.getState().chip).toBeNull()
+    expect(newFinds()).toBe(0)
   })
 
   it('adds a key and a chest TV showed through the real addDiscovered, and neither opens anything by itself', async () => {
@@ -243,7 +247,7 @@ describe('TV opens bags where its avatars stand', () => {
     expect(Object.keys(useTv.getState().found).sort()).toEqual([keyEvent.id, chestEvent.id].sort())
     expect(Object.keys(useShards.getState().discovered).sort()).toEqual([keyEvent.id, chestEvent.id].sort())
     expect(Object.values(useShards.getState().discovered).some((h) => h.type === 'message')).toBe(false)
-    expect(useCeremony.getState().chip).toBeNull()
+    expect(newFinds()).toBe(0)
     // The key is found, not held, until TAKE, which holds it as watched (arkinox, 2026-10-26).
     expect(useInventory.getState().items[keyEvent.id]).toBeUndefined()
     useShards.getState().takeFound([keyEvent.id])
@@ -256,7 +260,7 @@ describe('TV opens bags where its avatars stand', () => {
     const door = { ...useShards.getState().discovered[chestEvent.id], eventId: other.id, inner: other, chest: chestItemOf(other)! }
     useShards.getState().addDiscovered([door])
     expect(Object.values(useShards.getState().discovered).some((h) => h.type === 'message')).toBe(false)
-    expect(useCeremony.getState().chip).toBeNull()
+    expect(newFinds()).toBe(0)
     // OPEN, your own action, may still use it.
     expect(openerFor(chestItemOf(chestEvent)!, openingKeys(useInventory.getState().items), '')).toMatchObject({ by: 'key' })
     expect(openingKeys(useInventory.getState().items, true)).toEqual([])
@@ -272,7 +276,7 @@ describe('TV opens bags where its avatars stand', () => {
     useTv.getState().start()
     await run(9000)
     expect(Object.keys(useShards.getState().discovered)).toEqual([chestEvent.id])
-    expect(useCeremony.getState().chip).toBeNull()
+    expect(newFinds()).toBe(0)
     // It waits for OPEN, which that key still answers.
     expect(openerFor(chestItemOf(chestEvent)!, openingKeys(useInventory.getState().items), '')).toMatchObject({ by: 'key' })
   })

@@ -86,8 +86,3 @@ export function nearbyItems<T extends NearbyCandidate>(items: T[], keys: NearbyK
     .map((it) => ({ ...it, distance: axisDistance(it.at, anchor) }))
     .sort((a, b) => (a.distance < b.distance ? -1 : a.distance > b.distance ? 1 : 0))
 }
-
-/** The toast's line: how many were found here. */
-export function foundLabel(count: number): string {
-  return `${count} FOUND HERE`
-}

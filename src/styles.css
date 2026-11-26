@@ -844,8 +844,11 @@ body {
 }
 .instruments {
   position: absolute;
-  top: 12px;
-  left: var(--instruments-left);
+  /* Clear of a notch where the page reaches under one (the arrow chip sits
+     in this corner on its own, hud/ChipFold.tsx); 12px and the left edge
+     otherwise, as always. */
+  top: max(12px, env(safe-area-inset-top, 0px));
+  left: max(var(--instruments-left), env(safe-area-inset-left, 0px));
   /* Above the 3D compass (10) and its rotation submenu (101): the
      instrument stack is what is being read, nothing may cover it. */
   z-index: 102;
@@ -858,6 +861,195 @@ body {
 /* The stack's three groups (InstrumentStack.tsx) take no box of their own:
    the stack's gap and alignment run across them as one list. */
 .instruments__group { display: contents; }
+
+/* ---------- The arrow chip: the stack put away and brought back ----------
+ *
+ * hud/ChipFold.tsx (owner, 2026-11-26). The phase is a class on the stack:
+ * --leaving, --hidden, --arriving, --entering, --shown. While leaving, each
+ * chip slides off the left edge and fades, top first (--chip-i, set by
+ * ChipFold, is its place in the stack, the stagger capped at the sixth),
+ * accelerating away; while entering they come back decelerating into place.
+ * `translate`, not `transform`, so a chip's own transform or animation is
+ * left alone. The arrow glides between its place under the stack and the
+ * stack's top by --fold-dy (ChipFold's offsetTop), and only while moving:
+ * at rest it has no translate and no transition, so it lands with nothing
+ * to undo.
+ *
+ * THE BLADE. Inspiration: augmented-ui's border and inlay layers (a line
+ * clipped round an inset fill, its hexangle shapes; by hand, no
+ * dependency), the layered glass readouts of FUI/HUD work (daisyUI's FUI
+ * trend board), and the chevron tabs in Dribbble's sci-fi HUD collections.
+ * A hexagonal blade: the point is the direction. Pointing left, the left
+ * corners meet at a point and the right edge is flat; pointing right, the
+ * mirror. Both are the same six corners, so the clip-path morphs between
+ * them through a symmetric hexagon as the chips go. The 1px line is the
+ * plate's own background showing round a dark glass fill inset by a pixel
+ * under the same cut (.fluidnote's way); a lit spine on the flat edge is
+ * where it holds the stack; the halo is a drop-shadow on the button, which
+ * the clip does not cut. The chevron is white with a dark edge, as every
+ * word over the scene is.
+ */
+:root {
+  --fold-slide: 240ms;
+  --fold-step: 22ms;
+  --fold-ease-out: cubic-bezier(0.55, 0, 0.85, 0.25);
+  --fold-ease-in: cubic-bezier(0.16, 1, 0.3, 1);
+  --fold-glide: cubic-bezier(0.65, 0, 0.35, 1);
+}
+.instruments--leaving .instruments__group > *,
+.instruments--arriving .instruments__group > * {
+  translate: calc(-100% - var(--instruments-left) - var(--hud-shift-l, 0px) - 24px) 0;
+  opacity: 0;
+  pointer-events: none;
+}
+.instruments--leaving .instruments__group > * {
+  transition:
+    translate var(--fold-slide) var(--fold-ease-out) calc(var(--chip-i, 0) * var(--fold-step)),
+    opacity var(--fold-slide) ease-in calc(var(--chip-i, 0) * var(--fold-step));
+}
+.instruments--arriving .instruments__group > * { transition: none; }
+.instruments--entering .instruments__group > * {
+  transition:
+    translate calc(var(--fold-slide) + 40ms) var(--fold-ease-in) calc(var(--chip-i, 0) * var(--fold-step)),
+    opacity var(--fold-slide) ease-out calc(var(--chip-i, 0) * var(--fold-step));
+}
+
+.chipfold {
+  --cf-w: 40px;
+  --cf-h: 26px;
+  /* How far the point reaches in from the blade's end. */
+  --cf-p: 9px;
+  --cf-line: rgba(0, 229, 255, 0.78);
+  --cf-glow: rgba(0, 229, 255, 0.34);
+  --cf-left: polygon(var(--cf-p) 0, 100% 0, 100% 50%, 100% 100%, var(--cf-p) 100%, 0 50%);
+  --cf-right: polygon(0 0, calc(100% - var(--cf-p)) 0, 100% 50%, calc(100% - var(--cf-p)) 100%, 0 100%, 0 50%);
+  --cf-shape: var(--cf-left);
+  position: relative;
+  flex: none;
+  width: var(--cf-w);
+  height: var(--cf-h);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #fff;
+  cursor: pointer;
+  pointer-events: auto;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  filter: drop-shadow(0 0 5px var(--cf-glow)) drop-shadow(0 1px 2px rgba(0, 0, 0, 0.55));
+  transition: filter 200ms ease;
+}
+.chipfold--out { --cf-shape: var(--cf-right); }
+.instruments--leaving .chipfold,
+.instruments--arriving .chipfold { translate: 0 var(--fold-dy, 0px); }
+.instruments--leaving .chipfold { transition: filter 200ms ease, translate 300ms var(--fold-glide) 40ms; }
+.instruments--entering .chipfold { transition: filter 200ms ease, translate 320ms var(--fold-glide); }
+
+.chipfold__plate {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(100deg, var(--cf-line), rgba(0, 229, 255, 0.34) 70%, var(--cf-line));
+  clip-path: var(--cf-shape);
+  transition: clip-path 320ms var(--fold-glide), background 200ms ease;
+}
+/* The glass, a pixel inside the line under the same cut. */
+.chipfold__plate::before {
+  content: '';
+  position: absolute;
+  inset: 1px;
+  clip-path: var(--cf-shape);
+  background:
+    linear-gradient(180deg, rgba(0, 229, 255, 0.1), transparent 55%),
+    rgba(5, 12, 20, 0.86);
+  transition: clip-path 320ms var(--fold-glide), background 160ms ease;
+}
+/* The spine: a lit stroke along the flat edge, the side that holds the stack. */
+.chipfold__plate::after {
+  content: '';
+  position: absolute;
+  top: 7px;
+  bottom: 7px;
+  left: calc(100% - 5px);
+  width: 2px;
+  background: var(--accent, #00e5ff);
+  box-shadow: 0 0 6px var(--accent, #00e5ff);
+  opacity: 0.75;
+  transition: left 320ms var(--fold-glide);
+}
+.chipfold--out .chipfold__plate::after { left: 3px; }
+
+/* What the blade holds, in the part the point does not take. */
+.chipfold__body {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--cf-p);
+  right: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  transition: left 320ms var(--fold-glide), right 320ms var(--fold-glide);
+}
+.chipfold--out .chipfold__body { left: 4px; right: var(--cf-p); flex-direction: row-reverse; }
+.chipfold__icons { position: relative; width: 16px; height: 16px; flex: none; }
+.chipfold__icon {
+  position: absolute;
+  inset: 0;
+  filter: drop-shadow(0 0 1px #000) drop-shadow(0 1px 2px rgba(0, 0, 0, 0.9));
+  transition: opacity 220ms ease, scale 220ms ease, translate 160ms ease;
+}
+/* The point turns by a fade, one chevron for the other. */
+.chipfold__icon--r { opacity: 0; scale: 0.6; }
+.chipfold--out .chipfold__icon--l { opacity: 0; scale: 0.6; }
+.chipfold--out .chipfold__icon--r { opacity: 1; scale: 1; }
+/* U, printed where there is a keyboard; on a touch screen the blade is the chevron alone. */
+.chipfold__key { display: none; }
+@media (hover: hover) and (pointer: fine) {
+  .chipfold { --cf-w: 48px; }
+  .chipfold__key {
+    display: block;
+    font-family: 'Monaspace Krypton', var(--mono);
+    font-size: 8px;
+    line-height: 1;
+    letter-spacing: 0;
+    color: rgba(200, 245, 255, 0.72);
+    text-shadow: 0 0 1px #000;
+  }
+  .chipfold:hover { --cf-line: rgba(0, 229, 255, 0.95); --cf-glow: rgba(0, 229, 255, 0.5); }
+  /* A pull toward where it goes. */
+  .chipfold:hover .chipfold__icon--l { translate: -1.5px 0; }
+  .chipfold:hover .chipfold__icon--r { translate: 1.5px 0; }
+}
+.chipfold:active .chipfold__plate::before { background: rgba(0, 229, 255, 0.28); }
+.chipfold:focus-visible { outline: 1px solid #fff; outline-offset: 3px; }
+/* Something waits behind the folded blade: unread notifications or a broken chain. */
+.chipfold__pip {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 6px;
+  height: 6px;
+  rotate: 45deg;
+  background: var(--warn);
+  box-shadow: 0 0 6px var(--warn), 0 0 0 1px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* A fade instead of the slide and the glide. */
+  .instruments--leaving .instruments__group > *,
+  .instruments--arriving .instruments__group > * { translate: none; }
+  .instruments--leaving .instruments__group > *,
+  .instruments--entering .instruments__group > * { transition: opacity 180ms ease; }
+  .instruments--leaving .chipfold,
+  .instruments--arriving .chipfold { translate: none; opacity: 0; }
+  .instruments--leaving .chipfold { transition: opacity 180ms ease; }
+  .instruments--hidden .chipfold,
+  .instruments--entering .chipfold { transition: opacity 180ms ease; }
+  .chipfold__plate, .chipfold__plate::before, .chipfold__plate::after, .chipfold__body { transition: none; }
+}
 /* A sticky toast's way out: the whole chip dismisses, the ✕ says so. */
 .toast__dismiss {
   margin-left: 8px;
@@ -7811,16 +8003,6 @@ select.avatars__input option:checked {
   color: var(--accent);
 }
 
-.foundchip__decode {
-  margin-left: auto;
-  max-width: 46ch;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  font-size: 10px;
-  letter-spacing: 0.08em;
-  color: var(--fg);
-}
 @keyframes found-breathe {
   0%, 100% { box-shadow: 0 0 10px rgba(0, 229, 255, 0.12); }
   50% { box-shadow: 0 0 22px rgba(0, 229, 255, 0.34); }
@@ -9589,6 +9771,16 @@ select.avatars__input option:checked {
    second; its chip is accent throughout, label included. */
 .presence .presence__head svg { color: #f7931a; }
 .nearby__chip .presence__head svg { color: var(--accent); }
+/* NEARBY 168 +12: the count and the new finds in tabular figures, so the
+   chip never shifts by a hair as either changes; the +12 in the line's
+   Bitcoin orange against the chip's cyan (owner, 2026-11-26), its own dark
+   edge so it reads over the scene. */
+.nearby__total, .nearby__new { font-variant-numeric: tabular-nums; }
+.nearby__new {
+  margin-left: 6px;
+  color: #f7931a;
+  text-shadow: 0 0 1px #000, 0 0 6px rgba(247, 147, 26, 0.35);
+}
 /* VIEW on a Nearby Loot row: a button, not a label. */
 .nearby__view { flex: none; padding: 3px 9px; font-size: 8px; letter-spacing: 0.14em; }
 /* A chest row's OPEN, or a door row's OPEN or CLOSE, beside its VIEW, VIEW on

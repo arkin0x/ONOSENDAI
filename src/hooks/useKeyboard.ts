@@ -42,6 +42,9 @@ import { toggleMenuOpen } from './useMenuOpen'
 import { scanBuying, scanSpace, useScan } from '../store/useScan'
 import { useTerrain } from '../store/useTerrain'
 import { enterTerrainMode } from '../store/padMode'
+import { toggleChipsFolded } from '../store/chipsFold'
+import { useTutorial } from '../store/useTutorial'
+import { useDemo } from '../store/useDemo'
 
 // Cyberspace TV is watching only: WALK's input is closed while it is on (store/walkInput.ts).
 addWalkInputCloser(() => useTv.getState().on)
@@ -225,6 +228,15 @@ export function useKeyboard(): void {
       if (useWorkshop.getState().open) return
       // In a game its own keys answer (game/GameView.tsx): nothing here moves you in cyberspace meanwhile.
       if (useGame.getState().session) return
+
+      // U: the top-left chips put away or brought back, as the arrow chip
+      // under them does (hud/ChipFold.tsx; owner, 2026-11-26). Not in the
+      // tutorial or the /demo tour, where there is no arrow.
+      if (event.code === 'KeyU' && !event.shiftKey) {
+        event.preventDefault()
+        if (!event.repeat && !useTutorial.getState().active && !useDemo.getState().active) toggleChipsFolded()
+        return
+      }
 
       const store = useCyberspace.getState()
       // What is on screen, which under free orbit is not the snapped frame.

@@ -29,6 +29,7 @@ import { openChestHere } from '../../hud/ItemRows'
 import { lookOf } from '../../lib/looks'
 import { chestLoot } from '../../lib/lootObjects'
 import { useCeremony } from '../useCeremony'
+import { clearNearbyNew } from '../nearbyNew'
 import { useCyberspace } from '../useCyberspace'
 import { useShards } from '../useShards'
 import { openedByHand, resetOpenedChests } from '../useOpenedChests'
@@ -62,7 +63,7 @@ beforeEach(() => {
   localStorage.removeItem('onosendai:chests-opened')
   resetOpenedChests()
   resetCeremonySound()
-  useCeremony.setState({ births: {}, chip: null })
+  useCeremony.setState({ births: {} }); clearNearbyNew()
   useOpenCeremony.setState({ playing: {} })
 })
 
@@ -113,7 +114,7 @@ describe('OPEN on a door', () => {
     const ev = doorEvent(true)
     useShards.setState({ mine: [], discovered: { [ev.id]: found(ev) } })
     await openChestHere({ id: ev.id, chest, author: ev.pubkey, place, sealer: ev.pubkey, door: true }, opener)
-    useCeremony.setState({ births: {}, chip: null })
+    useCeremony.setState({ births: {} }); clearNearbyNew()
     resetOpenedChests()
     expect(afterOpen(!openedByHand(ME, ev.id, chest.lockPubkey), true).ceremony).toBe(false)
   })

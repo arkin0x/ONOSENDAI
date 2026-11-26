@@ -15235,3 +15235,145 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
    tall and at least as wide as it is tall, so the tap is as easy as before. */
 .chatdock__chip.is-tight { min-width: 29px; justify-content: center; padding-left: 8px; padding-right: 8px; }
 .chatdock__chip.is-tight .chatdock__word { display: none; }
+
+/* ---------- Hidden messages and sounds: the sealed letter and the voice line ----------
+ *
+ * Owner, 2026-11-26: "in the world: letter with glyph ring from concept 1 ...
+ * decode effect for the message itself. love the broken seal for read" and
+ * "the audio look is amazing from the hidden message looks. lets replace
+ * audio with this" (onosendai/hidden-messages-ui, directions 1, 6 and 7).
+ * Drawn by hand in the HUD's own cut-corner vocabulary (no augmented-ui):
+ * thin luminous borders, corner brackets, chamfered buttons, the author's
+ * colour as an octagon. Each author colour arrives as --author or --seal
+ * (lib/authorColour.ts).
+ */
+
+/* Who left it: their picture in an octagon of their colour, their name, when it was sealed. */
+.authorline { display: flex; align-items: center; gap: 10px; min-width: 0; margin: 0 0 12px; }
+.authorline__pic { flex: none; display: inline-flex; padding: 2px; background: var(--author, var(--accent)); clip-path: polygon(30% 0, 70% 0, 100% 30%, 100% 70%, 70% 100%, 30% 100%, 0 70%, 0 30%); }
+.authorline__pic .pfp { border-radius: 0; clip-path: polygon(30% 0, 70% 0, 100% 30%, 100% 70%, 70% 100%, 30% 100%, 0 70%, 0 30%); }
+.authorline__text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.authorline__name { display: inline-flex; align-items: center; gap: 6px; min-width: 0; font-size: 13px; color: #fff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.authorline__when { display: inline-flex; align-items: center; gap: 5px; font-size: 10px; letter-spacing: 0.04em; color: var(--dim); font-variant-numeric: tabular-nums; }
+.authorline__when svg { flex: none; color: var(--accent); }
+/* The author's dot, everywhere a name is: a small octagon of their colour. */
+.authordot { flex: none; display: inline-block; width: 8px; height: 8px; background: var(--author, var(--accent)); clip-path: polygon(30% 0, 70% 0, 100% 30%, 100% 70%, 70% 100%, 30% 100%, 0 70%, 0 30%); }
+
+/* The seal: a hexagon in the author's colour bearing their initial, whole or cracked in two. */
+.seal { position: relative; display: inline-block; flex: none; }
+.seal__svg { display: block; width: 100%; height: 100%; overflow: visible; }
+.seal__initial { font-family: 'Monaspace Krypton', var(--mono); }
+.seal__half { transform-box: fill-box; transform-origin: 50% 50%; }
+.seal--broken .seal__half--l { transform: translate(-5px, 1.5px) rotate(-14deg); }
+.seal--broken .seal__half--r { transform: translate(5px, 1.5px) rotate(14deg); }
+.seal--cracking .seal__svg { animation: seal-flare calc(var(--unfold-ms, 650ms) * 0.6) ease-out both; }
+.seal--cracking .seal__half--l { animation: seal-crack-l calc(var(--unfold-ms, 650ms) * 0.55) calc(var(--unfold-ms, 650ms) * 0.1) cubic-bezier(.2, .8, .2, 1) both; }
+.seal--cracking .seal__half--r { animation: seal-crack-r calc(var(--unfold-ms, 650ms) * 0.55) calc(var(--unfold-ms, 650ms) * 0.1) cubic-bezier(.2, .8, .2, 1) both; }
+.seal__initial--fading { animation: seal-initial-out calc(var(--unfold-ms, 650ms) * 0.3) ease-out both; }
+@keyframes seal-crack-l { from { transform: none; } to { transform: translate(-5px, 1.5px) rotate(-14deg); } }
+@keyframes seal-crack-r { from { transform: none; } to { transform: translate(5px, 1.5px) rotate(14deg); } }
+@keyframes seal-initial-out { from { opacity: 1; } to { opacity: 0; } }
+@keyframes seal-flare { 0% { filter: drop-shadow(0 0 0 transparent); } 35% { filter: drop-shadow(0 0 10px var(--seal, #ffcf6b)); } 100% { filter: drop-shadow(0 0 0 transparent); } }
+
+/* The opened letter: the seal over the page's top edge, the page framed in thin light with the author's corner brackets. */
+.letter { position: relative; margin: 0 0 14px; }
+.letter__seal { position: relative; z-index: 1; display: flex; justify-content: center; height: 50px; margin-bottom: -24px; pointer-events: none; }
+.letter__page {
+  position: relative;
+  padding: 28px 16px 14px;
+  background: linear-gradient(180deg, #0c1a27, #07111a 55%);
+  border: 1px solid rgba(200, 245, 255, 0.16);
+  transform-origin: 50% 0;
+}
+.letter__page::before, .letter__page::after { content: ""; position: absolute; width: 12px; height: 12px; border: 2px solid var(--author, var(--accent)); pointer-events: none; }
+.letter__page::before { left: -1px; top: -1px; border-right: 0; border-bottom: 0; }
+.letter__page::after { right: -1px; bottom: -1px; border-left: 0; border-top: 0; }
+.letter--opening .letter__page { animation: letter-unfold calc(var(--unfold-ms, 650ms) * 0.75) calc(var(--unfold-ms, 650ms) * 0.25) cubic-bezier(.2, .8, .2, 1) both; }
+@keyframes letter-unfold { from { transform: perspective(600px) rotateX(-78deg); opacity: 0.25; } to { transform: none; opacity: 1; } }
+/* The words: a comfortable reading face, white on the dark page. */
+.letter__words {
+  margin: 0;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  font-size: 16px;
+  line-height: 1.65;
+  color: #f4fbff;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  outline: none;
+}
+.letter__words--short { padding: 6px 0 2px; font-size: 20px; line-height: 1.4; text-align: center; }
+/* The real words hold the height from the first frame; the glyphs are drawn over them until they resolve. */
+.letter__stack { position: relative; display: block; }
+.letter__ghost { color: transparent; }
+.letter__stack.is-done .letter__ghost { color: inherit; }
+.letter__shown { position: absolute; inset: 0; overflow: hidden; }
+.letter__shown .g { color: var(--accent); opacity: 0.85; }
+/* A long message: a reading view of fixed height, a fade at its foot while there is more, a line for how far through. */
+.letter__long { position: relative; }
+.letter__read { height: 220px; overflow-y: auto; overscroll-behavior: contain; outline: none; }
+.letter__read.has-more { -webkit-mask-image: linear-gradient(180deg, #000 72%, transparent); mask-image: linear-gradient(180deg, #000 72%, transparent); }
+.letter__read:focus-visible, .letter__words--short:focus-visible { box-shadow: 0 0 0 1px rgba(0, 229, 255, 0.5); }
+.letter__progress { display: block; height: 2px; margin-top: 10px; background: rgba(0, 229, 255, 0.15); }
+.letter__progress i { display: block; height: 100%; background: var(--accent); box-shadow: 0 0 6px rgba(0, 229, 255, 0.55); transition: width 120ms linear; }
+
+/* A message in a list: the folded letter with its seal, whole until read. */
+.letterthumb__paper { position: relative; display: block; }
+.letterthumb__paper > svg { display: block; overflow: visible; }
+.letterthumb__sheet { fill: rgba(200, 245, 255, 0.07); stroke: #c8f5ff; stroke-width: 3; }
+.letterthumb__fold { fill: none; stroke: #c8f5ff; stroke-width: 3; opacity: 0.7; }
+.letterthumb__seal { position: absolute; left: 50%; top: 57%; transform: translate(-50%, -50%); }
+.letterthumb--read .letterthumb__sheet { fill: rgba(200, 245, 255, 0.04); stroke: #6f8d9a; }
+.letterthumb--read .letterthumb__fold { stroke: #6f8d9a; opacity: 0.55; }
+
+/* The voice line: a large play button beside the waveform, which is the scrubber. */
+.voice { gap: 10px; }
+.voice__title { font-size: 16px; color: #fff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.voice__player { display: grid; grid-template-columns: 56px minmax(0, 1fr); gap: 12px; align-items: start; }
+.voice__play {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  width: 56px;
+  height: 64px;
+  padding: 0;
+  font: inherit;
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  color: #05070d;
+  background: var(--accent);
+  border: 0;
+  cursor: pointer;
+  clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px);
+}
+.voice__play.is-on { color: var(--accent); background: rgba(0, 229, 255, 0.16); box-shadow: inset 0 0 0 1px rgba(0, 229, 255, 0.7); }
+.voice__play:focus-visible { outline: 1px solid #fff; outline-offset: 2px; }
+.voice__track { min-width: 0; }
+.wave { position: relative; display: flex; align-items: center; height: 64px; touch-action: none; cursor: pointer; outline: none; }
+.wave:focus-visible { box-shadow: 0 0 0 1px rgba(0, 229, 255, 0.6); }
+.wave__bars { display: flex; align-items: center; gap: 2px; width: 100%; height: 100%; pointer-events: none; }
+.wave__bars i { flex: 1 1 0; min-width: 1px; background: #4aa3ff; opacity: 0.45; border-radius: 1px; }
+.wave__bars i.is-on { background: var(--accent); opacity: 1; box-shadow: 0 0 6px rgba(0, 229, 255, 0.6); }
+.wave--standin .wave__bars i:not(.is-on) { opacity: 0.25; }
+.voice__times { display: flex; justify-content: space-between; margin-top: 4px; font-size: 10px; color: var(--dim); font-variant-numeric: tabular-nums; }
+.voice__line { margin: 0; padding-left: 10px; font-size: 13px; line-height: 1.6; color: var(--fg); border-left: 2px solid #4aa3ff; overflow-wrap: anywhere; }
+.voice__status { min-height: 1.4em; }
+
+/* A sound in a list: its waveform. */
+.wavethumb__bars { display: flex; align-items: center; gap: 2px; width: 72%; height: 50%; }
+.wavethumb__bars i { flex: 1 1 0; min-width: 1px; background: #9fd0ff; border-radius: 1px; }
+.wavethumb--standin .wavethumb__bars i { opacity: 0.55; }
+
+/* DISCOVERED NEARBY: two lines of words for a message or a sound, the author's dot, when it was sealed, which way it is. */
+.nearby__row .nearby__label.nearby__label--two { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; min-height: 2.8em; line-height: 1.4; white-space: normal; overflow: hidden; overflow-wrap: anywhere; color: #fff; }
+.nearby__unread { flex: none; padding: 1px 4px; font-size: 8px; letter-spacing: 0.14em; color: #05070d; background: var(--author, var(--accent)); }
+.nearby__dot { display: inline-flex; align-items: center; gap: 5px; min-width: 0; min-height: 24px; padding: 0; font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+.nearby__when { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.nearby__way { display: flex; align-items: center; gap: 5px; min-width: 0; font-size: 10px; letter-spacing: 0.04em; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nearby__arrow, .nearby__way > svg { flex: none; color: var(--accent); }
+
+@media (prefers-reduced-motion: reduce) {
+  .seal--cracking .seal__svg, .seal--cracking .seal__half, .seal__initial--fading, .letter--opening .letter__page { animation: none; }
+  .letter__progress i { transition: none; }
+}

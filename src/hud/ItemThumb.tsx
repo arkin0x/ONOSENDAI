@@ -11,8 +11,14 @@
  *   picture if it has one, else its icon.
  * - A key item with its own picture and no model shows that picture, pixel
  *   art, filling the frame.
- * - Everything else (a message, a coin, DNA, a sound, a seed, a chest) shows
- *   its kind's lucide icon, large and centred, in its kind's colour.
+ * - A hidden message handed its seal (`letter`) shows the folded letter with
+ *   its seal in its author's colour, whole until read, broken after
+ *   (LetterSeal LetterThumb; owner, 2026-11-26).
+ * - Hidden audio handed its file (`audio`) shows its waveform (WaveBars
+ *   WaveThumb; direction 7, Voice line).
+ * - Everything else (a coin, DNA, a seed, a chest, a message or a sound with
+ *   neither) shows its kind's lucide icon, large and centred, in its kind's
+ *   colour.
  */
 
 import { useEffect, useRef, useState } from 'react'
@@ -24,6 +30,8 @@ import { useItemModel } from '../hooks/useItemModel'
 import { ItemIcon } from './ItemIcon'
 import { ShardThumb, scrollRootOf, watchNear } from './ShardThumb'
 import { Chamfer, THUMB_PX } from './ui/Chamfer'
+import { LetterThumb } from './LetterSeal'
+import { WaveThumb } from './WaveBars'
 
 /** How big a kind's icon is drawn inside the frame: big enough to read as the picture, with air around it. */
 export const THUMB_ICON_PX = 36
@@ -44,6 +52,10 @@ interface Props {
    * model no relay has is asked for again by every mount.
    */
   lazy?: boolean
+  /** For a message that is not a coin: its seal, drawn as the folded letter. */
+  letter?: { colour: string; initial: string; broken: boolean }
+  /** For hidden audio: the file, drawn as its waveform. */
+  audio?: { hash: string }
 }
 
 function ModelThumb({ model, size, fallback }: { model: ItemModelRef; size: number; fallback: JSX.Element }): JSX.Element {
@@ -65,7 +77,9 @@ function NearModelThumb({ model, size, fallback }: { model: ItemModelRef; size: 
   return <span ref={box} className="itemthumb__wait">{fallback}</span>
 }
 
-export function ItemThumb({ type, coin = false, shard, image, model, size = THUMB_PX, lazy = false }: Props): JSX.Element {
+export function ItemThumb({ type, coin = false, shard, image, model, size = THUMB_PX, lazy = false, letter, audio }: Props): JSX.Element {
+  if (type === 'message' && !coin && letter) return <LetterThumb colour={letter.colour} initial={letter.initial} broken={letter.broken} size={size} />
+  if (type === 'audio' && audio?.hash) return <WaveThumb audio={audio} size={size} />
   const kind = coin ? 'cashu' : type
   const icon = <ItemIcon className={`itemthumb__icon itemthumb__icon--${kind}`} type={type} coin={coin} size={Math.round(size * (THUMB_ICON_PX / THUMB_PX))} strokeWidth={1.75} />
   const own = image && isPictureUri(image) ? <img className="itemthumb__pic" src={image} alt="" width={size} height={size} draggable={false} /> : null

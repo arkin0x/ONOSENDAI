@@ -470,7 +470,7 @@ function ContentRow({ entry, from, place, size }: { entry: ChestEntry; from: Hel
   }, [type, entry, found, place])
   return (
     <li className="chest__row chest__row--thumb" style={size ? ({ '--chamfer-size': `${size}px` } as CSSProperties) : undefined}>
-      <ItemThumb type={type} coin={coin} shard={type === 'shard' ? entry.body.shard : undefined} image={entry.body.key?.image} model={entry.body.key?.model} size={size} />
+      <ItemThumb type={type} coin={coin} shard={type === 'shard' ? entry.body.shard : undefined} image={entry.body.key?.image} model={entry.body.key?.model} size={size} audio={type === 'audio' ? entry.body.audio : undefined} />
       {type === 'chest' && entry.body.chest
         ? <ChestBlock id={entry.id} chest={entry.body.chest} author={entry.event.pubkey} verified={entry.verified} place={place} sealer={entry.verified ? entry.event.pubkey : undefined} inChest />
         : (

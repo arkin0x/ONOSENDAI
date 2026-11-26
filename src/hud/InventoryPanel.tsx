@@ -506,7 +506,7 @@ export function TakenRow({ item, fresh = false, focused = false }: { item: HeldI
   return (
     // Laid out as a key item row (HeldRowLine), the same picture size for every kind (owner, 2026-11-15).
     <li ref={focusRef} className={`secrets__row held__row held__row--loot${focused ? ' held__row--focus' : ''}`} data-actions-row={item.id} data-kind={item.type}>
-      <ItemThumb type={item.type} coin={coin} shard={item.type === 'shard' ? item.shard : undefined} />
+      <ItemThumb type={item.type} coin={coin} shard={item.type === 'shard' ? item.shard : undefined} audio={item.type === 'audio' ? item.audio : undefined} />
       {item.type === 'chest' && item.chest
         ? <ChestBlock id={item.id} chest={item.chest} author={item.author} verified={item.verified} place={item.place} sealer={item.verified ? item.event.pubkey : undefined} contentsIn={contents} />
         : (

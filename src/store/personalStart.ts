@@ -10,6 +10,7 @@ import { personalListsMade } from './personalLists'
 import './useStarred'
 import './recentViewsList'
 import './useItemsSeen'
+import './useMessagesRead'
 
 let started = false
 

@@ -87,11 +87,14 @@ beforeEach(() => {
 })
 
 describe('a seed row', () => {
-  it('names its DNA, says where it is and its day, who planted it and how far, with VIEW', () => {
+  it('names its DNA, its day, who planted it and when, and which way and how far, with VIEW', () => {
     useBlooms.setState({ views: { [big.id]: grownView(big.id, 975300, 12) } })
     const html = row(bigItem, planter)
     expect(html).toContain('fiddlehead')
-    expect(html).toContain('Dataspace, height 6 · day 12 of 41')
+    // Plain words, not "Dataspace, height 6" (owner, 2026-11-26).
+    expect(html).toContain('<span class="nearby__where">day 12 of 41</span>')
+    expect(html).not.toContain('height 6')
+    expect(html).toContain('planted')
     expect(html).toMatch(/<span class="nearby__who">you<\/span>/)
     expect(html).toContain('away')
     expect(html).toContain('VIEW')

@@ -47,11 +47,13 @@ afterEach(() => {
 describe('BUILD mode keeps NEARBY and CHAIN off the stack', () => {
   it('NEARBY shows its count outside BUILD and nothing in it', () => {
     useShards.setState({ nearbyOpen: false })
-    expect(renderToStaticMarkup(<NearbyChip />)).toContain('NEARBY 1')
+    // Its words, without the markup (the count has its own span, beside the orange +N).
+    const words = (): string => renderToStaticMarkup(<NearbyChip />).replace(/<[^>]+>/g, '')
+    expect(words()).toContain('NEARBY 1')
     useBuilder.setState({ active: true })
     expect(renderToStaticMarkup(<NearbyChip />)).toBe('')
     useBuilder.setState({ active: false })
-    expect(renderToStaticMarkup(<NearbyChip />)).toContain('NEARBY 1')
+    expect(words()).toContain('NEARBY 1')
   })
 
   it('CHAIN shows n/N outside BUILD and nothing in it', () => {

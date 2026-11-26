@@ -317,7 +317,8 @@ export default function App(): JSX.Element {
   // A view you can leave keeps Escape as its way out while its RETURN chip
   // is put away: the first Escape brings the chips back, RETURN with them,
   // and the next is RETURN's own (hud/FocusBar.tsx, hud/HyperspaceBar.tsx).
-  useEscape('chip', chipsFolded && (viewing || stationView || building || regionOn), () => setChipsFolded(false))
+  // BUILD keeps its own Escape in its store (useBuilder), so not for BUILD.
+  useEscape('chip', chipsFolded && (viewing || stationView || regionOn), () => setChipsFolded(false))
   // The question bubble lives in the menu; on a phone the menu covers the
   // scene, so starting the tour from it closes it. Only on the start:
   // opening the menu during the tour (its menu step) leaves it open.

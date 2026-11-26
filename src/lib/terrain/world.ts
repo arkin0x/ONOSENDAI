@@ -25,6 +25,7 @@
 
 import { CELLS, chunkInSpace, chunkKey, idx, type ChunkBase } from './coords'
 import { EMPTY } from './blocks'
+import { FOOT, aroundIndex, lightReaches } from './light'
 import type { AxisDirection, ViewAxes, AxisName } from '../space'
 
 /** Blocks of reach past the chunk's walls, on each axis (DECK-0009 §6.2). */
@@ -85,6 +86,8 @@ export interface ChunkSlot {
   own?: Uint8Array | null
   /** Changed since it was last meshed. */
   dirty: boolean
+  /** Its light (light.ts) may have changed since it was last worked out: a block within its reach changed, or a chunk came or went. */
+  lightDirty?: boolean
   /** Bumped by every change to its blocks: the walls built from it (lib/terrain/walls.ts) follow it. */
   version: number
 }
@@ -138,7 +141,7 @@ export class TerrainWorld {
     if (!s && create) {
       const o = this.origin
       const base = { x: o.x + BigInt(32 * cx), y: o.y + BigInt(32 * cy), z: o.z + BigInt(32 * cz), plane: o.plane }
-      s = { base, key: chunkKey(base), off: [cx, cy, cz], inSpace: chunkInSpace(base), surveyed: false, generated: null, blocks: null, dirty: false, version: 0 }
+      s = { base, key: chunkKey(base), off: [cx, cy, cz], inSpace: chunkInSpace(base), surveyed: false, generated: null, blocks: null, dirty: false, lightDirty: false, version: 0 }
       this.chunks.set(k, s)
     }
     return s ?? null
@@ -223,6 +226,7 @@ export class TerrainWorld {
       const n = this.slotAt(slot.off[0] + ax, slot.off[1] + ay, slot.off[2] + az)
       if (n) n.dirty = true
     }
+    if (slot.blocks) this.markLight(slot, null)
   }
 
   /** Set a chunk's blocks once generated (and its layer and log applied); marks it and its neighbours to be meshed again. */
@@ -234,6 +238,49 @@ export class TerrainWorld {
     slot.surveyed = true
     slot.version++
     this.markAround(slot, null)
+    this.markLight(slot, null)
+  }
+
+  /**
+   * Mark the chunks whose light a change in `slot` can reach (light.ts
+   * lightReaches): at `cell`, or anywhere in it when null (it came or went).
+   */
+  private markLight(slot: ChunkSlot, cell: number | null): void {
+    const x = cell === null ? 0 : cell & 31, z = cell === null ? 0 : (cell >> 5) & 31, y = cell === null ? 0 : cell >> 10
+    for (const n of this.chunks.values()) {
+      if (!n.blocks) continue
+      const d: [number, number, number] = [n.off[0] - slot.off[0], n.off[1] - slot.off[1], n.off[2] - slot.off[2]]
+      const reach = cell === null ? Math.abs(d[0]) <= 1 && Math.abs(d[2]) <= 1 && d[1] <= 1 : lightReaches(d, x, y, z)
+      if (reach) n.lightDirty = true
+    }
+  }
+
+  /**
+   * What a chunk's light is worked out from (light.ts computeLight): its own
+   * blocks and its 26 neighbours' (null where open space), and which columns
+   * of their footprint a chunk higher up shades (null when none does).
+   * `shaded` gives a chunk's shaded columns (light.ts shadedColumns), so the
+   * caller can keep them between calls.
+   */
+  lightInputs(slot: ChunkSlot, shaded: (s: ChunkSlot) => Uint8Array): { around: Array<Uint8Array | null>; skyTop: Uint8Array | null } {
+    const around: Array<Uint8Array | null> = new Array(27).fill(null)
+    for (let dz = -1; dz <= 1; dz++) for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      around[aroundIndex(dx, dy, dz)] = this.slotAt(slot.off[0] + dx, slot.off[1] + dy, slot.off[2] + dz)?.blocks ?? null
+    }
+    let skyTop: Uint8Array | null = null
+    for (const n of this.chunks.values()) {
+      const dx = n.off[0] - slot.off[0], dz = n.off[2] - slot.off[2]
+      if (!n.blocks || n.off[1] - slot.off[1] < 2 || Math.abs(dx) > 1 || Math.abs(dz) > 1) continue
+      const cols = shaded(n)
+      skyTop ??= new Uint8Array(FOOT * FOOT).fill(1)
+      for (let z = 0; z < 32; z++) for (let x = 0; x < 32; x++) if (cols[x + 32 * z]) skyTop[(dx + 1) * 32 + x + FOOT * ((dz + 1) * 32 + z)] = 0
+    }
+    return { around, skyTop }
+  }
+
+  /** Chunks generated whose light needs working out again. */
+  lightDirtySlots(): ChunkSlot[] {
+    return this.slots.filter((s) => s.lightDirty && s.blocks)
   }
 
   /** Mark a chunk dirty, and the neighbours whose border faces it touches (all six when `cell` is null). */
@@ -262,6 +309,7 @@ export class TerrainWorld {
     slot.blocks[cell] = id
     slot.version++
     this.markAround(slot, cell)
+    this.markLight(slot, cell)
     return { chunk: slot.key, cell, id, was }
   }
 

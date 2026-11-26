@@ -23,7 +23,10 @@
  * (scene/HiddenAudio.tsx never reads it). A seventh, glow, draws the halos round a POINTS object's points
  * (DECK-0003 §1.16; scene/PointBillboards.tsx) in the world and in games, for
  * slow phones; it defaults on, and the workshop's bench draws them either
- * way. These are view
+ * way. An eighth, blockShading, darkens TERRAIN's blocks by the light that
+ * reaches them (lib/terrain/light.ts; owner, 2026-11-26: more darkness and
+ * depth in chunks); it defaults on, and off draws every block fully lit,
+ * as before, and works out no light. These are view
  * preferences only: nothing about the proof, the movement, the cursor or the
  * chain reads them.
  *
@@ -45,13 +48,13 @@
 
 import { create } from 'zustand'
 
-export type SceneLayer = 'dots' | 'boxes' | 'walkAvatarHidden' | 'walkLookSphere' | 'headlamp' | 'spatialAudio' | 'glow' | 'walkLimits'
+export type SceneLayer = 'dots' | 'boxes' | 'walkAvatarHidden' | 'walkLookSphere' | 'headlamp' | 'spatialAudio' | 'glow' | 'walkLimits' | 'blockShading'
 
 export type SceneLayers = Record<SceneLayer, boolean>
 
 export const LAYERS_KEY = 'onosendai:layers'
 
-export const DEFAULT_LAYERS: SceneLayers = { dots: true, boxes: true, walkAvatarHidden: false, walkLookSphere: true, headlamp: true, spatialAudio: false, glow: true, walkLimits: true }
+export const DEFAULT_LAYERS: SceneLayers = { dots: true, boxes: true, walkAvatarHidden: false, walkLookSphere: true, headlamp: true, spatialAudio: false, glow: true, walkLimits: true, blockShading: true }
 
 /**
  * Spatial Audio as stored: on only when the Spatial Audio switch itself was
@@ -90,6 +93,8 @@ export function loadLayers(): SceneLayers {
       glow: p?.glow !== false,
       // WALK's sync limit: on unless explicitly off, as it always was.
       walkLimits: p?.walkLimits !== false,
+      // Block shading: on unless explicitly off.
+      blockShading: p?.blockShading !== false,
     }
   } catch {
     return { ...DEFAULT_LAYERS }
@@ -107,7 +112,7 @@ interface LayersState extends SceneLayers {
 
 export const useLayers = create<LayersState>((set, get) => {
   const put = (layer: SceneLayer, on: boolean): void => {
-    const next = { dots: get().dots, boxes: get().boxes, walkAvatarHidden: get().walkAvatarHidden, walkLookSphere: get().walkLookSphere, headlamp: get().headlamp, spatialAudio: get().spatialAudio, glow: get().glow, walkLimits: get().walkLimits, [layer]: on }
+    const next = { dots: get().dots, boxes: get().boxes, walkAvatarHidden: get().walkAvatarHidden, walkLookSphere: get().walkLookSphere, headlamp: get().headlamp, spatialAudio: get().spatialAudio, glow: get().glow, walkLimits: get().walkLimits, blockShading: get().blockShading, [layer]: on }
     set({ [layer]: on })
     saveLayers(next)
   }

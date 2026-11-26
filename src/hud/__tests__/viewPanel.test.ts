@@ -107,9 +107,10 @@ const ROWS: Array<[string, string, string]> = [
   ['view-walk-limits', 'Optimize chain', WALK_LIMITS_HINT],
   ['view-chain-trail', 'Chain trail', 'The red line of your movement history.'],
   ['view-region-keys', 'Region keys', 'Green cages on the regions you hold keys for.'],
-  ['view-headlamp', 'Headlamp', 'Light shards from your view so their shape and depth show.'],
+  ['view-headlamp', 'Headlamp', 'Light shards and nearby blocks from your view.'],
   ['view-spatial-audio', 'Spatial Audio', 'See spatial audio sources and fade perimeters.'],
   ['view-glow', 'Glow', 'Light and fog that objects cast.'],
+  ['view-block-shading', 'Block shading', 'Darker caves and corners.'],
   ['view-sfx', 'Sound effects', 'Short game sounds, like the boing when you bounce.'],
   ['view-hides-sync', 'Sync hidden list', 'Your hidden things on every device signed in as you.'],
 ]
@@ -119,7 +120,7 @@ const GROUPS: Array<[string, string[]]> = [
   ['Protocol visualization', ['view-chain-trail', 'view-terrain-dots', 'view-hx-boxes', 'view-region-keys', 'view-spatial-audio']],
   ['Movement', ['view-walk-gravity', 'view-walk-gravity-hard', 'view-walk-fluid', 'view-walk-limits']],
   ['Interface', ['view-walk-look']],
-  ['Effects', ['view-headlamp', 'view-glow', 'view-walk-avatar', 'view-sfx']],
+  ['Effects', ['view-headlamp', 'view-glow', 'view-block-shading', 'view-walk-avatar', 'view-sfx']],
   ['Sync', ['view-hides-sync']],
 ]
 
@@ -154,14 +155,14 @@ describe('the Settings panel', () => {
 
     viewSwitch('view-terrain-dots').props.onCheckedChange(false)
     expect(useLayers.getState()).toMatchObject({ dots: false, boxes: true })
-    expect(JSON.parse(localStorage.getItem(LAYERS_KEY) ?? 'null')).toEqual({ dots: false, boxes: true, walkAvatarHidden: false, walkLookSphere: true, headlamp: true, spatialAudio: false, glow: true, walkLimits: true })
+    expect(JSON.parse(localStorage.getItem(LAYERS_KEY) ?? 'null')).toEqual({ dots: false, boxes: true, walkAvatarHidden: false, walkLookSphere: true, headlamp: true, spatialAudio: false, glow: true, walkLimits: true, blockShading: true })
     expect(switchTag(view(), 'view-terrain-dots')).toContain('aria-checked="false"')
     expect(switchTag(view(), 'view-hx-boxes')).toContain('aria-checked="true"')
 
     viewSwitch('view-hx-boxes').props.onCheckedChange(false)
     viewSwitch('view-terrain-dots').props.onCheckedChange(true)
     expect(useLayers.getState()).toMatchObject({ dots: true, boxes: false })
-    expect(JSON.parse(localStorage.getItem(LAYERS_KEY) ?? 'null')).toEqual({ dots: true, boxes: false, walkAvatarHidden: false, walkLookSphere: true, headlamp: true, spatialAudio: false, glow: true, walkLimits: true })
+    expect(JSON.parse(localStorage.getItem(LAYERS_KEY) ?? 'null')).toEqual({ dots: true, boxes: false, walkAvatarHidden: false, walkLookSphere: true, headlamp: true, spatialAudio: false, glow: true, walkLimits: true, blockShading: true })
     expect(viewSwitch('view-hx-boxes').props.checked).toBe(false)
 
     viewSwitch('view-hx-boxes').props.onCheckedChange(true)

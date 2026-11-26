@@ -32,7 +32,7 @@ import { useEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import {
   BoxGeometry, BufferAttribute, BufferGeometry, EdgesGeometry, Group, InterleavedBuffer, InterleavedBufferAttribute, LineBasicMaterial, Matrix4, Mesh,
-  Raycaster, Vector2, Vector3, type LineSegments,
+  Raycaster, Vector2, Vector3, type LineSegments, type Object3D, type Ray,
 } from 'three'
 import { cellInReach, slotInReach, surveyTarget, terrainSession, useTerrain, type TerrainSession } from '../store/useTerrain'
 import { AIM_COLORS, aimAt, sceneDraws } from '../store/terrainShare'
@@ -49,6 +49,8 @@ import { NO_BLOOM_BLEND } from './shardFaces'
 import { alignedOrigin } from '../store/useCyberspace'
 import type { Position, ViewAxes } from '../lib/space'
 import { committedAnchor, committedScale } from '../lib/renderFrame'
+import { TapOccluder } from './TapOccluder'
+import { tapClaimNearer } from './TapTarget'
 
 /** Chunks meshing at once. */
 const MESH_IN_FLIGHT = 2
@@ -193,6 +195,64 @@ function Chunks({ axes }: { axes: ViewAxes }): JSX.Element {
   return <group ref={group} name="terrain-chunks" />
 }
 
+/** How far a ray is walked through the blocks for what hides a shard, in blocks from where it enters them: well past the chunks round you (3 by 3 by 3 is 96 across). */
+export const OCCLUSION_REACH = 1024
+
+const occField = new Matrix4()
+const occInverse = new Matrix4()
+const occFrom = new Vector3()
+const occDir = new Vector3()
+const occPoint = new Vector3()
+
+/**
+ * How far along `ray` (render space, the scene's) the first block that hides
+ * what is behind it lies, in render units, or null: the blocks as Chunks
+ * draws them (same field, plane and zoom), walked cell by cell (raycast.ts),
+ * only across the box of the chunks held. A ray that starts inside a mass of
+ * blocks is not hidden by it (their faces are drawn on the outside only, so
+ * from within nothing of it is seen): the first block after open space is.
+ * What TapOccluder asks at a tap; nothing here runs a frame.
+ */
+export function blockOcclusion(s: TerrainSession | null, axes: ViewAxes, ray: Ray): number | null {
+  if (!s || s.plane !== useCyberspace.getState().plane) return null
+  const zoom = drawnScale()
+  if (zoom > MAX_SCALE) return null
+  // The box of the chunks with blocks, in the field's frame (a cell d spans d to d + 1).
+  const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity]
+  for (const sl of s.world.chunks.values()) {
+    if (!sl.blocks) continue
+    for (let a = 0; a < 3; a++) { lo[a] = Math.min(lo[a], 32 * sl.off[a]); hi[a] = Math.max(hi[a], 32 * sl.off[a] + 32) }
+  }
+  if (!(lo[0] < hi[0])) return null
+  // The scene's world group stands untransformed, so the field's frame is render space (as Marks has it).
+  fieldMatrix(s, axes, zoom, occField)
+  occInverse.copy(occField).invert()
+  occFrom.copy(ray.origin).applyMatrix4(occInverse)
+  occDir.copy(ray.origin).add(ray.direction).applyMatrix4(occInverse).sub(occFrom).normalize()
+  // Clipped to the box: where the ray enters it and leaves it.
+  let enter = 0, leave = Infinity
+  const o = [occFrom.x, occFrom.y, occFrom.z], d = [occDir.x, occDir.y, occDir.z]
+  for (let a = 0; a < 3; a++) {
+    if (d[a] === 0) { if (o[a] < lo[a] || o[a] > hi[a]) return null; continue }
+    let t0 = (lo[a] - o[a]) / d[a], t1 = (hi[a] - o[a]) / d[a]
+    if (t0 > t1) [t0, t1] = [t1, t0]
+    enter = Math.max(enter, t0)
+    leave = Math.min(leave, t1)
+  }
+  // As far in as OCCLUSION_REACH blocks from where the ray enters (from the eye, zoomed out, the blocks can be thousands of blocks off).
+  leave = Math.min(leave, enter + OCCLUSION_REACH)
+  if (enter > leave) return null
+  // From where the ray enters the box (a hair in, so the first cell is the box's own); from the eye when it starts inside.
+  const start = enter > 0 ? enter + 1e-6 : 0
+  const solid = (i: number, j: number, k: number): boolean => isSolid(s.world.blockCs(i, j, k))
+  const at: [number, number, number] = [o[0] + d[0] * start - 0.5, o[1] + d[1] * start - 0.5, o[2] + d[2] * start - 0.5]
+  const hit = raycast(at, d as [number, number, number], leave - start, solid, start > 0 ? 'hit' : 'skip')
+  if (!hit) return null
+  // Back to render space: the point where the ray meets the block, measured from the ray's origin.
+  occPoint.copy(occDir).multiplyScalar(start + hit.distance).add(occFrom).applyMatrix4(occField)
+  return occPoint.distanceTo(ray.origin)
+}
+
 const CURSOR_EDGES = new EdgesGeometry(new BoxGeometry(1.02, 1.02, 1.02))
 /** The targeted block's outline: by whose block it is (AIM_COLORS), a dull red out of reach. */
 const OUTLINE = '#ffffff'
@@ -204,6 +264,9 @@ const ndc = new Vector2()
 const inverse = new Matrix4()
 const from = new Vector3()
 const toward = new Vector3()
+const point = new Vector3()
+/** How often the block outline asks whether a shard stands in front of it, in milliseconds. */
+const SHARD_LOOK_MS = 150
 
 /**
  * TERRAIN's marks, in the field's frame (fieldMatrix): the block cursor, the
@@ -217,6 +280,9 @@ function Marks({ axes }: { axes: ViewAxes }): JSX.Element {
   const survey = useRef<LineSegments>(null)
   const reachGroup = useRef<Group>(null)
   const last = useRef(0)
+  /** When the outline last asked whether a shard stands in front of its block, and the answer. */
+  const looked = useRef(-Infinity)
+  const hidden = useRef(false)
   useFrame((state) => {
     const s = terrainSession
     const f = frame.current, o = outline.current, sv = survey.current, rg = reachGroup.current
@@ -238,16 +304,30 @@ function Marks({ axes }: { axes: ViewAxes }): JSX.Element {
       const solid = (i: number, j: number, k: number): boolean => isSolid(s.world.blockCs(i, j, k))
       return raycast([from.x - 0.5, from.y - 0.5, from.z - 0.5], [toward.x, toward.y, toward.z], CURSOR_REACH, solid)
     }
+    // Whether a shard (any tap target) stands nearer along the ray than `hit`: the nearest thing wins, so a tap there is the shard's, never the block's behind it (TapOccluder.tsx).
+    const shardInFront = (hit: RayHit): boolean => {
+      // `aim` left the ray and the field's frame: the block's face, back in render space.
+      point.copy(toward).normalize().multiplyScalar(hit.distance).add(from).applyMatrix4(f.matrix)
+      return tapClaimNearer(ray, state.internal.interaction as Object3D[], point.distanceTo(ray.ray.origin))
+    }
     terrainCursor.hit = aim(terrainInput.hover)
     const act = terrainInput.action
+    const now = performance.now()
     if (act) {
       terrainInput.action = null
-      const hit = act.at ? aim(act.at) : terrainCursor.hit
+      let hit = act.at ? aim(act.at) : terrainCursor.hit
+      // One ray for the press: a shard in front takes the tap (R3F's click) and the block behind stays.
+      if (hit && shardInFront(hit)) hit = null
       if (act.kind === 'mine') st.mine(hit)
       else st.place(hit)
       if (act.at) terrainCursor.hit = hit
-    }
-    const hit = terrainCursor.hit
+      hidden.current = false
+    } else if (terrainCursor.hit && now - looked.current >= SHARD_LOOK_MS) {
+      // The outline follows the same rule, looked at a few times a second, not every frame.
+      looked.current = now
+      hidden.current = shardInFront(terrainCursor.hit)
+    } else if (!terrainCursor.hit) hidden.current = false
+    const hit = hidden.current ? null : terrainCursor.hit
     o.visible = !!hit
     if (hit) {
       o.position.set(hit.cell[0] + 0.5, hit.cell[1] + 0.5, hit.cell[2] + 0.5)
@@ -255,7 +335,6 @@ function Marks({ axes }: { axes: ViewAxes }): JSX.Element {
       const at = s.world.locate(hit.cell[0], hit.cell[1], hit.cell[2])
       ;(o.material as LineBasicMaterial).color.set(cellInReach(s, hit.cell) ? AIM_COLORS[aimAt(at.slot?.key ?? null, at.cell)] : OUTLINE_FAR)
     }
-    const now = performance.now()
     if (now - last.current < 200) return
     last.current = now
     // The chunks in reach of where the walk has taken you, and the one SURVEY would fill.
@@ -294,6 +373,11 @@ function Marks({ axes }: { axes: ViewAxes }): JSX.Element {
   )
 }
 
+/** A tap on the blocks means something while TERRAIN is on (it mines), or while a press is TERRAIN's alone. */
+function terrainClaims(): boolean {
+  return terrainInput.swallowTap || useTerrain.getState().active
+}
+
 export function TerrainLayer({ axes }: { axes: ViewAxes }): JSX.Element {
   // Others' blocks round you are read while the scene draws blocks, in every mode (store/terrainShare.ts), as shards are scanned while the app shows them.
   useEffect(() => { sceneDraws(true); return () => sceneDraws(false) }, [])
@@ -301,6 +385,8 @@ export function TerrainLayer({ axes }: { axes: ViewAxes }): JSX.Element {
     <>
       <Chunks axes={axes} />
       <Marks axes={axes} />
+      {/* What the blocks hide takes no tap, in every mode; in TERRAIN a tap on them mines (TapOccluder.tsx). */}
+      <TapOccluder distance={(r) => (terrainInput.swallowTap ? 0 : blockOcclusion(terrainSession, axes, r))} claims={terrainClaims} />
     </>
   )
 }

@@ -53,6 +53,12 @@
  * a solid target whose box is met first leaves the tap to a fog in front of
  * what it drew (solidYields).
  *
+ * What is hidden behind blocks cannot be tapped either (TapOccluder.tsx;
+ * owner, 2026-11-26): a target whose claim lies beyond the blocks' hit under
+ * the same tap leaves it to them, in every mode, and tapClaimNearer answers
+ * TERRAIN the other way round, so a block behind a shard is not mined by a
+ * tap the shard took.
+ *
  * farCullDoublings below is the guaranteed form of the same idea for shards
  * zoomed far out: past that many doublings no shard of its own geometry can
  * show MIN_VISIBLE_PX at any camera distance, so it is not drawn at all.
@@ -65,6 +71,7 @@ import { CAMERA_NEAR, FOV } from './camera'
 import { markSceneTapHandled } from '../hooks/useCanvasTap'
 import { tapsPassThrough } from './BuildOccluders'
 import { hitDepth, isSoftHit } from './softPick'
+import { blockedNearer, idleOccluder } from './TapOccluder'
 
 /** Below this many pixels across, an object is a speck and takes no taps. */
 export const MIN_VISIBLE_PX = 4
@@ -207,8 +214,17 @@ interface Props {
  * hit: anything else in the scene with a tap handler (R3F's intersections
  * hold only objects that have one). `self` is the yielding target's own mesh.
  */
-export function yieldsTap(intersections: ReadonlyArray<{ object: unknown }>, self: unknown): boolean {
-  return intersections.some((i) => i.object !== self)
+export function yieldsTap(intersections: ReadonlyArray<{ object: unknown; distance?: number }>, self: unknown, ray?: Ray): boolean {
+  return intersections.some((i) => {
+    const o = i.object as Object3D
+    // Blocks behind it that a tap means nothing on (outside TERRAIN) leave it the tap; nearer, they stopped it first (TapOccluder.tsx).
+    if (o === self || idleOccluder(o)) return false
+    // Nor does a target the blocks hide, which would refuse the tap in its turn.
+    const judge = ray ? o.userData?.tapJudge as TapJudge | undefined : undefined
+    if (!judge || i.distance === undefined) return true
+    const claim = judge(ray!, i.distance)
+    return !!claim && !blockedNearer(intersections as ReadonlyArray<TapHit>, claim.distance)
+  })
 }
 
 /** What a target would take a tap at: how far along the ray (for a soft hit, how deep the fog's body lies there), and whether only on something soft (a pick volume, softPick.tsx). */
@@ -276,6 +292,33 @@ export function solidYields(intersections: ReadonlyArray<TapHit>, self: unknown,
     const other = judge?.(ray, i.distance)
     if (other && other.soft && other.distance < distance) return true
   }
+  return false
+}
+
+const claimHits: Intersection[] = []
+
+/**
+ * Whether a tap target along `raycaster`'s ray would claim a tap nearer than
+ * `distance` (render units): what TERRAIN asks before it mines or places by
+ * a press, so a block behind a shard is never mined by the tap the shard
+ * takes (the nearest thing wins, as TapOccluder.tsx has it for the shard).
+ * `objects` are R3F's (its `internal.interaction`); only tap targets are
+ * asked, each with its own raycast and judge, as R3F's click would. One ray,
+ * asked at a press, or a few times a second for the cursor.
+ */
+export function tapClaimNearer(raycaster: Raycaster, objects: ReadonlyArray<Object3D>, distance: number): boolean {
+  for (const o of objects) {
+    const judge = o.userData?.tapJudge as TapJudge | undefined
+    if (!judge) continue
+    claimHits.length = 0
+    o.raycast(raycaster, claimHits)
+    for (const h of claimHits) {
+      if (h.distance >= distance) continue
+      const claim = judge(raycaster.ray, h.distance)
+      if (claim && claim.distance < distance) { claimHits.length = 0; return true }
+    }
+  }
+  claimHits.length = 0
   return false
 }
 
@@ -492,14 +535,17 @@ export function TapTarget({ onTap, measure, px, side, at, yields = false, occlud
     if (e.delta > TAP_SLOP_PX) return
     // Not stopping propagation is how R3F lets the tap travel on to the
     // next thing the ray hit, nearer or farther.
-    if (yields && yieldsTap(e.intersections, hit.current)) return
+    if (yields && yieldsTap(e.intersections, hit.current, e.ray)) return
     // A coin or message under the same tap takes it: leave the event to
     // travel on to it (not stopping propagation is how R3F does that).
-    if (measure && e.intersections.some((i) => i.object.userData?.tapPriority === 'mark')) return
+    // One the blocks hide is not under it at all (TapOccluder.tsx).
+    if (measure && e.intersections.some((i) => i.object.userData?.tapPriority === 'mark' && !blockedNearer(e.intersections, i.distance))) return
     const claim = judge(e.ray, e.distance)
     if (!claim) return
     // A message's box met before what this target draws takes the tap: leave it to travel on to the box.
     if (measure && e.intersections.some((i) => i.object.userData?.tapPriority === 'box' && i.distance < claim.distance)) return
+    // Blocks in front of what it draws hide it: the tap is theirs (TapOccluder.tsx), however near its box was met.
+    if (blockedNearer(e.intersections, claim.distance)) return
     // Fog, glow or points: a solid thing hit nearer under the same tap takes it;
     // and a solid one leaves it to a fog that stands in front of what it drew.
     if (claim.soft ? softYields(e.intersections, hit.current, e.ray, claim.distance) : solidYields(e.intersections, hit.current, e.ray, claim.distance)) return

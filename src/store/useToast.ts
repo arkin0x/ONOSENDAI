@@ -1,6 +1,6 @@
 /**
  * useToast.ts - one chip in the instrument stack for something that just
- * finished elsewhere, the way KEY FOUND announces a find: a cloud job done,
+ * finished elsewhere: a cloud job done,
  * a place starred, BUILD mode ended by something other than EXIT
  * (store/useBuilder.ts), a WALK stopped short (store/useWalk.ts), or what a
  * /C/ link named (store/useCoordRoute.ts), or that the signer is on another

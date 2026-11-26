@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { foundLabel, itemNearby, nearbyItems, regionContains } from '../nearby'
+import { itemNearby, nearbyItems, regionContains } from '../nearby'
 
 const anchor = { x: 1000n, y: 2000n, z: 3000n }
 
@@ -48,12 +48,5 @@ describe('the nearby list', () => {
     expect(nearbyItems([filed], keys, anchor, 0).map((x) => x.key)).toEqual(['filed'])
     const elsewhere = [{ lookupId: 'ff'.repeat(32), plane: 0 as const, height: 4, base: { x: '9000', y: '9000', z: '9000' } }]
     expect(nearbyItems([filed], elsewhere, anchor, 0)).toHaveLength(0)
-  })
-})
-
-describe('the toast', () => {
-  it('says how many', () => {
-    expect(foundLabel(1)).toBe('1 FOUND HERE')
-    expect(foundLabel(3)).toBe('3 FOUND HERE')
   })
 })

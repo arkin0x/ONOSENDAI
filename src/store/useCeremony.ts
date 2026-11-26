@@ -3,66 +3,26 @@
  *
  * Finding is a decryption, so the scene shows one: items born from a scan
  * carry a birth time here, and the shard and message renderers read it to run
- * their decode. The HUD shows a chip with how many were found, which stays
- * until tapped and opens the Nearby Loot list. A DEV
+ * their decode. The HUD counts them on the NEARBY chip, the orange +N, until
+ * the Nearby list is opened (store/nearbyNew.ts; owner, 2026-11-26: the
+ * FOUND HERE chip it replaced was "always too long"). A DEV
  * trigger fabricates a found bag beside the avatar so the ceremony can be
  * watched without hiding anything first.
  */
 
 import { create } from 'zustand'
 import type { Plane } from 'cyberspace-core'
-import { hiddenLabel, type Hidden } from '../lib/hidden'
-import { regionLabel } from '../lib/loot'
+import type { Hidden } from '../lib/hidden'
 import { GRID_HALF, type ShardModel } from 'sno-core/shards'
 import { useCyberspace } from './useCyberspace'
 import { findHidden, useShards } from './useShards'
 import { useMutes } from './useMutes'
 import { tvIsOn } from './tvOn'
-
-export interface FoundChip {
-  id: string
-  /** What was found last, for the decoding line: a message preview or a shard name. */
-  label: string
-  /** Region size of the last find. */
-  meta: string
-  /** Everything found since the chip was last tapped away. */
-  count: number
-  at: number
-  /** The finds counted, newest first, each with the line and region size the chip would give it. */
-  finds: ChipFind[]
-  /**
-   * Those counted that left the finds because a room they stand in was closed
-   * (CLOSE, store/rooms closeDoor): out of the count until they are found again,
-   * which OPEN on the door does (arkinox, 2026-11-09). See chipCount.
-   */
-  away: string[]
-}
-
-/** One find the chip counts: its id, and its line and region size as the chip shows them. */
-export interface ChipFind { id: string; label: string; meta: string }
-
-/** How many the chip says were found here: everything since the last tap, less what stands in a room closed since. */
-export function chipCount(chip: FoundChip | null): number {
-  return chip ? chip.count - chip.away.length : 0
-}
-
-/**
- * What the chip's lines name: the newest find still in the world, not one standing in
- * a room closed since (arkinox, 2026-11-09). With that room open again, the newest of
- * all again. Null when every find counted is closed away (the chip is not drawn then).
- */
-export function chipLine(chip: FoundChip | null): { label: string; meta: string } | null {
-  if (!chip) return null
-  if (chip.away.length === 0) return { label: chip.label, meta: chip.meta }
-  const away = new Set(chip.away)
-  const here = chip.finds.find((f) => !away.has(f.id))
-  return here ? { label: here.label, meta: here.meta } : null
-}
+import { addNearbyNew } from './nearbyNew'
 
 interface CeremonyState {
   /** Item key -> performance.now() when this client first opened it. */
   births: Record<string, number>
-  chip: FoundChip | null
   /**
    * Finds opened in the other plane than the one the view is in: one bag
    * holds a region and its twin (spec §7.6 Planes), so a scan opens both
@@ -71,34 +31,11 @@ interface CeremonyState {
    * (releasePending).
    */
   pending: Hidden[]
-  /** Items just opened by a scan; starts their decode and raises the chip. */
+  /** Items just opened by a scan; starts their decode and counts them new on NEARBY. */
   mark: (items: Hidden[]) => void
-  /** These finds left with a room closed (CLOSE): out of the chip's count, kept to come back. */
-  leave: (ids: Iterable<string>) => void
-  dismiss: () => void
   /** DEV: fabricate a found bag beside the avatar and run the ceremony on it. */
   preview: () => void
   clearPreview: () => void
-}
-
-/**
- * A find that left with a closed room is back in the count the moment it is among
- * the finds again: OPEN on the door fills its room again (store/rooms fillRoom),
- * and a chest opened in it before restores what it held. Nothing is marked again,
- * so no find ceremony plays a second time and the chip's line does not decode anew.
- * Watched from the first close on (useShards is still loading when this module is).
- */
-let watching = false
-function watchReturns(): void {
-  if (watching) return
-  watching = true
-  useShards.subscribe((s, prev) => {
-    if (s.discovered === prev.discovered) return
-    const chip = useCeremony.getState().chip
-    if (!chip || chip.away.length === 0) return
-    const away = chip.away.filter((id) => !s.discovered[id])
-    if (away.length !== chip.away.length) useCeremony.setState({ chip: { ...chip, away } })
-  })
 }
 
 /** How many finds wait for their own plane at most; the oldest go first. */
@@ -175,11 +112,10 @@ function previewShard(unit: number): ShardModel {
 
 export const useCeremony = create<CeremonyState>((set, get) => ({
   births: {},
-  chip: null,
   pending: [],
 
   mark: (opened) => {
-    // A find in the other plane is not here: no decode, no chip, until the
+    // A find in the other plane is not here: no decode, no +N, until the
     // view stands in its region in its plane (releasePending). An entry with no C took the plane
     // it was read from, so it is here.
     const { here: found, elsewhere } = byViewPlane(opened, useCyberspace.getState().anchorPlane)
@@ -189,8 +125,8 @@ export const useCeremony = create<CeremonyState>((set, get) => ({
       watchPlane()
     }
     // The tour's district shows only its curators' things (useShards
-    // curated): a stranger's find there raises no chip, whose line is the
-    // find's own text, and gets no decode (review of #364).
+    // curated): a stranger's find there is not counted new and gets no
+    // decode (review of #364).
     const curated = useShards.getState().curated
     // Nor does anything the mute list hides (store/useMutes).
     const muted = useMutes.getState().muted
@@ -200,29 +136,12 @@ export const useCeremony = create<CeremonyState>((set, get) => ({
     const now = performance.now()
     const births = { ...get().births }
     for (const h of items) births[h.eventId] = now
-    const first = items[0]
-    const label = hiddenLabel(first, 40)
-    // Finds pile onto a chip nobody has tapped yet: the count is everything
-    // since the last tap, and the chip stays until it is.
-    const was = get().chip
-    const count = (was?.count ?? 0) + items.length
-    // Newest first: this mark's first find is the one the chip names.
-    const finds = [...items.map((h, i) => ({ id: h.eventId, label: i === 0 ? label : hiddenLabel(h, 40), meta: regionLabel(h.height) })), ...(was?.finds ?? [])]
-    set({ births, chip: { id: `${now}`, label, meta: regionLabel(first.height), count, at: now, finds, away: was?.away ?? [] } })
+    set({ births })
+    // The orange +N on NEARBY (store/nearbyNew.ts). A find in a room closed
+    // since leaves that count by leaving NEARBY's list, and OPEN brings it
+    // back without marking it again, so no ceremony plays a second time.
+    addNearbyNew(items.map((h) => h.eventId))
   },
-
-  leave: (gone) => {
-    const chip = get().chip
-    if (!chip) return
-    const counted = new Set(chip.finds.map((f) => f.id))
-    const away = new Set(chip.away)
-    for (const id of gone) if (counted.has(id)) away.add(id)
-    if (away.size === chip.away.length) return
-    watchReturns()
-    set({ chip: { ...chip, away: [...away] } })
-  },
-
-  dismiss: () => set({ chip: null }),
 
   preview: () => {
     get().clearPreview()

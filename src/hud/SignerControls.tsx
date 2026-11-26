@@ -162,6 +162,18 @@ export function SignerStatus(): JSX.Element | null {
   )
 }
 
+/** Whether SignerStuckChip below has something to say: for the arrow chip's mark while the chips are put away (ChipFold.tsx). */
+export function useSignerStuck(): boolean {
+  const kind = useCyberspace((s) => s.signerKind)
+  const session = useCyberspace((s) => s.signerSession)
+  const stuckAt = useSignerActivity((s) => (session ? s.bySession[session]?.stuckAt ?? null : null))
+  const bigSilentAt = useSignerActivity((s) => (session ? s.bySession[session]?.bigSilentAt ?? null : null))
+  const dismissed = useSignerUi((s) => s.stuckDismissed)
+  const bigDismissed = useSignerUi((s) => s.bigDismissed)
+  if (kind !== 'nip46') return false
+  return (bigSilentAt !== null && bigDismissed !== bigSilentAt) || (stuckAt !== null && dismissed !== stuckAt)
+}
+
 /**
  * The chip a stalled remote signer raises: a move (or another signature this
  * device needed) ran out of time with it. Goes when the signer answers again,

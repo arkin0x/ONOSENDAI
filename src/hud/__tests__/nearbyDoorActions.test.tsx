@@ -59,6 +59,7 @@ import { resetClosedDoors } from '../../store/closedDoors'
 import { useShards } from '../../store/useShards'
 import { setDrawnLooks, useOpenCeremony } from '../../store/useOpenCeremony'
 import { useCeremony } from '../../store/useCeremony'
+import { clearNearbyNew } from '../../store/nearbyNew'
 import { Row } from '../NearbyLootModal'
 import type { NearbyItem } from '../../hooks/useNearbyLoot'
 
@@ -113,7 +114,7 @@ beforeEach(() => {
   setDrawnLooks([])
   useInventory.setState({ owner: me(), items: {}, storage: 'memory' })
   useShards.setState({ mine: [], discovered: {}, deleted: {}, selectedSecret: null, curated: null })
-  useCeremony.setState({ chip: null, births: {} })
+  useCeremony.setState({ births: {} }); clearNearbyNew()
 })
 
 describe('a door row in DISCOVERED NEARBY', () => {

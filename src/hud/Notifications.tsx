@@ -111,7 +111,7 @@ function mutedNote(n: Notification, muted: Muted): boolean {
 }
 
 /** The unread count, recomputed when the list or the seen mark moves. */
-function useUnread(): number {
+export function useUnread(): number {
   const muted = useMutes((s) => s.muted)
   return useNotifications((s) => s.items.filter((n) => n.createdAt > s.lastSeen && !mutedNote(n, muted)).length)
 }

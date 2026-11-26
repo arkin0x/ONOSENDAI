@@ -1,9 +1,9 @@
 /**
  * doorCloseFollowups.test.tsx: the owner's rulings of 2026-11-09 on CLOSE, by the
  * real card buttons. (1) CLOSE plays a soft lock tick with the door's buzz, through
- * the gate every opening shares; OPEN on a closed door stays silent. (2) The found
- * chip leaves out finds standing in a room you closed, and counts them again when
- * it opens, with no find ceremony replayed. (3) NEARBY says CLOSED for a door you
+ * the gate every opening shares; OPEN on a closed door stays silent. (2) NEARBY's
+ * orange +N (it replaced the found chip, 2026-11-26) leaves out finds standing in a
+ * room you closed, and counts them again when it opens, with no find ceremony replayed. (3) NEARBY says CLOSED for a door you
  * closed (it opens with no key), LOCKED for one never opened. The relay is a mock
  * that answers by `d`. No network.
  */
@@ -55,7 +55,7 @@ import { ROOM_BAG_SETTINGS, newDoorSecret, roomEntries, roomKey, roomLookupId } 
 import { regionKeyOffThread } from '../../lib/regionKeyOffThread'
 import type { Position } from '../../lib/space'
 import { publish, publishLight, publishMany } from '../../lib/relay'
-import { mount, settled, textOf } from '../../test/elementRoot'
+import { mount, settled } from '../../test/elementRoot'
 import { doorSecret, resetDoorSecrets, resetReopens } from '../../store/rooms'
 import { useCyberspace } from '../../store/useCyberspace'
 import { useInventory } from '../../store/useInventory'
@@ -64,11 +64,9 @@ import { resetClosedDoors } from '../../store/closedDoors'
 import { useShards } from '../../store/useShards'
 import { setDrawnLooks, useOpenCeremony } from '../../store/useOpenCeremony'
 import { SecretModal } from '../SecretModal'
-import { KeyFoundChip } from '../KeyFoundChip'
 import { Row } from '../NearbyLootModal'
-import { chipCount, chipLine, useCeremony } from '../../store/useCeremony'
-import { hiddenLabel } from '../../lib/hidden'
-import { regionLabel } from '../../lib/loot'
+import { useCeremony } from '../../store/useCeremony'
+import { clearNearbyNew, freshAmong, nearbyNewFor } from '../../store/nearbyNew'
 import type { NearbyItem } from '../../hooks/useNearbyLoot'
 import { renderToStaticMarkup } from 'react-dom/server'
 
@@ -145,32 +143,15 @@ beforeEach(() => {
   setDrawnLooks([])
   useInventory.setState({ owner: me(), items: {}, storage: 'memory' })
   useShards.setState({ mine: [], discovered: {}, deleted: {}, selectedSecret: null, curated: null })
-  useCeremony.setState({ chip: null, births: {} })
+  useCeremony.setState({ births: {} })
+  useShards.setState({ nearbyOpen: false })
+  clearNearbyNew()
   sounds.close = 0
   sounds.open = 0
 })
 
-/** The found chip's region line now, or null when it is not drawn. */
-async function chipMeta(): Promise<string | null> {
-  const w = window as unknown as { requestAnimationFrame?: unknown; cancelAnimationFrame?: unknown }
-  w.requestAnimationFrame = () => 0
-  w.cancelAnimationFrame = () => undefined
-  const chip = await mount(<KeyFoundChip />)
-  const words = chip.all().length === 0 ? null : chip.all().filter((h) => h.props.className === 'hyperbar__meta').map(textOf).join('')
-  await chip.unmount()
-  return words
-}
-
-/** What the found chip shows now, or null when it is not drawn. */
-async function chipSays(): Promise<string | null> {
-  const w = window as unknown as { requestAnimationFrame?: unknown; cancelAnimationFrame?: unknown }
-  w.requestAnimationFrame = () => 0
-  w.cancelAnimationFrame = () => undefined
-  const chip = await mount(<KeyFoundChip />)
-  const words = chip.all().length === 0 ? null : chip.all().filter((h) => h.props.className === 'hyperbar__label').map(textOf).join('')
-  await chip.unmount()
-  return words
-}
+/** NEARBY's orange +N over what is found now (the chip counts it over what NEARBY lists; here every find stands at AT). */
+const freshHere = (): number => freshAmong(Object.keys(useShards.getState().discovered), nearbyNewFor(me()))
 
 /** A door as NEARBY lists it, by its real event. */
 const nearbyRow = (d: Hidden): string => {
@@ -204,31 +185,25 @@ describe('(1) CLOSE sounds a soft lock tick; OPEN again is silent', () => {
   })
 })
 
-describe('(2) the found chip leaves out finds in a room you closed', () => {
-  it('the room’s finds leave the count on CLOSE, and come back on OPEN with no ceremony replayed', async () => {
+describe('(2) NEARBY\'s +N leaves out finds in a room you closed', () => {
+  it('the room’s finds leave the +N on CLOSE, and come back on OPEN with no ceremony replayed', async () => {
     const n = await openBoth()
     // Each first OPEN marked its room: 2, then 1 more.
-    expect(chipCount(useCeremony.getState().chip)).toBe(3)
-    expect(await chipSays()).toBe('3 FOUND HERE')
-    const { births, chip: before } = useCeremony.getState()
+    expect(freshHere()).toBe(3)
+    const { births } = useCeremony.getState()
     await press(n.outer.eventId, /^CLOSE$/)
-    // Every find counted stood in the closed rooms: the chip waits unseen.
-    expect(chipCount(useCeremony.getState().chip)).toBe(0)
-    expect(await chipSays()).toBeNull()
+    // Every new find stood in the closed rooms: no +N.
+    expect(freshHere()).toBe(0)
     await press(n.outer.eventId, /^OPEN$/)
     await vi.waitFor(() => expect(roomTexts()).toEqual(['Inner Door', 'in the outer room']))
     // The outer room is back; the inner door's room stays closed, so its note stays out.
-    expect(chipCount(useCeremony.getState().chip)).toBe(2)
-    expect(await chipSays()).toBe('2 FOUND HERE')
+    expect(freshHere()).toBe(2)
     await press(n.innerId, /^OPEN$/)
     await vi.waitFor(() => expect(roomTexts()).toContain('deep inside'))
-    expect(chipCount(useCeremony.getState().chip)).toBe(3)
-    // Nothing was marked again: the same births, the chip's line not decoding anew.
-    const after = useCeremony.getState()
-    expect(after.births).toEqual(births)
-    expect(after.chip?.at).toBe(before?.at)
-    expect(after.chip?.label).toBe(before?.label)
-    expect(after.chip?.count).toBe(before?.count)
+    expect(freshHere()).toBe(3)
+    // Nothing was marked again: the same births, so no decode replayed.
+    expect(useCeremony.getState().births).toEqual(births)
+    expect(nearbyNewFor(me()).size).toBe(3)
   })
 
   it('a find outside the room keeps its count through the close', async () => {
@@ -236,62 +211,22 @@ describe('(2) the found chip leaves out finds in a room you closed', () => {
     const outside: Hidden = { eventId: '9'.repeat(64), bagId: 'f'.repeat(64), lookupId: 'e'.repeat(64), author: 'a'.repeat(64), at: AT, plane: 1, height: 3, createdAt: T, type: 'message', text: 'by the road' }
     useShards.getState().addDiscovered([outside])
     useCeremony.getState().mark([outside])
-    expect(chipCount(useCeremony.getState().chip)).toBe(4)
+    expect(freshHere()).toBe(4)
     await press(n.outer.eventId, /^CLOSE$/)
-    expect(chipCount(useCeremony.getState().chip)).toBe(1)
-    expect(await chipSays()).toBe('1 FOUND HERE')
+    expect(freshHere()).toBe(1)
   })
 
-  it('names the newest find still in the world, and the newest of all again once its room is open (arkinox, 2026-11-09)', async () => {
-    const n = await nested()
-    useShards.setState({ discovered: { [n.outer.eventId]: n.outer } })
-    // A find by the road first, of another region size, then both rooms opened.
-    const road: Hidden = { eventId: '9'.repeat(64), bagId: 'f'.repeat(64), lookupId: 'e'.repeat(64), author: 'a'.repeat(64), at: AT, plane: 1, height: 6, createdAt: T, type: 'message', text: 'by the road' }
-    useShards.getState().addDiscovered([road])
-    useCeremony.getState().mark([road])
-    await press(n.outer.eventId, /^OPEN$/)
-    await vi.waitFor(() => expect(roomTexts()).toEqual(['Inner Door', 'in the outer room']))
-    const outerNewest = chipLine(useCeremony.getState().chip)!
-    await press(n.innerId, /^OPEN$/)
-    await vi.waitFor(() => expect(roomTexts()).toContain('deep inside'))
-    const deep = Object.values(S().discovered).find((h) => h.text === 'deep inside')!
-    const newest = { label: hiddenLabel(deep, 40), meta: regionLabel(deep.height) }
-    const at = useCeremony.getState().chip!.at
-    expect(chipLine(useCeremony.getState().chip)).toEqual(newest)
-    // CLOSE: every room find is closed away; the road is the newest still here.
-    await press(n.outer.eventId, /^CLOSE$/)
-    expect(chipLine(useCeremony.getState().chip)).toEqual({ label: hiddenLabel(road, 40), meta: regionLabel(6) })
-    expect(await chipMeta()).toBe(`${regionLabel(6)} · tap to see`)
-    // OPEN on the outer door: its room is here again, the inner room still closed.
-    await press(n.outer.eventId, /^OPEN$/)
-    await vi.waitFor(() => expect(roomTexts()).toEqual(['Inner Door', 'in the outer room']))
-    expect(chipLine(useCeremony.getState().chip)).toEqual(outerNewest)
-    expect(outerNewest).not.toEqual(newest)
-    // The inner door's own OPEN: the newest of all again, and no decode started anew.
-    await press(n.innerId, /^OPEN$/)
-    await vi.waitFor(() => expect(roomTexts()).toContain('deep inside'))
-    expect(chipLine(useCeremony.getState().chip)).toEqual(newest)
-    expect(await chipMeta()).toBe(`${newest.meta} · tap to see`)
-    expect(useCeremony.getState().chip!.at).toBe(at)
-  })
-
-  it('a tap clears it all: a room opened after the tap brings nothing back', async () => {
+  it('opening the Nearby list clears what it lists: a room opened after brings nothing back', async () => {
     const n = await openBoth()
+    // Standing where the finds are, so the list shows them.
+    useCyberspace.setState({ anchor: AT, anchorPlane: 1 })
+    useShards.getState().setNearbyOpen(true)
+    useShards.getState().setNearbyOpen(false)
+    expect(nearbyNewFor(me()).size).toBe(0)
     await press(n.outer.eventId, /^CLOSE$/)
-    useCeremony.getState().dismiss()
     await press(n.outer.eventId, /^OPEN$/)
     await vi.waitFor(() => expect(roomTexts()).toEqual(['Inner Door', 'in the outer room']))
-    expect(useCeremony.getState().chip).toBeNull()
-  })
-
-  it('leave() counts out only what the chip counted', () => {
-    const a: Hidden = { eventId: '7'.repeat(64), bagId: 'f'.repeat(64), lookupId: 'e'.repeat(64), author: 'a'.repeat(64), at: AT, plane: 1, height: 3, createdAt: T, type: 'message', text: 'one' }
-    useShards.getState().addDiscovered([a])
-    useCeremony.getState().mark([a])
-    useCeremony.getState().leave(['8'.repeat(64)])
-    expect(useCeremony.getState().chip?.away).toEqual([])
-    expect(chipLine(useCeremony.getState().chip)?.label).toBe(hiddenLabel(a, 40))
-    expect(chipCount(useCeremony.getState().chip)).toBe(1)
+    expect(freshHere()).toBe(0)
   })
 })
 

@@ -9,11 +9,12 @@
  * | Group | What | Examples |
  * |---|---|---|
  * | return | a view you can leave: the chip carries RETURN or EXIT | VIEWING (focus, /C/ link, hyperspace stop), BUILD |
- * | status | what is simply true right now, there until it stops being true | broken chain, the line, a ride, the chain, XOR BITS, notifications, found, nearby, presence |
+ * | status | what is simply true right now, there until it stops being true | broken chain, the line, a ride, the chain, XOR BITS, notifications, nearby (with what is new), presence |
  * | toast | a word about something that just happened, gone when tapped or timed out | job done, starred, WALK stopped, a /C/ link's block |
  *
  * Each group is `display: contents`, so the stack's own gap and alignment
- * apply across all of them as if they were one list.
+ * apply across all of them as if they were one list. The arrow chip under
+ * them puts them all away and brings them back (hud/ChipFold.tsx).
  */
 
 import type { ReactNode } from 'react'

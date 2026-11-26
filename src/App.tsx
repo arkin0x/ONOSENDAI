@@ -14,7 +14,10 @@ import { ThumbHost } from './scene/ThumbStage'
 import { PublicShardModal, SecretModal } from './hud/SecretModal'
 import { FocusBar } from './hud/FocusBar'
 import { BuildBar } from './hud/BuildBar'
-import { KeyFoundChip } from './hud/KeyFoundChip'
+import { ChipFold, useChipFoldPhase } from './hud/ChipFold'
+import { setChipsFolded, useChipsFolded, useChipsFoldOffered } from './store/chipsFold'
+import { watchNearbyOpen } from './store/nearbyNew'
+import { useReducedMotion } from './hooks/useReducedMotion'
 import { ActionModal } from './hud/ActionModal'
 import { NotificationsModal, NotificationsToast, useNotificationsLoop } from './hud/Notifications'
 import { AgentTalkHost } from './hud/AgentTalk'
@@ -129,7 +132,7 @@ import { useBuilder } from './store/useBuilder'
 import { CHAT_COVERS_PAD, linkChatAndPad, tapScene, usePad } from './store/usePad'
 
 /** A stable empty list for a step that keeps no chips, so the selector never churns. */
-const EMPTY_KEEP: ReadonlyArray<'found' | 'chain'> = []
+const EMPTY_KEEP: ReadonlyArray<'nearby' | 'chain'> = []
 
 export default function App(): JSX.Element {
   // Landing on /tv, the first render is already TV's alone, as it will be
@@ -149,7 +152,7 @@ export default function App(): JSX.Element {
   useProofListener()
   // The chain drains to the relay from here on, whenever Live is on, and the
   // targets' positions are kept current.
-  useEffect(() => { startVersionGate(); startPublisher(); startTracker(); startPresence(); startSelfSync(); startMutes(); startHidesSync(); watchBlockedSpectation(); startCalibration(); void useCyberspace.getState().initSigner(); useHyperspace.getState().startSync(); watchMyAvatar(); void useSecrets.getState().load(); void useInventory.getState().load(); void useShardFolders.getState().load(); void useFound.getState().load(); startPersonalLists(); watchFocus(); watchNearbyReturn(); watchDoorReturn() }, [])
+  useEffect(() => { startVersionGate(); startPublisher(); startTracker(); startPresence(); startSelfSync(); startMutes(); startHidesSync(); watchBlockedSpectation(); startCalibration(); void useCyberspace.getState().initSigner(); useHyperspace.getState().startSync(); watchMyAvatar(); void useSecrets.getState().load(); void useInventory.getState().load(); void useShardFolders.getState().load(); void useFound.getState().load(); startPersonalLists(); watchFocus(); watchNearbyReturn(); watchDoorReturn(); watchNearbyOpen() }, [])
   // onosendai.tech/C/<hex>: a place or a region to open on, and Back and
   // Forward over the ones the View box opens (store/useCoordRoute.ts).
   useEffect(() => {
@@ -299,11 +302,23 @@ export default function App(): JSX.Element {
   // when it is exited or finished.
   const tutorialActive = useTutorial((s) => s.active)
   const tutorialKeep = useTutorial((s) => (s.active ? (s.script.steps[s.index]?.keepChips ?? EMPTY_KEEP) : EMPTY_KEEP))
-  const keepsChip = (name: 'found' | 'chain'): boolean => !tutorialActive || tutorialKeep.includes(name)
+  const keepsChip = (name: 'nearby' | 'chain'): boolean => !tutorialActive || tutorialKeep.includes(name)
   // A newer deploy that refuses moves or saves (lib/versionGate.ts): its bar shows even in the tutorial.
   const versionBlocked = useVersionGate((s) => s.verdict === 'blocked' || s.savesBlocked)
   // Region mode (store/useRegion.ts) clears the stack under its chip the same way.
   const regionOn = useRegion((s) => s.active)
+  // The arrow chip under the stack puts every chip away, unmounted, and
+  // brings them back (hud/ChipFold.tsx; owner, 2026-11-26), kept per
+  // identity (store/chipsFold.ts). Not in the tutorial or the /demo tour,
+  // which teach with chips by name: there they all show, and no arrow.
+  const foldOffered = useChipsFoldOffered()
+  const chipsFolded = useChipsFolded() && foldOffered
+  const chipPhase = useChipFoldPhase(chipsFolded, useReducedMotion())
+  // A view you can leave keeps Escape as its way out while its RETURN chip
+  // is put away: the first Escape brings the chips back, RETURN with them,
+  // and the next is RETURN's own (hud/FocusBar.tsx, hud/HyperspaceBar.tsx).
+  // BUILD keeps its own Escape in its store (useBuilder), so not for BUILD.
+  useEscape('chip', chipsFolded && (viewing || stationView || regionOn), () => setChipsFolded(false))
   // The question bubble lives in the menu; on a phone the menu covers the
   // scene, so starting the tour from it closes it. Only on the start:
   // opening the menu during the tour (its menu step) leaves it open.
@@ -416,11 +431,12 @@ export default function App(): JSX.Element {
       <SceneGuard />
       {!crowded && !offerUp && <TargetsHere />}
       {!crowded && !secretOpen && !offerUp && !deploying && (
-        <div className="instruments">
+        <div className={`instruments instruments--${chipPhase}`}>
           {/* Grouped, not ordered by hand (InstrumentStack.tsx): chips with a
               RETURN on top, what is true right now in the middle, toasts at
-              the bottom (arkinox, 2026-10-14). */}
-          <InstrumentStack groups={{
+              the bottom (arkinox, 2026-10-14). Unmounted while put away
+              (hud/ChipFold.tsx). */}
+          {chipPhase !== 'hidden' && <InstrumentStack groups={{
             return: <>
               <HyperspaceViewBar />
               <FocusBar />
@@ -433,12 +449,12 @@ export default function App(): JSX.Element {
             status: tutorialActive ? <>
               {/* During the tutorial only what is needed shows (feedback item
                   3): RELOAD TO MOVE (or TO SAVE), a broken chain and a game you are in,
-                  which each stop you; then the chips a step names, FOUND HERE
+                  which each stop you; then the chips a step names, NEARBY
                   while opening a chest, the chain chip while spectating a friend. */}
               {versionBlocked && <VersionChip />}
               <BrokenChainChip stopsOnly />
               <GameChip />
-              {keepsChip('found') && <KeyFoundChip />}
+              {keepsChip('nearby') && <NearbyChip />}
               {keepsChip('chain') && <ChainExplorer />}
             </> : <>
               {/* A newer deploy, first of all when it requires a RELOAD to move (lib/versionGate.ts). */}
@@ -463,8 +479,7 @@ export default function App(): JSX.Element {
               {!building && !regionOn && <BitReadout />}
               {/* Under XOR BITS while anything is unread (arkinox, 2026-09-28). */}
               <NotificationsToast />
-              {/* What was just found, what is open to you here, then the scan. */}
-              <KeyFoundChip />
+              {/* What is open to you here, with what is new in orange (+N), then the scan. */}
               <NearbyChip />
               <PresenceChip />
               {/* Hidden audio held back until a tap, then what cyberspace is playing (DECK-0007). */}
@@ -478,7 +493,9 @@ export default function App(): JSX.Element {
               {/* Haven't finished the tutorial yet? START or LATER (tutorial/toast.ts). */}
               <TutorialToast />
             </>,
-          }} />
+          }} />}
+          {/* Under the last chip, or alone in the corner while they are away. */}
+          {foldOffered && <ChipFold phase={chipPhase} folded={chipsFolded} />}
         </div>
       )}
       {showPanels && !offerUp && <CrashNote where="the menu"><Hud menuOpen={menuCrowded} /></CrashNote>}

@@ -285,10 +285,10 @@ describe('the script', () => {
 
   it('keeps only the chips a step teaches with, and no others (feedback item 3)', () => {
     const keep = (id: string): string[] => TUTORIAL_SCRIPT.steps.find((s) => s.id === id)?.keepChips ?? []
-    // Opening and taking from a chest needs FOUND HERE; spectating a friend needs the chain chip.
-    expect(keep('open')).toEqual(['found'])
-    expect(keep('take')).toEqual(['found'])
-    expect(keep('finish')).toEqual(['found'])
+    // Opening and taking from a chest needs NEARBY (FOUND HERE until 2026-11-26); spectating a friend needs the chain chip.
+    expect(keep('open')).toEqual(['nearby'])
+    expect(keep('take')).toEqual(['nearby'])
+    expect(keep('finish')).toEqual(['nearby'])
     expect(keep('friend')).toEqual(['chain'])
     // The welcome, the box and the course teach with none.
     expect(keep('welcome')).toEqual([])

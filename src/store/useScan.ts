@@ -27,7 +27,7 @@
  *   or its limits unknown, the range stops at the local max.
  * - One key per scan, the cube at the height chosen (lib/scanCube.ts says
  *   why not the ladder under it). It is held with source `scanmode` and asked
- *   about at once, so what it opens lands in the find chip and the Nearby
+ *   about at once, so what it opens lands on NEARBY's +N and in the Nearby
  *   list. A cube already held (in either plane: a region key is the same in
  *   both) is only asked about again: never computed twice, never bought twice.
  * - One scan at a time. Leaving SCAN leaves a scan running: a local one

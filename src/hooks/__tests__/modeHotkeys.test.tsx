@@ -69,6 +69,8 @@ import { backOf, currentPadMode, cycleMode, leaveTerrain, modeKeyAllowed, switch
 import { useDemo } from '../../store/useDemo'
 import { MODES, resetModes, setModeOn, updateModes, useModes } from '../../store/modeOrder'
 import { placeSpawn } from '../../store/fixtures/placeSpawn'
+import { chipsFolded, setChipsFolded } from '../../store/chipsFold'
+import { registerEscape } from '../useEscape'
 
 const S = () => useCyberspace.getState()
 
@@ -366,3 +368,46 @@ describe('no collisions', () => {
   })
 })
 
+
+/** U puts the top-left chips away and brings them back, as the arrow chip does (hud/ChipFold.tsx; owner, 2026-11-26). */
+describe('U', () => {
+  beforeEach(() => { setChipsFolded(false); useDemo.setState({ active: false }) })
+  afterEach(() => { setChipsFolded(false) })
+
+  it('folds the chips away and brings them back', () => {
+    press('KeyU')
+    expect(chipsFolded()).toBe(true)
+    press('KeyU')
+    expect(chipsFolded()).toBe(false)
+  })
+
+  it('is a field\'s letter while typing, and not ours with Shift, in the tutorial, in the /demo tour, over a dialog or over the workshop', () => {
+    const stays = (): void => expect(chipsFolded()).toBe(false)
+    press('KeyU', field); stays()
+    press('KeyU', target, { shiftKey: true }); stays()
+    press('KeyU', target, { ctrlKey: true }); stays()
+    useTutorial.setState({ active: true })
+    press('KeyU'); stays()
+    useTutorial.setState({ active: false })
+    useDemo.setState({ active: true })
+    press('KeyU'); stays()
+    useDemo.setState({ active: false })
+    const closeDialog = registerEscape('modal', () => {})
+    press('KeyU'); stays()
+    closeDialog()
+    useWorkshop.setState({ open: true })
+    press('KeyU'); stays()
+    useWorkshop.setState({ open: false })
+    // And with all of those gone, it is U again.
+    press('KeyU')
+    expect(chipsFolded()).toBe(true)
+  })
+
+  it('is nobody else\'s in the main keymap or WALK\'s', async () => {
+    const { readFileSync } = await import('node:fs')
+    const { resolve } = await import('node:path')
+    const src = readFileSync(resolve(__dirname, '../useKeyboard.ts'), 'utf8')
+    expect(src.match(/'KeyU'/g)?.length ?? 0).toBe(1)
+    expect(readFileSync(resolve(__dirname, '../../lib/walkKeys.ts'), 'utf8').includes('KeyU')).toBe(false)
+  })
+})

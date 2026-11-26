@@ -66,10 +66,10 @@ export interface TutorialStep {
   /**
    * Top-left chips this step still needs, by name (tutorial feedback
    * 2026-11-11, item 3): the tutorial hides them all while it runs, and a step
-   * names the few it teaches with. 'found' is the FOUND HERE chip (opening a
-   * chest); 'chain' is the chain chip (spectating a friend's history).
+   * names the few it teaches with. 'nearby' is the NEARBY chip (opening a
+   * chest, the way to the Nearby list); 'chain' is the chain chip (spectating a friend's history).
    */
-  keepChips?: Array<'found' | 'chain'>
+  keepChips?: Array<'nearby' | 'chain'>
   /**
    * Who says the caption, by pubkey: their profile picture stands to the left
    * of it, from the profile cache (hud/ProfileBadge ProfilePic), with the

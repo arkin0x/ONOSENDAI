@@ -39,7 +39,7 @@ function alignedBase(at: Position, height: number): HeldKey['base'] {
   return { x: String((at.x >> h) << h), y: String((at.y >> h) << h), z: String((at.z >> h) << h) }
 }
 
-/** Scan the relay with a key just held: what it opens goes through the find chip. */
+/** Scan the relay with a key just held: what it opens goes through the find ceremony and NEARBY's +N. */
 function scanKey(lookupId: string, keyHex: string): void {
   void import('../store/useShards').then((m) => m.useShards.getState().rescan(lookupId, keyHex)).catch(() => { /* a miss is a miss */ })
 }

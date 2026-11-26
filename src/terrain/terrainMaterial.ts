@@ -42,7 +42,7 @@ export const FOG_FAR = 60
  * halfway).
  */
 export const LIGHT_FLOOR = 0.02
-export const EYE_LAMP = { light: 0.25, reach: 7 } as const
+export const EYE_LAMP = { light: 0.18, reach: 6 } as const
 export const EYE_GLIMMER = { light: 0.06, reach: 3 } as const
 export const AO_DARK = 0.15
 

@@ -17,7 +17,7 @@ import { Text } from '@react-three/drei'
 import { useFrame, type RootState } from '@react-three/fiber'
 import { Group, Quaternion, Vector3, type Object3D } from 'three'
 import { WORLD_FONT } from '../lib/font'
-import { CREDIT_FADE, MARK_RECEDE_FLOOR, NAME_FADE, fadeShare, labelLiftPx, projScaleOf, recedeShare } from '../lib/markerSize'
+import { CREDIT_FADE, MARK_RECEDE_FLOOR, NAME_FADE, fadeShare, labelLiftPx, projScaleOf, recedeShare, sphereLiftPx } from '../lib/markerSize'
 import { bearingDepth } from '../lib/bearing'
 import { headlampUniforms } from './headlamp'
 
@@ -54,6 +54,17 @@ function fadeTo(t: FadingText | null, base: number, alpha: number): void {
 export function labelShrink(width: number): number {
   return Math.max(0.72, Math.min(1, width / 700))
 }
+
+/**
+ * What a label stands clear of. A marker box (`trueSide`, `minPx`,
+ * `nearFace`), as stops and cubes have it; or a thing that fits in a ball of
+ * `radius` render units about the anchor (a letter and its ring, an item's
+ * token, a sound's ring of bars): its name stands a constant gap above the
+ * ball's top on screen at any distance and any zoom (lib/markerSize
+ * sphereLiftPx; owner, 2026-11-27: "the text ... is weirdly far from the
+ * actual item. i'm standing only a couple gibsons away from it").
+ */
+export type LabelClear = { trueSide: number; minPx: number; nearFace?: boolean } | { radius: number }
 
 interface Props {
   text: string
@@ -125,7 +136,7 @@ interface Props {
    * there (#870, #887), while a name above stands over the ground from any
    * camera above it. A wall in front still hides it, as it hides any label.
    */
-  clear?: { trueSide: number; minPx: number; nearFace?: boolean }
+  clear?: LabelClear
   /**
    * Where the label's parent stands from the camera, for a parent that is
    * always at the same offset from it and carries no turn or scale: the
@@ -194,14 +205,16 @@ export function WorldLabel({
     const near = recede && recede !== 'mark' ? mark : 1
     // Lifted clear of its marker: one local unit is `unitPx` pixels.
     if (inner.current && clear) {
-      // A box in the world is measured where it comes nearest the eye (its near face), so up close it never runs into its name.
-      const at = clear.nearFace ? Math.max(depth - clear.trueSide / 2, depth * 0.05) : depth
-      const lift = labelLiftPx(clear.trueSide, clear.minPx * mark, at, projScale, unitPx) / unitPx
+      // A ball: its own outline on screen. A box in the world is measured where it comes nearest the eye (its near face), so up close it never runs into its name.
+      const ball = 'radius' in clear
+      const lift = ball
+        ? sphereLiftPx(clear.radius, depth, projScale, unitPx) / unitPx
+        : labelLiftPx(clear.trueSide, clear.minPx * mark, clear.nearFace ? Math.max(depth - clear.trueSide / 2, depth * 0.05) : depth, projScale, unitPx) / unitPx
       // Its credit line hangs under the name (the caption below), so the name
       // stands that much higher; far off, as the credit line fades out
       // (CREDIT_FADE, below), the name settles down over the box with it.
       const credit = recede === 'name' || recede === 'credit' ? fadeShare(depth, reach, CREDIT_FADE[0], CREDIT_FADE[1]) : 1
-      const creditLift = clear.nearFace && sub !== undefined ? (subBottom(subScale) - 0.5) * credit : 0
+      const creditLift = (ball || clear.nearFace) && sub !== undefined ? (subBottom(subScale) - 0.5) * credit : 0
       inner.current.position.y = lift + creditLift + (offsetPx[1] / px) * near
     } else if (inner.current && recede) {
       // Every frame while it recedes: back at full size the prop is never

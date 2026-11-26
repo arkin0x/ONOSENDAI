@@ -32,7 +32,7 @@ import type { Vanishing } from '../store/useOpenCeremony'
 import { fadeAll, Twinkles } from './ChestCeremony'
 import { headlampUniforms } from './headlamp'
 import { ItemModelMark } from './ItemModel'
-import { LABEL_PRIORITY, WorldLabel } from './WorldLabel'
+import { LABEL_PRIORITY, WorldLabel, type LabelClear } from './WorldLabel'
 
 /** How many sparkles, and how far they reach on screen from the item at the least, CSS pixels. */
 const SPARKLES = 36
@@ -82,7 +82,7 @@ export function ItemVanish({ id, label, at, wears, region, axes, minPx, play, cl
    * `fadeOut`, `nearFace`): an item with no model has its name lifted clear
    * above it, never inside it, where it stood before the TAKE.
    */
-  clear?: { trueSide: number; minPx: number; nearFace?: boolean }
+  clear?: LabelClear
 }): JSX.Element {
   const model = useItemModel(wears?.model)
   const scaleExp = useCyberspace((s) => s.scaleExp)

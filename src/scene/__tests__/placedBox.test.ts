@@ -148,7 +148,7 @@ describe('the box under TAKE', () => {
     expect(source).toMatch(/<HeldItemMark id=\{w\.key\} own=\{draw === 'own'\} [^\n]*appear=\{play\} \/>/)
     expect(source).toMatch(/\{draw !== 'item' && play && <NamedVanish /)
     // Over the half box; an item with no model over its token and the token's ring, its name where it was (keyCube.test.tsx).
-    expect(source).toMatch(/<NamedVanish [^\n]*clear=\{side === undefined \? \{ trueSide: placedBoxSide\(scaleExp\), minPx: 0 \} : \{ trueSide: side \* TOKEN_REACH, minPx: 0, nearFace: true \}\}/)
+    expect(source).toMatch(/<NamedVanish [^\n]*clear=\{side === undefined \? \{ trueSide: placedBoxSide\(scaleExp\), minPx: 0 \} : \{ radius: side \* TOKEN_BALL \}\}/)
   })
 })
 

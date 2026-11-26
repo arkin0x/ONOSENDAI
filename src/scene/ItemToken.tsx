@@ -34,6 +34,13 @@ import { bandOf, bothFaces, shapeOf } from './LetterField'
 import { LABEL_PRIORITY } from './WorldLabel'
 import { markFadeLeft } from '../lib/worldMarks'
 
+/**
+ * The ball a token and its ring fit in, for a token 1 across: the ring's
+ * radius (it can stand straight up as it turns), over the tag's own corner
+ * (0.51), and the bob. Its name stands a constant gap above it on screen.
+ */
+export const TOKEN_BALL = 0.6 + 0.03
+
 /** One turn of the token, seconds: a little quicker than a letter, so a row of both never turns as one. */
 export const TOKEN_TURN_S = 20
 /** The core: the token's dark, opaque face. */

@@ -92,7 +92,7 @@ import { MARK_RECEDE_FLOOR, recedeShare } from '../lib/markerSize'
 import { headlampUniforms } from './headlamp'
 import { basicFaceProps, TRANSLUCENT_ORDER } from './shardFaces'
 import { useDrawReach } from './buildZoom'
-import { dropLetter, LetterField, LETTER_GIBSONS, LETTER_REACH, putLetter } from './LetterField'
+import { dropLetter, LetterField, LETTER_BALL, LETTER_GIBSONS, putLetter } from './LetterField'
 import { LevelRing } from './LevelRing'
 import { atlasIndex } from './glyphAtlas'
 import { authorColour } from '../lib/authorColour'
@@ -101,7 +101,7 @@ import { readId } from '../lib/messagesRead'
 import { sealBroken, useMessagesRead } from '../store/useMessagesRead'
 import { recordViewPose } from '../lib/viewPose'
 import { nameLabel, shortNpub } from '../lib/nameLabel'
-import { ItemToken } from './ItemToken'
+import { ItemToken, TOKEN_BALL } from './ItemToken'
 
 /** A message's tap target, in CSS pixels: a fingertip over the mark, at any zoom. */
 const TAP_PX = 44
@@ -380,7 +380,7 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
               : <HeldItemMark id={w.key} own={draw === 'own'} at={w.centre} wears={w.wears} region={w.region} axes={axes} appear={play} />}
             {/* TAKE on an item with no model: its token fades out (MARK_FADE_MS), and its name, over where it stood, with the rest. */}
             {draw !== 'item' && play && side !== undefined && <ItemToken id={w.key} at={w.centre} side={side} colour={authorColour(w.itemAuthor ?? w.author)} fadeOut={play.at} />}
-            {draw !== 'item' && play && <NamedVanish id={w.key} who={{ pubkey: w.itemAuthor ?? w.author, mine: w.mine }} label={{ text: w.text, color: NAME_WHITE, subColor: NAME_WHITE }} at={w.centre} wears={w.wears} region={w.region} axes={axes} minPx={NOTE_EDGE_PX} play={play} clear={side === undefined ? { trueSide: placedBoxSide(scaleExp), minPx: 0 } : { trueSide: side * TOKEN_REACH, minPx: 0, nearFace: true }} />}
+            {draw !== 'item' && play && <NamedVanish id={w.key} who={{ pubkey: w.itemAuthor ?? w.author, mine: w.mine }} label={{ text: w.text, color: NAME_WHITE, subColor: NAME_WHITE }} at={w.centre} wears={w.wears} region={w.region} axes={axes} minPx={NOTE_EDGE_PX} play={play} clear={side === undefined ? { trueSide: placedBoxSide(scaleExp), minPx: 0 } : { radius: side * TOKEN_BALL }} />}
             {/* A fingertip over the mark at any distance, and over a one-gibson
                 cube the whole cube once it is larger (TapTarget `side`). A
                 held key keeps its fingertip: its box is the half one. */}
@@ -475,7 +475,7 @@ export function ItemMark({ id, text, sub, who, at, opacity = 1, wears, region = 
       {who
         ? <ItemToken id={id ?? text} at={at} side={side ?? noteBoxSide(scaleExp)} colour={authorColour(who.pubkey)} opacity={opacity} />
         : <WorldMark kind="note" at={at} opacity={opacity} side={side} />}
-      {FLOATING_NAME.item && <WorldLabel text={label.text} color={label.color} at={at} align="center" px={11} sub={label.sub} subColor={label.subColor} subScale={1} subOpacity={1} opacity={opacity} clear={who ? { trueSide: (side ?? noteBoxSide(scaleExp)) * TOKEN_REACH, minPx: 0, nearFace: true } : undefined} recede="name" />}
+      {FLOATING_NAME.item && <WorldLabel text={label.text} color={label.color} at={at} align="center" px={11} sub={label.sub} subColor={label.subColor} subScale={1} subOpacity={1} opacity={opacity} clear={who ? { radius: (side ?? noteBoxSide(scaleExp)) * TOKEN_BALL } : undefined} recede="name" />}
     </>
   )
 }
@@ -538,10 +538,11 @@ const FLOURISH_HOLD_MS = 2600
  * while NEARBY said "you"), else the profile's name.
  *
  * The letter is one gibson wide (LETTER_GIBSONS, the width of the box it
- * replaces), and its ring reaches past the gibson, so the name stands just
- * above the ring, clear of it on screen at any distance (WorldLabel `clear`,
- * `nearFace`, measured on a cube as wide as the ring: LETTER_REACH), and the
- * tap target covers the gibson once it is larger than a fingertip.
+ * replaces), and its ring reaches past the gibson, so the name stands a
+ * constant gap above the ball the letter and its ring fit in, on screen at
+ * any distance (WorldLabel `clear` radius, LETTER_BALL; the same rule as an
+ * item's token, TOKEN_BALL), and the tap target covers the gibson once it is
+ * larger than a fingertip.
  */
 export function NoteItem({ w, birth, onTap }: { w: { key: string; lineage?: string; text: string; mine: boolean; author: string; centre: [number, number, number] }; birth: number | undefined; onTap: () => void }): JSX.Element {
   const profile = useProfile(w.author || null)
@@ -568,7 +569,7 @@ export function NoteItem({ w, birth, onTap }: { w: { key: string; lineage?: stri
     <group>
       {flourish && birth !== undefined
         ? <DecodingLabel text={messageBillboard(w.text)} seed={seedOf(w.key)} birth={birth} at={w.centre} />
-        : <WorldLabel text={name} color={NAME_WHITE} at={w.centre} align="center" px={11} clear={{ trueSide: side * LETTER_REACH, minPx: 0, nearFace: true }} recede="credit" />}
+        : <WorldLabel text={name} color={NAME_WHITE} at={w.centre} align="center" px={11} clear={{ radius: side * LETTER_GIBSONS * LETTER_BALL }} recede="credit" />}
       {/* A fingertip over the letter at any distance, and its whole gibson once it is larger (TapTarget `side`). */}
       <TapTarget px={TAP_PX} side={side} at={w.centre} onTap={onTap} />
     </group>
@@ -595,9 +596,6 @@ function NamedVanish({ who, label, ...rest }: Omit<Parameters<typeof ItemVanish>
 
 /** Text over the scene is white, with the label's dark outline (owner's rule, 2026-11-14). */
 const NAME_WHITE = '#ffffff'
-
-/** How far the token's ring reaches across, for a token 1 across: what its name stands clear of. */
-const TOKEN_REACH = 1.3
 
 /** An npub for a seal's initial; empty for no author. */
 function safeNpubOf(pubkey: string): string {

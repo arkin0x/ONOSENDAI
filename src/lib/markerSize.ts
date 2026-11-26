@@ -50,6 +50,26 @@ export const DEST_CUBE_PX = 16
 export const LABEL_GAP_PX = 4
 
 /**
+ * How far above a thing's centre the top of its silhouette stands on screen,
+ * in CSS pixels, for a thing that fits in a ball of `radius` (render units)
+ * at `depth` from the eye: the ball's own outline, tan(asin(r / d)) of the
+ * view, which is exact from any side and stays honest up close, where the
+ * old box reach (CUBE_REACH, measured at the box's near face) overshot by
+ * half again and more. An eye inside the ball has no top to clear: 0.
+ */
+export function sphereTopPx(radius: number, depth: number, projScale: number): number {
+  const d = Math.max(depth, 1e-6)
+  if (radius <= 0) return 0
+  if (radius >= d) return 0
+  return (projScale * radius) / Math.sqrt(d * d - radius * radius)
+}
+
+/** How far above a thing's centre its label's centre sits, in CSS pixels: its ball's top on screen (sphereTopPx), a gap and half the label's height. */
+export function sphereLiftPx(radius: number, depth: number, projScale: number, labelPx: number): number {
+  return sphereTopPx(radius, depth, projScale) + LABEL_GAP_PX + labelPx / 2
+}
+
+/**
  * How far above a marker's centre its label's centre sits, in CSS pixels: the
  * marker's on-screen reach plus a gap plus half the label's own height.
  */

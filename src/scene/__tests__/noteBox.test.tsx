@@ -16,7 +16,7 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createElement, useRef } from 'react'
-import { Box3, Matrix4, Raycaster, ShaderLib, Vector3, Vector4, type Camera, type Material, type Mesh, type Object3D } from 'three'
+import { Matrix4, Raycaster, ShaderLib, Vector3, Vector4, type Camera, type Material, type Mesh, type Object3D } from 'three'
 import { newShard, type ShardModel } from 'sno-core/shards'
 import { r3fRoot, type R3fRoot } from '../../test/r3fRoot'
 
@@ -27,8 +27,10 @@ vi.mock('@react-three/drei', async () => {
   return { Text: forwardRef((props: { position?: unknown; children?: unknown }, ref) => h('group', { name: 'text', ref, position: props.position, userData: { text: props.children } })) }
 })
 
-import { NoteItem, noteBoxSide, patchNoteDepthPull, NOTE_BOX_GIBSONS, NOTE_DEPTH_PULL } from '../WorldMessages'
-import { bothFaces, shapeOf, FOLD_LINE_VERTS, foldLinePoints, LetterField, lettersDrawn, LETTER_GIBSONS, LETTER_TURN_S, PAPER } from '../LetterField'
+import { ItemMark, NoteItem, noteBoxSide, patchNoteDepthPull, NOTE_BOX_GIBSONS, NOTE_DEPTH_PULL } from '../WorldMessages'
+import { bothFaces, shapeOf, FOLD_LINE_VERTS, foldLinePoints, LetterField, lettersDrawn, LETTER_BALL, LETTER_GIBSONS, LETTER_TURN_S, PAPER } from '../LetterField'
+import { TOKEN_BALL } from '../ItemToken'
+import { LABEL_GAP_PX, sphereTopPx } from '../../lib/markerSize'
 import { authorColour } from '../../lib/authorColour'
 import { useMessagesRead } from '../../store/useMessagesRead'
 import { Color, DoubleSide, InstancedMesh, PerspectiveCamera, ShaderMaterial, type BufferGeometry, type LineSegments } from 'three'
@@ -75,19 +77,6 @@ function drawn(scene: Object3D): Array<Object3D & { material: Material | Materia
   return out
 }
 
-/** The gibson's cube about the letter: what its name stands clear of. */
-const GIBSON = new Box3(new Vector3(-0.5, -0.5, -0.5), new Vector3(0.5, 0.5, 0.5))
-
-/** A box's eight corners on screen, CSS pixels (y down). */
-function screenCorners(b: Box3, camera: Camera, size: { width: number; height: number }): Array<[number, number]> {
-  const out: Array<[number, number]> = []
-  for (let i = 0; i < 8; i++) {
-    const v = new Vector3(i & 1 ? b.max.x : b.min.x, i & 2 ? b.max.y : b.min.y, i & 4 ? b.max.z : b.min.z).project(camera)
-    out.push([((v.x + 1) / 2) * size.width, ((1 - v.y) / 2) * size.height])
-  }
-  return out
-}
-
 async function placeCamera(root: R3fRoot, at: [number, number, number]): Promise<Camera> {
   const camera = root.state().camera
   camera.position.set(...at)
@@ -95,6 +84,31 @@ async function placeCamera(root: R3fRoot, at: [number, number, number]): Promise
   camera.updateMatrixWorld()
   await root.frame()
   return camera
+}
+
+/**
+ * Where a label stands on screen against the ball of `radius` about the
+ * origin it names: each text line's foot (CSS pixels, y down), the ball's top
+ * on screen (lib/markerSize sphereTopPx) and its centre.
+ */
+async function measureLabel(root: R3fRoot, eye: [number, number, number], radius: number): Promise<{ bottoms: number[]; ballTop: number; centreY: number }> {
+  const camera = await placeCamera(root, eye)
+  const size = root.state().size
+  const persp = camera as PerspectiveCamera
+  const proj = size.height / (2 * Math.tan((persp.fov * Math.PI) / 360))
+  const texts: Object3D[] = []
+  root.state().scene.traverse((o) => { if (o.name === 'text') texts.push(o) })
+  const toY = (v: Vector3): number => ((1 - v.clone().project(camera).y) / 2) * size.height
+  const centreY = toY(new Vector3(0, 0, 0))
+  const depth = camera.position.length()
+  const ballTop = centreY - sphereTopPx(radius, depth, proj)
+  const bottoms = texts.map((t) => {
+    // A line is one local unit high at its own scale: its world scale over its depth, in pixels.
+    const world = t.getWorldPosition(new Vector3())
+    const unitPx = (new Vector3().setFromMatrixScale(t.matrixWorld).y * proj) / camera.position.distanceTo(world)
+    return toY(world) + unitPx / 2
+  })
+  return { bottoms, ballTop, centreY }
 }
 
 describe('a message’s box', () => {
@@ -309,27 +323,33 @@ describe('a message’s box', () => {
     expect(text!.userData.text).toBe('you')
   })
 
-  it('carries the name over the letter, clear of its gibson’s highest corner on screen near or far (the ring stays inside the gibson)', async () => {
+  it('stands the name a constant few pixels over the letter and its ring at any distance: close by it does not float off (owner, 2026-11-27)', async () => {
+    for (const scaleExp of [0, 1]) {
+      useCyberspace.setState({ scaleExp })
+      r = await r3fRoot()
+      await r.render(createElement(NoteItem, { w: NOTE, birth: undefined, onTap: () => undefined }))
+      const radius = noteBoxSide(scaleExp) * LETTER_GIBSONS * LETTER_BALL
+      // From a couple of gibsons away, as he stood, out to far off, straight on and from above.
+      for (const eye of [[0, 0, 2], [0, 0, 3], [0, 1.2, 1.8], [0, 0, 8], [3, 4, 20], [0, 0, 40]] as Array<[number, number, number]>) {
+        const { bottoms, ballTop } = await measureLabel(r, eye, radius)
+        // The lowest line's foot stands the gap over the ball's top, to a pixel, wherever the eye is.
+        expect(Math.abs(ballTop - bottoms[bottoms.length - 1] - LABEL_GAP_PX)).toBeLessThan(1)
+      }
+      await r.unmount()
+      r = null
+    }
+  })
+
+  it('an item’s name and who left it stand over its token by the same rule, the lower line a few pixels over its top', async () => {
     useCyberspace.setState({ scaleExp: 0 })
     r = await r3fRoot()
-    await r.render(createElement(NoteItem, { w: NOTE, birth: undefined, onTap: () => undefined }))
-    const scene = r.state().scene
-    const size = r.state().size
-    // From the next gibson (1.5 away) out to far off, straight on and from above.
-    for (const eye of [[0, 0, 1.5], [0, 0, 2.5], [0, 1.2, 1.4], [0, 0, 8], [3, 4, 20], [0, 0, 40]] as Array<[number, number, number]>) {
-      const camera = await placeCamera(r, eye)
-      let text: Object3D | undefined
-      scene.traverse((o) => { if (o.name === 'text') text = o })
-      const inner = text!.parent!
-      expect(inner.position.y).toBeGreaterThan(0)
-      // The name's centre on screen, and half its height: one local unit of the label is one of its pixels.
-      const at = inner.getWorldPosition(new Vector3()).project(camera)
-      const nameY = ((1 - at.y) / 2) * size.height
-      const label = inner.parent!.parent!
-      const depth = camera.position.distanceTo(label.getWorldPosition(new Vector3()))
-      const unitPx = (label.scale.x * size.height) / (2 * Math.tan(((camera as PerspectiveCamera).fov * Math.PI) / 360) * depth)
-      const highest = Math.min(...screenCorners(GIBSON, camera, size).map((c) => c[1]))
-      expect(nameY + unitPx / 2).toBeLessThanOrEqual(highest)
+    await r.render(createElement(ItemMark, { id: 'k', text: 'free', sub: 'unused', who: { pubkey: 'c3'.repeat(32), mine: false }, at: [0, 0, 0], side: 1 }))
+    for (const eye of [[0, 0, 2], [0, 0.8, 2.2], [0, 0, 6], [2, 3, 25]] as Array<[number, number, number]>) {
+      const { bottoms, ballTop, centreY } = await measureLabel(r, eye, TOKEN_BALL)
+      expect(bottoms).toHaveLength(2)
+      expect(Math.abs(ballTop - Math.max(...bottoms) - LABEL_GAP_PX)).toBeLessThan(2)
+      // Two gibsons off, the whole label sits within a token's height of the token's top: close by, not floating off.
+      if (eye[2] === 2 && eye[1] === 0) expect(centreY - Math.min(...bottoms)).toBeLessThan((centreY - ballTop) * 2.2)
     }
   })
 

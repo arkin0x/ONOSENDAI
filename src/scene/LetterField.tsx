@@ -80,8 +80,12 @@ export const LETTER_ASPECT = 98 / 150
 /** The ring's radius and a glyph's size, for a letter 1 wide. */
 export const RING_RADIUS = 0.74
 export const GLYPH_SIZE = 0.18
-/** How far the ring reaches across, for a letter 1 wide: what the name over it stands clear of. */
-export const LETTER_REACH = 2 * (RING_RADIUS + GLYPH_SIZE / 2)
+/**
+ * The ball a letter and its ring fit in, for a letter 1 wide: the ring's
+ * reach from the centre, its glyphs' outer half and the bob. Its name stands
+ * a constant gap above this ball's top on screen (WorldLabel `clear`).
+ */
+export const LETTER_BALL = RING_RADIUS + GLYPH_SIZE / 2 + 0.035
 
 /** The tilt the letter hangs at, radians (direction 6's -6 degrees). */
 const TILT = (-6 * Math.PI) / 180

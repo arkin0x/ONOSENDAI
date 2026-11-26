@@ -19,6 +19,8 @@
 import { create } from 'zustand'
 import { kvGet, kvSet } from '../lib/kvStore'
 import { useCyberspace } from './useCyberspace'
+import { useTutorial } from './useTutorial'
+import { useDemo } from './useDemo'
 
 /** The record's prefix; the pubkey follows. */
 export const CHIPS_FOLD_PREFIX = 'onosendai:chips-folded:'
@@ -66,6 +68,22 @@ export function setChipsFolded(folded: boolean, pubkey: string = identity()): vo
 /** The arrow chip's tap, and U on a keyboard. */
 export function toggleChipsFolded(): void {
   setChipsFolded(!chipsFolded())
+}
+
+/**
+ * Whether the chips can be put away now: not in the tutorial or the /demo
+ * tour, which teach with chips by name. There they all show, whatever was
+ * chosen, and there is no arrow and no U.
+ */
+export function chipsFoldOffered(): boolean {
+  return !useTutorial.getState().active && !useDemo.getState().active
+}
+
+/** chipsFoldOffered, kept current. */
+export function useChipsFoldOffered(): boolean {
+  const tutorial = useTutorial((s) => s.active)
+  const demo = useDemo((s) => s.active)
+  return !tutorial && !demo
 }
 
 /** Whether the identity on screen has the chips put away, kept current. */

@@ -13,10 +13,12 @@
  * left behind when you move, drops out of the +N on its own and comes back
  * with OPEN or with you, without being counted twice.
  *
- * WHEN IT CLEARS. Opening the Nearby list clears it all. Not item by item:
- * the list shows every find at once, so having opened it is having seen
- * them, and "opened Nearby" is something a player can tell they did, where
- * "viewed each item" would leave a +2 nobody can account for.
+ * WHEN IT CLEARS. Opening the Nearby list clears what it lists, all at once.
+ * Not item by item: the list shows everything around you together, so
+ * having opened it is having seen them, and "opened Nearby" is something a
+ * player can tell they did, where "viewed each item" would leave a +2
+ * nobody can account for. A find made somewhere else and not listed here
+ * stays new until you are back where NEARBY lists it and open the list.
  *
  * KEPT PER IDENTITY IN INDEXEDDB (owner, 2026-11-19): one record per pubkey,
  * `onosendai:nearby-new:<pubkey>`, a JSON list of event ids (at most
@@ -29,6 +31,8 @@ import { create } from 'zustand'
 import { kvGet, kvRemove, kvSet } from '../lib/kvStore'
 import { useCyberspace } from './useCyberspace'
 import { useShards } from './useShards'
+import { useSecrets } from './useSecrets'
+import { nearbyItems } from '../lib/nearby'
 
 /** The record's prefix; the pubkey follows. */
 export const NEARBY_NEW_PREFIX = 'onosendai:nearby-new:'
@@ -105,10 +109,20 @@ export function addNearbyNew(ids: readonly string[], pubkey: string = identity()
   write(pubkey, [...list, ...fresh].slice(-NEARBY_NEW_MAX))
 }
 
-/** Seen: the Nearby list was opened. */
-export function clearNearbyNew(pubkey: string = identity()): void {
-  if (listOf(pubkey).length === 0) return
-  write(pubkey, [])
+/** Seen: these (or, with none named, every find) are off the +N. */
+export function clearNearbyNew(pubkey: string = identity(), seen?: Iterable<string>): void {
+  const list = listOf(pubkey)
+  if (list.length === 0) return
+  if (!seen) { write(pubkey, []); return }
+  const gone = new Set(seen)
+  const left = list.filter((id) => !gone.has(id))
+  if (left.length !== list.length) write(pubkey, left)
+}
+
+/** What the Nearby list shows where the view stands now (hooks/useNearbyLoot.ts, read once). */
+function listedNow(): string[] {
+  const cs = useCyberspace.getState()
+  return nearbyItems(useShards.getState().worldItems(), Object.values(useSecrets.getState().keys), cs.anchor, cs.anchorPlane).map((it) => it.key)
 }
 
 /** How many of `keys` (what NEARBY lists now) are new. */
@@ -138,5 +152,5 @@ let watching = false
 export function watchNearbyOpen(): void {
   if (watching) return
   watching = true
-  useShards.subscribe((s, prev) => { if (s.nearbyOpen && !prev.nearbyOpen) clearNearbyNew() })
+  useShards.subscribe((s, prev) => { if (s.nearbyOpen && !prev.nearbyOpen) clearNearbyNew(identity(), listedNow()) })
 }

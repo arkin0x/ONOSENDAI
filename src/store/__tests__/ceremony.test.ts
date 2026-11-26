@@ -27,9 +27,15 @@ const item = (id: string, text: string): Hidden => ({
 })
 
 describe('the new finds NEARBY counts (the orange +N, store/nearbyNew.ts)', () => {
-  beforeEach(() => { useCeremony.setState({ births: {}, pending: [] }); clearNearbyNew(); useCyberspace.setState({ anchorPlane: 0, headPlane: 0 }) })
+  beforeEach(() => {
+    useShards.setState({ nearbyOpen: false, discovered: {} })
+    useCeremony.setState({ births: {}, pending: [] }); clearNearbyNew()
+    useCyberspace.setState({ anchorPlane: 0, headPlane: 0, anchor: { x: 1n, y: 2n, z: 3n } })
+  })
 
   it('counts what was found, and keeps counting until the Nearby list is opened', () => {
+    // Found where the view stands, so the Nearby list shows them.
+    useShards.setState({ discovered: Object.fromEntries(['a', 'b', 'c', 'd', 'e'].map((id) => [id, item(id, id)])) })
     useCeremony.getState().mark([item('a', 'one'), item('b', 'two')])
     expect(newFinds()).toBe(2)
     useCeremony.getState().mark([item('c', 'three')])
@@ -48,6 +54,16 @@ describe('the new finds NEARBY counts (the orange +N, store/nearbyNew.ts)', () =
     expect(newFinds()).toBe(1)
   })
 
+  it('opening the list clears only what it lists: a find somewhere else stays new', () => {
+    const far = { ...item('f', 'far away'), at: { x: 1n << 30n, y: 2n, z: 3n } }
+    useShards.setState({ discovered: { a: item('a', 'here'), f: far } })
+    useCeremony.getState().mark([item('a', 'here'), far])
+    expect(newFinds()).toBe(2)
+    useShards.getState().setNearbyOpen(true)
+    useShards.getState().setNearbyOpen(false)
+    expect([...nearbyNewFor(useCyberspace.getState().identity.pubkey)]).toEqual(['f'])
+  })
+
   it('does nothing for an empty find', () => {
     useCeremony.getState().mark([])
     expect(newFinds()).toBe(0)
@@ -60,6 +76,7 @@ describe('the new finds and the plane (spec §7.6 Planes)', () => {
     useCyberspace.setState({ anchorPlane: plane, headPlane: plane, plane, anchor, position: anchor, spectate: null, exploreIndex: null, focus: null, transit: null })
   }
   beforeEach(() => {
+    useShards.setState({ nearbyOpen: false })
     useCeremony.setState({ births: {}, pending: [] }); clearNearbyNew()
     useTv.setState({ on: false })
     standAt(0)

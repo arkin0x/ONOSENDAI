@@ -3,7 +3,7 @@
  * laid out and drawn on the tube, in the spot's family (scene/tvPainter
  * commercial): a ground and speed stripes in one of the spot's three themes,
  * cards slamming in, rows decoding in from scrambled glyphs (lib/decode, the
- * AskBubble and KeyFoundChip effect), a #1 splash in the NOW AVAILABLE!
+ * AskBubble effect), a #1 splash in the NOW AVAILABLE!
  * family, and the #1's avatar turning (hud/TvSegments TvSpinHost), or the red
  * avatar cube when they have none (design 4.2 to 4.4).
  *

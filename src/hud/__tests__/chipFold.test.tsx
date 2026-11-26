@@ -28,7 +28,9 @@ import { mount, settled, textOf, type Host, type Mounted } from '../../test/elem
 import { ChipFold, foldMoveMs, useChipFoldPhase, type FoldPhase } from '../ChipFold'
 import { NearbyChip } from '../NearbyChip'
 import { ToastChip } from '../ToastChip'
-import { CHIPS_FOLD_PREFIX, chipsFoldedFor, forgetChipsFold, setChipsFolded, useChipsFolded } from '../../store/chipsFold'
+import { CHIPS_FOLD_PREFIX, chipsFoldedFor, forgetChipsFold, setChipsFolded, useChipsFolded, useChipsFoldOffered } from '../../store/chipsFold'
+import { useTutorial } from '../../store/useTutorial'
+import { useDemo } from '../../store/useDemo'
 import { NEARBY_NEW_PREFIX, addNearbyNew, clearNearbyNew, forgetNearbyNew, freshAmong, nearbyNewFor } from '../../store/nearbyNew'
 import { movesToKv } from '../../lib/kvStore'
 import { useCyberspace } from '../../store/useCyberspace'
@@ -56,13 +58,14 @@ function Probe(): JSX.Element {
 /** The stack as App draws it: the chips while not `hidden`, then the arrow. */
 let lastPhase: FoldPhase = 'shown'
 function Stack({ children }: { children: ReactNode }): JSX.Element {
-  const folded = useChipsFolded()
+  const offered = useChipsFoldOffered()
+  const folded = useChipsFolded() && offered
   const phase = useChipFoldPhase(folded, false)
   lastPhase = phase
   return (
     <div className={`instruments instruments--${phase}`}>
       {phase !== 'hidden' && <div className="instruments__group">{children}</div>}
-      <ChipFold phase={phase} folded={folded} />
+      {offered && <ChipFold phase={phase} folded={folded} />}
     </div>
   )
 }
@@ -142,6 +145,23 @@ describe('the arrow chip puts the chips away and brings them back', () => {
     await m.unmount()
   })
 
+  it('in the tutorial and the /demo tour every chip shows and there is no arrow, whatever was chosen', async () => {
+    setChipsFolded(true)
+    useTutorial.setState({ active: true })
+    const m = await mount(<Stack><Probe /></Stack>)
+    expect(m.says('PROBE')).toBe(true)
+    expect(m.all().some((h) => typeof h.props.className === 'string' && (h.props.className as string).startsWith('chipfold'))).toBe(false)
+    useTutorial.setState({ active: false })
+    useDemo.setState({ active: true })
+    await settled()
+    expect(m.says('PROBE')).toBe(true)
+    useDemo.setState({ active: false })
+    await afterMove()
+    // The tour over, the choice applies again.
+    expect(m.says('PROBE')).toBe(false)
+    await m.unmount()
+  })
+
   it('a chip draws what its store holds after coming back: a toast put away is still there', async () => {
     useToast.getState().show({ label: 'STARRED', meta: 'a place', mark: 'star', sticky: true })
     const m = await mount(<Stack><ToastChip /></Stack>)
@@ -206,6 +226,10 @@ describe('NEARBY 168 +12 (hud/NearbyChip.tsx, store/nearbyNew.ts)', () => {
 
   it('clears when the Nearby list is opened, from anywhere, and a find made with it open is not new', async () => {
     loot.keys = ['a', 'b']
+    // Found where the view stands, so the list (lib/nearby, as the watcher reads it) shows them.
+    const cs = useCyberspace.getState()
+    const here = (id: string) => ({ eventId: id, bagId: 'f'.repeat(64), lookupId: 'e'.repeat(64), author: OTHER, at: cs.anchor, plane: cs.anchorPlane, height: 0, createdAt: 1, type: 'message' as const, text: id })
+    useShards.setState({ discovered: { a: here('a'), b: here('b') } })
     addNearbyNew(['a', 'b'])
     expect(nearbyNewFor(me()).size).toBe(2)
     useShards.getState().setNearbyOpen(true)

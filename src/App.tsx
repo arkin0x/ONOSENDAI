@@ -15,7 +15,7 @@ import { PublicShardModal, SecretModal } from './hud/SecretModal'
 import { FocusBar } from './hud/FocusBar'
 import { BuildBar } from './hud/BuildBar'
 import { ChipFold, useChipFoldPhase } from './hud/ChipFold'
-import { useChipsFolded } from './store/chipsFold'
+import { setChipsFolded, useChipsFolded, useChipsFoldOffered } from './store/chipsFold'
 import { watchNearbyOpen } from './store/nearbyNew'
 import { useReducedMotion } from './hooks/useReducedMotion'
 import { ActionModal } from './hud/ActionModal'
@@ -303,17 +303,21 @@ export default function App(): JSX.Element {
   const tutorialActive = useTutorial((s) => s.active)
   const tutorialKeep = useTutorial((s) => (s.active ? (s.script.steps[s.index]?.keepChips ?? EMPTY_KEEP) : EMPTY_KEEP))
   const keepsChip = (name: 'nearby' | 'chain'): boolean => !tutorialActive || tutorialKeep.includes(name)
-  // The arrow chip under the stack puts every chip away, unmounted, and
-  // brings them back (hud/ChipFold.tsx; owner, 2026-11-26), kept per
-  // identity (store/chipsFold.ts). Not in the tutorial or the /demo tour,
-  // which teach with chips by name: there they all show, and no arrow.
-  const foldOffered = !tutorialActive && !touring
-  const chipsFolded = useChipsFolded() && foldOffered
-  const chipPhase = useChipFoldPhase(chipsFolded, useReducedMotion())
   // A newer deploy that refuses moves or saves (lib/versionGate.ts): its bar shows even in the tutorial.
   const versionBlocked = useVersionGate((s) => s.verdict === 'blocked' || s.savesBlocked)
   // Region mode (store/useRegion.ts) clears the stack under its chip the same way.
   const regionOn = useRegion((s) => s.active)
+  // The arrow chip under the stack puts every chip away, unmounted, and
+  // brings them back (hud/ChipFold.tsx; owner, 2026-11-26), kept per
+  // identity (store/chipsFold.ts). Not in the tutorial or the /demo tour,
+  // which teach with chips by name: there they all show, and no arrow.
+  const foldOffered = useChipsFoldOffered()
+  const chipsFolded = useChipsFolded() && foldOffered
+  const chipPhase = useChipFoldPhase(chipsFolded, useReducedMotion())
+  // A view you can leave keeps Escape as its way out while its RETURN chip
+  // is put away: the first Escape brings the chips back, RETURN with them,
+  // and the next is RETURN's own (hud/FocusBar.tsx, hud/HyperspaceBar.tsx).
+  useEscape('chip', chipsFolded && (viewing || stationView || building || regionOn), () => setChipsFolded(false))
   // The question bubble lives in the menu; on a phone the menu covers the
   // scene, so starting the tour from it closes it. Only on the start:
   // opening the menu during the tour (its menu step) leaves it open.

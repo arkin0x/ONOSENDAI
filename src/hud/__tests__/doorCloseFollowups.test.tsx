@@ -216,11 +216,14 @@ describe('(2) NEARBY\'s +N leaves out finds in a room you closed', () => {
     expect(freshHere()).toBe(1)
   })
 
-  it('opening the Nearby list clears it all: a room opened after brings nothing back', async () => {
+  it('opening the Nearby list clears what it lists: a room opened after brings nothing back', async () => {
     const n = await openBoth()
-    await press(n.outer.eventId, /^CLOSE$/)
+    // Standing where the finds are, so the list shows them.
+    useCyberspace.setState({ anchor: AT, anchorPlane: 1 })
     useShards.getState().setNearbyOpen(true)
     useShards.getState().setNearbyOpen(false)
+    expect(nearbyNewFor(me()).size).toBe(0)
+    await press(n.outer.eventId, /^CLOSE$/)
     await press(n.outer.eventId, /^OPEN$/)
     await vi.waitFor(() => expect(roomTexts()).toEqual(['Inner Door', 'in the outer room']))
     expect(freshHere()).toBe(0)

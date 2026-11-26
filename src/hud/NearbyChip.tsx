@@ -32,11 +32,11 @@ export function NearbyChip(): JSX.Element | null {
   const title = fresh > 0 ? `What your keys open where you stand: ${fresh} new since you last looked` : 'What your keys open where you stand'
   return (
     <div className="hyperbar presence hyperbar--found nearby__chip" role="status">
-      <button className="presence__head" onClick={() => useShards.getState().setNearbyOpen(true)} title={title}>
+      <button className="presence__head" onClick={() => useShards.getState().setNearbyOpen(true)} title={title} aria-label={fresh > 0 ? `Nearby, ${count}, ${fresh} new` : `Nearby, ${count}`}>
         <Gem size={12} strokeWidth={2.25} aria-hidden />
         <span className="hyperbar__label">
           NEARBY <span className="nearby__total">{count}</span>
-          {fresh > 0 && <span className="nearby__new" aria-label={`${fresh} new`}>+{fresh}</span>}
+          {fresh > 0 && <span className="nearby__new">+{fresh}</span>}
         </span>
       </button>
     </div>

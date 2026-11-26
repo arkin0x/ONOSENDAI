@@ -4,8 +4,8 @@
  * The green box is the region your keys open; this is the list of what is in
  * it: every shard, message, key and chest this client has opened or placed
  * whose region holds the anchor, newest first (arkinox, 2026-10-13), nearest
- * first among things made in the same second, undated things last. Reached from the found chip,
- * which says how many, and from NEARBY on the DISCOVERED panel. VIEW flies to
+ * first among things made in the same second, undated things last. Reached from the NEARBY chip,
+ * whose orange +N says how many are new, and from NEARBY on the DISCOVERED panel. VIEW flies to
  * the thing the way the bag record's VIEW does. A key row has TAKE until it
  * is held, and INFO (KeyItemInfo); a chest row has its OPEN, and a door row its OPEN or CLOSE, beside
  * VIEW and the same size, VIEW on the right (arkinox, 2026-11-12). A seed's

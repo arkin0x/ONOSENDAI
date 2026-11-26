@@ -17,6 +17,17 @@ import { canLeave, gameFor } from '../lib/games/registry'
 import { useCyberspace } from '../store/useCyberspace'
 import { useGame } from '../store/useGame'
 
+/** Whether GameChip below shows: for the arrow chip's mark while the chips are put away (ChipFold.tsx). */
+export function useGameAway(): boolean {
+  const events = useCyberspace((s) => s.events)
+  const atHead = useCyberspace((s) => s.atHead())
+  const inMode = useGame((s) => s.session !== null)
+  const busy = useGame((s) => s.busy)
+  const open = useMemo(() => openBracket(useCyberspace.getState().actions()), [events])
+  if (!open || inMode || !atHead) return false
+  return gameFor(open.game?.pubkey) ? true : canLeave(open.game?.pubkey) && !busy
+}
+
 export function GameChip(): JSX.Element | null {
   const events = useCyberspace((s) => s.events)
   const atHead = useCyberspace((s) => s.atHead())

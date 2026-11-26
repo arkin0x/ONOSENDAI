@@ -46,14 +46,19 @@
  * technique (.fluidnote), a lit spine on the flat edge where it "holds" the
  * stack, a soft cyan halo, and a white chevron with the dark edge every
  * word over the scene has. A small amber diamond on the folded blade when
- * something waits behind it: unread notifications or a broken chain.
+ * something waits behind it: unread notifications, or a chip that stops you
+ * (RELOAD TO MOVE, a broken chain, a stalled signer, a game left open).
  */
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { toggleChipsFolded } from '../store/chipsFold'
 import { useUnread } from './Notifications'
+import { useSignerStuck } from './SignerControls'
+import { useGameAway } from './GameChip'
 import { useChainStop } from '../hooks/useChainStop'
+import { useCyberspace } from '../store/useCyberspace'
+import { useVersionGate } from '../lib/versionGate'
 
 export type FoldPhase = 'shown' | 'leaving' | 'hidden' | 'arriving' | 'entering'
 
@@ -125,9 +130,16 @@ export function ChipFold({ phase, folded }: { phase: FoldPhase; folded: boolean 
     const arrow = ref.current
     if (arrow && (phase === 'leaving' || phase === 'arriving')) prepareMove(arrow)
   }, [phase])
+  // What waits behind the folded blade: news, and the chips that stop you
+  // (RELOAD TO MOVE, a broken chain, a stalled signer, a game left open).
   const unread = useUnread()
   const stop = useChainStop()
-  const waiting = folded && (unread > 0 || (!!stop && !(stop.source === 'relay' && stop.stop.kind === 'tall')))
+  const spectating = useCyberspace((s) => s.spectate !== null)
+  const blocked = useVersionGate((s) => s.verdict === 'blocked' || s.savesBlocked)
+  const stuck = useSignerStuck()
+  const inGame = useGameAway()
+  const broken = !!stop && !spectating && !(stop.source === 'relay' && stop.stop.kind === 'tall')
+  const waiting = folded && (unread > 0 || broken || blocked || stuck || inGame)
   const label = folded ? 'Show status chips' : 'Hide status chips'
   return (
     <button

@@ -841,14 +841,16 @@ body {
   --compass-right: 12px;
   --compass-size: 84px;
   --compass-reserve: calc(var(--compass-right) + var(--compass-size) + 8px);
+  /* The stack's left edge on the page: its inset, or the safe area where that is wider. */
+  --instruments-x: max(var(--instruments-left), env(safe-area-inset-left, 0px));
 }
 .instruments {
   position: absolute;
-  /* Clear of a notch where the page reaches under one (the arrow chip sits
-     in this corner on its own, hud/ChipFold.tsx); 12px and the left edge
-     otherwise, as always. */
+  /* The safe-area insets are 0 while the page does not reach under a notch
+     (no viewport-fit=cover); should it ever, the stack, and the arrow chip
+     alone in this corner (hud/ChipFold.tsx), stay clear of it. */
   top: max(12px, env(safe-area-inset-top, 0px));
-  left: max(var(--instruments-left), env(safe-area-inset-left, 0px));
+  left: var(--instruments-x);
   /* Above the 3D compass (10) and its rotation submenu (101): the
      instrument stack is what is being read, nothing may cover it. */
   z-index: 102;
@@ -898,10 +900,12 @@ body {
 }
 .instruments--leaving .instruments__group > *,
 .instruments--arriving .instruments__group > * {
-  translate: calc(-100% - var(--instruments-left) - var(--hud-shift-l, 0px) - 24px) 0;
+  translate: calc(-100% - var(--instruments-x) - var(--hud-shift-l, 0px) - 24px) 0;
   opacity: 0;
-  pointer-events: none;
 }
+/* Nothing on a chip on its way out or in takes a tap, its own buttons included. */
+.instruments--leaving .instruments__group *,
+.instruments--arriving .instruments__group * { pointer-events: none !important; }
 .instruments--leaving .instruments__group > * {
   transition:
     translate var(--fold-slide) var(--fold-ease-out) calc(var(--chip-i, 0) * var(--fold-step)),
@@ -910,7 +914,7 @@ body {
 .instruments--arriving .instruments__group > * { transition: none; }
 .instruments--entering .instruments__group > * {
   transition:
-    translate calc(var(--fold-slide) + 40ms) var(--fold-ease-in) calc(var(--chip-i, 0) * var(--fold-step)),
+    translate var(--fold-slide) var(--fold-ease-in) calc(var(--chip-i, 0) * var(--fold-step)),
     opacity var(--fold-slide) ease-out calc(var(--chip-i, 0) * var(--fold-step));
 }
 
@@ -940,6 +944,8 @@ body {
   filter: drop-shadow(0 0 5px var(--cf-glow)) drop-shadow(0 1px 2px rgba(0, 0, 0, 0.55));
   transition: filter 200ms ease;
 }
+/* A finger's worth to tap (about 44 by 40), the blade drawn its own size: short of the chip above, in the stack's 8px gap. */
+.chipfold::after { content: ''; position: absolute; inset: -7px -2px; }
 .chipfold--out { --cf-shape: var(--cf-right); }
 .instruments--leaving .chipfold,
 .instruments--arriving .chipfold { translate: 0 var(--fold-dy, 0px); }
@@ -1024,7 +1030,7 @@ body {
 }
 .chipfold:active .chipfold__plate::before { background: rgba(0, 229, 255, 0.28); }
 .chipfold:focus-visible { outline: 1px solid #fff; outline-offset: 3px; }
-/* Something waits behind the folded blade: unread notifications or a broken chain. */
+/* Something waits behind the folded blade: unread notifications, or a chip that stops you. */
 .chipfold__pip {
   position: absolute;
   top: -3px;
@@ -7983,7 +7989,7 @@ select.avatars__input option:checked {
   height: 0;
 }
 
-/* KEY FOUND: the ceremony's chip, breathing in the accent color */
+/* NEARBY (and a toast): a chip breathing in the accent color */
 .hyperbar--found {
   border-color: rgba(0, 229, 255, 0.6);
   animation: found-breathe 1.6s ease-in-out infinite;
@@ -7992,7 +7998,7 @@ select.avatars__input option:checked {
 .hyperbar--found .hyperbar__label {
   color: var(--accent);
 }
-/* A chip for a cloud job that just finished: the found chip's pill, with the
+/* A chip for a cloud job that just finished: NEARBY's pill, with the
  * provider's mark where the glyph goes. */
 .hyperbar__mark {
   flex: none;
@@ -9762,7 +9768,7 @@ select.avatars__input option:checked {
 .nearby__meta { display: inline-flex; align-items: center; gap: 5px; font-size: 9px; color: var(--dim); letter-spacing: 0.06em; }
 
 /* NEARBY: a chip that stays while anything decrypted is around you, glowing
- * like the find chip; the way to the list while the menu is locked. */
+ * with the new finds in orange (+N); the way to the list while the menu is locked. */
 /* The mark takes the label's colour, so a chip reads as one thing.
    .presence__head inherits its colour from .hyperbar, which is the foreground
    cyan, while .hyperbar__label is the bitcoin orange: the SCANNING chip came
@@ -11113,7 +11119,7 @@ select.avatars__input option:checked {
 .brokenchain__card .modal__body ul { margin: 0 0 10px; padding-left: 18px; }
 .brokenchain__card .modal__body li { margin-bottom: 6px; }
 
-/* The chip at the top of the instrument stack: the found chip's pill in red. */
+/* The chip at the top of the instrument stack: NEARBY's pill in red. */
 .hyperbar--broken {
   font-family: inherit;
   text-align: left;

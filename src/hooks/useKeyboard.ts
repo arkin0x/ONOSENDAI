@@ -18,7 +18,7 @@
  */
 
 import { useEffect } from 'react'
-import { escapeTop } from './useEscape'
+import { escapeTop, modalUp } from './useEscape'
 import { useCyberspace } from '../store/useCyberspace'
 import { closeScrubber, useHyperspace } from '../store/useHyperspace'
 import { useTv } from '../store/useTv'
@@ -42,9 +42,7 @@ import { toggleMenuOpen } from './useMenuOpen'
 import { scanBuying, scanSpace, useScan } from '../store/useScan'
 import { useTerrain } from '../store/useTerrain'
 import { enterTerrainMode } from '../store/padMode'
-import { toggleChipsFolded } from '../store/chipsFold'
-import { useTutorial } from '../store/useTutorial'
-import { useDemo } from '../store/useDemo'
+import { chipsFoldOffered, toggleChipsFolded } from '../store/chipsFold'
 
 // Cyberspace TV is watching only: WALK's input is closed while it is on (store/walkInput.ts).
 addWalkInputCloser(() => useTv.getState().on)
@@ -231,10 +229,12 @@ export function useKeyboard(): void {
 
       // U: the top-left chips put away or brought back, as the arrow chip
       // under them does (hud/ChipFold.tsx; owner, 2026-11-26). Not in the
-      // tutorial or the /demo tour, where there is no arrow.
+      // tutorial or the /demo tour, where there is no arrow, and not over a
+      // dialog: one drawn inside a chip (the CHAIN chip's fork notice) would
+      // go with it.
       if (event.code === 'KeyU' && !event.shiftKey) {
         event.preventDefault()
-        if (!event.repeat && !useTutorial.getState().active && !useDemo.getState().active) toggleChipsFolded()
+        if (!event.repeat && chipsFoldOffered() && !modalUp()) toggleChipsFolded()
         return
       }
 

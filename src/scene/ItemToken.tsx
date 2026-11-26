@@ -34,24 +34,6 @@ import { bandOf, bothFaces, shapeOf } from './LetterField'
 import { LABEL_PRIORITY } from './WorldLabel'
 import { markFadeLeft } from '../lib/worldMarks'
 
-/** How far the ring leans back from upright, radians. */
-const RING_LEAN = 1.15
-
-/**
- * The token's outline in its own frame, for a token 1 across: the tag's
- * corners on both faces and the ring's points as it leans. Its name stands
- * a constant gap over the highest of them on screen, projected every frame
- * as the token turns and bobs (WorldLabel `clear` object and points).
- */
-export const TOKEN_OUTLINE: ReadonlyArray<readonly [number, number, number]> = (() => {
-  const out: Array<[number, number, number]> = []
-  for (const z of [0.012, -0.012]) for (const [x, y] of [[-0.31 + 0.11, 0.41], [0.31, 0.41], [0.31, -0.41 + 0.11], [0.31 - 0.11, -0.41], [-0.31, -0.41], [-0.31, 0.41 - 0.11]]) out.push([x, y, z])
-  for (let k = 0; k < 16; k++) {
-    const t = (k / 16) * Math.PI * 2
-    out.push([0.6 * Math.cos(t), 0.6 * Math.sin(t) * Math.cos(RING_LEAN), 0.6 * Math.sin(t) * Math.sin(RING_LEAN)])
-  }
-  return out
-})()
 
 /** One turn of the token, seconds: a little quicker than a letter, so a row of both never turns as one. */
 export const TOKEN_TURN_S = 20
@@ -61,6 +43,27 @@ export const TOKEN_CORE = '#08121c'
 /** The tag's outline, for a token 1 across: 0.62 wide and 0.82 tall, the HUD's corners cut. */
 const W = 0.31, H = 0.41, CUT = 0.11
 export const TAG_OUTLINE: Array<[number, number]> = [[-W + CUT, H], [W, H], [W, -H + CUT], [W - CUT, -H], [-W, -H], [-W, H - CUT]]
+
+/** How far the ring leans back from upright, radians. */
+const RING_LEAN = 1.15
+/** The ring's radius, for a token 1 across. */
+const TOKEN_RING_RADIUS = 0.6
+
+/**
+ * The token's outline in its own frame, for a token 1 across: the tag's
+ * corners on both faces and the ring's points as it leans. Its name stands
+ * a constant gap over the highest of them on screen, projected every frame
+ * as the token turns and bobs (WorldLabel `clear` object and points).
+ */
+export const TOKEN_OUTLINE: ReadonlyArray<readonly [number, number, number]> = (() => {
+  const out: Array<[number, number, number]> = []
+  for (const z of [0.012, -0.012]) for (const [x, y] of TAG_OUTLINE) out.push([x, y, z])
+  for (let k = 0; k < 16; k++) {
+    const t = (k / 16) * Math.PI * 2
+    out.push([TOKEN_RING_RADIUS * Math.cos(t), TOKEN_RING_RADIUS * Math.sin(t) * Math.cos(RING_LEAN), TOKEN_RING_RADIUS * Math.sin(t) * Math.sin(RING_LEAN)])
+  }
+  return out
+})()
 
 /** Lucide's package, in the tag's middle: a box seen corner on, a hexagon with the three edges that meet at its front corner. */
 function packageStrokes(r: number, cy: number): Array<Array<[number, number]>> {
@@ -107,7 +110,7 @@ const LINE_GEOMETRY = (() => {
 
 /** The thin ring about it, flat in its own plane: tilted and turned in the frame. */
 const RING_GEOMETRY = (() => {
-  const pts = new EllipseCurve(0, 0, 0.6, 0.6, 0, Math.PI * 2, false, 0).getPoints(64)
+  const pts = new EllipseCurve(0, 0, TOKEN_RING_RADIUS, TOKEN_RING_RADIUS, 0, Math.PI * 2, false, 0).getPoints(64)
   return new BufferGeometry().setFromPoints(pts.map((p) => new Vector3(p.x, p.y, 0)))
 })()
 

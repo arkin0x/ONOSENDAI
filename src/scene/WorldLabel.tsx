@@ -217,11 +217,13 @@ export function WorldLabel({
       const fitted = !('trueSide' in clear)
       // On screen a local unit is `unitPx` times how much nearer the label stands along the view than straight
       // off (the label is sized by its straight distance): so the gap holds off the middle of the view too.
+      // The rig may have moved the camera this frame without its matrices: brought up to date before anything is measured by them.
+      if (fitted) (state.camera as unknown as import('three').Camera).updateMatrixWorld()
       const along = fitted ? Math.max(1e-6, -viewScratch.copy(g.getWorldPosition(anchorScratch)).applyMatrix4((state.camera as unknown as import('three').Camera).matrixWorldInverse).z) : depth
       const screenUnit = unitPx * (depth / along)
       // A shape is measured along the view, as it is drawn on screen; the thing itself by its points.
       const top = 'shape' in clear
-        ? shapeTopPx(clear.shape, along, projScale, camUp(state.camera))
+        ? shapeTopPx({ ...clear.shape, minPx: (clear.shape.minPx ?? 0) * mark }, along, projScale, camUp(state.camera))
         : 'object' in clear ? pointsTopPx(clear.object.current, clear.points, g, state.camera, state.size.height) : 0
       const lift = fitted
         ? Math.min(top + LABEL_GAP_PX, state.size.height * MAX_LIFT_SHARE) / screenUnit + 0.5

@@ -86,7 +86,7 @@ export const GLYPH_SIZE = 0.18
  * glyphs' outer edge, and the paper turning in it, an upright ellipsoid that
  * holds the sheet's corners and its bob.
  */
-export const LETTER_SHAPE = { flat: RING_RADIUS + GLYPH_SIZE / 2, radius: 0.71, height: 0.5 } as const
+export const LETTER_SHAPE = { flat: RING_RADIUS + GLYPH_SIZE / 2, radius: 0.71, height: 0.56 } as const
 
 /** The tilt the letter hangs at, radians (direction 6's -6 degrees). */
 const TILT = (-6 * Math.PI) / 180

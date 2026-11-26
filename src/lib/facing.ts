@@ -183,3 +183,47 @@ export function uprightTurn(axes: ViewAxes, move: readonly [Position, Position] 
 export function facingTurn(axes: ViewAxes, move: readonly [Position, Position] | null, face: FaceMode): Quaternion {
   return face === 'upright' ? uprightTurn(axes, move) : avatarTurn(axes, move)
 }
+
+/**
+ * Someone else's heading, from the moves of theirs this client has seen
+ * (arkinox, 2026-11-26: "other people's avatars always face the black sun
+ * regardless of their movements"). Your own avatar faces its chain's last
+ * move (scene/Avatar.tsx headingPair), and so does a spectated one and
+ * every avatar on Cyberspace TV; everyone else in the field was drawn at
+ * rest, model +Z toward the black sun, whatever they did. Now each of them
+ * faces the way their own last move went, from where they stood to where
+ * they stand, which is the heading their chain gives them and the one they
+ * see of themselves out of WALK. No fetch: the moves are the positions the
+ * presence feed and the target tracker already hand the scene.
+ *
+ * `last` is the newest move seen, for PATH. `level` is the newest that went
+ * across the view's up when it was seen, for UPRIGHT, which keeps its
+ * heading on a move straight up or down (DECK-0003 §1.18). Standing still
+ * keeps both. Before any move both are null and the avatar stands at rest,
+ * as it always has.
+ */
+export interface SeenMoves {
+  last: readonly [Position, Position] | null
+  level: readonly [Position, Position] | null
+}
+
+export const NO_MOVES: SeenMoves = Object.freeze({ last: null, level: null })
+
+/** The moves seen after one more, from `from` to `to`, in the view `axes`; the same object when nothing moved. */
+export function seeMove(seen: SeenMoves, from: Position, to: Position, axes: ViewAxes): SeenMoves {
+  if (from.x === to.x && from.y === to.y && from.z === to.z) return seen
+  const move = [from, to] as const
+  return { last: move, level: crossesUp(from, to, axes) ? move : seen.level }
+}
+
+/**
+ * The turn an avatar's group carries for the moves seen of it, in the view
+ * `axes`: PATH along its newest move; UPRIGHT along its newest move across
+ * your up, while that one still goes across it (a compass turn can make it a
+ * climb, and then it stands at rest, yawed about your up).
+ */
+export function seenTurn(seen: SeenMoves, axes: ViewAxes, face: FaceMode): Quaternion {
+  if (face !== 'upright') return facingTurn(axes, seen.last, face)
+  const kept = seen.level && crossesUp(seen.level[0], seen.level[1], axes) ? seen.level : null
+  return facingTurn(axes, kept, face)
+}

@@ -13,7 +13,6 @@
 import { useMemo } from 'react'
 import { GRID_RADIUS, placeCentre, type Position, type ViewAxes } from '../lib/space'
 import { alignedOrigin, useCyberspace } from '../store/useCyberspace'
-import { avatarTurn } from '../lib/facing'
 import { OtherAvatar } from './OtherAvatar'
 import { useMutes } from '../store/useMutes'
 import { useDrawReach } from './buildZoom'
@@ -63,16 +62,16 @@ export function TargetAvatars({ axes }: Props): JSX.Element | null {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [targets, anchorPlane, scaleExp, focus, place, blocked, reach])
 
-  // Turned with the view like every shard and your own avatar, so a compass
-  // turn that puts the world upside down puts them upside down with it.
-  const turn = useMemo(() => avatarTurn(axes, null), [axes])
-
+  // Each faces the way its own last move seen here went, turned with the
+  // view like every shard and your own avatar (OtherAvatar, lib/facing.ts
+  // seenTurn), so a compass turn that puts the world upside down puts them
+  // upside down with it.
   if (near.length === 0) return null
 
   return (
     <>
       {near.map((t) => (
-        <OtherAvatar key={t.id} pubkey={t.id} color={t.color} center={t.centre} position={t.at} place={place} turn={turn} label={t.label} labelOpacity={0.9} />
+        <OtherAvatar key={t.id} pubkey={t.id} color={t.color} center={t.centre} position={t.at} place={place} label={t.label} labelOpacity={0.9} />
       ))}
     </>
   )

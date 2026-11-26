@@ -4,7 +4,7 @@
  * its label sits just above its top at every zoom.
  */
 import { describe, expect, it } from 'vitest'
-import { CUBE_REACH, DEST_CUBE_PX, FLEET_CUBE_PX, CREDIT_FADE, LABEL_GAP_PX, MARK_RECEDE_FLOOR, NAME_FADE, fadeShare, cellsForPixels, labelLiftPx, markerSide, pixelsForCells, projScaleOf, recedeShare } from '../markerSize'
+import { CUBE_REACH, DEST_CUBE_PX, FLEET_CUBE_PX, CREDIT_FADE, LABEL_GAP_PX, MARK_RECEDE_FLOOR, NAME_FADE, fadeShare, cellsForPixels, labelLiftPx, shapeTopPx, sphereTopPx, markerSide, pixelsForCells, projScaleOf, recedeShare } from '../markerSize'
 
 const proj = projScaleOf(915, 55)
 
@@ -134,5 +134,34 @@ describe('a hidden item label fades far off', () => {
     expect(fadeShare(50, 0, 1.5, 2)).toBe(1)
     expect(fadeShare(50, Number.NaN, 1.5, 2)).toBe(1)
     expect(fadeShare(Number.NaN, reach, 1.5, 2)).toBe(1)
+  })
+})
+
+describe('the top of a thing on screen, for its name (owner, 2026-11-27: the name floated far over an item close by)', () => {
+  it('a ball far off is its radius over the distance, to the pixel', () => {
+    expect(sphereTopPx(0.6, 100, proj)).toBeCloseTo((0.6 * proj) / 100, 1)
+  })
+
+  it('an upright ellipsoid seen level is its height, seen from straight above its radius', () => {
+    expect(shapeTopPx({ radius: 0.7, height: 0.4 }, 50, proj, 1)).toBeCloseTo((0.4 * proj) / Math.sqrt(2500 - 0.16), 6)
+    expect(shapeTopPx({ radius: 0.7, height: 0.4 }, 50, proj, 0)).toBeCloseTo((0.7 * proj) / Math.sqrt(2500 - 0.49), 6)
+  })
+
+  it('a disc turned to the camera is its radius over the distance; the largest of the parts wins, never under the floor', () => {
+    expect(shapeTopPx({ flat: 0.8 }, 4, proj)).toBeCloseTo((0.8 * proj) / 4, 9)
+    expect(shapeTopPx({ flat: 0.8, radius: 0.1 }, 4, proj)).toBeCloseTo((0.8 * proj) / 4, 9)
+    expect(shapeTopPx({ radius: 0.001, minPx: 30 }, 40, proj)).toBe(30)
+  })
+
+  it('up close it never runs off without bound, and an eye inside does not snap to nothing', () => {
+    const r = 0.6
+    const outside = shapeTopPx({ radius: r }, r * 1.2, proj)
+    const touching = shapeTopPx({ radius: r }, r, proj)
+    const inside = shapeTopPx({ radius: r }, r * 0.5, proj)
+    for (const v of [outside, touching, inside]) expect(Number.isFinite(v)).toBe(true)
+    expect(touching).toBeGreaterThan(0)
+    expect(inside).toBeGreaterThan(0)
+    // Continuous across where it is held: just over and just under 1.15 radii agree.
+    expect(Math.abs(shapeTopPx({ radius: r }, r * 1.1548, proj) - shapeTopPx({ radius: r }, r * 1.1546, proj))).toBeLessThan(2)
   })
 })

@@ -16,7 +16,7 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createElement, useRef } from 'react'
-import { Box3, Matrix4, Raycaster, ShaderLib, Vector3, Vector4, type Camera, type Material, type Mesh, type Object3D } from 'three'
+import { Matrix4, Raycaster, ShaderLib, Vector3, Vector4, type Camera, type Material, type Mesh, type Object3D } from 'three'
 import { newShard, type ShardModel } from 'sno-core/shards'
 import { r3fRoot, type R3fRoot } from '../../test/r3fRoot'
 
@@ -27,8 +27,10 @@ vi.mock('@react-three/drei', async () => {
   return { Text: forwardRef((props: { position?: unknown; children?: unknown }, ref) => h('group', { name: 'text', ref, position: props.position, userData: { text: props.children } })) }
 })
 
-import { NoteItem, noteBoxSide, patchNoteDepthPull, NOTE_BOX_GIBSONS, NOTE_DEPTH_PULL } from '../WorldMessages'
-import { bothFaces, shapeOf, FOLD_LINE_VERTS, foldLinePoints, LetterField, lettersDrawn, LETTER_GIBSONS, LETTER_TURN_S, PAPER } from '../LetterField'
+import { ItemMark, NoteItem, noteBoxSide, patchNoteDepthPull, NOTE_BOX_GIBSONS, NOTE_DEPTH_PULL } from '../WorldMessages'
+import { bothFaces, shapeOf, FOLD_LINE_VERTS, foldLinePoints, LetterField, lettersDrawn, LETTER_GIBSONS, LETTER_SHAPE, LETTER_TURN_S, PAPER } from '../LetterField'
+import { TOKEN_OUTLINE } from '../ItemToken'
+import { LABEL_GAP_PX } from '../../lib/markerSize'
 import { authorColour } from '../../lib/authorColour'
 import { useMessagesRead } from '../../store/useMessagesRead'
 import { Color, DoubleSide, InstancedMesh, PerspectiveCamera, ShaderMaterial, type BufferGeometry, type LineSegments } from 'three'
@@ -75,19 +77,6 @@ function drawn(scene: Object3D): Array<Object3D & { material: Material | Materia
   return out
 }
 
-/** The gibson's cube about the letter: what its name stands clear of. */
-const GIBSON = new Box3(new Vector3(-0.5, -0.5, -0.5), new Vector3(0.5, 0.5, 0.5))
-
-/** A box's eight corners on screen, CSS pixels (y down). */
-function screenCorners(b: Box3, camera: Camera, size: { width: number; height: number }): Array<[number, number]> {
-  const out: Array<[number, number]> = []
-  for (let i = 0; i < 8; i++) {
-    const v = new Vector3(i & 1 ? b.max.x : b.min.x, i & 2 ? b.max.y : b.min.y, i & 4 ? b.max.z : b.min.z).project(camera)
-    out.push([((v.x + 1) / 2) * size.width, ((1 - v.y) / 2) * size.height])
-  }
-  return out
-}
-
 async function placeCamera(root: R3fRoot, at: [number, number, number]): Promise<Camera> {
   const camera = root.state().camera
   camera.position.set(...at)
@@ -95,6 +84,32 @@ async function placeCamera(root: R3fRoot, at: [number, number, number]): Promise
   camera.updateMatrixWorld()
   await root.frame()
   return camera
+}
+
+/**
+ * Where a label stands on screen: each text line's foot (CSS pixels, y down),
+ * and a way to put any scene point on the same screen.
+ */
+async function measureLabel(root: R3fRoot, eye: [number, number, number], look: [number, number, number] = [0, 0, 0]): Promise<{ bottoms: number[]; toY: (v: Vector3) => number; centreY: number; perPx: number }> {
+  const camera = root.state().camera
+  camera.position.set(...eye)
+  camera.lookAt(...look)
+  camera.updateMatrixWorld()
+  await root.frame()
+  const size = root.state().size
+  const persp = camera as PerspectiveCamera
+  const proj = size.height / (2 * Math.tan((persp.fov * Math.PI) / 360))
+  const texts: Object3D[] = []
+  root.state().scene.traverse((o) => { if (o.name === 'text') texts.push(o) })
+  const toY = (v: Vector3): number => ((1 - v.clone().project(camera).y) / 2) * size.height
+  const bottoms = texts.map((t) => {
+    // A line is one local unit high at its own scale: its world scale over its depth along the view, in pixels.
+    const world = t.getWorldPosition(new Vector3())
+    const along = -world.clone().applyMatrix4(camera.matrixWorldInverse).z
+    const unitPx = (new Vector3().setFromMatrixScale(t.matrixWorld).y * proj) / along
+    return toY(world) + unitPx / 2
+  })
+  return { bottoms, toY, centreY: toY(new Vector3()), perPx: proj }
 }
 
 describe('a message’s box', () => {
@@ -309,27 +324,50 @@ describe('a message’s box', () => {
     expect(text!.userData.text).toBe('you')
   })
 
-  it('carries the name over the letter, clear of its gibson’s highest corner on screen near or far (the ring stays inside the gibson)', async () => {
+  it('stands the name a constant few pixels over the letter’s ring at any distance and angle: close by it does not float off (owner, 2026-11-27)', async () => {
+    for (const scaleExp of [0, 1]) {
+      useCyberspace.setState({ scaleExp })
+      r = await r3fRoot()
+      await r.render(scene())
+      const width = noteBoxSide(scaleExp) * LETTER_GIBSONS
+      // From a couple of gibsons away, as he stood, out to far off; level, from above, and with the letter off the middle of the view.
+      for (const [eye, look] of [[[0, 0, 2], [0, 0, 0]], [[0, 0, 3], [0, 0, 0]], [[0, 1.2, 1.8], [0, 0, 0]], [[0, 0, 2.5], [0.6, -0.4, 0]], [[0, 0, 8], [0, 0, 0]], [[3, 4, 20], [0, 0, 0]], [[0, 0, 40], [0, 0, 0]]] as Array<[[number, number, number], [number, number, number]]>) {
+        const { bottoms, toY, centreY, perPx } = await measureLabel(r, eye, look)
+        // The real top: the ring's glyphs, turned to the camera, LETTER_SHAPE.flat across from the centre; or the paper's highest corner as drawn.
+        const camera = r.state().camera
+        const up = new Vector3(0, 1, 0).applyQuaternion(camera.quaternion)
+        const ringTop = toY(up.clone().multiplyScalar(LETTER_SHAPE.flat * width))
+        const m = new Matrix4(); paper(r).getMatrixAt(0, m)
+        const corners = [[-0.5, 0.33], [0.5, 0.33], [0.5, -0.33], [-0.5, -0.33]].map(([x, y]) => toY(new Vector3(x, y, 0).applyMatrix4(m)))
+        const top = Math.min(ringTop, ...corners)
+        const foot = bottoms[bottoms.length - 1]
+        // Never on the letter, and no more than a pixel or two over the gap (the paper's bound is an ellipsoid, a few pixels loose up close).
+        expect(top - foot).toBeGreaterThanOrEqual(LABEL_GAP_PX - 1)
+        expect(top - foot).toBeLessThan(LABEL_GAP_PX + (eye[2] <= 2.5 ? 12 : 2))
+        void centreY; void perPx
+      }
+      await r.unmount()
+      r = null
+    }
+  })
+
+  it('an item’s name and who left it stand a few pixels over its token as drawn, as it turns and bobs, at any distance and angle', async () => {
     useCyberspace.setState({ scaleExp: 0 })
     r = await r3fRoot()
-    await r.render(createElement(NoteItem, { w: NOTE, birth: undefined, onTap: () => undefined }))
-    const scene = r.state().scene
-    const size = r.state().size
-    // From the next gibson (1.5 away) out to far off, straight on and from above.
-    for (const eye of [[0, 0, 1.5], [0, 0, 2.5], [0, 1.2, 1.4], [0, 0, 8], [3, 4, 20], [0, 0, 40]] as Array<[number, number, number]>) {
-      const camera = await placeCamera(r, eye)
-      let text: Object3D | undefined
-      scene.traverse((o) => { if (o.name === 'text') text = o })
-      const inner = text!.parent!
-      expect(inner.position.y).toBeGreaterThan(0)
-      // The name's centre on screen, and half its height: one local unit of the label is one of its pixels.
-      const at = inner.getWorldPosition(new Vector3()).project(camera)
-      const nameY = ((1 - at.y) / 2) * size.height
-      const label = inner.parent!.parent!
-      const depth = camera.position.distanceTo(label.getWorldPosition(new Vector3()))
-      const unitPx = (label.scale.x * size.height) / (2 * Math.tan(((camera as PerspectiveCamera).fov * Math.PI) / 360) * depth)
-      const highest = Math.min(...screenCorners(GIBSON, camera, size).map((c) => c[1]))
-      expect(nameY + unitPx / 2).toBeLessThanOrEqual(highest)
+    await r.render(createElement(ItemMark, { id: 'k', text: 'free', sub: 'unused', who: { pubkey: 'c3'.repeat(32), mine: false }, at: [0, 0, 0], side: 1 }))
+    let group: Object3D | undefined
+    r.state().scene.traverse((o) => { if (o.name === 'item-token') group = o })
+    for (const [eye, look] of [[[0, 0, 2], [0, 0, 0]], [[0, 0.8, 2.2], [0, 0, 0]], [[0, 0, 2.2], [0.5, 0.4, 0]], [[0, 0, 6], [0, 0, 0]], [[2, 3, 25], [0, 0, 0]]] as Array<[[number, number, number], [number, number, number]]>) {
+      // Several moments of its turn.
+      for (let f = 0; f < 3; f++) {
+        for (let k = 0; k < 40; k++) await r.frame()
+        const { bottoms, toY } = await measureLabel(r, eye, look)
+        expect(bottoms).toHaveLength(2)
+        // The highest point of the token as drawn: its tag and its ring, through the group's own matrix this frame.
+        group!.updateWorldMatrix(true, false)
+        const top = Math.min(...TOKEN_OUTLINE.map((p) => toY(new Vector3(p[0], p[1], p[2]).applyMatrix4(group!.matrixWorld))))
+        expect(Math.abs(top - Math.max(...bottoms) - LABEL_GAP_PX)).toBeLessThan(1)
+      }
     }
   })
 

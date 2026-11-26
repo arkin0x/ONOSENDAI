@@ -80,8 +80,13 @@ export const LETTER_ASPECT = 98 / 150
 /** The ring's radius and a glyph's size, for a letter 1 wide. */
 export const RING_RADIUS = 0.74
 export const GLYPH_SIZE = 0.18
-/** How far the ring reaches across, for a letter 1 wide: what the name over it stands clear of. */
-export const LETTER_REACH = 2 * (RING_RADIUS + GLYPH_SIZE / 2)
+/**
+ * The shape a letter's name stands over, for a letter 1 wide (WorldLabel
+ * `clear` shape): the glyph ring, a disc turned to the camera reaching its
+ * glyphs' outer edge, and the paper turning in it, an upright ellipsoid that
+ * holds the sheet's corners and its bob.
+ */
+export const LETTER_SHAPE = { flat: RING_RADIUS + GLYPH_SIZE / 2, radius: 0.71, height: 0.56 } as const
 
 /** The tilt the letter hangs at, radians (direction 6's -6 degrees). */
 const TILT = (-6 * Math.PI) / 180

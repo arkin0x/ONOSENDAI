@@ -17,7 +17,7 @@ import { Text } from '@react-three/drei'
 import { useFrame, type RootState } from '@react-three/fiber'
 import { Group, Quaternion, Vector3, type Object3D } from 'three'
 import { WORLD_FONT } from '../lib/font'
-import { CREDIT_FADE, MARK_RECEDE_FLOOR, NAME_FADE, fadeShare, labelLiftPx, projScaleOf, recedeShare } from '../lib/markerSize'
+import { CREDIT_FADE, LABEL_GAP_PX, MARK_RECEDE_FLOOR, NAME_FADE, fadeShare, labelLiftPx, projScaleOf, recedeShare, shapeTopPx, type LabelShape } from '../lib/markerSize'
 import { bearingDepth } from '../lib/bearing'
 import { headlampUniforms } from './headlamp'
 
@@ -54,6 +54,29 @@ function fadeTo(t: FadingText | null, base: number, alpha: number): void {
 export function labelShrink(width: number): number {
   return Math.max(0.72, Math.min(1, width / 700))
 }
+
+/**
+ * What a label stands clear of, so it sits a constant few pixels over the
+ * thing it names at any distance and zoom (owner, 2026-11-27: "the text ...
+ * is weirdly far from the actual item. i'm standing only a couple gibsons
+ * away from it"). Three kinds:
+ *  - a marker box (`trueSide`, `minPx`), as stops and cubes have it;
+ *  - a shape about the anchor (lib/markerSize LabelShape: an upright
+ *    ellipsoid, a disc facing the camera, a pixel floor): a letter and its
+ *    ring, an item's model;
+ *  - the thing itself (`object`, a ref to what is drawn, and `points`, its
+ *    outline in that object's own frame): each point projected every
+ *    frame, so the name stands exactly over the highest one on screen as
+ *    the thing turns and bobs. An item's token.
+ * Whichever, the lowest line of the label stands LABEL_GAP_PX over that top.
+ */
+export type LabelClear =
+  | { trueSide: number; minPx: number }
+  | { shape: LabelShape }
+  | { object: { current: Object3D | null }; points: ReadonlyArray<readonly [number, number, number]> }
+
+/** The most a label is lifted, as a share of the view's height: up close a name stays on screen. */
+const MAX_LIFT_SHARE = 0.48
 
 interface Props {
   text: string
@@ -110,22 +133,18 @@ interface Props {
   /** How big the second string is, as a fraction of the first. */
   smallScale?: number
   /**
-   * The marker this label names, so the label sits just above its top at
-   * every zoom (lib/markerSize.ts): the marker's true edge in cells and the
-   * pixel size it is never drawn smaller than. The label is centred on the
-   * anchor and lifted by the marker's on-screen reach plus a small gap,
-   * recomputed every frame from depth; `offsetPx` is added on top.
-   *
-   * `nearFace`, for a marker that is a box in the world (a message's or a
-   * model-less key's one-gibson cube): the reach is measured where the box
-   * comes nearest the eye, so a box up close never runs into its name, and
-   * the label is lifted a further `sub` line so its credit line clears the
-   * box too. Above, not under: a box resting on the ground has the ground in
-   * front of whatever hangs under it on screen, and the ground hid the name
-   * there (#870, #887), while a name above stands over the ground from any
-   * camera above it. A wall in front still hides it, as it hides any label.
+   * What this label names, so it sits just above its top at every zoom
+   * (LabelClear): a marker box by its true edge and the pixel size it is
+   * never drawn smaller than, lifted by its on-screen reach plus a small
+   * gap; a shape or the thing itself by its top on screen, the label's
+   * lowest line (its `sub`, when it has one) a constant LABEL_GAP_PX over
+   * it. Recomputed every frame; `offsetPx` is added on top. Above, not
+   * under: a thing resting on the ground has the ground in front of
+   * whatever hangs under it on screen, and the ground hid the name there
+   * (#870, #887), while a name above stands over the ground from any camera
+   * above it. A wall in front still hides it, as it hides any label.
    */
-  clear?: { trueSide: number; minPx: number; nearFace?: boolean }
+  clear?: LabelClear
   /**
    * Where the label's parent stands from the camera, for a parent that is
    * always at the same offset from it and carries no turn or scale: the
@@ -194,14 +213,26 @@ export function WorldLabel({
     const near = recede && recede !== 'mark' ? mark : 1
     // Lifted clear of its marker: one local unit is `unitPx` pixels.
     if (inner.current && clear) {
-      // A box in the world is measured where it comes nearest the eye (its near face), so up close it never runs into its name.
-      const at = clear.nearFace ? Math.max(depth - clear.trueSide / 2, depth * 0.05) : depth
-      const lift = labelLiftPx(clear.trueSide, clear.minPx * mark, at, projScale, unitPx) / unitPx
+      // A box by its reach; a shape or the thing itself by its top on screen, the gap and half the name.
+      const fitted = !('trueSide' in clear)
+      // On screen a local unit is `unitPx` times how much nearer the label stands along the view than straight
+      // off (the label is sized by its straight distance): so the gap holds off the middle of the view too.
+      // The rig may have moved the camera this frame without its matrices: brought up to date before anything is measured by them.
+      if (fitted) (state.camera as unknown as import('three').Camera).updateMatrixWorld()
+      const along = fitted ? Math.max(1e-6, -viewScratch.copy(g.getWorldPosition(anchorScratch)).applyMatrix4((state.camera as unknown as import('three').Camera).matrixWorldInverse).z) : depth
+      const screenUnit = unitPx * (depth / along)
+      // A shape is measured along the view, as it is drawn on screen; the thing itself by its points.
+      const top = 'shape' in clear
+        ? shapeTopPx({ ...clear.shape, minPx: (clear.shape.minPx ?? 0) * mark }, along, projScale, camUp(state.camera))
+        : 'object' in clear ? pointsTopPx(clear.object.current, clear.points, g, state.camera, state.size.height) : 0
+      const lift = fitted
+        ? Math.min(top + LABEL_GAP_PX, state.size.height * MAX_LIFT_SHARE) / screenUnit + 0.5
+        : labelLiftPx((clear as { trueSide: number }).trueSide, (clear as { minPx: number }).minPx * mark, depth, projScale, unitPx) / unitPx
       // Its credit line hangs under the name (the caption below), so the name
       // stands that much higher; far off, as the credit line fades out
       // (CREDIT_FADE, below), the name settles down over the box with it.
       const credit = recede === 'name' || recede === 'credit' ? fadeShare(depth, reach, CREDIT_FADE[0], CREDIT_FADE[1]) : 1
-      const creditLift = clear.nearFace && sub !== undefined ? (subBottom(subScale) - 0.5) * credit : 0
+      const creditLift = fitted && sub !== undefined ? (subBottom(subScale) - 0.5) * credit : 0
       inner.current.position.y = lift + creditLift + (offsetPx[1] / px) * near
     } else if (inner.current && recede) {
       // Every frame while it recedes: back at full size the prop is never
@@ -290,4 +321,36 @@ export function WorldLabel({
       </group>
     </group>
   )
+}
+
+/** The y of the camera's up in the scene: 1 looking level, toward 0 looking straight down or up. */
+function camUp(camera: Object3D): number {
+  return upScratch.set(0, 1, 0).applyQuaternion(camera.quaternion).y
+}
+const upScratch = new Vector3()
+const pointScratch = new Vector3()
+const anchorScratch = new Vector3()
+const viewScratch = new Vector3()
+
+/**
+ * How far above the label's anchor the highest of `points` (in `object`'s own
+ * frame) stands on screen, CSS pixels, this frame; 0 with nothing to measure.
+ * A point behind the eye is passed over.
+ */
+export function pointsTopPx(object: Object3D | null, points: ReadonlyArray<readonly [number, number, number]>, anchor: Object3D, camera: Object3D & { matrixWorldInverse?: unknown }, height: number): number {
+  if (!object || points.length === 0) return 0
+  const cam = camera as unknown as import('three').Camera
+  object.updateWorldMatrix(true, false)
+  anchor.getWorldPosition(anchorScratch)
+  anchorScratch.project(cam)
+  const anchorY = (anchorScratch.y * height) / 2
+  let top = 0
+  for (const p of points) {
+    pointScratch.set(p[0], p[1], p[2]).applyMatrix4(object.matrixWorld)
+    // Behind the eye: no place on screen.
+    if (viewScratch.copy(pointScratch).applyMatrix4(cam.matrixWorldInverse).z >= 0) continue
+    pointScratch.project(cam)
+    top = Math.max(top, (pointScratch.y * height) / 2 - anchorY)
+  }
+  return top
 }

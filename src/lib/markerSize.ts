@@ -50,6 +50,40 @@ export const DEST_CUBE_PX = 16
 export const LABEL_GAP_PX = 4
 
 /**
+ * A thing a label stands over, by its shape about the label's anchor (render
+ * units): an upright ellipsoid `radius` across and `height` up (a model, a
+ * letter's paper), a flat disc of `flat` turned to the camera (a letter's
+ * glyph ring), and a floor in pixels its top never comes under (`minPx`).
+ */
+export interface LabelShape { radius?: number; height?: number; flat?: number; minPx?: number }
+
+/**
+ * How far above a thing's centre the top of its outline stands on screen, CSS
+ * pixels, `depth` from the eye, with the camera's up making `upY` (the y of
+ * the camera's up in the scene) with the scene's up: the ellipsoid's reach
+ * along the screen's up (its support, exact for the ellipsoid seen straight
+ * on, and close off centre), the disc's, and the floor, the largest. Up
+ * close it never runs off without bound, and an eye inside never snaps to
+ * nothing: the reach is held at twice its far-off rate once the eye comes
+ * within 1.15 of it (review of the first ball rule).
+ */
+export function shapeTopPx(shape: LabelShape, depth: number, projScale: number, upY = 1): number {
+  const d = Math.max(depth, 1e-6)
+  const r = shape.radius ?? 0
+  const h = shape.height ?? r
+  const uy = Math.min(1, Math.max(-1, upY))
+  const reach = Math.sqrt(r * r * (1 - uy * uy) + h * h * uy * uy)
+  const solid = reach > 0 ? (projScale * reach) / Math.sqrt(Math.max(d * d - reach * reach, 0.25 * d * d)) : 0
+  const disc = shape.flat ? (projScale * shape.flat) / d : 0
+  return Math.max(solid, disc, shape.minPx ?? 0)
+}
+
+/** The ball rule's top for a ball of `radius` seen from anywhere: an ellipsoid of one radius. */
+export function sphereTopPx(radius: number, depth: number, projScale: number): number {
+  return shapeTopPx({ radius, height: radius }, depth, projScale)
+}
+
+/**
  * How far above a marker's centre its label's centre sits, in CSS pixels: the
  * marker's on-screen reach plus a gap plus half the label's own height.
  */

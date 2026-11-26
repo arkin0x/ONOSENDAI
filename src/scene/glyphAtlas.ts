@@ -46,18 +46,23 @@ export function glyphAtlas(): Texture {
   }
   canvas.width = side
   canvas.height = side
-  ctx.clearRect(0, 0, side, side)
   ctx.fillStyle = '#ffffff'
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
   // The HUD's own monospace for Latin and hex; the system's Japanese face for the katakana.
-  ctx.font = `600 ${Math.round(ATLAS_CELL * 0.68)}px "Monaspace Krypton", ui-monospace, "Hiragino Sans", "Noto Sans JP", "Noto Sans CJK JP", "Yu Gothic", sans-serif`
-  ;[...ATLAS_CHARS].forEach((ch, i) => {
-    const x = (i % ATLAS_COLS) * ATLAS_CELL + ATLAS_CELL / 2
-    const y = Math.floor(i / ATLAS_COLS) * ATLAS_CELL + ATLAS_CELL / 2
-    ctx.fillText(ch, x, y + ATLAS_CELL * 0.03)
-  })
+  const draw = (): void => {
+    ctx.clearRect(0, 0, side, side)
+    ctx.font = `600 ${Math.round(ATLAS_CELL * 0.68)}px "Monaspace Krypton", ui-monospace, "Hiragino Sans", "Noto Sans JP", "Noto Sans CJK JP", "Yu Gothic", sans-serif`
+    ;[...ATLAS_CHARS].forEach((ch, i) => {
+      const x = (i % ATLAS_COLS) * ATLAS_CELL + ATLAS_CELL / 2
+      const y = Math.floor(i / ATLAS_COLS) * ATLAS_CELL + ATLAS_CELL / 2
+      ctx.fillText(ch, x, y + ATLAS_CELL * 0.03)
+    })
+  }
+  draw()
   const tex = new CanvasTexture(canvas)
+  // Drawn before the HUD's face had loaded, the atlas would keep a fallback for the visit: drawn again once the fonts are in.
+  document.fonts?.ready?.then(() => { draw(); tex.needsUpdate = true }).catch(() => undefined)
   tex.minFilter = LinearFilter
   tex.magFilter = LinearFilter
   tex.generateMipmaps = false

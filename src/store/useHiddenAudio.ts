@@ -290,6 +290,8 @@ function release(key: string): void {
   waitingPlays.delete(key)
   awaitingHeard.delete(key)
   armGesture()
+  const an = analysers.get(key)
+  if (an) { analysers.delete(key); try { an.node.disconnect() } catch { /* already apart */ } }
   const v = voices.get(key)
   if (!v) return
   voices.delete(key)
@@ -639,6 +641,49 @@ function shortLoopBuffer(blob: Blob): Promise<AudioBuffer | null> {
   // The next decode waits for this one, whether it succeeds or not.
   decoding = run.catch(() => undefined)
   return run
+}
+
+/**
+ * A small file decoded whole for its waveform (store/useWaveforms), on the
+ * same one-at-a-time queue as a short loop, so the two never decode at once;
+ * null when its worst case does not fit the budget by its bytes
+ * (decodeWholeOk) or its decoded buffer does not (decodedFits).
+ */
+export function decodeForShape(blob: Blob, file: Uint8Array): Promise<AudioBuffer | null> {
+  const ctx = audioContext()
+  if (!ctx || !decodeWholeOk(file, blob.size, ctx.sampleRate)) return Promise.resolve(null)
+  return shortLoopBuffer(blob)
+}
+
+/** An analyser on each card voice whose level is asked for (cardLevel), by voice key. */
+const analysers = new Map<string, { node: AnalyserNode; samples: Float32Array }>()
+
+/**
+ * How loud an item's card PLAY is this moment, 0 to 1 (the loudest sample
+ * of the last few milliseconds), or null when nothing plays from the card or
+ * its sound is not on the audio context. The waveform of a file too large to
+ * decode whole is drawn from these as it is heard (store/useWaveforms). The
+ * analyser hangs off the voice's own output and goes with it.
+ */
+export function cardLevel(itemKey: string): number | null {
+  const key = cardKey(itemKey)
+  const v = voices.get(key)
+  const ctx = audioContext()
+  if (!v?.node || !ctx) return null
+  let a = analysers.get(key)
+  if (!a) {
+    try {
+      const node = ctx.createAnalyser()
+      node.fftSize = 256
+      ;(v.node.getOutput() as AudioNode).connect(node)
+      a = { node, samples: new Float32Array(node.fftSize) }
+      analysers.set(key, a)
+    } catch { return null }
+  }
+  a.node.getFloatTimeDomainData(a.samples as Float32Array<ArrayBuffer>)
+  let peak = 0
+  for (let i = 0; i < a.samples.length; i++) { const x = Math.abs(a.samples[i]); if (x > peak) peak = x }
+  return Math.min(1, peak)
 }
 
 /** Decode a file into a buffer on the shared context; the callback form, which every Safari has. Throws when it cannot. */

@@ -19,7 +19,7 @@
  */
 
 /** The hues already spoken for in the scene, in degrees, with what each means. */
-export const RESERVED_HUES: ReadonlyArray<{ name: string; colour: string; hue: number }> = [
+export const RESERVED_HUES: ReadonlyArray<{ name: string; colour: string; hue: number; clearance?: number }> = [
   // scene/PathTrail.tsx TRAIL_RED
   { name: 'trail red', colour: '#ff0000', hue: 0 },
   // lib/palette.ts SIDESTEP
@@ -28,6 +28,9 @@ export const RESERVED_HUES: ReadonlyArray<{ name: string; colour: string; hue: n
   { name: 'game pink', colour: '#ff7ad9', hue: 317 },
   // scene/DeployRegionBox.tsx REGION and SecretRegions HELD
   { name: 'region green', colour: '#52e39f', hue: 152 },
+  // lib/palette.ts ACCENT: the HUD's cyan, the colour of the glyph ring, the decode and the arrows.
+  // Kept apart less widely (ACCENT_CLEARANCE), so a sky blue may stand beside it.
+  { name: 'HUD cyan', colour: '#00e5ff', hue: 186, clearance: 15 },
 ]
 
 /** How far, in degrees of hue, every author colour stays from every reserved hue. */
@@ -43,9 +46,9 @@ export const AUTHOR_COLOURS: readonly string[] = [
   '#f2e266', // straw
   '#c4ec6c', // lime
   '#9ae873', // leaf, well short of the region box's mint
-  '#5fe0e8', // aqua
   '#7cc8ff', // sky
   '#8ea6ff', // periwinkle
+  '#c4e4ff', // ice, the sky made pale
 ]
 
 /** A hex colour's hue in degrees [0, 360), or null for a grey. */

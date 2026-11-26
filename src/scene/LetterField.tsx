@@ -72,6 +72,8 @@ export const LETTER_ASPECT = 98 / 150
 /** The ring's radius and a glyph's size, for a letter 1 wide. */
 export const RING_RADIUS = 0.74
 export const GLYPH_SIZE = 0.18
+/** How far the ring reaches across, for a letter 1 wide: what the name over it stands clear of. */
+export const LETTER_REACH = 2 * (RING_RADIUS + GLYPH_SIZE / 2)
 
 /** The tilt the letter hangs at, radians (direction 6's -6 degrees). */
 const TILT = (-6 * Math.PI) / 180
@@ -366,7 +368,10 @@ const RING_COLOUR = ACCENT
 export function LetterField(): JSX.Element | null {
   const v = useSyncExternalStore(subscribe, snapshot, snapshot)
   const list = useMemo(() => lettersDrawn(), [v])
-  const capacity = capacityFor(list.length)
+  // Room only grows while mounted, so letters coming and going across a step never rebuild (and reshuffle) every ring.
+  const room = useRef(0)
+  room.current = Math.max(room.current, capacityFor(list.length))
+  const capacity = room.current
   if (list.length === 0) return null
   return <LetterMeshes key={capacity} list={list} capacity={capacity} />
 }
@@ -416,9 +421,10 @@ function LetterMeshes({ list, capacity }: { list: LetterSpec[]; capacity: number
   }, [capacity])
   const ringGeometry = useMemo(() => {
     const g = new InstancedBufferGeometry()
-    g.index = QUAD.index
-    g.setAttribute('position', QUAD.getAttribute('position'))
-    g.setAttribute('uv', QUAD.getAttribute('uv'))
+    // Its own copies: disposing a geometry frees its attributes' buffers, and a shared one would go with it.
+    g.index = QUAD.index!.clone()
+    g.setAttribute('position', QUAD.getAttribute('position').clone())
+    g.setAttribute('uv', QUAD.getAttribute('uv').clone())
     const slots = capacity * RING_GLYPHS
     g.setAttribute('aCentre', new InstancedBufferAttribute(new Float32Array(slots * 3), 3))
     g.setAttribute('aWidth', new InstancedBufferAttribute(new Float32Array(slots), 1))
@@ -481,6 +487,8 @@ function LetterMeshes({ list, capacity }: { list: LetterSpec[]; capacity: number
     glyphsOf.current = keep
     centre.needsUpdate = true
     width.needsUpdate = true
+    // The whole buffer, whatever stretch the last frame sent.
+    glyph.clearUpdateRanges()
     glyph.needsUpdate = true
     ringGeometry.instanceCount = list.length * RING_GLYPHS
   }, [list, layout, initialGeometry, ringGeometry])
@@ -490,10 +498,17 @@ function LetterMeshes({ list, capacity }: { list: LetterSpec[]; capacity: number
   const rng = useRef<Rng>(mulberry32((Date.now() >>> 0) ^ 0x5eed))
   const carry = useRef(0)
   const last = useRef<number | null>(null)
+  // With reduced motion nothing bobs, so the matrices change only when the camera turns or the letters change.
+  const still = useRef({ q: new Quaternion(), list: null as LetterSpec[] | null })
   useFrame((state) => {
     const cam = state.camera as PerspectiveCamera
     const t = state.clock.elapsedTime
     const { m, q, tilt, p, s, up } = scratch
+    const unchanged = reduced && still.current.list === list && still.current.q.equals(cam.quaternion)
+    still.current.list = list
+    still.current.q.copy(cam.quaternion)
+    if (!unchanged) placeLetters()
+    function placeLetters(): void {
     q.copy(cam.quaternion).multiply(tilt)
     up.set(0, 1, 0).applyQuaternion(cam.quaternion)
     list.forEach((l, i) => {
@@ -510,6 +525,7 @@ function LetterMeshes({ list, capacity }: { list: LetterSpec[]; capacity: number
       }
     })
     for (const mesh of [paper.current, folds.current, whole.current, broken.current, initials.current]) if (mesh) mesh.instanceMatrix.needsUpdate = true
+    }
 
     const u = materials.ring.uniforms
     u.uPerPixel.value = (2 * Math.tan((cam.fov * Math.PI) / 360)) / Math.max(1, state.size.height)
@@ -521,11 +537,18 @@ function LetterMeshes({ list, capacity }: { list: LetterSpec[]; capacity: number
     carry.current = budget.carry
     if (budget.count === 0) return
     const glyph = ringGeometry.getAttribute('aGlyph') as InstancedBufferAttribute
+    let lo = Infinity
+    let hi = -1
     for (const c of glyphChanges(rng.current, list.length * RING_GLYPHS, budget.count)) {
       glyph.setX(c.slot, c.glyph)
+      lo = Math.min(lo, c.slot)
+      hi = Math.max(hi, c.slot)
       const kept = glyphsOf.current.get(list[Math.floor(c.slot / RING_GLYPHS)].key)
       if (kept) kept[c.slot % RING_GLYPHS] = c.glyph
     }
+    // Only the stretch that changed goes to the GPU.
+    glyph.clearUpdateRanges()
+    if (hi >= lo) glyph.addUpdateRange(lo, hi - lo + 1)
     glyph.needsUpdate = true
   }, LABEL_PRIORITY)
 

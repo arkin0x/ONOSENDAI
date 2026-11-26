@@ -4,6 +4,9 @@
  * block"): their picture in an octagon of their colour, their name, and
  * "Sealed at block 975,410 · 2 h ago".
  *
+ * Under them their npub, to copy. For a message or a sound this line is the
+ * card's whole account of who left it; the profile is one tap away.
+ *
  * The block is reckoned from the newest block this client knows
  * (lib/sealedAt.ts); before one is known the line says only how long ago.
  */
@@ -16,6 +19,9 @@ import { trustedTip } from '../lib/seeds/seedSources'
 import { useNow } from '../hooks/useNow'
 import { useHyperspace } from '../store/useHyperspace'
 import { ProfilePic, ProfileTap } from './ProfileBadge'
+import { CopyValue } from './ui/CopyValue'
+import { safeNpub } from '../lib/npub'
+import { shortHex } from '../lib/time'
 
 export function AuthorLine({ pubkey, name, mine, createdAt }: { pubkey: string; name: string; mine: boolean; createdAt?: number }): JSX.Element {
   const tip = useHyperspace((s) => s.tipHeight) ?? trustedTip()
@@ -29,6 +35,8 @@ export function AuthorLine({ pubkey, name, mine, createdAt }: { pubkey: string; 
         <span className="authorline__name"><i className="authordot" aria-hidden="true" />{name}{mine ? ' (you)' : ''}</span>
         {/* The line keeps its height before the time is known, so nothing under it moves. */}
         <span className="authorline__when">{when && <Box size={11} strokeWidth={2} aria-hidden />}{when || ' '}</span>
+        {/* Their key, to copy, as the card's LEFT BY gave it: this line replaces that block for a message or a sound. */}
+        <CopyValue className="secret__npub authorline__npub" value={safeNpub(pubkey)} shown={shortHex(safeNpub(pubkey), 14, 8)} />
       </div>
     </div>
   )

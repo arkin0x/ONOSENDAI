@@ -6,7 +6,8 @@
  */
 import { describe, expect, it } from 'vitest'
 import { AUTHOR_COLOURS, HUE_CLEARANCE, RESERVED_HUES, authorColour, authorColourIndex, hueDistance, hueOf } from '../authorColour'
-import { GAME, SIDESTEP } from '../palette'
+import { readFileSync } from 'node:fs'
+import { ACCENT, GAME, SIDESTEP } from '../palette'
 
 describe('author colours', () => {
   it('are eight, all different', () => {
@@ -18,7 +19,7 @@ describe('author colours', () => {
     for (const c of AUTHOR_COLOURS) {
       const h = hueOf(c)
       expect(h).not.toBeNull()
-      for (const r of RESERVED_HUES) expect(hueDistance(h!, r.hue), `${c} against ${r.name}`).toBeGreaterThanOrEqual(HUE_CLEARANCE)
+      for (const r of RESERVED_HUES) expect(hueDistance(h!, r.hue), `${c} against ${r.name}`).toBeGreaterThanOrEqual(r.clearance ?? HUE_CLEARANCE)
     }
   })
 
@@ -27,6 +28,12 @@ describe('author colours', () => {
     for (const r of RESERVED_HUES) expect(Math.abs(hueDistance(hueOf(r.colour)!, r.hue))).toBeLessThanOrEqual(1.5)
     expect(RESERVED_HUES.find((r) => r.name === 'sidestep purple')!.colour).toBe(SIDESTEP)
     expect(RESERVED_HUES.find((r) => r.name === 'game pink')!.colour).toBe(GAME)
+    expect(RESERVED_HUES.find((r) => r.name === 'HUD cyan')!.colour).toBe(ACCENT)
+    // The trail's red and the region box's green, as their own files draw them.
+    const trail = readFileSync(new URL('../../scene/PathTrail.tsx', import.meta.url), 'utf8')
+    expect(trail).toMatch(new RegExp(`const TRAIL_RED = '${RESERVED_HUES.find((r) => r.name === 'trail red')!.colour}'`))
+    const region = readFileSync(new URL('../../scene/DeployRegionBox.tsx', import.meta.url), 'utf8')
+    expect(region).toMatch(new RegExp(`const REGION = '${RESERVED_HUES.find((r) => r.name === 'region green')!.colour}'`))
   })
 
   it('are bright enough to read on the dark scene', () => {

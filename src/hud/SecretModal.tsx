@@ -315,7 +315,8 @@ export function ItemCard({ item, onClose, published: object }: { item: WorldItem
             <div className="secret__person-text"><span className="secret__name">the tutorial</span></div>
           </div>
         ) : (<>
-        <div className="secret__creator">
+        {/* A message or a sound opens on its author line (AuthorLine), which says who left it: no second LEFT BY. */}
+        {item.type !== 'message' && item.type !== 'audio' && <div className="secret__creator">
           <span className="secret__label">Left by</span>
           <div className="secret__person">
             <ProfileTap pubkey={author}><ProfilePic pubkey={author} size={40} /></ProfileTap>
@@ -326,7 +327,7 @@ export function ItemCard({ item, onClose, published: object }: { item: WorldItem
             </div>
           </div>
           {profile?.about && <p className="secret__about">{profile.about}</p>}
-        </div>
+        </div>}
 
         {/* Reactions carry no words, only the item's id, so they need no seal
             (arkinox, 2026-09-28): the item's author and the hider are told. */}

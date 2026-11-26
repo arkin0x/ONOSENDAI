@@ -93,7 +93,7 @@ import { MARK_RECEDE_FLOOR, recedeShare } from '../lib/markerSize'
 import { headlampUniforms } from './headlamp'
 import { basicFaceProps, TRANSLUCENT_ORDER } from './shardFaces'
 import { useDrawReach } from './buildZoom'
-import { dropLetter, LetterField, LETTER_GIBSONS, putLetter } from './LetterField'
+import { dropLetter, LetterField, LETTER_GIBSONS, LETTER_REACH, putLetter } from './LetterField'
 import { LevelRing } from './LevelRing'
 import { atlasIndex } from './glyphAtlas'
 import { authorColour } from '../lib/authorColour'
@@ -532,10 +532,10 @@ const FLOURISH_HOLD_MS = 2600
  * while NEARBY said "you"), else the profile's name.
  *
  * The letter is one gibson wide (LETTER_GIBSONS, the width of the box it
- * replaces), so the name stands just above it and its ring, clear of them on
- * screen at any distance (WorldLabel `clear`, `nearFace`, measured on the
- * gibson's cube that holds them both), and the tap target covers the gibson
- * once it is larger than a fingertip.
+ * replaces), and its ring reaches past the gibson, so the name stands just
+ * above the ring, clear of it on screen at any distance (WorldLabel `clear`,
+ * `nearFace`, measured on a cube as wide as the ring: LETTER_REACH), and the
+ * tap target covers the gibson once it is larger than a fingertip.
  */
 export function NoteItem({ w, birth, onTap }: { w: { key: string; lineage?: string; text: string; mine: boolean; author: string; centre: [number, number, number] }; birth: number | undefined; onTap: () => void }): JSX.Element {
   const profile = useProfile(w.author || null)
@@ -562,7 +562,7 @@ export function NoteItem({ w, birth, onTap }: { w: { key: string; lineage?: stri
     <group>
       {flourish && birth !== undefined
         ? <DecodingLabel text={messageBillboard(w.text)} seed={seedOf(w.key)} birth={birth} at={w.centre} />
-        : <WorldLabel text={name} color={NAME_WHITE} at={w.centre} align="center" px={11} clear={{ trueSide: side, minPx: 0, nearFace: true }} recede="credit" />}
+        : <WorldLabel text={name} color={NAME_WHITE} at={w.centre} align="center" px={11} clear={{ trueSide: side * LETTER_REACH, minPx: 0, nearFace: true }} recede="credit" />}
       {/* A fingertip over the letter at any distance, and its whole gibson once it is larger (TapTarget `side`). */}
       <TapTarget px={TAP_PX} side={side} at={w.centre} onTap={onTap} />
     </group>

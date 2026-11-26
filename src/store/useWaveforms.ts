@@ -3,30 +3,30 @@
  * this device, for the card's waveform scrubber and the lists' thumbnails
  * (lib/waveform.ts; direction 7, Voice line).
  *
- * A shape is made when a card opens on a small file, or after its PLAY has
- * opened a file anyway: the decrypted file (lib/audioFile openAudio, which
- * keeps the few heard last, so a PLAY and the shape share one fetch) is
- * decoded on the app's one audio context (lib/audioContext; arkinox,
- * 2026-10-23: one audio plumbing, never a second context) and its peaks
- * kept here by the file's hash for the rest of the visit. Nothing is fetched
- * for a list.
+ * Two ways to the real shape, neither of which fetches anything for a list:
  *
- * Decoding a file whole allocates all of its samples, so only a file small
- * enough to do that safely on a phone is decoded (WAVE_DECODE_MAX_BYTES, and
- * the decoded size under useHiddenAudio's own cap). A larger one keeps its
- * stand-in shape (lib/waveform hashWave) and learns its length from its PLAY
- * (noteDuration).
+ * - A file small enough to decode whole safely (useHiddenAudio
+ *   decodeForShape: the same byte budget and the same one-at-a-time queue as
+ *   a short loop, on the app's one audio context; arkinox, 2026-10-23: one
+ *   audio plumbing, never a second context) is decoded when its card opens
+ *   and its item says it is that small, or once its PLAY has opened it.
+ * - Any other file is drawn as it is heard: while its card plays, the card
+ *   hands in how loud it is and where (noteLevel), each bar keeps the loudest
+ *   moment heard in its slice, and once nearly every bar has been heard the
+ *   shape is the file's own (HEARD_ENOUGH).
+ *
+ * Until then a file wears its stand-in (lib/waveform hashWave). Shapes are
+ * kept by the file's hash for the rest of the visit.
  */
 
 import { create } from 'zustand'
-import { audioContext } from '../lib/audioContext'
 import { openAudio } from '../lib/audioFile'
 import type { AudioItem } from '../lib/audioItem'
-import { peaksOf, WAVE_BARS } from '../lib/waveform'
-import { DECODE_WHOLE_MAX_PCM, isPcmWav, wavDecodedBytes } from './useHiddenAudio'
+import { normalise, peaksOf, WAVE_BARS, WAVE_FLOOR } from '../lib/waveform'
+import { decodeForShape, DECODE_WHOLE_WAV_BYTES } from './useHiddenAudio'
 
-/** The largest file a shape is decoded for, bytes: about a minute and a half of a typical MP3. */
-export const WAVE_DECODE_MAX_BYTES = 1.5 * 1024 * 1024
+/** The share of bars that must have been heard before a heard shape is shown as the file's own. */
+export const HEARD_ENOUGH = 0.9
 
 export interface Wave {
   /** WAVE_BARS peaks, 0 to 1, or empty while only the length is known. */
@@ -42,8 +42,10 @@ interface WaveformsState {
 
 export const useWaveforms = create<WaveformsState>(() => ({ waves: {} }))
 
-/** Hashes being decoded now, or already tried and failed: never asked twice in a visit. */
+/** Hashes decoded, being decoded, or tried and failed: never asked twice in a visit. */
 const tried = new Set<string>()
+/** Per hash, the loudest level heard in each bar's slice so far; -1 not heard yet. */
+const heard = new Map<string, number[]>()
 
 /** Keep a file's shape and length. */
 export function setWave(hash: string, peaks: number[], duration: number): void {
@@ -58,33 +60,60 @@ export function noteDuration(hash: string, duration: number): void {
   setWave(hash, was?.peaks ?? [], duration)
 }
 
-/** Whether a file of `bytes` (0 when the item does not say) may be decoded for its shape before it is opened. */
+/**
+ * How loud the file is at `fraction` of the way through, heard while its
+ * card plays. Once HEARD_ENOUGH of the bars have been heard, the shape is
+ * the heard one, its gaps filled from their neighbours.
+ */
+export function noteLevel(hash: string, fraction: number, level: number, duration: number): void {
+  if (!hash || !(fraction >= 0) || fraction > 1 || !(level >= 0)) return
+  if (useWaveforms.getState().waves[hash]?.peaks.length) return
+  const bars = heard.get(hash) ?? new Array<number>(WAVE_BARS).fill(-1)
+  heard.set(hash, bars)
+  const b = Math.min(WAVE_BARS - 1, Math.floor(fraction * WAVE_BARS))
+  bars[b] = Math.max(bars[b], level)
+  const known = bars.filter((v) => v >= 0).length
+  if (known / WAVE_BARS < HEARD_ENOUGH) return
+  setWave(hash, heardShape(bars), duration)
+  heard.delete(hash)
+}
+
+/** A heard shape with its unheard bars filled from the nearest heard ones, scaled so the loudest is full height. */
+export function heardShape(bars: readonly number[]): number[] {
+  const filled = bars.map((v, i) => {
+    if (v >= 0) return v
+    for (let d = 1; d < bars.length; d++) {
+      const l = bars[i - d], r = bars[i + d]
+      if (l !== undefined && l >= 0) return l
+      if (r !== undefined && r >= 0) return r
+    }
+    return WAVE_FLOOR
+  })
+  return normalise(filled)
+}
+
+/** Whether a file of `bytes` (0 when the item does not say) is small enough to be opened for its shape before it is played. */
 export function waveDecodable(bytes: number): boolean {
-  return bytes > 0 && bytes <= WAVE_DECODE_MAX_BYTES
+  return bytes > 0 && bytes <= DECODE_WHOLE_WAV_BYTES
 }
 
 /**
- * Make a file's shape if it is small enough and not made yet. `opened`: its
- * PLAY has opened the file already, so its size is checked on the bytes and
- * nothing more is fetched.
+ * Make a file's shape by decoding it whole, if it is small enough and not
+ * made yet. `opened`: its PLAY has opened the file already, so nothing more
+ * is fetched and its own bytes decide.
  */
 export function wantWave(audio: Pick<AudioItem, 'url' | 'hash' | 'originalHash' | 'keyHex' | 'nonceHex' | 'mime' | 'size'>, opened = false): void {
   const hash = audio.hash
   if (!hash || tried.has(hash) || useWaveforms.getState().waves[hash]?.peaks.length) return
   if (!opened && !waveDecodable(audio.size)) return
-  const ctx = audioContext()
-  if (!ctx) return
   tried.add(hash)
   void openAudio(audio)
     .then(async (blob) => {
-      if (blob.size > WAVE_DECODE_MAX_BYTES + 16) return
-      const bytes = new Uint8Array(await blob.arrayBuffer())
-      // A WAV says how large it decodes: one too large for a phone is never decoded.
-      if (isPcmWav(bytes) && (wavDecodedBytes(bytes, ctx.sampleRate) ?? Infinity) > DECODE_WHOLE_MAX_PCM) return
-      const buffer = await new Promise<AudioBuffer>((resolve, reject) => {
-        const p = ctx.decodeAudioData(bytes.buffer.slice(0) as ArrayBuffer, resolve, reject)
-        if (p && typeof (p as Promise<AudioBuffer>).catch === 'function') (p as Promise<AudioBuffer>).catch(() => { /* told by the callback */ })
-      })
+      // Past the largest file decoded whole, its bytes are not even read.
+      if (blob.size > DECODE_WHOLE_WAV_BYTES) return
+      const buffer = await decodeForShape(blob, new Uint8Array(await blob.arrayBuffer()))
+      // Too large to decode whole: it is drawn as it is heard instead (noteLevel).
+      if (!buffer) return
       const channels: Float32Array[] = []
       for (let c = 0; c < buffer.numberOfChannels; c++) channels.push(buffer.getChannelData(c))
       setWave(hash, peaksOf(channels, WAVE_BARS), buffer.duration)
@@ -96,5 +125,6 @@ export function wantWave(audio: Pick<AudioItem, 'url' | 'hash' | 'originalHash' 
 /** Forget every shape (tests). */
 export function forgetWaves(): void {
   tried.clear()
+  heard.clear()
   useWaveforms.setState({ waves: {} })
 }

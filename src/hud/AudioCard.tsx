@@ -11,14 +11,14 @@
  * PLAY is the file as it is, from the tap (store/useHiddenAudio): a manual
  * play, whatever the item's autoplay, loop and walk settings, which are for
  * hearing it in the world. A tap or a drag on the waveform moves the play
- * there, and before PLAY starts it there. DOWNLOAD saves the decrypted file.
+ * there, and before PLAY starts it there (once its length is known). DOWNLOAD saves the decrypted file.
  * RESET TRIGGER forgets that this device heard the one-shot fire
  * (lib/audioTrigger), so leaving its sphere and entering again plays it once
  * more. Nothing here shortens or lengthens what plays: the whole file, as
  * before.
  *
- * The waveform is the file's own once it has been opened here: the card
- * opening on a small file, or its PLAY, makes it (store/useWaveforms).
+ * The waveform is the file's own once it is known here: a small file is
+ * decoded for it, a larger one is drawn as it is heard (store/useWaveforms).
  *
  * `moderation` is the row under the actions where MUTE THIS AUDIO and
  * BLOCK AUTHOR go (SecretModal, store/useMutes); absent, nothing is drawn.
@@ -40,9 +40,9 @@ import { Download, Play, RotateCcw, Square } from 'lucide-react'
 import type { AudioItem } from '../lib/audioItem'
 import { audioExtension } from '../lib/audioItem'
 import { hasTrigger, onTriggers, resetTrigger, triggerFired, triggersVersion } from '../lib/audioTrigger'
-import { cardKey, cardTime, downloadAudio, playAudio, seekCard, stopAudio, useHiddenAudio, type MuteSubject } from '../store/useHiddenAudio'
+import { cardKey, cardLevel, cardTime, downloadAudio, playAudio, seekCard, stopAudio, useHiddenAudio, type MuteSubject } from '../store/useHiddenAudio'
 import { trackSilenced, useSoundMutes } from '../store/useSoundMutes'
-import { noteDuration, wantWave } from '../store/useWaveforms'
+import { noteDuration, noteLevel, wantWave } from '../store/useWaveforms'
 import { clockWords, scrubTime } from '../lib/waveform'
 import { useWave, WaveScrubber } from './WaveBars'
 
@@ -108,7 +108,12 @@ export function AudioCard({ id, triggerId, audio, who, moderation }: {
         const now = cardTime(id)
         if (now) {
           setPos((p) => (Math.abs(p.at - now.at) < 0.02 && p.duration === now.duration ? p : now))
-          if (now.duration > 0) noteDuration(audio.hash, now.duration)
+          if (now.duration > 0) {
+            noteDuration(audio.hash, now.duration)
+            // A file too large to decode whole is drawn as it is heard.
+            const level = cardLevel(id)
+            if (level !== null) noteLevel(audio.hash, now.at / now.duration, level, now.duration)
+          }
         }
       }
       raf = window.requestAnimationFrame(tick)
@@ -120,11 +125,17 @@ export function AudioCard({ id, triggerId, audio, who, moderation }: {
     if (sounding) stopAudio(id)
     else void playAudio(id, audio, who, triggerId)
   }
+  // Stopped, or come to its end: the waveform lights nothing, as the next PLAY starts at the top.
+  useEffect(() => { if (!sounding) setPos((p) => (p.at === 0 ? p : { ...p, at: 0 })) }, [sounding])
   const seek = (fraction: number): void => {
+    // With no length known there is nowhere to go to: PLAY starts it.
+    if (!(length > 0)) return
     const t = scrubTime(fraction, length)
     setPos((p) => ({ ...p, at: t }))
-    // Playing, it moves there; not yet playing, PLAY starts there.
-    if (!seekCard(id, t) && !sounding) void playAudio(id, audio, who, triggerId)
+    // Playing, it moves there; not yet playing, PLAY starts there. Asked now, not from this render, so a drag starts it once.
+    const phase = useHiddenAudio.getState().entries[cardKey(id)]?.phase
+    const now = phase === 'playing' || phase === 'loading'
+    if (!seekCard(id, t) && !now) void playAudio(id, audio, who, triggerId)
   }
   const save = (): void => {
     setSaving(true)

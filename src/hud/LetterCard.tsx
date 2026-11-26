@@ -47,8 +47,21 @@ export function LetterCard({ item, author, mine }: {
   const profile = useProfile(author || null)
   const opening = plan.unfoldMs > 0 && !skipped
   const style = { '--author': authorColour(author), '--unfold-ms': `${plan.unfoldMs}ms` } as CSSProperties
-  const skip = (): void => setSkipped(true)
-  const onKey = (e: KeyboardEvent): void => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); skip() } }
+  // Whether the reveal has run its course: from then on the page's keys are its own (a token's buttons, Space scrolling).
+  const [settled, setSettled] = useState(plan.unfoldMs + plan.decodeMs === 0)
+  useEffect(() => {
+    if (settled) return
+    const t = window.setTimeout(() => setSettled(true), plan.unfoldMs + plan.decodeMs + 50)
+    return () => window.clearTimeout(t)
+  }, [settled, plan])
+  const skip = (): void => { if (!settled) setSkipped(true) }
+  const onKey = (e: KeyboardEvent): void => {
+    if (settled || skipped || (e.key !== 'Enter' && e.key !== ' ')) return
+    // A button or a link inside the page (a Cashu token's card) keeps its own keys.
+    if ((e.target as Element | null)?.closest?.('button, a, input, textarea, select')) return
+    e.preventDefault()
+    skip()
+  }
   return (
     <div className={`letter${opening ? ' letter--opening' : ''}`} style={style}>
       <div className="letter__seal">

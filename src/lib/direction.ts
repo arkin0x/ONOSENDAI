@@ -24,7 +24,7 @@ const SIDE = 0.38
 export function directionOf(offset: readonly [number, number, number], near = 1e-6): Direction {
   const [x, y, z] = offset
   const len = Math.hypot(x, y, z)
-  if (!(len > near)) return { deg: 0, words: 'right here' }
+  if (!(len > near)) return { deg: 0, words: 'Right here' }
   const ux = x / len
   const uy = y / len
   const ahead = -z / len

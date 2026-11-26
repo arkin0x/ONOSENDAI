@@ -24,7 +24,7 @@ describe('direction words', () => {
     expect(directionOf([-3, 3, -1]).deg).toBe(315)
     expect(directionOf([3, -3, -1]).words).toBe('Down and to the right')
     expect(directionOf([3, 0, 6]).words).toBe('Behind you to the right')
-    expect(directionOf([0, 0, 0]).words).toBe('right here')
+    expect(directionOf([0, 0, 0]).words).toBe('Right here')
   })
 
   it('never uses an em dash or a tacked-on comma', () => {

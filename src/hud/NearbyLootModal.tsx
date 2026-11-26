@@ -206,8 +206,8 @@ export function Row({ item, me, onView }: { item: NearbyItem; me: string; onView
               : <span className="nearby__label" title={labelOf(item)}>{labelOf(item)}</span>}
         <span className="nearby__meta" style={{ '--author': authorColour(author) } as CSSProperties}>
           {letter && !broken && <span className="nearby__unread">UNREAD</span>}
-          {author && <ProfileTap pubkey={author} className="nearby__dot"><i className="authordot" aria-hidden="true" /></ProfileTap>}
-          <span className="nearby__who">{name}</span>
+          {/* The dot and the name together are the tap for their profile: a fingertip's worth, not an 8px dot. */}
+          {author ? <ProfileTap pubkey={author} className="nearby__dot"><i className="authordot" aria-hidden="true" /><span className="nearby__who">{name}</span></ProfileTap> : <span className="nearby__who">{name}</span>}
           {sound && length > 0 && <span className="nearby__far">· {clockWords(length)}</span>}
           {when && <span className="nearby__when" title={item.createdAt ? formatAgo(item.createdAt) : undefined}>· {when}</span>}
         </span>
@@ -247,8 +247,7 @@ export function SeedRow({ item, me, onView }: { item: NearbyItem; me: string; on
         <span className="nearby__label">{seedName(view?.dna)}</span>
         <span className="nearby__where">{bloomGrowthWords(view)}</span>
         <span className="nearby__meta" style={{ '--author': authorColour(planter) } as CSSProperties}>
-          {planter && <ProfileTap pubkey={planter} nested className="nearby__dot"><i className="authordot" aria-hidden="true" /></ProfileTap>}
-          <span className="nearby__who">{name}</span>
+          {planter ? <ProfileTap pubkey={planter} nested className="nearby__dot"><i className="authordot" aria-hidden="true" /><span className="nearby__who">{name}</span></ProfileTap> : <span className="nearby__who">{name}</span>}
           {when && <span className="nearby__when">· {when}</span>}
         </span>
         <WhichWay item={item} />

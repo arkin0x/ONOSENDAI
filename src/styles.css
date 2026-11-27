@@ -16783,8 +16783,8 @@ div.bpt-tile__hit { cursor: default; }
   content: '';
   position: absolute;
   width: calc(var(--mt-cut) * 1.42);
-  height: 2px;
-  background: var(--accent);
+  height: 1px;
+  background: rgba(0, 229, 255, 0.28); /* the same colour and weight as the tile's border */
   transform-origin: 0 0;
 }
 .mining__tile::before { left: 0; top: var(--mt-cut); transform: rotate(-45deg); }

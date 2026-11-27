@@ -59,6 +59,7 @@ import {
 } from './terrainShare'
 import { loadBuilder, releaseBuilderDb } from '../lib/terrain/builderKey'
 import './terrainShareLive'
+import { noteMining } from './miningStats'
 
 /** The first-visit hint's steps: mine one, place one, open the inventory; then done. */
 export const HINT_DONE = 3
@@ -305,6 +306,7 @@ export const useTerrain = create<TerrainState>((set, get) => ({
       noteChange(key)
       clearWalker(s, key)
       count('surveyed')
+      noteMining({ type: 'survey', chunk: key }, s.owner)
       get().say('Terrain revealed from cyberspace\'s structure.')
     } catch {
       s.surveyedKeys.delete(key)
@@ -331,6 +333,7 @@ export const useTerrain = create<TerrainState>((set, get) => ({
     record(s, change)
     advanceHint(0)
     count('mined')
+    noteMining({ type: 'mine', kind: kindId(id) }, s.owner)
     // What it carries as: its kind's own id. A block this client has no kind for is mined, and carried as nothing.
     if (yours <= EMPTY) return true
     const was = kindId(yours)
@@ -386,6 +389,7 @@ export const useTerrain = create<TerrainState>((set, get) => ({
     saveInventory({ ...inv, counts })
     advanceHint(1)
     count('placed')
+    noteMining({ type: 'place', air: target.kind === 'air' }, s.owner)
     return true
   },
 

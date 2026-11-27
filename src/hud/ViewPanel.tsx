@@ -52,6 +52,7 @@ import { useLayers } from '../store/useLayers'
 import { useWalk } from '../store/useWalk'
 import { useFluidWalk } from '../store/fluidSwitch'
 import { useHidesSync } from '../store/hidesSync'
+import { useMiningStats } from '../store/miningStats'
 import { setSfxOn, useSfxOn } from '../store/sfxSwitch'
 import { Field, Switch } from './ui/Switch'
 import { Explanation } from './Explanation'
@@ -99,7 +100,7 @@ export const SETTINGS_GROUPS: ReadonlyArray<{ id: string; title: string; rows: r
   { id: 'movement', title: 'Movement', rows: ['view-walk-gravity', 'view-walk-gravity-hard', 'view-walk-fluid', WALK_LIMITS_ROW] },
   { id: 'interface', title: 'Interface', rows: ['view-walk-look'] },
   { id: 'effects', title: 'Effects', rows: ['view-headlamp', 'view-glow', 'view-block-shading', 'view-walk-avatar', 'view-sfx'] },
-  { id: 'sync', title: 'Sync', rows: ['view-hides-sync'] },
+  { id: 'sync', title: 'Sync', rows: ['view-hides-sync', 'view-mining-sync'] },
 ]
 
 export function ViewPanel(): JSX.Element {
@@ -121,6 +122,7 @@ export function ViewPanel(): JSX.Element {
   const hidesSync = useHidesSync((s) => s.enabled)
   const hidesStatus = useHidesSync((s) => s.status)
   const hidesNote = useHidesSync((s) => s.note)
+  const miningSync = useMiningStats((s) => s.enabled)
   const sfxOn = useSfxOn()
   // The newcomer view shows Interface only: the screen's two ways and the look sphere (newcomer/reveal.ts).
   const plain = useNewcomerView()
@@ -285,6 +287,16 @@ export function ViewPanel(): JSX.Element {
       hint: hidesSync && (hidesStatus === 'unsupported' || hidesStatus === 'error') && hidesNote ? hidesNote : 'Your hidden things on every device signed in as you.',
       on: hidesSync,
       set: (v) => useHidesSync.getState().setEnabled(v),
+    },
+    // Your MINING stats, saved to the relay encrypted to you, so every device
+    // signed in as you shows the same totals (store/miningStats.ts; owner,
+    // 2026-11-27). On by default; off keeps them on this device.
+    {
+      id: 'view-mining-sync',
+      title: 'Sync mining stats',
+      hint: 'Your MINING stats on every device signed in as you.',
+      on: miningSync,
+      set: (v) => useMiningStats.getState().setEnabled(v),
     },
   ]
 

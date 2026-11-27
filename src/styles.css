@@ -16509,3 +16509,97 @@ div.bpt-tile__hit { cursor: default; }
   .bp-place__acts .chest__act, .bp-place__acts .secret__act { min-height: 44px; }
 }
 /* ===== end blueprints: cards in the world (bp-place) ===== */
+
+/* ===== TERRAIN: the ghost block's distance (air-place) ===== */
+/* Beside PLACE while the ghost block shows (terrain/AirStepper.tsx): under SMASH, right of SURVEY's slot, in the
+   tools' free cell. Its slot is always kept, hidden while the ghost is off, so nothing round it ever moves. */
+.terrain-tools > .terrain-tools__slot--air { grid-column: 2; grid-row: 2; height: 38px; }
+.terrain-tools__slot--air.is-off { visibility: hidden; }
+/* A phone held upright: one column with the LOOK ball beside it and the first-visit steps just over it, so the stepper
+   stands left of SMASH, over WALK's pad (its GRAVITY key 4px under it), and every tool keeps its place. */
+@media (max-width: 699px) and (min-height: 521px) {
+  .terrain-tools > .terrain-tools__slot--air { position: absolute; grid-area: auto; top: 0; right: calc(100% + 8px); height: 28px; }
+}
+/* A short screen (a phone on its side): the tools stand level with the cross, so the cell under SMASH reaches into the
+   message slot under the cross (--terrain-cross-clear); the stepper stands over SMASH instead, above the cross's line. */
+@media (max-height: 520px) {
+  .terrain-tools > .terrain-tools__slot--air { position: absolute; grid-area: auto; bottom: calc(100% + 4px); right: 0; height: 28px; }
+}
+/* The frame: TERRAIN's chamfer, the line and fill of every tool, in three cells: nearer, the distance, farther. */
+.terrain-air {
+  --air-line: var(--terrain-line);
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  grid-template-columns: 26px 1fr 26px;
+  align-items: stretch;
+  width: 86px;
+  height: 100%;
+  background: var(--air-line);
+  clip-path: polygon(var(--terrain-cut) 0, 100% 0, 100% calc(100% - var(--terrain-cut)), calc(100% - var(--terrain-cut)) 100%, 0 100%, 0 var(--terrain-cut));
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+}
+.terrain-air::before {
+  content: "";
+  position: absolute;
+  inset: 1px;
+  z-index: -1;
+  background: var(--terrain-fill);
+  clip-path: polygon(calc(var(--terrain-cut) - 0.6px) 0, 100% 0, 100% calc(100% - var(--terrain-cut) + 0.6px), calc(100% - var(--terrain-cut) + 0.6px) 100%, 0 100%, 0 calc(var(--terrain-cut) - 0.6px));
+}
+/* Where it cannot go: the ghost's dim red, on the line too. */
+.terrain-air.is-bad { --air-line: rgba(200, 100, 100, 0.75); }
+.terrain-air__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  touch-action: none;
+  cursor: pointer;
+}
+.terrain-air__btn:active { background: rgba(124, 255, 196, 0.22); }
+.terrain-air__btn:disabled { opacity: 0.35; cursor: default; }
+.terrain-air__btn:disabled:active { background: transparent; }
+/* The distance in blocks, with a hairline either side, like an inlay. */
+.terrain-air__value {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  border-left: 1px solid rgba(124, 255, 196, 0.22);
+  border-right: 1px solid rgba(124, 255, 196, 0.22);
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.terrain-air.is-bad .terrain-air__value { color: #ffb4b4; border-color: rgba(200, 100, 100, 0.45); }
+/* The wheel's hint, where there is a wheel: beside the frame with a clear gap, dimmer than the number, never in its cell. */
+.terrain-tools__slot--air { position: relative; }
+.terrain-air__hint {
+  position: absolute;
+  left: calc(100% + 8px);
+  top: 50%;
+  transform: translateY(-50%);
+  display: none;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-shadow: 0 1px 2px #000;
+  pointer-events: none;
+}
+@media (hover: hover) and (pointer: fine) {
+  .terrain-air__hint { display: inline-flex; }
+}
+/* A narrow window held upright: SMASH stands right beside the stepper, so the hint stays in the tooltip. */
+@media (hover: hover) and (pointer: fine) and (max-width: 699px) and (min-height: 521px) {
+  .terrain-air__hint { display: none; }
+}
+/* ===== end TERRAIN: the ghost block's distance (air-place) ===== */

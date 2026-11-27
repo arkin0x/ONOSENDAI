@@ -50,6 +50,8 @@ import { BARE_HOLD_MS, COMPILER_HOLD_MS, RESOLVE_AFTER_MS } from '../lib/bluepri
 import { PrizeCard, PrizeFlights, PrizePicker, PrizeStrip, usePrizesHere } from './PrizePanel'
 import { useBlueprintTool } from '../store/useBlueprintTool'
 import { recordAtCursor } from '../lib/blueprint/capture'
+import { useAirPlace } from '../store/useAirPlace'
+import { AirStepper } from './AirStepper'
 
 /** A press held this long without moving places (a long press). */
 export const LONG_PRESS_MS = 420
@@ -134,7 +136,9 @@ export const WHEEL_STEP = 40
  * before, round the nine, while the pointer is over the scene or captured.
  * Over a menu or a panel the wheel scrolls as ever. The scene's own wheel
  * zoom is already off while walking (scene/Scene.tsx enableZoom), so nothing
- * else hears it here. Returns what stops it.
+ * else hears it here. While the ghost block shows (no block in reach, one in
+ * hand: lib/terrain/airPlace.ts), the wheel sets how far along the look it
+ * stands instead: up farther, down nearer, a block a notch. Returns what stops it.
  */
 export function terrainWheel(on: EventTarget): () => void {
   let acc = 0
@@ -146,6 +150,13 @@ export function terrainWheel(on: EventTarget): () => void {
     const d = e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1)
     // A mouse's notch is one slot, however many pixels it says; a trackpad's small deltas add up to one.
     acc = Math.abs(d) >= WHEEL_STEP ? Math.sign(d) * WHEEL_STEP : acc + d
+    // The ghost at arm's length showing: the wheel moves it along the look.
+    const air = useAirPlace.getState()
+    if (air.ghost !== 'off') {
+      if (acc >= WHEEL_STEP) { air.nudge(-1); acc = 0 }
+      else if (acc <= -WHEEL_STEP) { air.nudge(1); acc = 0 }
+      return
+    }
     const n = st.inventory.hotbar.length
     let slot = st.inventory.slot
     if (acc >= WHEEL_STEP) { slot = (slot + 1) % n; acc = 0 }
@@ -578,7 +589,8 @@ function TerrainScreen({ covered }: { covered: boolean }): JSX.Element {
             <span className="terrain-act__bar" aria-hidden />
           </button>
         </span>
-        <button className="terrain-act terrain-act--place" {...noCallout} onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); terrainInput.action = { kind: 'place', at: null } }} title="Place the chosen block on the face at the cross (E, or right click)" aria-label="Place (E)"><Box size={15} strokeWidth={2.25} aria-hidden />PLACE<Key>E</Key></button>
+        <button className="terrain-act terrain-act--place" {...noCallout} onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); terrainInput.action = { kind: 'place', at: null } }} title="Place the chosen block on the face at the cross, or at the ghost block in open air (E, or right click)" aria-label="Place (E)"><Box size={15} strokeWidth={2.25} aria-hidden />PLACE<Key>E</Key></button>
+        <AirStepper />
         <span className="terrain-tools__slot">
           {(target || surveying || holding) && (
             <button

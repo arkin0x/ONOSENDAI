@@ -1,0 +1,91 @@
+/**
+ * airStepper.test.tsx - the ghost block's distance beside PLACE
+ * (terrain/AirStepper.tsx): its slot is always there, hidden while the ghost
+ * is off, so nothing round it moves; while the ghost shows, − and + move it
+ * a block nearer or farther, stopping at the ends; and the tools keep the
+ * stepper's slot in their grid on every screen.
+ */
+
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+import { afterEach, describe, expect, it } from 'vitest'
+import { createElement } from 'react'
+import { mount, settled, textOf, type Host } from '../../test/elementRoot'
+import { AirStepper } from '../AirStepper'
+import { useAirPlace } from '../../store/useAirPlace'
+import { AIR_DEFAULT, AIR_MAX, AIR_MIN } from '../../lib/terrain/airPlace'
+
+const slotOf = (all: Host[]): Host => all.find((h) => String(h.props.className ?? '').includes('terrain-tools__slot--air'))!
+const btn = (all: Host[], label: string): Host => all.find((h) => h.type === 'button' && h.props['aria-label'] === label)!
+const tap = async (b: Host): Promise<void> => {
+  ;(b.props.onPointerDown as (e: unknown) => void)({ preventDefault: () => {}, stopPropagation: () => {} })
+  await settled()
+}
+
+afterEach(() => useAirPlace.setState({ ghost: 'off', distance: AIR_DEFAULT }))
+
+describe('the ghost block\'s distance', () => {
+  it('keeps its slot while the ghost is off, hidden, its buttons out of reach', async () => {
+    useAirPlace.setState({ ghost: 'off', distance: AIR_DEFAULT })
+    const m = await mount(createElement(AirStepper))
+    const slot = slotOf(m.all())
+    expect(slot).toBeTruthy()
+    expect(String(slot.props.className)).toContain('is-off')
+    expect(btn(m.all(), 'Nearer').props.disabled).toBe(true)
+    expect(btn(m.all(), 'Farther').props.disabled).toBe(true)
+    await m.unmount()
+  })
+
+  it('while the ghost shows, − and + move it a block at a time, and stop at the ends', async () => {
+    useAirPlace.setState({ ghost: 'ok', distance: AIR_DEFAULT })
+    const m = await mount(createElement(AirStepper))
+    expect(String(slotOf(m.all()).props.className)).not.toContain('is-off')
+    expect(m.says(String(AIR_DEFAULT))).toBe(true)
+    await tap(btn(m.all(), 'Farther'))
+    expect(useAirPlace.getState().distance).toBe(AIR_DEFAULT + 1)
+    expect(m.says(String(AIR_DEFAULT + 1))).toBe(true)
+    for (let i = 0; i < 10 && !btn(m.all(), 'Farther').props.disabled; i++) await tap(btn(m.all(), 'Farther'))
+    expect(useAirPlace.getState().distance).toBe(AIR_MAX)
+    expect(btn(m.all(), 'Farther').props.disabled).toBe(true)
+    for (let i = 0; i < 10 && !btn(m.all(), 'Nearer').props.disabled; i++) await tap(btn(m.all(), 'Nearer'))
+    expect(useAirPlace.getState().distance).toBe(AIR_MIN)
+    expect(btn(m.all(), 'Nearer').props.disabled).toBe(true)
+    await m.unmount()
+  })
+
+  it('keeps the wheel\'s hint out of the number\'s cell (a mouse there read as a zero: review of #949)', async () => {
+    useAirPlace.setState({ ghost: 'ok', distance: 3 })
+    const m = await mount(createElement(AirStepper))
+    const value = m.all().find((h) => h.props.className === 'terrain-air__value')!
+    expect(textOf(value)).toBe('3')
+    expect(value.children.every((c) => typeof c === 'string' || c.type === '#text')).toBe(true)
+    const hint = m.all().find((h) => h.props.className === 'terrain-air__hint')!
+    const frame = m.all().find((h) => String(h.props.className).startsWith('terrain-air '))
+      ?? m.all().find((h) => h.props.className === 'terrain-air')!
+    // Beside the frame, not inside it.
+    expect(m.all().filter((h) => h === hint).length).toBe(1)
+    const inFrame = (h: Host): boolean => h.children.some((c) => c === hint || (typeof c !== 'string' && inFrame(c)))
+    expect(inFrame(frame)).toBe(false)
+    const css = readFileSync(resolve(__dirname, '../../styles.css'), 'utf8')
+    expect(css).toMatch(/\.terrain-air__hint \{\n  position: absolute;\n  left: calc\(100% \+ 8px\);/)
+    expect(css).toContain('color: rgba(255, 255, 255, 0.6);')
+    await m.unmount()
+  })
+
+  it('goes dim red with the ghost where a block cannot go, its hairlines too', async () => {
+    expect(readFileSync(resolve(__dirname, '../../styles.css'), 'utf8')).toContain('.terrain-air.is-bad .terrain-air__value { color: #ffb4b4; border-color: rgba(200, 100, 100, 0.45); }')
+    useAirPlace.setState({ ghost: 'bad' })
+    const m = await mount(createElement(AirStepper))
+    expect(m.all().some((h) => String(h.props.className ?? '').includes('terrain-air is-bad'))).toBe(true)
+    await m.unmount()
+  })
+
+  it('has a slot of its own in the tools\' grid on every screen, so PLACE, SMASH and SURVEY keep theirs', () => {
+    const css = readFileSync(resolve(__dirname, '../../styles.css'), 'utf8')
+    expect(css).toContain('.terrain-tools > .terrain-tools__slot--air { grid-column: 2; grid-row: 2; height: 38px; }')
+    expect(css).toContain('.terrain-tools__slot--air.is-off { visibility: hidden; }')
+    expect(css).toContain('.terrain-tools > .terrain-tools__slot--air { position: absolute; grid-area: auto; top: 0; right: calc(100% + 8px); height: 28px; }')
+    // A phone on its side: over SMASH, above the cross's line, clear of the ring's plate and the message slot under the cross.
+    expect(css).toContain('.terrain-tools > .terrain-tools__slot--air { position: absolute; grid-area: auto; bottom: calc(100% + 4px); right: 0; height: 28px; }')
+  })
+})

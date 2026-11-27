@@ -30,7 +30,7 @@ vi.mock('../../lib/relay', () => ({
 import { useCyberspace } from '../useCyberspace'
 import { useWalk } from '../useWalk'
 import { useTutorial } from '../useTutorial'
-import { OUT_OF_REACH, setTerrainSession, syncTerrain, terrainSession, useTerrain } from '../useTerrain'
+import { OUT_OF_REACH, airRefusal, setTerrainSession, syncTerrain, terrainSession, useTerrain } from '../useTerrain'
 import { switchMode, currentPadMode, enterTerrainMode, leaveTerrain, pressSecond, backOf, watchLastRing } from '../padMode'
 import { DEFAULT_MODES, modeRoles, resetModes, updateModes, useModes, type ModeId, type ModeSettings } from '../modeOrder'
 import { chunkKey, chunkOf, CELLS } from '../../lib/terrain/coords'
@@ -268,6 +268,96 @@ describe('mining and placing', () => {
     expect(west.surveyed).toBe(false)
     expect(T().message).toBe(OUT_OF_REACH)
     expect(T().place({ cell: [-5, 5, 5], normal: [1, 0, 0], distance: 1 })).toBe(false)
+  })
+})
+
+describe('placing in open air (the ghost at arm\'s length)', () => {
+  /** An open cell in the chunk you stand in with open space on all six sides, clear of your body. */
+  function floatingCell(): [number, number, number] {
+    const s = terrainSession!
+    const open = (x: number, y: number, z: number): boolean => s.world.blockCs(x, y, z) === EMPTY
+    for (let y = 30; y > 1; y--) for (let z = 2; z < 30; z++) for (let x = 2; x < 30; x++) {
+      if (x === 16 && z === 16) continue
+      if (open(x, y, z) && open(x - 1, y, z) && open(x + 1, y, z) && open(x, y - 1, z) && open(x, y + 1, z) && open(x, y, z - 1) && open(x, y, z + 1)) return [x, y, z]
+    }
+    throw new Error('no open air in the chunk')
+  }
+
+  /** Carry one block of the first kind mined, chosen. */
+  function carryOne(): number {
+    const s = terrainSession!
+    const [c] = solidCells(1)
+    const id = s.world.blockCs(...c)
+    expect(T().mine(hitAt(...c))).toBe(true)
+    T().selectSlot(T().inventory.hotbar.indexOf(id))
+    return id
+  }
+
+  it('with no block hit, PLACE fills the ghost\'s cell, touching nothing, and keeps it as any placed block (the log, the inventory)', async () => {
+    const key = await openSurveyed()
+    const s = terrainSession!
+    const id = carryOne()
+    const cell = floatingCell()
+    const waitingBefore = s.pending.get(key)?.length ?? 0
+    expect(T().place(null, { cell, eye: [16, 17, 16] })).toBe(true)
+    expect(s.world.blockCs(...cell)).toBe(id)
+    expect(T().inventory.counts[id]).toBeUndefined()
+    expect(T().tally.placed).toBeGreaterThan(0)
+    // One change waiting in your layer, as a block placed on a face would be.
+    expect((s.pending.get(key)?.length ?? 0)).toBe(waitingBefore + 1)
+    // Kept on the device: back after a reload.
+    await settle()
+    reload()
+    await openSurveyed()
+    await settle()
+    expect(terrainSession!.world.blockCs(...cell)).toBe(id)
+  })
+
+  it('a hit always comes first: the block goes on the face, not in the ghost\'s cell', async () => {
+    await openSurveyed()
+    const s = terrainSession!
+    const [x, y, z] = solidCells(4000).find(([cx, cy, cz]) => cy > 0 && s.world.blockCs(cx, cy - 1, cz) !== EMPTY && !(cx === 16 && cy === 16 && cz === 16))!
+    const id = s.world.blockCs(x, y, z)
+    expect(T().mine(hitAt(x, y, z))).toBe(true)
+    T().selectSlot(T().inventory.hotbar.indexOf(id))
+    const air = floatingCell()
+    expect(T().place({ cell: [x, y - 1, z], normal: [0, 1, 0], distance: 1 }, { cell: air, eye: null })).toBe(true)
+    expect(s.world.blockCs(x, y, z)).toBe(id)
+    expect(s.world.blockCs(...air)).toBe(EMPTY)
+  })
+
+  it('never into a block ("Something\'s already there") nor inside your body ("Too close to you"); nothing is spent', async () => {
+    await openSurveyed()
+    const id = carryOne()
+    const [solid] = solidCells(1)
+    expect(T().place(null, { cell: solid, eye: null })).toBe(false)
+    expect(T().message).toBe("Something's already there")
+    // Your body: the walk's gibson (16, 16, 16 here) and the cells up to the eye.
+    expect(T().place(null, { cell: [16, 17, 16], eye: [16, 17.4, 16] })).toBe(false)
+    expect(T().message).toBe('Too close to you')
+    expect(T().place(null, { cell: [16, 16, 16], eye: null })).toBe(false)
+    expect(T().message).toBe('Too close to you')
+    expect(T().inventory.counts[id]).toBe(1)
+  })
+
+  it('out of reach of your avatar, refused in words as on a face', async () => {
+    await openSurveyed()
+    carryOne()
+    expect(T().place(null, { cell: [-5, 5, 5], eye: null })).toBe(false)
+    expect(T().message).toBe(OUT_OF_REACH)
+  })
+
+  it('the ghost reads refused for the same reasons, and asks only (nothing is surveyed or changed)', async () => {
+    await openSurveyed()
+    const s = terrainSession!
+    const cell = floatingCell()
+    expect(airRefusal(s, { cell, eye: null })).toBeNull()
+    expect(airRefusal(s, { cell: solidCells(1)[0], eye: null })).toBe("Something's already there")
+    expect(airRefusal(s, { cell: [16, 16, 16], eye: null })).toBe('Too close to you')
+    expect(airRefusal(s, { cell: [-5, 5, 5], eye: null })).toBe(OUT_OF_REACH)
+    const west = s.world.slotAt(-1, 0, 0)!
+    expect(west.own ?? null).toBeNull()
+    expect(s.world.blockCs(...cell)).toBe(EMPTY)
   })
 })
 

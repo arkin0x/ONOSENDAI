@@ -64,6 +64,6 @@ describe('the ghost block\'s distance', () => {
     const css = readFileSync(resolve(__dirname, '../../styles.css'), 'utf8')
     expect(css).toContain('.terrain-tools > .terrain-tools__slot--air { grid-column: 2; grid-row: 2; height: 38px; }')
     expect(css).toContain('.terrain-tools__slot--air.is-off { visibility: hidden; }')
-    expect(css).toContain('.terrain-tools > .terrain-tools__slot--air { grid-column: 1; grid-row: 1; height: 30px; }')
+    expect(css).toContain('.terrain-tools > .terrain-tools__slot--air { position: absolute; grid-area: auto; top: 0; right: calc(100% + 8px); height: 28px; }')
   })
 })

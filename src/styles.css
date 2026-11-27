@@ -16460,14 +16460,10 @@ div.bpt-tile__hit { cursor: default; }
    tools' free cell. Its slot is always kept, hidden while the ghost is off, so nothing round it ever moves. */
 .terrain-tools > .terrain-tools__slot--air { grid-column: 2; grid-row: 2; height: 38px; }
 .terrain-tools__slot--air.is-off { visibility: hidden; }
-/* A phone held upright: one column, the LOOK ball beside it, so the stepper takes a short row of its own on top,
-   over SMASH; the rows under it keep their places (the tools stand on the pad's bottom). */
+/* A phone held upright: one column with the LOOK ball beside it and the first-visit steps just over it, so the stepper
+   stands left of SMASH, over WALK's pad (its GRAVITY key 4px under it), and every tool keeps its place. */
 @media (max-width: 699px) and (min-height: 521px) {
-  .terrain-tools { grid-template-rows: 30px 54px 54px 38px; }
-  .terrain-tools > .terrain-act--place { grid-row: 3; }
-  .terrain-tools > .terrain-tools__slot { grid-row: 4; }
-  .terrain-tools > .terrain-tools__slot--smash { grid-row: 2; }
-  .terrain-tools > .terrain-tools__slot--air { grid-column: 1; grid-row: 1; height: 30px; }
+  .terrain-tools > .terrain-tools__slot--air { position: absolute; grid-area: auto; top: 0; right: calc(100% + 8px); height: 28px; }
 }
 /* The frame: TERRAIN's chamfer, the line and fill of every tool, in three cells: nearer, the distance, farther. */
 .terrain-air {

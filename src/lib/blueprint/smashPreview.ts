@@ -51,15 +51,28 @@ export interface Preview {
   bare: boolean
   cells: Array<[number, number, number]>
   state: PreviewState
-  /** Packed cells (packCell), to ask whether a cell is in the set without making strings. */
+  /** The cells packed relative to `hit` (packCell), to ask whether a cell is in the set without making strings (inSet). */
   keys: Set<number>
 }
 
-/** A cell as one number (each axis within 2^16 of the field's origin, far more than a field holds), for a Set without strings. */
-const SPAN = 131072
-const HALF = 65536
-export function packCell(x: number, y: number, z: number): number {
-  return ((x + HALF) * SPAN + (y + HALF)) * SPAN + (z + HALF)
+/**
+ * A cell's offset from the struck block as one number, for a Set without strings. A smash set lies within 15 of the
+ * block struck on every axis (smash.ts), so each offset is far inside PACK_REACH; packed from the field's origin it
+ * collided far out in a field (review of #948).
+ */
+const SPAN = 1024
+const HALF = 512
+/** The farthest offset packCell keeps apart, on any axis. */
+export const PACK_REACH = HALF - 2
+export function packCell(dx: number, dy: number, dz: number): number {
+  return ((dx + HALF) * SPAN + (dy + HALF)) * SPAN + (dz + HALF)
+}
+
+/** Whether a cell (field offsets) is in a preview's set. */
+export function inSet(p: Pick<Preview, 'hit' | 'keys'>, x: number, y: number, z: number): boolean {
+  const dx = x - p.hit[0], dy = y - p.hit[1], dz = z - p.hit[2]
+  if (Math.abs(dx) > PACK_REACH || Math.abs(dy) > PACK_REACH || Math.abs(dz) > PACK_REACH) return false
+  return p.keys.has(packCell(dx, dy, dz))
 }
 
 /** What a smash at `hit` would do, by the smash's own function (smash.ts smashGroup); null when nothing is there. */
@@ -69,7 +82,7 @@ export function smashPreview(read: (x: number, y: number, z: number) => number, 
   // A construction compiles with the Compiler; a bare hand compiles only the Compiler's own recipe (smash.ts compiles).
   const compiled = compiles(g.arrangement, bare)
   const keys = new Set<number>()
-  for (const c of g.smash) keys.add(packCell(c[0], c[1], c[2]))
+  for (const c of g.smash) keys.add(packCell(c[0] - hit[0], c[1] - hit[1], c[2] - hit[2]))
   return { hit: [hit[0], hit[1], hit[2]], bare, cells: g.smash, state: compiled ? 'compiles' : 'breaks', keys }
 }
 
@@ -116,9 +129,9 @@ const FACES: ReadonlyArray<readonly [number, 1 | -1, number, number]> = [
  * whose neighbour across it is not in the set, lifted FACE_LIFT off it. One array for the whole set, so it is one
  * mesh and one draw, never one per cell.
  */
-export function outerFaces(cells: ReadonlyArray<Cell>, keys: ReadonlySet<number>): Float32Array {
+export function outerFaces(cells: ReadonlyArray<Cell>, keys: ReadonlySet<number>, origin: Cell = [0, 0, 0]): Float32Array {
   // Whether the neighbour across a face is in the set, with no array made per face.
-  const open = (c: Cell, a: number, s: number): boolean => !keys.has(packCell(c[0] + (a === 0 ? s : 0), c[1] + (a === 1 ? s : 0), c[2] + (a === 2 ? s : 0)))
+  const open = (c: Cell, a: number, s: number): boolean => !keys.has(packCell(c[0] - origin[0] + (a === 0 ? s : 0), c[1] - origin[1] + (a === 1 ? s : 0), c[2] - origin[2] + (a === 2 ? s : 0)))
   let faces = 0
   for (const c of cells) for (const [a, s] of FACES) if (open(c, a, s)) faces++
   const out = new Float32Array(faces * 18)
@@ -152,8 +165,8 @@ export interface PreviewAim {
 /**
  * Works the preview out again only when what it depends on changes (the field, the aimed cell, the hand, the blocks'
  * version), and only once that has held for PREVIEW_DEBOUNCE_MS: never per frame. While a new aim waits, the old set
- * stays on screen if the new cell is in it with the same hand (sweeping across one build does not blink), else
- * nothing is shown, so a stale set never sits on a block it does not hold.
+ * stays on screen if the new cell is in it with the same hand and the same blocks (sweeping across one build does not
+ * blink), else nothing is shown, so a stale set never sits on a block it does not hold.
  */
 export class PreviewTracker {
   /** The preview worked out last, for `done`; null when there was nothing there. */
@@ -201,7 +214,7 @@ export class PreviewTracker {
     }
     // Waiting: the old set only while the new cell is one of its own, with the same hand, in the same field.
     const old = this.has ? this.current : null
-    if (old && aim.field === this.doneField && aim.bare === old.bare && old.keys.has(packCell(aim.x, aim.y, aim.z))) return old
+    if (old && aim.field === this.doneField && aim.bare === old.bare && aim.version === this.doneVersion && inSet(old, aim.x, aim.y, aim.z)) return old
     return null
   }
 }

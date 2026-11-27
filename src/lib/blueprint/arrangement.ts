@@ -80,6 +80,9 @@ export function smashCells(read: (x: number, y: number, z: number) => number, hi
 function flood(read: (x: number, y: number, z: number) => number, hit: Cell, below: number, above: number): { cells: Array<[number, number, number]>; has: (x: number, y: number, z: number) => boolean } {
   // What was looked at, in a grid over the window (one byte a cell: 1 looked at, 2 in the group), not a set of strings:
   // the Compiler's window is 31 by 31 by 31, and the smash preview works it out each time the aim rests on a new block.
+  // A reach under one looks at the struck block alone, as the set of strings did (review of #948: a reach of 0 threw).
+  below = Math.max(0, below)
+  above = Math.max(0, above)
   const w = below + above + 1
   const x0 = hit[0] - below, y0 = hit[1] - below, z0 = hit[2] - below
   const grid = new Uint8Array(w * w * w)

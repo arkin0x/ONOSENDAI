@@ -14590,24 +14590,34 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
 }
 .terrain-survey__btn:disabled { opacity: 0.6; cursor: default; }
 
-/* Under the cross, from the top: the hold ring's name plate while a hold is up (.hold-ring__label), what a smash there
-   would do (one 11px line), then the message slot. The line and the slot start --terrain-cross-clear below the centre:
-   half the ring, the plate's gap and height, and a gap, always, so they sit just under the ring and its plate when a
-   hold shows them and never move when it starts or ends. */
+/* Round the cross (owner's taste: nothing moves, nothing over the controls; review of #948): the hold ring and, under
+   it, its name plate while a hold is up (.hold-ring); just over the ring, what a smash there would do (one 11px line, its
+   slot always kept); over that, the message slot, growing upward. Under the cross belongs to the plate and, on a phone,
+   to the first-visit steps, SMASH and LOOK. On a screen on its side (short) there is no room over the cross either (the
+   steps and the instruments are there), so the line and the message stand beside the ring, to its right, clear of
+   LOOK. Every place is fixed: a hold starting or ending, or a line coming and going, moves nothing. */
 .terrainview {
   --hold-ring-size: 48px;
-  --hold-plate-h: 20px;
-  --terrain-cross-clear: calc(var(--hold-ring-size) / 2 + 4px + var(--hold-plate-h) + 6px);
+  /* From the centre to the bottom of the preview line: half the ring and a gap. */
+  --terrain-over-cross: calc(var(--hold-ring-size) / 2 + 6px);
 }
 .terrain-smash-preview {
   position: absolute;
   left: 16px;
   right: 16px;
-  top: calc(50% + var(--terrain-cross-clear));
+  bottom: calc(50% + var(--terrain-over-cross));
   height: 16px;
   display: flex;
   justify-content: center;
   pointer-events: none;
+}
+@media (max-height: 520px) {
+  .terrain-smash-preview {
+    bottom: auto;
+    top: calc(50% - 8px);
+    left: calc(50% + var(--terrain-over-cross));
+    justify-content: flex-start;
+  }
 }
 .terrain-smash-preview__text {
   display: inline-flex;
@@ -14632,10 +14642,23 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
   position: absolute;
   left: 16px;
   right: 16px;
-  top: calc(50% + var(--terrain-cross-clear) + 20px);
+  bottom: calc(50% + var(--terrain-over-cross) + 16px + 6px);
   display: flex;
+  align-items: flex-end;
   justify-content: center;
   pointer-events: none;
+}
+/* On its side: right of the ring and its plate, under the preview line, short of LOOK and JUMP at the right edge. */
+@media (max-height: 520px) {
+  .terrain-message {
+    bottom: auto;
+    top: calc(50% + 14px);
+    left: calc(50% + 44px);
+    right: 150px;
+    align-items: flex-start;
+    justify-content: flex-start;
+  }
+  .terrainview .terrain-message__text { text-align: left; }
 }
 .terrain-message__text {
   max-width: 420px;
@@ -14669,8 +14692,8 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
 
 /* A hold's progress at the cross (terrain/HoldRing.tsx; owner, 2026-11-27: "my thumb covers the bar"): a thin ring round
    the cross, filling clockwise from the top over the hold in the action's colour (--hold-colour), four short ticks
-   outside it, and the action's name and the seconds left under it in white on a small chamfered plate, in the message
-   slot's place (hidden while the ring is up, so nothing moves). A plain linear fill: nothing pulses. */
+   outside it, and the action's name and the seconds left under it in white on a small chamfered plate. The message
+   stands over the cross, clear of them (.terrain-message). A plain linear fill: nothing pulses. */
 .hold-ring {
   position: absolute;
   left: 50%;
@@ -14701,9 +14724,6 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
   display: inline-flex;
   align-items: baseline;
   gap: 6px;
-  box-sizing: border-box;
-  /* A fixed height, so the line under it (.terrain-smash-preview, --terrain-cross-clear) is placed clear of it. */
-  height: var(--hold-plate-h, 20px);
   padding: 2px 8px;
   white-space: nowrap;
   background: rgba(2, 5, 9, 0.55);
@@ -14718,7 +14738,8 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
 }
 /* The seconds keep one width as they count down, so the plate never changes size. */
 .hold-ring__secs { min-width: 2ch; text-align: right; font-variant-numeric: tabular-nums; letter-spacing: 0.04em; }
-.terrain-message.is-under-hold { visibility: hidden; }
+/* On a short phone the first-visit steps reach the cross: they give way while the ring is up, their slot kept. */
+.terrain-hint.is-under-hold { visibility: hidden; }
 @media (prefers-reduced-motion: reduce) {
   .hold-ring { animation: none; }
 }

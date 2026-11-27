@@ -22,13 +22,12 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { BufferAttribute, BufferGeometry, DoubleSide, MeshBasicMaterial, type Mesh } from 'three'
-import { cellInReach, terrainSession, useTerrain, type TerrainSession } from '../store/useTerrain'
+import { cellInReach, compilerInHand, headNow, terrainSession, useTerrain, type TerrainSession } from '../store/useTerrain'
 import { useCyberspace } from '../store/useCyberspace'
 import { walkMenuCovering } from '../store/walkInput'
 import { modalUp } from '../hooks/useEscape'
 import { useReducedMotion } from '../hooks/useReducedMotion'
 import { useSmashHold } from '../terrain/smashHold'
-import { isCompiler } from '../lib/terrain/terrainDb'
 import { RESOLVE_AFTER_MS, SWING_MS } from '../lib/blueprint/smash'
 import { PreviewTracker, advancePhase, previewColor, pulseOpacity, outerFaces, showPreview, smashPreview, type Preview, type PreviewAim } from '../lib/blueprint/smashPreview'
 import { NO_BLOOM_BLEND } from './shardFaces'
@@ -40,6 +39,17 @@ export function makePreviewMaterial(): MeshBasicMaterial {
     color: '#ffffff', transparent: true, opacity: 0, depthTest: true, depthWrite: false, side: DoubleSide, toneMapped: false,
     polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2, forceSinglePass: true, ...NO_BLOOM_BLEND,
   })
+}
+
+/** The last reach asked: asked again only when the field, the block, where you stand or the check changes (it makes BigInts). */
+const reachMemo: { s: TerrainSession | null; x: number; y: number; z: number; head: unknown; check: unknown; ok: boolean } = { s: null, x: 0, y: 0, z: 0, head: null, check: null, ok: false }
+function reachable(s: TerrainSession, cell: readonly [number, number, number], check: typeof cellInReach): boolean {
+  const head = headNow()
+  const m = reachMemo
+  if (m.s === s && m.check === check && m.head === head && m.x === cell[0] && m.y === cell[1] && m.z === cell[2]) return m.ok
+  m.s = s; m.check = check; m.head = head; m.x = cell[0]; m.y = cell[1]; m.z = cell[2]
+  m.ok = check(s, cell)
+  return m.ok
 }
 
 /** What the preview aims at this frame, or null for nothing: written into `out`, so a frame makes nothing new. */
@@ -58,9 +68,9 @@ export function previewAim(out: PreviewAim, now: number, s: TerrainSession | nul
     bare = hold.bare
   } else {
     // Not holding: only with the Compiler in hand, at a block in reach (holdSmash refuses one out of reach).
-    bare = !isCompiler(st.inventory.hotbar[st.inventory.slot])
+    bare = !compilerInHand()
     const hit = terrainCursor.hit
-    if (bare || !hit || !inReach(s, hit.cell)) return null
+    if (bare || !hit || !reachable(s, hit.cell, inReach)) return null
     cell = hit.cell
   }
   out.field = s; out.x = cell[0]; out.y = cell[1]; out.z = cell[2]; out.bare = bare; out.version = s.version
@@ -105,7 +115,7 @@ export function SmashPreview(): JSX.Element {
       builtFor.current = shown
       ;(geometry.current ?? m.geometry).dispose()
       const g = new BufferGeometry()
-      g.setAttribute('position', new BufferAttribute(outerFaces(shown.cells, shown.keys), 3))
+      g.setAttribute('position', new BufferAttribute(outerFaces(shown.cells, shown.keys, shown.hit), 3))
       g.computeBoundingSphere()
       geometry.current = g
       m.geometry = g

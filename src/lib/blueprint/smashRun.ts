@@ -12,7 +12,7 @@
  */
 
 import { sha256 } from '@noble/hashes/sha2.js'
-import { useTerrain, terrainSession, cellInReach, OUT_OF_REACH } from '../../store/useTerrain'
+import { useTerrain, terrainSession, cellInReach, compilerInHand, OUT_OF_REACH } from '../../store/useTerrain'
 import { useSmashFx } from '../../store/useSmashFx'
 import { useBlueprints } from '../../store/useBlueprints'
 import { useCyberspace } from '../../store/useCyberspace'
@@ -22,7 +22,6 @@ import { followsKnown } from '../../store/terrainShare'
 import { cancelSmashHold as cancelHold, startSmashHold, useSmashHold } from '../../terrain/smashHold'
 import { humStart, humStop, impact, whoosh } from './smashSound'
 import { terrainCursor } from '../../scene/TerrainLayer'
-import { isCompiler } from '../terrain/terrainDb'
 import { query } from '../relay'
 import { regionKeyAt } from '../shardCrypto'
 import { bytesToHex, type NostrEvent } from '../events'
@@ -32,11 +31,8 @@ import { BARE_HOLD_MS, COMPILER_HOLD_MS, RESOLVE_AFTER_MS, SWING_MS, compile, co
 import { readRecord, type Prize, type RecordEvent } from './format'
 import type { ToyRow } from './blueprintDb'
 
-/** Whether the Compiler is the chosen slot (otherwise the hand is bare). */
-export function compilerInHand(): boolean {
-  const inv = useTerrain.getState().inventory
-  return isCompiler(inv.hotbar[inv.slot])
-}
+// Whether the Compiler is the chosen slot (otherwise the hand is bare): with the terrain store, where the preview asks it too.
+export { compilerInHand } from '../../store/useTerrain'
 
 /** Start the smash hold at the block under the cross: COMPILER_HOLD_MS with the Compiler, BARE_HOLD_MS bare (lib/blueprint/smash.ts). */
 export function holdSmash(): void {

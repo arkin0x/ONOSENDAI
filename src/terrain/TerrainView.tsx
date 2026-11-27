@@ -268,11 +268,11 @@ function useCompiling(): boolean {
 }
 
 /**
- * What a smash at the cross would do, in one line just under the cross (scene/SmashPreview.tsx pulses the blocks):
- * COMPILES for a construction, BREAKS and the count for anything else, with a mark in the pulse's colour. Its slot is
- * always there, so nothing moves when it comes and goes. It sits under the hold ring and its name plate
- * (HoldRing.tsx; the --terrain-cross-clear offset), whether a ring is up or not, so a hold starting or ending never
- * moves it; the message slot sits under it.
+ * What a smash at the cross would do, in one line just over the hold ring's place (scene/SmashPreview.tsx pulses the
+ * blocks): COMPILES for a construction, BREAKS and the count for anything else, with a mark in the pulse's colour. Its
+ * slot is always there, whether a ring is up or not, so nothing moves when it or a hold comes and goes (styles.css
+ * --terrain-over-cross). Over the cross (beside the ring on a screen on its side) it never covers the first-visit
+ * steps, SMASH or LOOK.
  */
 export function SmashPreviewLabel(): JSX.Element {
   const state = useSmashPreview((s) => s.state)
@@ -558,15 +558,17 @@ function TerrainScreen({ covered }: { covered: boolean }): JSX.Element {
       <span className="terrain-crosshair" aria-hidden />
       {/* A SMASH or SURVEY hold's progress round the cross, where you look, not under your thumb (owner, 2026-11-27). */}
       <HoldRing />
-      {/* What a smash at the cross would do, just under the ring's place (it stays put whether a ring is up or not). */}
+      {/* What a smash at the cross would do, just over the ring's place, or beside it on a screen on its side (it stays put whether a ring is up or not). */}
       <SmashPreviewLabel />
 
-      {/* What just happened (a refusal, a survey), under the cross, in a slot of its own: up to two lines, nothing moves.
-          While a hold's ring is up its name and seconds take this place, so the slot is hidden (kept) under them. */}
-      <div className={`terrain-message${holding || smashing ? ' is-under-hold' : ''}`} role="status" aria-live="polite">{message ? <span className="terrain-message__text">{message}</span> : compiling ? <span className="terrain-message__text terrain-message__text--compiling">COMPILING</span> : catching ? <span className="terrain-message__text">{standing}</span> : null}</div>
+      {/* What just happened (a refusal, a survey), in a slot of its own, nothing moves: over the preview line, growing
+          upward, clear of the hold ring and its plate under the cross and of the controls under it (review of #948);
+          on a screen on its side, beside the ring instead (styles.css). */}
+      <div className="terrain-message" role="status" aria-live="polite">{message ? <span className="terrain-message__text">{message}</span> : compiling ? <span className="terrain-message__text terrain-message__text--compiling">COMPILING</span> : catching ? <span className="terrain-message__text">{standing}</span> : null}</div>
 
-      {/* The first visit's three steps, just over the hotbar, in a slot of its own. */}
-      <div className="terrain-hint" aria-live="polite">
+      {/* The first visit's three steps, just over the hotbar, in a slot of its own. On a short phone that slot reaches the
+          cross, so while a hold's ring is up the steps give way to it (hidden, their slot kept). */}
+      <div className={`terrain-hint${holding || smashing ? ' is-under-hold' : ''}`} aria-live="polite">
         {capturing ? (
           <span className="prize-strip prize-strip--record" role="group" aria-label="Record a blueprint">
             <span className="prize-strip__count">Aim at a build that stands alone</span>

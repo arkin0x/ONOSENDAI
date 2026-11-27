@@ -9,9 +9,10 @@
 import { describe, expect, it } from 'vitest'
 import { smashGroup, COMPILER_REACH, BARE_REACH, MISS_LINE, NO_MATCH_LINE, OFFLINE_LINE, UNKNOWN_LINE, missLine } from '../smash'
 import { FERROVEIN, GLOWCORE, GRIDSTONE, RUSTBAND } from '../recipes'
+import { gather, smashCells } from '../arrangement'
 import {
   PREVIEW_BREAKS, PREVIEW_COMPILES, PREVIEW_DEBOUNCE_MS, PULSE_FULL_MS, PULSE_HIGH, PULSE_LOW, PULSE_MS, PULSE_STEADY, PreviewTracker, advancePhase, packCell,
-  previewColor, previewLine, pulseOpacity, pulsePeriod, outerFaces, showPreview, smashPreview, useSmashPreview, type Preview, type PreviewAim,
+  inSet, previewColor, previewLine, pulseOpacity, pulsePeriod, outerFaces, showPreview, smashPreview, useSmashPreview, type Preview, type PreviewAim,
 } from '../smashPreview'
 
 type Read = (x: number, y: number, z: number) => number
@@ -80,6 +81,16 @@ describe('the preview set is the smash set', () => {
     expect(p.state).toBe('breaks')
     expect(p.cells).toHaveLength(16)
     expect(previewLine(p.state, p.cells.length)).toBe('BREAKS 16')
+  })
+
+  it('a reach of 0 or 1 takes the struck block alone, and never throws (review of #948)', () => {
+    for (const n of [0, 1]) {
+      const g = gather(ground, [0, -1, 0], n)
+      expect(g.cells).toEqual([[0, -1, 0]])
+      expect(smashCells(ground, [0, -1, 0], n, g)).toEqual([[0, -1, 0]])
+    }
+    const lone: Read = (x, y, z) => (x === 0 && y === 0 && z === 0 ? GRIDSTONE : 0)
+    expect(gather(lone, [0, 0, 0], 0).isolated).toBe(true)
   })
 
   it('open space: nothing to preview', () => {
@@ -177,10 +188,21 @@ describe('the outer faces', () => {
     }
   })
 
-  it('packed cells differ for neighbours and for negative offsets', () => {
+  it('packed offsets differ for every cell a smash can reach, either side of the block struck', () => {
     const seen = new Set<number>()
-    for (let x = -2; x <= 2; x++) for (let y = -2; y <= 2; y++) for (let z = -2; z <= 2; z++) seen.add(packCell(x * 1000, y, z))
-    expect(seen.size).toBe(125)
+    for (let x = -16; x <= 16; x++) for (let y = -16; y <= 16; y++) for (let z = -16; z <= 16; z++) seen.add(packCell(x, y, z))
+    expect(seen.size).toBe(33 ** 3)
+  })
+
+  it('far out in a field (past 2^19 on an axis), neighbours stay apart and the faces are whole', () => {
+    const far = 1 << 29
+    const read: Read = (x, y, z) => (y === far && z === -far && (x === far || x === far + 1) ? GRIDSTONE : 0)
+    const p = smashPreview(read, [far, far, -far], false)!
+    expect(p.cells).toHaveLength(2)
+    expect(inSet(p, far + 1, far, -far)).toBe(true)
+    expect(inSet(p, far + 2, far, -far)).toBe(false)
+    expect(inSet(p, far + 131072, far, -far)).toBe(false)
+    expect(outerFaces(p.cells, p.keys, p.hit).length).toBe(10 * 18)
   })
 })
 
@@ -228,6 +250,11 @@ describe('worked out only on change', () => {
     expect(t.step(aimAt(1, 1, 0), 150)).toBe(p)
     // A block outside it: nothing, rather than a set on blocks it does not hold.
     expect(t.step(aimAt(40, -1, 40), 160)).toBeNull()
+    // The blocks changed: the old set is not kept while the new one waits, even on a cell it held.
+    const u = make()
+    u.step(aimAt(1, 0, 0), 0)
+    u.step(aimAt(1, 0, 0), 100)
+    expect(u.step(aimAt(1, 1, 0, false, 2), 150)).toBeNull()
   })
 
   it('nothing aimed: gone at once, and worked out afresh after', () => {

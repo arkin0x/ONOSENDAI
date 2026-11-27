@@ -9,6 +9,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { previewAim } from '../SmashPreview'
 import { useTerrain, type TerrainSession } from '../../store/useTerrain'
+import { setWalkMenuCovering } from '../../store/walkInput'
+import { registerEscape } from '../../hooks/useEscape'
 import { useCyberspace } from '../../store/useCyberspace'
 import { useSmashHold } from '../../terrain/smashHold'
 import { terrainCursor } from '../TerrainLayer'
@@ -86,5 +88,26 @@ describe('when the smash preview shows', () => {
     expect(aim(out(), 1000)).toBeNull()
     expect(aim(out(), 1000 + SWING_MS + RESOLVE_AFTER_MS - 1)).toBeNull()
     expect(aim(out(), 1000 + SWING_MS + RESOLVE_AFTER_MS)).not.toBeNull()
+  })
+
+  it('hidden while the menu covers the scene, and while a modal is up', () => {
+    hand(true)
+    setWalkMenuCovering(true)
+    try { expect(aim(out(), 1000)).toBeNull() } finally { setWalkMenuCovering(false) }
+    expect(aim(out(), 1000)).not.toBeNull()
+    const close = registerEscape('modal', () => {})
+    try { expect(aim(out(), 1000)).toBeNull() } finally { close() }
+    expect(aim(out(), 1000)).not.toBeNull()
+  })
+
+  it('asks reach again only when the block, where you stand or the check changes', () => {
+    hand(true)
+    let asked = 0
+    const check = (): boolean => { asked++; return true }
+    for (let i = 0; i < 50; i++) previewAim(out(), 1000 + i, field, check)
+    expect(asked).toBe(1)
+    terrainCursor.hit = { cell: [3, 4, 6] } as typeof terrainCursor.hit
+    previewAim(out(), 2000, field, check)
+    expect(asked).toBe(2)
   })
 })

@@ -52,7 +52,7 @@ import { useInventory } from '../../store/useInventory'
 import { useShards, type WorldItem } from '../../store/useShards'
 import { coinSide, ItemMark, keyBoxSide, markFadeLeft, MARK_FADE_MS, noteBoxSide, WorldMessages } from '../WorldMessages'
 import { lettersDrawn, LETTER_GIBSONS } from '../LetterField'
-import { ItemToken, TOKEN_CORE, TOKEN_OUTLINE } from '../ItemToken'
+import { ItemToken, TOKEN_CORE, TOKEN_SHAPE } from '../ItemToken'
 import { SEE_THROUGH_BLEND } from '../shardFaces'
 import { useTakeVanish } from '../../store/useOpenCeremony'
 
@@ -175,6 +175,13 @@ function token(root: R3fRoot): { group: Group; core: Mesh; lines: LineSegments }
   return { group: group!, core: core!, lines: lines! }
 }
 
+/** The token's card's box in the world, as drawn. */
+function coreBox(root: R3fRoot): Box3 {
+  const { core } = token(root)
+  core.updateWorldMatrix(true, false)
+  return new Box3().setFromObject(core)
+}
+
 /** The token's width on screen, CSS pixels, from its drawn core's box. */
 function tokenScreenWidth(root: R3fRoot, camera: Camera): number {
   const { core } = token(root)
@@ -217,9 +224,9 @@ describe('a key with no model of its own', () => {
     r = await scene([worldKey('1'.repeat(64))])
     await r.frame()
     const { core, lines } = token(r)
-    const coreMat = core.material as Material & { color: { getHexString: () => string } }
+    const coreMat = core.material as Material & { uniforms: { uColor: { value: { getHexString: () => string } } } }
     expect(coreMat.depthWrite).not.toBe(false)
-    expect(`#${coreMat.color.getHexString()}`).toBe(TOKEN_CORE)
+    expect(`#${coreMat.uniforms.uColor.value.getHexString()}`).toBe(TOKEN_CORE)
     expect((lines.material as Material).depthWrite).toBe(false)
     // No one-gibson wire cube left in the scene.
     const cubes = drawn(r.state().scene).filter((o) => o.type === 'LineSegments' && o.name !== 'item-token-lines' && o.name !== 'letter-fold-lines')
@@ -237,34 +244,46 @@ describe('a key with no model of its own', () => {
   })
 
   it('stands its name and who left it just over the token as drawn, clear of its highest point on screen, near or far', async () => {
-    r = await scene([worldKey('1'.repeat(64))])
-    await r.frame()
-    const scene3 = r.state().scene
-    const size = r.state().size
-    const { group } = token(r)
-    const centre = group.position.clone()
-    const texts: Object3D[] = []
-    scene3.traverse((o) => { if (o.name === 'text') texts.push(o) })
-    // The name and, under it, who left it, the same size (subScale 1).
-    expect(texts).toHaveLength(2)
-    for (const back of [1.5, 2.5, 8, 20, 40]) {
-      const camera = await lookFrom(r, centre, back)
-      group.updateWorldMatrix(true, false)
-      const highest = Math.min(...TOKEN_OUTLINE.map((p) => ((1 - new Vector3(p[0], p[1], p[2]).applyMatrix4(group.matrixWorld).project(camera).y) / 2) * size.height))
-      for (const text of texts) {
-        const world = text.getWorldPosition(new Vector3())
-        const along = -world.clone().applyMatrix4(camera.matrixWorldInverse).z
-        const unitPx = (new Vector3().setFromMatrixScale(text.matrixWorld).y * size.height) / (2 * Math.tan(((camera as PerspectiveCamera).fov * Math.PI) / 360) * along)
-        const y = ((1 - world.clone().project(camera).y) / 2) * size.height
-        expect(y + unitPx / 2).toBeLessThanOrEqual(highest + 0.5)
+    // Held still (reduced motion), so the token stands exactly where it rests, as its name is measured from.
+    ;(globalThis as { matchMedia?: unknown }).matchMedia = (q: string) => ({ matches: q.includes('reduce'), addEventListener: () => {}, removeEventListener: () => {} })
+    try {
+      r = await scene([worldKey('1'.repeat(64))])
+      await r.frame()
+      const scene3 = r.state().scene
+      const size = r.state().size
+      const { group } = token(r)
+      const centre = group.position.clone()
+      const texts: Object3D[] = []
+      scene3.traverse((o) => { if (o.name === 'text') texts.push(o) })
+      // The name and, under it, who left it, the same size (subScale 1).
+      expect(texts).toHaveLength(2)
+      for (const back of [1.5, 2.5, 8, 20, 40]) {
+        const camera = await lookFrom(r, centre, back)
+        // The highest of its card as drawn and its ring's reach turned to the camera, from where it rests.
+        const toY = (v: Vector3): number => ((1 - v.project(camera).y) / 2) * size.height
+        const card = coreBox(r)
+        const corners = [0, 1, 2, 3, 4, 5, 6, 7].map((i) => toY(new Vector3(i & 1 ? card.max.x : card.min.x, i & 2 ? card.max.y : card.min.y, i & 4 ? card.max.z : card.min.z)))
+        const ringTop = toY(new Vector3(0, 1, 0).applyQuaternion(camera.quaternion).multiplyScalar(TOKEN_SHAPE.flat * group.scale.x).add(new Vector3(centre.x, centre.y, centre.z)))
+        const highest = Math.min(ringTop, ...corners)
+        // So close the ring's reach is off the top of the screen: the name is held on screen instead (WorldLabel MAX_LIFT_SHARE).
+        if (ringTop < 0) continue
+        for (const text of texts) {
+          const world = text.getWorldPosition(new Vector3())
+          const along = -world.clone().applyMatrix4(camera.matrixWorldInverse).z
+          const unitPx = (new Vector3().setFromMatrixScale(text.matrixWorld).y * size.height) / (2 * Math.tan(((camera as PerspectiveCamera).fov * Math.PI) / 360) * along)
+          const y = ((1 - world.clone().project(camera).y) / 2) * size.height
+          expect(y + unitPx / 2).toBeLessThanOrEqual(highest + 0.5)
+        }
       }
+    } finally {
+      delete (globalThis as { matchMedia?: unknown }).matchMedia
     }
   })
 
   it('resting on the ground, its name and credit line are never behind the ground, from any camera above it', async () => {
     r = await scene([worldKey('1'.repeat(64))])
-    const lines = markEdges(r.state().scene)
-    const b = worldBox(lines)
+    await r.frame()
+    const b = coreBox(r)
     const centre = b.getCenter(new Vector3())
     // The ground, its top face the cube's bottom face, added to the same scene.
     const { Mesh, BoxGeometry, MeshBasicMaterial, Raycaster } = await import('three')
@@ -291,8 +310,8 @@ describe('a key with no model of its own', () => {
   it('takes a tap anywhere over the cube up close, and a fingertip’s worth off it far away', async () => {
     const id = '1'.repeat(64)
     r = await scene([worldKey(id)])
-    const lines = markEdges(r.state().scene)
-    const centre = worldBox(lines).getCenter(new Vector3())
+    await r.frame()
+    const centre = coreBox(r).getCenter(new Vector3())
     const camera = r.state().camera
     const tapAt = async (dx: number): Promise<void> => {
       const v = centre.clone().project(camera)

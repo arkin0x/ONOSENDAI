@@ -59,14 +59,14 @@ describe('the letters and their rings', () => {
   it('draws every letter in the same few instanced meshes, and every ring in one', async () => {
     await run(1)
     expect(find<InstancedMesh>(r!, 'letter-paper').count).toBe(N)
-    expect(find<InstancedMesh>(r!, 'letter-folds').count).toBe(N)
     expect(find<InstancedMesh>(r!, 'letter-seal').count).toBe(N - 10)
     expect(find<InstancedMesh>(r!, 'letter-seal-broken').count).toBe(10)
     expect(find<InstancedMesh>(r!, 'letter-initial').count).toBe(N - 10)
     expect((find<Mesh>(r!, 'letter-rings').geometry as InstancedBufferGeometry).instanceCount).toBe(N * RING_GLYPHS)
     let meshes = 0
     r!.state().scene.traverse((o) => { if ((o as Mesh).isMesh) meshes++ })
-    expect(meshes).toBe(6)
+    // The sheet, the outline (one screen-space line object), the two seals, the initials, the NEW pulses and the rings.
+    expect(meshes).toBe(7)
   })
 
   it('starts each ring from its message, with cipher glyphs', async () => {

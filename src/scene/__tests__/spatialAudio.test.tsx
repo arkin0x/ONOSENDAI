@@ -55,7 +55,7 @@ vi.mock('../../store/useHiddenAudio', () => ({
   worldFailed: () => false,
   worldPending: () => new Set<string>(),
   worldVoices: () => new Set<string>(),
-  // A sound's level ring asks whether it plays (LevelRing): nothing plays here.
+  // A sound's slices and level lines ask whether it plays (SoundMark): nothing plays here.
   useHiddenAudio: (pick: (s: { entries: Record<string, unknown> }) => unknown) => pick({ entries: {} }),
   cardKey: (k: string) => `card:${k}`,
   worldKey: (k: string) => `world:${k}`,

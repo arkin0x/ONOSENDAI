@@ -234,7 +234,7 @@ export function ViewPanel(): JSX.Element {
       on: headlamp,
       set: (v) => useLayers.getState().setLayer('headlamp', v),
     },
-    // Each hidden sound's box and the blue rings where it plays at full
+    // Each hidden sound and the blue rings where it plays at full
     // volume (DECK-0007 `fade`; scene/AudioSpheres.tsx). Sound spheres until
     // arkinox renamed it, off by default (2026-11-22); drawing only, every
     // sound still plays. Both show while audio is placed in BUILD.

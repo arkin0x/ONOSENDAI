@@ -12,6 +12,13 @@
  *
  * Your own messages are read: you wrote them (isRead `mine`).
  *
+ * Since the one rulebook for hidden things (owner ruling, 2026-11-27) the
+ * same record also keeps the items whose cards were opened and the sounds
+ * heard (hooks/useHiddenState, store/useHiddenAudio), by lineage, so every
+ * hidden thing shows READ the same way. The name stays: it is the record's
+ * key in each identity's store (MESSAGES_READ_LIST), and renaming it would
+ * need a migration.
+ *
  * Pure: nothing here reads a store, the clock or IndexedDB.
  */
 

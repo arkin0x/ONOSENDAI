@@ -1,7 +1,8 @@
 /**
  * floatingNames.test.tsx: which placed things carry their name floating in the
- * world (arkinox, 2026-11-02). A door, a chest and a sound do not: the name is
- * on the card a tap opens. An item keeps its name until the owner decides.
+ * world (arkinox, 2026-11-02). A door and a chest do not: the name is on the
+ * card a tap opens. An item and a sound do: every hidden thing wears its name
+ * over its maker under the one rulebook (owner ruling, 2026-11-27).
  */
 import { describe, expect, it, vi } from 'vitest'
 
@@ -45,14 +46,17 @@ const label = { text: '▣ Wind Chest', color: '#fff', sub: 'by someone', subCol
 const labels = (m: Mounted) => m.all().filter((h) => h.type === 'worldlabel')
 
 describe('floating names in the world', () => {
-  it('none for a door, a chest or a sound; an item keeps its own', () => {
-    expect(FLOATING_NAME).toEqual({ item: true, chest: false, door: false, sound: false })
+  it('none for a door or a chest; an item and a sound keep their own', () => {
+    expect(FLOATING_NAME).toEqual({ item: true, chest: false, door: false, sound: true })
   })
 
-  it('a sound is its box and its note, with no name beside it', async () => {
-    const m = await mount(createElement(AudioMark, { title: 'Rain Loop', at: [0, 0, 0] }))
-    expect(labels(m)).toHaveLength(0)
-    expect(m.all().some((h) => h.type === 'mesh')).toBe(true)
+  it('a sound is its slices and its level lines, its title over who left it, white, at the rulebook size', async () => {
+    const me = useCyberspace.getState().identity.pubkey
+    const m = await mount(createElement(AudioMark, { title: 'Rain Loop', who: { pubkey: me, mine: true }, at: [0, 0, 0] }))
+    const words = labels(m)
+    expect(words).toHaveLength(1)
+    expect(words[0].props).toMatchObject({ text: 'Rain Loop', sub: 'you', color: '#ffffff', subColor: '#ffffff', px: 11 })
+    expect(m.all().some((h) => h.type === 'instancedMesh' && h.props.name === 'sound-slices')).toBe(true)
     await m.unmount()
   })
 

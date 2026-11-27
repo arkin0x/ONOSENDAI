@@ -34,3 +34,28 @@ describe('the holo schematic', () => {
     for (const p of [...c.smoke, ...c.solid.map((s) => s.at)]) for (const v of p) expect(Math.abs(v)).toBeLessThan(0.5)
   })
 })
+
+describe('the marker in the rulebook (#945)', () => {
+  it('corner brackets round a 0.84 box: three arms at each of the eight corners, none longer than its share', async () => {
+    const { bracketSegments, BRACKET_BOX } = await import('../HoloSchematic')
+    const s = bracketSegments(BRACKET_BOX)
+    expect(BRACKET_BOX).toBe(0.84)
+    expect(s.length).toBe(8 * 3 * 6)
+    for (let i = 0; i < s.length; i += 6) {
+      const d = Math.hypot(s[i + 3] - s[i], s[i + 4] - s[i + 1], s[i + 5] - s[i + 2])
+      expect(d).toBeCloseTo(BRACKET_BOX * 0.22)
+      for (let k = 0; k < 3; k++) expect(Math.abs(s[i + k])).toBeCloseTo(BRACKET_BOX / 2)
+    }
+  })
+
+  it('each revealed block keeps its colour and its own edge colour', () => {
+    const view = { size: [2, 1, 1] as const, occupied: [true, true], revealed: new Map([[0, 1], [1, 5]]) }
+    const c = schematicCells(view)
+    expect(c.solid.map((s) => [s.color, s.edge])).toEqual([['#555e60', '#80898c'], ['#943300', '#f47000']])
+  })
+
+  it('a blueprint card opened is read like a letter, an item or a sound', async () => {
+    const { opensAsHidden } = await import('../../hooks/useHiddenState')
+    expect(opensAsHidden('blueprint')).toBe(true)
+  })
+})

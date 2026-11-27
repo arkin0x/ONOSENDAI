@@ -45,6 +45,7 @@ import { useProfile } from '../hooks/useProfile'
 import { isGuideAuthor } from '../tutorial/guideBags'
 import { profileLabel } from '../store/useProfiles'
 import { useCyberspace } from '../store/useCyberspace'
+import { useMarkOpened } from '../hooks/useHiddenState'
 import { editable, movable as movableDep, muteSubject, rowLoss, useShards, worldItemHidden, type WorldItem } from '../store/useShards'
 import { useInventory } from '../store/useInventory'
 import { addToRoom, editPlaced, movePlaced } from '../store/useBuilder'
@@ -183,6 +184,8 @@ export function SecretModal(): JSX.Element | null {
   const close = (): void => useShards.getState().selectSecret(null)
   // A selection that no longer resolves (deleted, scrolled out) closes itself.
   useEffect(() => { if (selected && !item) useShards.getState().selectSecret(null) }, [selected, item])
+  // Opened: READ and no longer NEW for a message, an item or a sound; chests and doors keep NEARBY's own rule (hooks/useHiddenState useMarkOpened).
+  useMarkOpened(item)
   // Escape closes it as a tap outside does (arkinox, 2026-10-01); over a
   // modal that opened it (notifications), which is there again when it closes (modalStack).
   useModalStack(item !== null && author !== '', close)

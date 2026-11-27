@@ -12,6 +12,10 @@
  * held at or before it was in a list that was opened), and the ids of items
  * seen one at a time on their card (`ids`), newest first and capped.
  *
+ * BLUEPRINTS keeps a line of its own the same way (`through.blueprints`):
+ * a blueprint card is new until the BLUEPRINTS list is opened, by the time
+ * this identity came to hold it and its record's id (isNewBlueprint).
+ *
  * Everything held before NEW existed (SEEN_SINCE) counts as seen, so the
  * grids do not open covered in NEW marks the first time, and a new identity
  * starts from the same line: what it takes from then on is new.
@@ -21,8 +25,10 @@
 
 import { isKeyItem, type HeldItem } from './inventory'
 
-/** The two lists of ITEMS, and the grid under each button. */
+/** The two lists of held items in ITEMS, and the grid under each button. */
 export type ItemsKind = 'keys' | 'loot'
+/** Every list a NEW mark is kept for: the two of held items, and BLUEPRINTS. */
+export type SeenKind = ItemsKind | 'blueprints'
 
 /** Unix seconds: NEW began here (2026-11-26). Anything held before it was never new. */
 export const SEEN_SINCE = Date.UTC(2026, 10, 26) / 1000
@@ -32,12 +38,12 @@ export const SEEN_IDS_MAX = 400
 
 export interface ItemsSeen {
   /** Per kind, the newest hold time (unix seconds) that was in a list when it was opened. */
-  through: Record<ItemsKind, number>
+  through: Record<SeenKind, number>
   /** Items seen on their card, newest first. */
   ids: string[]
 }
 
-export const EMPTY_SEEN: ItemsSeen = { through: { keys: SEEN_SINCE, loot: SEEN_SINCE }, ids: [] }
+export const EMPTY_SEEN: ItemsSeen = { through: { keys: SEEN_SINCE, loot: SEEN_SINCE, blueprints: SEEN_SINCE }, ids: [] }
 
 /** Which list a held item is in. */
 export function kindOf(item: Pick<HeldItem, 'type'>): ItemsKind {
@@ -48,15 +54,19 @@ const time = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v
 
 /** What was read back, as this app can use it: anything malformed is dropped, never thrown. */
 export function cleanSeen(raw: unknown): ItemsSeen {
-  const r = (raw && typeof raw === 'object' ? raw : {}) as { through?: Partial<Record<ItemsKind, unknown>>; ids?: unknown }
+  const r = (raw && typeof raw === 'object' ? raw : {}) as { through?: Partial<Record<SeenKind, unknown>>; ids?: unknown }
   const ids = Array.isArray(r.ids) ? r.ids.filter((id): id is string => typeof id === 'string') : []
-  return { through: { keys: time(r.through?.keys), loot: time(r.through?.loot) }, ids: [...new Set(ids)].slice(0, SEEN_IDS_MAX) }
+  return { through: { keys: time(r.through?.keys), loot: time(r.through?.loot), blueprints: time(r.through?.blueprints) }, ids: [...new Set(ids)].slice(0, SEEN_IDS_MAX) }
 }
 
 /** Two records as one, losing nothing either saw: the later line per kind, and every id (`early`'s first). */
 export function mergeSeen(stored: ItemsSeen, early: ItemsSeen): ItemsSeen {
   return {
-    through: { keys: Math.max(stored.through.keys, early.through.keys), loot: Math.max(stored.through.loot, early.through.loot) },
+    through: {
+      keys: Math.max(stored.through.keys, early.through.keys),
+      loot: Math.max(stored.through.loot, early.through.loot),
+      blueprints: Math.max(stored.through.blueprints, early.through.blueprints),
+    },
     ids: [...new Set([...early.ids, ...stored.ids])].slice(0, SEEN_IDS_MAX),
   }
 }
@@ -66,11 +76,21 @@ export function isNewItem(seen: ItemsSeen, item: Pick<HeldItem, 'id' | 'type' | 
   return item.at > seen.through[kindOf(item)] && !seen.ids.includes(item.id)
 }
 
+/** A blueprint card as the seen record counts it: its record's id, and when this identity came to hold it. */
+export function blueprintSeenAs(card: { record: { id: string }; at: number }): { id: string; at: number } {
+  return { id: card.record.id, at: card.at }
+}
+
+/** Whether a blueprint card is NEW: held after BLUEPRINTS was last opened. */
+export function isNewBlueprint(seen: ItemsSeen, card: { record: { id: string }; at: number }): boolean {
+  return card.at > seen.through.blueprints && !seen.ids.includes(card.record.id)
+}
+
 /**
  * The list of `kind` was opened showing `items`: every one of them is seen.
  * The same record when nothing changes, so a caller can skip the write.
  */
-export function seeKind(seen: ItemsSeen, kind: ItemsKind, items: ReadonlyArray<Pick<HeldItem, 'id' | 'at'>>): ItemsSeen {
+export function seeKind(seen: ItemsSeen, kind: SeenKind, items: ReadonlyArray<Pick<HeldItem, 'id' | 'at'>>): ItemsSeen {
   const newest = items.reduce((m, it) => Math.max(m, it.at), seen.through[kind])
   if (newest === seen.through[kind]) return seen
   // An id behind the line now needs no place of its own.

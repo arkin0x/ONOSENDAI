@@ -67,17 +67,57 @@ export interface SurveyedRow {
   t: number
 }
 
-/** What a builder carries, kept on this device: counts by block id, the nine hotbar slots (a block id or 0), and the chosen slot. */
+/**
+ * What a builder carries, kept on this device: counts by block id, the nine
+ * hotbar slots (a block id, COMPILER_ID, or 0), and the chosen slot.
+ * `compiler`: 'made' when this identity made the Compiler from its recipe,
+ * 'granted' when a preview build handed it one to test with
+ * (lib/blueprint/devGrant.ts; production never does). Once it has, the Compiler
+ * always sits in slot 1 (owner, 2026-11-27), and the block slots shift one
+ * along: the ninth block slot is pushed off the bar (its blocks stay in the
+ * bag).
+ */
 export interface Inventory {
   counts: Record<number, number>
   hotbar: number[]
   slot: number
+  compiler?: 'made' | 'granted'
 }
 
 export const HOTBAR_SLOTS = 9
+/** The Compiler's place in the hotbar: never a block id (those are 1 to 255). */
+export const COMPILER_ID = 1000
+
+/** Whether a hotbar entry is the Compiler. */
+export const isCompiler = (id: number): boolean => id === COMPILER_ID
 
 export function emptyInventory(): Inventory {
   return { counts: {}, hotbar: new Array(HOTBAR_SLOTS).fill(0), slot: 0 }
+}
+
+/**
+ * The Compiler joins the bar: slot 1, with the block slots shifted one along
+ * and the chosen slot following its block. Unchanged when it is already there.
+ */
+export function withCompiler(inv: Inventory, how: 'made' | 'granted' = 'made'): Inventory {
+  // Made beats granted: a Compiler made by hand is kept whatever the preview switch says.
+  const compiler = inv.compiler === 'made' ? 'made' : how
+  if (isCompiler(inv.hotbar[0]) && !inv.hotbar.slice(1).some(isCompiler)) return inv.compiler === compiler ? inv : { ...inv, compiler }
+  const blocks = inv.hotbar.filter((id) => !isCompiler(id))
+  const hotbar = [COMPILER_ID, ...blocks].slice(0, HOTBAR_SLOTS)
+  const had = inv.hotbar.indexOf(COMPILER_ID)
+  const slot = isCompiler(inv.hotbar[inv.slot]) ? 0 : Math.min(HOTBAR_SLOTS - 1, inv.slot + (had >= 0 && had < inv.slot ? 0 : 1))
+  return { ...inv, compiler, hotbar, slot }
+}
+
+/** The Compiler off the bar (a preview's grant switched off): the block slots shift back. */
+export function withoutCompiler(inv: Inventory): Inventory {
+  if (!inv.compiler && !inv.hotbar.some(isCompiler)) return inv
+  const blocks = inv.hotbar.filter((id) => !isCompiler(id))
+  const hotbar = [...blocks, ...new Array(HOTBAR_SLOTS).fill(0)].slice(0, HOTBAR_SLOTS)
+  const at = inv.hotbar.indexOf(COMPILER_ID)
+  const slot = at >= 0 && inv.slot > at ? inv.slot - 1 : at === inv.slot ? 0 : inv.slot
+  return { counts: inv.counts, hotbar, slot }
 }
 
 /** Everything one identity has kept. */
@@ -130,7 +170,10 @@ export function tidyInventory(v: unknown): Inventory {
     return Number.isInteger(id) && id > 0 && id < 256 ? id : 0
   })
   const slot = Number.isInteger(v.slot) && v.slot >= 0 && v.slot < HOTBAR_SLOTS ? v.slot : 0
-  return { counts, hotbar, slot }
+  const tidy = { counts, hotbar, slot }
+  // The Compiler, once made, is always in slot 1 (withCompiler), whatever was stored.
+  if (v.compiler !== 'made' && v.compiler !== 'granted') return tidy
+  return withCompiler({ ...tidy, hotbar: v.hotbar.slice(0, HOTBAR_SLOTS).map((id, i) => (i === 0 && isCompiler(id) ? id : hotbar[i])) }, v.compiler)
 }
 
 /**

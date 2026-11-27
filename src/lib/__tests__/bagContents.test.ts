@@ -21,7 +21,7 @@ const LINK2 = `https://nonfungible.cash/claim/${'0a'.repeat(16)}#${'B'.repeat(42
 describe('bagContents', () => {
   it('counts shards (in the bag or by reference), messages, keys, chests and cashu tokens', () => {
     const c = bagContents([ev(3330), ref, ev(1, `here ${TOKEN}`), ev(1, 'hi'), ev(3340), ev(3341)])
-    expect(c).toEqual({ shard: 2, message: 2, key: 1, chest: 1, cashu: 1, nft: 0, audio: 0, door: 0, seed: 0, dna: 0 })
+    expect(c).toEqual({ shard: 2, message: 2, key: 1, chest: 1, cashu: 1, nft: 0, audio: 0, door: 0, seed: 0, dna: 0, blueprint: 0 })
   })
 
   it('counts seeds and the DNAs hidden with them, after door (DECK-0008 §8.2)', () => {
@@ -136,7 +136,7 @@ describe('readBagContents', () => {
   })
 
   it('a bare row says nothing for any kind but the claimable ones', () => {
-    for (const kind of ['shard', 'message', 'key', 'chest', 'audio', 'door', 'seed', 'dna']) expect(readBagContents([['contents', kind]])).toEqual({ money: false, moneyAlone: false, nft: false, nftAlone: false, counts: null })
+    for (const kind of ['shard', 'message', 'key', 'chest', 'audio', 'door', 'seed', 'dna', 'blueprint']) expect(readBagContents([['contents', kind]])).toEqual({ money: false, moneyAlone: false, nft: false, nftAlone: false, counts: null })
   })
 
   it('carries into a bag\'s settings, so a rewrite keeps the choice', () => {

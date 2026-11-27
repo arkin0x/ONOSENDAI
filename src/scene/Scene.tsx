@@ -98,6 +98,7 @@ import { TargetAvatars } from './TargetAvatars'
 import { PresenceAvatars } from './PresenceAvatars'
 import { WorldShards } from './WorldShards'
 import { TerrainLayer } from './TerrainLayer'
+import { PrizeToys } from './PrizeToys'
 import { WorldSeeds } from './WorldSeeds'
 import { WorldMessages } from './WorldMessages'
 import { ChestLooks } from './ChestLooks'
@@ -286,6 +287,8 @@ export function World(): JSX.Element {
       <WorldShards axes={axes} />
       {/* The blocks of the chunks you surveyed, in every mode, and TERRAIN's marks (TerrainLayer). */}
       <TerrainLayer axes={axes} />
+      {/* What a smash compiled, waiting where the build stood (PrizeToys). */}
+      <PrizeToys axes={axes} />
       {/* Each seed's bloom, grown here from its DNA and the blocks since it was planted (DECK-0008). */}
       <WorldSeeds axes={axes} />
       <WorldMessages axes={axes} />

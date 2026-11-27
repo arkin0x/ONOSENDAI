@@ -100,7 +100,13 @@ import {
   keyItemOf,
   isReference,
   learnSealed,
+  BLUEPRINT_KIND,
+  blueprintInnerTemplate,
+  type BlueprintItem,
 } from '../lib/hidden'
+import { BLUEPRINT_RELAY_READY, readRecord } from '../lib/blueprint/format'
+import type { BlueprintCard } from '../lib/blueprint/blueprintDb'
+import { useBlueprints } from './useBlueprints'
 import { dnaTextRefusal, draftPrice, seedWorkHolds, type SeedDraft } from '../lib/seeds/plant'
 import { MineCancelled } from '../lib/avatarWorker'
 import { cancelMining, isMining, plantedTemplate, seedDraftName } from './plantSeed'
@@ -215,6 +221,8 @@ export interface MyDeployment {
   key?: KeyItem
   chest?: ChestItem
   audio?: AudioItem
+  /** A blueprint card (DECK-0010 §7): the creator's record it carries. */
+  blueprint?: BlueprintItem
   at: { x: string; y: string; z: string }
   plane: Plane
   height: number
@@ -298,6 +306,8 @@ export interface WorldItem {
   chest?: ChestItem
   /** Hidden audio (DECK-0007): its file, key and how it is heard. */
   audio?: AudioItem
+  /** A blueprint card (DECK-0010 §7): the creator's record. Its placer ("left here by") is `author`. */
+  blueprint?: BlueprintItem
   createdAt?: number
   /** The bag's lookup id, for anything addressed to the bag (comments). */
   lookupId?: string
@@ -517,6 +527,13 @@ export type ChestContent =
   /** Hidden audio, its file already encrypted and uploaded (AudioCompose): sealed in at the chest's place. */
   | { kind: 'audio'; audio: AudioItem }
   /**
+   * A blueprint card (DECK-0010 §7.3): a copy of a blueprint you hold, its
+   * creator's record unchanged, signed by you at the chest's place. A chest
+   * that holds one stays on this device until blueprints go live
+   * (BLUEPRINT_RELAY_READY).
+   */
+  | { kind: 'blueprint'; card: BlueprintCard }
+  /**
    * Something already sealed in a chest of yours, kept as it is when EDIT or
    * ADD seals the chest again (its event, signed or a rumor, untouched), with
    * the words its row shows.
@@ -705,6 +722,33 @@ export type DeployPending =
    * is not there yet (free). `dna` is the signed DNA once there is one.
    */
   | { type: 'seed'; seed: SeedDraft }
+  /**
+   * A blueprint card (DECK-0010 §7.3, §7.5): a copy of a blueprint you hold,
+   * made or found, left at the build cursor. The card is signed by you and
+   * carries its creator's record unchanged, so the creator keeps the credit
+   * and you are "left here by". Until blueprints go live it is placed LOCAL
+   * only (BLUEPRINT_RELAY_READY, cardsStayLocal).
+   */
+  | { type: 'blueprint'; card: BlueprintCard }
+
+/**
+ * Whether a placement carries a blueprint card while cards stay on this
+ * device (BLUEPRINT_RELAY_READY false): a card, or a chest with one inside.
+ * Such a placement is written LOCAL even when the app is LIVE.
+ */
+export function cardsStayLocal(pending: DeployPending | null): boolean {
+  if (BLUEPRINT_RELAY_READY || !pending) return false
+  if (pending.type === 'blueprint') return true
+  return pending.type === 'chest' && pending.contents.some((c) => c.kind === 'blueprint' || (c.kind === 'sealed' && c.type === 'blueprint'))
+}
+
+/** What the deploy bar says while a card stays on this device (cardsStayLocal). */
+export const CARDS_LOCAL_NOTE = 'Kept on this device until blueprints go live.'
+
+/** A card's name as a bar or a chest row says it: its record's title. */
+export function cardTitle(card: Pick<BlueprintCard, 'record'>): string {
+  return readRecord(card.record)?.title ?? 'blueprint'
+}
 
 /**
  * Whether a deployment can be moved with EDIT: a shard of yours, inline or
@@ -989,6 +1033,8 @@ export function repeatable(pending: DeployPending): boolean {
     case 'audio': return !pending.move
     // Another planting of the same DNA: its own work, mined again.
     case 'seed': return true
+    // Another copy of a public record: a card is no bearer thing (DECK-0010 §7.4).
+    case 'blueprint': return true
     default: {
       const unknown: never = pending
       return unknown
@@ -1381,6 +1427,7 @@ export function pendingName(pending: DeployPending, shard: ShardModel | null): s
     case 'chest': return pending.name
     case 'audio': return pending.audio.title
     case 'seed': return seedDraftName(pending.seed)
+    case 'blueprint': return cardTitle(pending.card)
     default: return shard?.name ?? 'shard'
   }
 }
@@ -1395,6 +1442,7 @@ export function pendingEmpty(pending: DeployPending, shard: ShardModel | null): 
     case 'chest': return !!pending.spot && !pending.move && (pending.name.trim().length === 0 || (!pending.door && pending.contents.length === 0))
     case 'audio': return !pending.audio.url
     case 'seed': return dnaTextRefusal(pending.seed.text) !== null
+    case 'blueprint': return readRecord(pending.card.record) === null
     default: return !shard || (shard.vertices.length === 0 && (shard.parts?.length ?? 0) === 0)
   }
 }
@@ -1750,6 +1798,8 @@ interface ShardsState {
   startDeployMessage: (text: string) => void
   /** Hide a key the composer forged (B1 §3.1). */
   startDeployKey: (key: KeyItem) => void
+  /** Leave a card of a blueprint you hold at the build cursor (DECK-0010 §7.3, §7.5). LOCAL only until blueprints go live. */
+  startDeployBlueprint: (card: BlueprintCard) => void
   /** SEED: plant a DNA at the build cursor (DECK-0008). Its work is mined at COMMIT. */
   startDeploySeed: (seed: SeedDraft) => void
   /** Hide audio the composer encrypted and uploaded (DECK-0007). */
@@ -2086,6 +2136,61 @@ const ROOM_UNREADABLE = 'The room behind this door does not open with its key. N
 const BAG_WAIT_NOTE = 'Waiting for a bag already going out'
 /** The hide waiting on the bag lock, if one is: CANCEL may end it, since it has signed nothing yet. */
 let deployWaiting: DeployPending | null = null
+
+/**
+ * Chests sealed here that hold blueprint cards, by their sealed payload, and
+ * how many (sealChest). A chest's payload is the same through every reseal of
+ * its event that keeps its contents, and the chest's own row keeps what it
+ * sealed (MyDeployment `sealed`) for after a reload.
+ */
+const cardPayloads = new Map<string, number>()
+/** Bags signed here that carry a blueprint card while cards stay on this device: never sent to a relay (signBag, publishBag, sendBag). */
+const cardBags = new WeakSet<NostrEvent>()
+
+/** How many blueprint cards a list of entries carries inline. */
+function cardsAmong(entries: readonly BagEntry[] | undefined): number {
+  let n = 0
+  for (const e of entries ?? []) if (!isReference(e) && e.kind === BLUEPRINT_KIND) n++
+  return n
+}
+
+/**
+ * Whether a bag of yours stays on this device because it carries a blueprint
+ * card (BLUEPRINT_RELAY_READY false): a card of yours in it, or a chest of
+ * yours in it that holds one, by this device's rows. `except` is a row
+ * leaving the bag in this very write (DELETE): once the last card is out, the
+ * bag goes LIVE again as before.
+ */
+function cardsKeepLocal(rows: readonly MyDeployment[], lookupId: string, except?: string): boolean {
+  if (BLUEPRINT_RELAY_READY) return false
+  return rows.some((d) => d.lookupId === lookupId && d.eventId !== except && d.goneFrom === undefined && (d.type === 'blueprint' || (d.type === 'chest' && cardsAmong(d.sealed) > 0)))
+}
+
+/**
+ * The blueprint cards a bag of yours carries (DECK-0010 §7.6): whether it
+ * carries any, inline, in a sealed entry, or inside one of its chests, and
+ * how many each chest holds, by the chest's event id, for its `contents`
+ * count. A chest's contents are known from its payload (cardPayloads) or from
+ * its row (`sealed`). A chest of yours in this bag that held a card keeps the
+ * bag LOCAL even when its new event is not known yet (a reseal while taking
+ * something out of it).
+ */
+export function cardsInBag(entries: readonly BagEntry[], rows: readonly MyDeployment[], lookupId: string): { held: boolean; inChests: Map<string, number> } {
+  const inChests = new Map<string, number>()
+  let held = false
+  for (const e of entries) {
+    // A sealed entry (spec §7.6 overflow) is read as the item it carries: a card, or a chest that may hold one.
+    const item = isReference(e) ? sealedItemOf(e) : e
+    if (!item) continue
+    if (item.kind === BLUEPRINT_KIND) { held = true; continue }
+    if (item.kind !== CHEST_KIND) continue
+    // Matched by its payload as well as its id: a moved chest is a new item carrying the same sealed contents.
+    const n = cardPayloads.get(item.content) ?? cardsAmong(rows.find((d) => d.eventId === item.id || d.chest?.payload === item.content)?.sealed)
+    if (n > 0) { inChests.set(item.id, n); held = true }
+  }
+  if (!held && rows.some((d) => d.lookupId === lookupId && d.type === 'chest' && cardsAmong(d.sealed) > 0)) held = true
+  return { held, inChests }
+}
 
 /** What this list leaves out but must stay stored: rows no list shows. */
 const notShown = (d: MyDeployment | null): boolean => !isListed(d) || unreadable(d)
@@ -2678,7 +2783,8 @@ export const useShards = create<ShardsState>((set, get) => {
       // Anything that must go out only once the bag is signed (an EDIT's
       // resealed object): a signer that refuses the bag stops it here.
       if (beforeSend) await beforeSend()
-      if (!live) {
+      // A bag that carries a blueprint card stays on this device until blueprints go live (cardsInBag).
+      if (!live || cardBags.has(event)) {
         // LOCAL: the signed bag is the record, so what it sealed is the rows' now.
         settleSealed(event, true)
         return { event, published: false }
@@ -2727,6 +2833,8 @@ export const useShards = create<ShardsState>((set, get) => {
    * write of that bag (unsettledSealed).
    */
   async function sendBag(event: NostrEvent, relays: string[] = relaySet()): Promise<{ ok: boolean; reason?: string }> {
+    // Never a bag that carries a blueprint card, until blueprints go live (cardsInBag): it stays as the LOCAL record.
+    if (cardBags.has(event)) { settleSealed(event, false); return { ok: false, reason: CARDS_LOCAL_NOTE } }
     const extra = bagSealed.get(event)
     try {
       if (!extra || (extra.sealed.length === 0 && extra.dropped.length === 0)) {
@@ -2883,7 +2991,9 @@ export const useShards = create<ShardsState>((set, get) => {
     const chosen = plan.refusal ? forced : new Map([...forced, ...plan.convert])
     const entries = withReferences(written, chosen)
     const createdAt = nextBagAt(lookupId)
-    const template = await bagTemplate(entries, key, lookupId, height, createdAt, HIDDEN_KIND, settings, place, heldBy(chosen.values()))
+    // Blueprint cards it carries: counted as `blueprint`, chests included (DECK-0010 §7.6), and kept off the relays until the go.
+    const cards = cardsInBag(written, rowsOf(owner), lookupId)
+    const template = await bagTemplate(entries, key, lookupId, height, createdAt, HIDDEN_KIND, settings, place, heldBy(chosen.values()), cards.inChests)
     // Larger than before, by what is sealed inside: the bag's size follows its plaintext. Past the cap, nothing may be added either.
     const tooBig = bagSizeRefusal(signedBytes(template))
     if (tooBig && (adds || utf8Bytes(JSON.stringify(entries)) > utf8Bytes(JSON.stringify(before)))) throw new Error(tooBig)
@@ -2903,6 +3013,7 @@ export const useShards = create<ShardsState>((set, get) => {
     }
     if (cyber().identity.pubkey !== owner) throw new Error(SWITCHED)
     const bag = await cyber().signEvent(template)
+    if (cards.held && !BLUEPRINT_RELAY_READY) cardBags.add(bag)
     // What goes out first is what the bag names and no relay may have: the
     // entries just sealed, and any the relays' newest version of this bag did
     // not name (one sealed while LOCAL). Compared with what the relays hold
@@ -3192,7 +3303,7 @@ export const useShards = create<ShardsState>((set, get) => {
       if (h.author !== me || !h.inner || !h.keyHex || have.has(h.eventId) || deleted[h.eventId]) continue
       have.add(h.eventId)
       own.push({
-        eventId: h.eventId, inner: h.inner, ref: h.ref, bagId: h.bagId, ...(h.bagAt !== undefined ? { bagAt: h.bagAt } : {}), type: h.type, shard: h.shard, text: h.text, key: h.key, chest: h.chest, audio: h.audio,
+        eventId: h.eventId, inner: h.inner, ref: h.ref, bagId: h.bagId, ...(h.bagAt !== undefined ? { bagAt: h.bagAt } : {}), type: h.type, shard: h.shard, text: h.text, key: h.key, chest: h.chest, audio: h.audio, ...(h.blueprint ? { blueprint: h.blueprint } : {}),
         at: storedAt(h.at), plane: h.plane, height: h.height, lookupId: h.lookupId, keyHex: h.keyHex,
         relays: relaySet(), createdAt: h.createdAt, published: true, bag: h.bag, ...(h.room ? { room: h.room } : {}),
         // Read from a sealed entry: the row carries its reference, as the bag does.
@@ -3355,6 +3466,10 @@ export const useShards = create<ShardsState>((set, get) => {
       } else if (c.kind === 'audio') {
         // A rumor, as in a bag (DECK-0007 §3): the chest's signature vouches for it.
         signed.push(rumorOf(audioInnerTemplate(c.audio, at, plane, createdAt), cs.identity.pubkey))
+      } else if (c.kind === 'blueprint') {
+        // A card signed by you at the chest's place, the creator's record unchanged (DECK-0010 §7.3, §7.5).
+        if (!readRecord(c.card.record)) throw new Error('A blueprint in this chest could not be read. Take it out and add it again.')
+        signed.push(await signAsOwner(blueprintInnerTemplate(c.card.record, at, plane, createdAt)))
       } else {
         // A copy from ITEMS is the same key as this identity made it: one made by another (a draft outlives a switch) is not signed again as yours.
         if (c.copy && c.copy.pubkey !== cs.identity.pubkey) throw new Error('An item in this chest was made by another identity. Take it out and add it again.')
@@ -3365,6 +3480,9 @@ export const useShards = create<ShardsState>((set, get) => {
     }
     if (signed.length === 0) throw new Error('The chest is empty.')
     const sealed = sealEntries(signed, draft.lock.pubkey)
+    // A chest that holds a card is known by its payload, so every bag that carries it stays LOCAL (holdsCards).
+    const cards = signed.filter((e) => !isReference(e) && e.kind === BLUEPRINT_KIND).length
+    if (cards > 0) cardPayloads.set(sealed.payload, cards)
     return { chest: { name: draft.name.trim(), lockPubkey: draft.lock.pubkey, senderPubkey: sealed.senderPubkey, requires: draft.requires.trim(), payload: sealed.payload }, forged, entries: signed }
   }
 
@@ -3396,9 +3514,11 @@ export const useShards = create<ShardsState>((set, get) => {
       ? gathered.entries.map((e) => (standsFor(e, chest) ? inner : e))
       : [...gathered.entries, inner]
     const settings = gathered.settings ?? chest.bag ?? DEFAULT_BAG_SETTINGS
-    const { event, published } = await publishBag(entries, key, chest.lookupId, chest.height, wasPublic, settings, { at, plane: chest.plane }, undefined, gathered.entries, me)
+    // A card sealed in it, or beside it, keeps the bag on this device until blueprints go live (cardsKeepLocal).
+    const sendLive = wasPublic && !cardPayloads.has(next.payload) && !cardsKeepLocal(rowsOf(me).filter((d) => d.eventId !== chest.eventId), chest.lookupId)
+    const { event, published } = await publishBag(entries, key, chest.lookupId, chest.height, sendLive, settings, { at, plane: chest.plane }, undefined, gathered.entries, me)
     // Before anything here changes: the relays still hold the chest as it was.
-    if (wasPublic && !published) throw new Error('No relay took the new bag. The chest stays as it was.')
+    if (sendLive && !published) throw new Error('No relay took the new bag. The chest stays as it was.')
     let row: MyDeployment = chest
     const mine = rowsOf(me).map((d) => {
       if (d.eventId === chest.eventId) {
@@ -4024,7 +4144,7 @@ export const useShards = create<ShardsState>((set, get) => {
       const { event, published } = sent
       if (!published) {
         if (ref) await retractObject(inner).catch(() => undefined)
-        return 'No relay took the bag. Try again when one is reachable.'
+        return cardBags.has(event) ? CARDS_LOCAL_NOTE : 'No relay took the bag. Try again when one is reachable.'
       }
       const { goneFrom: _was, ...rest } = d
       void _was
@@ -4055,6 +4175,9 @@ export const useShards = create<ShardsState>((set, get) => {
       set({ broadcasting: null, broadcastError: SWITCHED, broadcastFailed: lookupId })
       return true
     }
+    // A bag holding a blueprint card (or a chest with one) sends nothing at all until blueprints go live: not its
+    // sealed entries, looks or objects either, which would carry the card or name what stays here.
+    if (!BLUEPRINT_RELAY_READY && cardsKeepLocal(rowsOf(owner), lookupId)) { set({ broadcastError: CARDS_LOCAL_NOTE, broadcastFailed: lookupId }); return false }
     for (const d of rowsOf(owner).filter((m) => m.lookupId === lookupId && m.putBack)) {
       if (!(await putBackNow(d.eventId, owner))) { set({ broadcastError: PUT_BACK_PENDING, broadcastFailed: lookupId }); return false }
     }
@@ -4158,7 +4281,7 @@ export const useShards = create<ShardsState>((set, get) => {
       const settings = existing.settings ?? DEFAULT_BAG_SETTINGS
       const { event, published } = await publishBag(allInners, key, lookupId, items[0].height, true, settings, { at: positionOf(items[0]), plane: items[0].plane }, undefined, existing.entries, owner)
       if (!published) {
-        set({ broadcasting: null, broadcastError: 'No relay took the bag. Try again when one is reachable.', broadcastFailed: lookupId })
+        set({ broadcasting: null, broadcastError: cardBags.has(event) ? CARDS_LOCAL_NOTE : 'No relay took the bag. Try again when one is reachable.', broadcastFailed: lookupId })
         return false
       }
       const relays = relaySet()
@@ -4309,6 +4432,7 @@ export const useShards = create<ShardsState>((set, get) => {
     }),
     startDeployMessage: (text) => set({ pending: { type: 'message', text }, ...freshDeploy() }),
     startDeployKey: (key) => set({ pending: { type: 'key', key }, ...freshDeploy() }),
+    startDeployBlueprint: (card) => set({ pending: { type: 'blueprint', card }, ...freshDeploy() }),
     // Its height fits the largest bloom its scale allows (DeployBar seedReach), until + or - is pressed.
     startDeploySeed: (seed) => set({ pending: { type: 'seed', seed }, ...freshDeploy(), deployHeightAuto: true }),
     setDeployFade: (fade) => {
@@ -5066,6 +5190,7 @@ export const useShards = create<ShardsState>((set, get) => {
       let key: KeyItem | undefined
       let chest: ChestItem | undefined
       let audio: AudioItem | undefined
+      let blueprint: BlueprintItem | undefined
       // Keys forged inside a chest, held by the hider once the chest is hidden.
       // What a chest holds, as sealed, kept on this device (MyDeployment `sealed`).
       let sealedInside: BagEntry[] | undefined
@@ -5190,6 +5315,12 @@ export const useShards = create<ShardsState>((set, get) => {
       } else if (pending.type === 'seed') {
         // Its template is made, and its work mined, inside the try below, once its key is in hand.
         if (dnaTextRefusal(pending.seed.text) !== null || draftPrice(pending.seed) === null) return
+      } else if (pending.type === 'blueprint') {
+        // A copy of the creator's record, unchanged, in a card signed by you (DECK-0010 §7.5).
+        const view = readRecord(pending.card.record)
+        if (!view) { set({ deployStatus: 'error', deployError: 'This blueprint could not be read, so it cannot be left anywhere.' }); return }
+        blueprint = { record: pending.card.record, title: view.title }
+        innerTemplate = blueprintInnerTemplate(pending.card.record, at, plane, createdAt)
       } else {
         text = movedItem?.text ?? pending.text.trim()
         if (!text.trim()) return
@@ -5323,7 +5454,11 @@ export const useShards = create<ShardsState>((set, get) => {
         // A move of something already on the relays goes to the relays, LOCAL
         // or not, as a DELETE does: leaving the old version up while the new
         // one stays here would show it in two places, or in the old one only.
-        const live = cs.live || (was?.published ?? false) || (movedChest?.published ?? false) || (movedItem?.published ?? false)
+        // A blueprint card, or a chest holding one, stays on this device until
+        // blueprints go live (BLUEPRINT_RELAY_READY), LIVE or not (cardsStayLocal).
+        // A chest moved with a card inside counts too: its sealed contents travel with it to the new place.
+        const movingCards = !!movedChest && (cardsAmong(movedChest.sealed) > 0 || (!!movedChest.chest && cardPayloads.has(movedChest.chest.payload)))
+        const live = !cardsStayLocal(pending) && !(movingCards && !BLUEPRINT_RELAY_READY) && !cardsKeepLocal(rowsOf(owner), rk.lookupId) && (cs.live || (was?.published ?? false) || (movedChest?.published ?? false) || (movedItem?.published ?? false))
         // A chest's look over what a tag carries goes as a sealed look (DECK-0004
         // §3.6): its own hidden object, sealed with this bag's key, sent first
         // so no bag names what no relay has, and named by a wrapper in the tag.
@@ -5636,6 +5771,7 @@ export const useShards = create<ShardsState>((set, get) => {
           key,
           chest,
           audio,
+          ...(blueprint ? { blueprint } : {}),
           at: storedAt(at),
           plane,
           height: deployHeight,
@@ -5932,7 +6068,7 @@ export const useShards = create<ShardsState>((set, get) => {
         // Rewrite the region bag without this item; the newer bag replaces it,
         // with the bag's settings as they stand.
         const settings = gathered.settings ?? DEFAULT_BAG_SETTINGS
-        const sent = await publishBag(left, key, item.lookupId, item.height, wasPublic, settings, { at: positionOf(item), plane: item.plane }, undefined, gathered.entries, cs.identity.pubkey).catch(refused)
+        const sent = await publishBag(left, key, item.lookupId, item.height, wasPublic && !cardsKeepLocal(rowsOf(cs.identity.pubkey), item.lookupId, eventId), settings, { at: positionOf(item), plane: item.plane }, undefined, gathered.entries, cs.identity.pubkey).catch(refused)
         if (!sent) return
         const { event, published } = sent
         unnamed = published
@@ -6157,6 +6293,12 @@ export const useShards = create<ShardsState>((set, get) => {
       const muted = useMutes.getState().muted
       // What the mute list hides is neither listed nor taken (review of #464, S5).
       const finds = eventIds.map((id) => discovered[id]).filter((h): h is Hidden => !!h && h.type === 'key' && !findHidden(h, muted, me))
+      // A blueprint card is copied into BLUEPRINTS, never ITEMS, and stays where it is for the next finder
+      // (DECK-0010 §7.4): left here by its bag's or chest's signer.
+      for (const id of eventIds) {
+        const h = discovered[id]
+        if (h?.type === 'blueprint' && h.blueprint && !findHidden(h, muted, me)) useBlueprints.getState().addFound(h.blueprint.record, h.author)
+      }
       const playedIds = playedFinds(me)
       const inPlay = finds.filter((h) => playedIds.has(h.eventId))
       const watchedOnly = finds.filter((h) => !playedIds.has(h.eventId))
@@ -6299,12 +6441,12 @@ export const useShards = create<ShardsState>((set, get) => {
       if (!inItsBag(d)) continue
       // In a room whose door you closed (CLOSE): dissolved with it, yours too, until OPEN.
       if (shut?.(d.eventId)) continue
-      out.push({ key: d.eventId, type: d.type, at: positionOf(d), plane: d.plane, height: d.height, mine: true, author: me, shard: d.shard, text: d.text, keyItem: d.key, chest: d.chest, audio: d.audio, createdAt: d.createdAt, lookupId: d.lookupId, bagId: d.bagId, bagKeyHex: d.keyHex, target: itemTargetOf(d.inner, d.ref), event: d.inner as NostrEvent, ...keptLineage(d) })
+      out.push({ key: d.eventId, type: d.type, at: positionOf(d), plane: d.plane, height: d.height, mine: true, author: me, shard: d.shard, text: d.text, keyItem: d.key, chest: d.chest, audio: d.audio, ...(d.blueprint ? { blueprint: d.blueprint } : {}), createdAt: d.createdAt, lookupId: d.lookupId, bagId: d.bagId, bagKeyHex: d.keyHex, target: itemTargetOf(d.inner, d.ref), event: d.inner as NostrEvent, ...keptLineage(d) })
     }
     for (const h of Object.values(state.discovered)) {
       if (seen.has(h.eventId)) continue
       if (shut?.(h.eventId)) continue
-      out.push({ key: h.eventId, type: h.type, at: h.at, plane: h.plane, height: h.height, mine: false, author: h.author, shard: h.shard, text: h.text, keyItem: h.key, chest: h.chest, audio: h.audio, createdAt: h.createdAt, lookupId: h.lookupId, bagId: h.bagId, ...(h.keyHex ? { bagKeyHex: h.keyHex } : {}), target: itemTargetOf(h.inner, h.ref), chestId: h.chestId, event: h.inner as NostrEvent | undefined, ...lineageOf(h.inner, h.ref) })
+      out.push({ key: h.eventId, type: h.type, at: h.at, plane: h.plane, height: h.height, mine: false, author: h.author, shard: h.shard, text: h.text, keyItem: h.key, chest: h.chest, audio: h.audio, ...(h.blueprint ? { blueprint: h.blueprint } : {}), createdAt: h.createdAt, lookupId: h.lookupId, bagId: h.bagId, ...(h.keyHex ? { bagKeyHex: h.keyHex } : {}), target: itemTargetOf(h.inner, h.ref), chestId: h.chestId, event: h.inner as NostrEvent | undefined, ...lineageOf(h.inner, h.ref) })
     }
     return oneVersionEach(out)
   }

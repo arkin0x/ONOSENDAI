@@ -34,6 +34,11 @@
  * and motions; ADD puts it in, CANCEL drops it with its keypair. Neither is
  * held until it is taken out (arkinox, 2026-11-06); the lock list still
  * offers it, as a key you made.
+ *
+ * + BLUEPRINT puts in a card of a blueprint you hold, made or found
+ * (DECK-0010 §7.3, §7.5): signed by you at the chest's place, the creator's
+ * record unchanged. Until blueprints go live a chest that holds one is sealed
+ * on this device only (useShards cardsStayLocal), and the modal says so.
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
@@ -53,13 +58,14 @@ import type { ShardModel } from 'sno-core/shards'
 import { nip19 } from 'nostr-tools'
 import { CHEST_MAX_PLAINTEXT, forgeKey, isLockPubkey, sizeRefusal, templateBytes } from '../lib/chests'
 import { attributed } from '../lib/client'
-import { MAX_ITEM_NAME, MAX_MESSAGE_LENGTH, messageInnerTemplate, shardInnerTemplate } from '../lib/hidden'
+import { MAX_ITEM_NAME, MAX_MESSAGE_LENGTH, blueprintInnerTemplate, messageInnerTemplate, shardInnerTemplate } from '../lib/hidden'
+import { useBlueprints } from '../store/useBlueprints'
 import { findCashuToken } from '../lib/cashu'
 import { hasNftLink } from '../lib/nftLink'
 import { useCyberspace } from '../store/useCyberspace'
 import { useInventory } from '../store/useInventory'
 import { sealableKeys } from '../lib/inventory'
-import { chestCopiesOf, chestKeyTemplate, chestModelOf, lookModelOf, placedDoorHeight, positionOf, useShards, type ChestContent, type ChestDraft, type ChestLock } from '../store/useShards'
+import { CARDS_LOCAL_NOTE, cardTitle, cardsStayLocal, chestCopiesOf, chestKeyTemplate, chestModelOf, lookModelOf, placedDoorHeight, positionOf, useShards, type ChestContent, type ChestDraft, type ChestLock } from '../store/useShards'
 import { creditOf, useWorkshop } from '../store/useWorkshop'
 import { composeVerdict, SETTLE_MS, useCashu } from './useCashu'
 import { useSettled } from './useSettled'
@@ -145,6 +151,7 @@ function contentLabel(c: ChestContent, shardName: (id: string) => string): strin
   if (c.kind === 'shard') return shardName(c.shardId)
   if (c.kind === 'audio') return c.audio.title
   if (c.kind === 'sealed') return c.label
+  if (c.kind === 'blueprint') return cardTitle(c.card)
   return c.key.name
 }
 
@@ -171,6 +178,11 @@ function itemSettings(key: KeyItem): string {
   if (!key.model) return 'NO MODEL'
   const motions = (key.animation ?? []).map((a) => (a === 'bob' ? 'BOB' : a === 'spin-y' ? 'ROTATE Y' : 'ROTATE X'))
   return ['MODEL', ...motions].join(' · ')
+}
+
+/** The record id a kept card carries, or ''. */
+function cardRecordId(entry: BagEntry): string {
+  try { return (JSON.parse((entry as { content?: string }).content ?? '') as { id?: string }).id ?? '' } catch { return '' }
 }
 
 /** What a row's icon is: its kind, a kept entry's own. */
@@ -322,7 +334,11 @@ export function ChestCompose({ onDone, target = { mode: 'place' } }: { onDone: (
   }, [])
   // What is being added: one editor open at a time.
   // + ITEM: `item` asks FROM MY ITEMS or FORGE NEW; `mine` lists your own; `forge` is the forge.
-  const [adding, setAdding] = useState<'message' | 'shard' | 'item' | 'mine' | 'forge' | 'audio' | null>(null)
+  const [adding, setAdding] = useState<'message' | 'shard' | 'item' | 'mine' | 'forge' | 'audio' | 'blueprint' | null>(null)
+  // + BLUEPRINT's list: every blueprint you hold, made or found, not archived; one already in the chest is marked.
+  const cards = useBlueprints((s) => s.cards)
+  const heldCards = useMemo(() => cards.filter((c) => !c.archived), [cards])
+  const cardsIn = useMemo(() => new Set(contents.flatMap((c) => (c.kind === 'blueprint' ? [c.card.record.id] : c.kind === 'sealed' && c.type === 'blueprint' ? [cardRecordId(c.entry)] : []))), [contents])
   const [text, setText] = useState('')
   // FORGE NEW's item, its keypair made when the forge opens; dropped by CANCEL.
   const [forging, setForging] = useState<KeyItem | null>(null)
@@ -379,6 +395,7 @@ export function ChestCompose({ onDone, target = { mode: 'place' } }: { onDone: (
       if (c.kind === 'message') return [attributed(messageInnerTemplate(c.text.trim(), at, 0, SAMPLE_CREATED_AT))]
       if (c.kind === 'key') return [attributed(chestKeyTemplate(c, at, 0, SAMPLE_CREATED_AT))]
       if (c.kind === 'audio') return [attributed(audioInnerTemplate(c.audio, at, 0, SAMPLE_CREATED_AT))]
+      if (c.kind === 'blueprint') return [attributed(blueprintInnerTemplate(c.card.record, at, 0, SAMPLE_CREATED_AT))]
       if (c.aimed) { const { kind, created_at, tags, content } = c.aimed.signed; return [{ kind, created_at, tags, content }] }
       // As the chest will carry it: a split build's pieces inside it (useShards chestModelOf).
       const found = models.find((s) => s.id === c.shardId)
@@ -441,6 +458,8 @@ export function ChestCompose({ onDone, target = { mode: 'place' } }: { onDone: (
     return m ? turnShard(m, turn) : null
   }, [editing, pending?.look, turn])
   const fields = !editing || editing.fields
+  // A card inside keeps the chest on this device until blueprints go live (useShards cardsStayLocal).
+  const holdsCard = cardsStayLocal({ type: 'chest', name, lock, requires, contents })
 
   return (
     <div className="shards__compose">
@@ -521,7 +540,28 @@ export function ChestCompose({ onDone, target = { mode: 'place' } }: { onDone: (
           <button className="chest__act" onClick={() => setAdding('shard')} disabled={models.length === 0} title={models.length === 0 ? 'Nothing in your workshop yet' : 'One of your workshop models'}>+ SHARD</button>
           <button className="chest__act" onClick={() => setAdding('item')} title="An item you made, or a new one forged here">+ ITEM</button>
           <button className="chest__act" onClick={() => setAdding('audio')} title="An audio file, encrypted and uploaded now">+ AUDIO</button>
+          <button className="chest__act" onClick={() => setAdding('blueprint')} disabled={heldCards.length === 0} title={heldCards.length === 0 ? 'You hold no blueprints yet' : 'A copy of a blueprint you hold. Its maker keeps the credit'}>+ BLUEPRINT</button>
         </div>
+      ) : adding === 'blueprint' ? (
+        <>
+          <ul className="objpick__list compose__models" aria-label="Blueprint you hold">
+            {heldCards.map((card) => {
+              const there = cardsIn.has(card.record.id)
+              return (
+                <li key={card.rowKey}>
+                  <button className="objpick__row" disabled={there} onClick={() => add({ kind: 'blueprint', card })} title={there ? 'Already in this chest' : 'Seal a copy in the chest'}>
+                    <ItemIcon className="chest__glyph chest__glyph--blueprint" type="blueprint" />
+                    <span className="objpick__name">{cardTitle(card)}</span>
+                    <span className="objpick__meta">{there ? 'IN CHEST' : card.source === 'made' ? 'MADE' : 'FOUND'}</span>
+                  </button>
+                </li>
+              )
+            })}
+          </ul>
+          <div className="compose__row">
+            <button className="chest__act" onClick={() => setAdding(null)}>CANCEL</button>
+          </div>
+        </>
       ) : adding === 'audio' ? (
         <AudioUpload idPrefix="chest-audio" submitLabel="ADD" onReady={(audio) => add({ kind: 'audio', audio })} onCancel={() => setAdding(null)} />
       ) : adding === 'message' ? (
@@ -588,6 +628,7 @@ export function ChestCompose({ onDone, target = { mode: 'place' } }: { onDone: (
       </div>
       </>}
 
+      {holdsCard && <span className="chest__status bp-place__local" role="status">{CARDS_LOCAL_NOTE}</span>}
       {(status ?? (editing ? null : deployError)) && <span className="chest__status notice" role="status">{status ?? deployError}</span>}
       {/* EDIT or ADD refused for dropping the last copy of a key (useShards keysLost): ARCHIVE keeps it, then SEAL again. */}
       {editing && status && lostKeys && <button className="chest__act" onClick={() => { useShards.getState().archiveLost(); setStatus('ARCHIVED') }} title="File the key away in ITEMS under ARCHIVED, then seal again">ARCHIVE</button>}
@@ -602,7 +643,7 @@ export function ChestCompose({ onDone, target = { mode: 'place' } }: { onDone: (
           <button className="avatars__go" onClick={cancel} disabled={working}>CANCEL</button>
           {!editing && <button className="avatars__go" onClick={move} disabled={working || midAdd} title={midAdd ? MID_ADD : 'Back to the hide bar, to place it somewhere else'}>MOVE</button>}
           <button className="avatars__go" disabled={!ready || working} onClick={seal} title={midAdd ? MID_ADD : refusal ?? (!lock ? 'Pick what opens it' : !isDoor && contents.length === 0 ? 'Put something in it first' : editing ? 'Seal it again where it stands' : undefined)}>
-            {working ? (deployNote && !editing ? `${deployNote.toUpperCase()}…` : 'SEALING…') : editing ? 'SAVE' : live ? 'SEAL & PUBLISH' : 'SEAL (LOCAL)'}
+            {working ? (deployNote && !editing ? `${deployNote.toUpperCase()}…` : 'SEALING…') : editing ? 'SAVE' : live && !holdsCard ? 'SEAL & PUBLISH' : 'SEAL (LOCAL)'}
           </button>
         </div>
       )}

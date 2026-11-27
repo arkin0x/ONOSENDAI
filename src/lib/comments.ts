@@ -22,6 +22,7 @@
  * the key from the location. No `d` tag, as FF-1 requires of derived events.
  */
 
+import { BLUEPRINT_CARD_KIND } from './blueprint/format'
 import { CHEST_KIND, HIDDEN_KIND, KEY_KIND, MESSAGE_KIND, SHARD_KIND, type HiddenType } from './hidden'
 import { AUDIO_KIND } from './audioItem'
 import { DNA_KIND, SEED_KIND } from './seeds/seedItem'
@@ -145,7 +146,7 @@ export function bagAddress(subject: Pick<CommentSubject, 'author' | 'lookupId'>)
 }
 
 export function itemKind(type: HiddenType): number {
-  return type === 'shard' ? SHARD_KIND : type === 'key' ? KEY_KIND : type === 'chest' ? CHEST_KIND : type === 'audio' ? AUDIO_KIND : type === 'seed' ? SEED_KIND : type === 'dna' ? DNA_KIND : MESSAGE_KIND
+  return type === 'shard' ? SHARD_KIND : type === 'key' ? KEY_KIND : type === 'chest' ? CHEST_KIND : type === 'audio' ? AUDIO_KIND : type === 'seed' ? SEED_KIND : type === 'dna' ? DNA_KIND : type === 'blueprint' ? BLUEPRINT_CARD_KIND : MESSAGE_KIND
 }
 
 /** The item as a parent: a top-level comment answers the item, or for a LIVE LINK the bag only. */

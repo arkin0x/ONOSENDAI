@@ -61,6 +61,13 @@
  * else has no box (arkinox, 2026-11-06, which replaces the solid box of
  * 2026-11-01; lib/worldMarks itemDrawAs, HeldItemMark). Its tap still opens
  * its card. TAKE fades the whole model out over it (scene/ItemVanish).
+ *
+ * A blueprint card (DECK-0010 §7.3) is a holo schematic (HoloSchematic): a
+ * wireframe cube of cyan lines one gibson on a side, the shape inside it as
+ * smoke and revealed blocks, the XYZ compass beside it, holding still so its
+ * axes stay true. Its title and who left it float over it in white, at the
+ * zooms notes are drawn at. A tap opens its card, with TAKE A COPY; one this
+ * identity holds already is drawn at half, and stays for every other finder.
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -107,6 +114,10 @@ import { sealBroken, useMessagesRead } from '../store/useMessagesRead'
 import { recordViewPose } from '../lib/viewPose'
 import { nameLabel, shortNpub } from '../lib/nameLabel'
 import { ItemToken, TOKEN_OUTLINE } from './ItemToken'
+import { HoloSchematic } from './HoloSchematic'
+import { finderView, readRecord } from '../lib/blueprint/format'
+import { useBlueprints } from '../store/useBlueprints'
+import type { BlueprintItem } from '../lib/hidden'
 
 /** A message's tap target, in CSS pixels: a fingertip over the mark, at any zoom. */
 const TAP_PX = 44
@@ -342,7 +353,7 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
     // what it opens is in the lists (ItemRows), one tap away. A chest or a
     // door is drawn as the look it wears (ChestLooks), at the same zooms.
     return useShards.getState().drawnItems()
-      .filter((w) => ((w.type === 'message' && w.text) || w.type === 'key' || (w.type === 'audio' && w.audio && (sounds || spotlit(w, spot)))) && w.plane === anchorPlane)
+      .filter((w) => ((w.type === 'message' && w.text) || w.type === 'key' || (w.type === 'blueprint' && w.blueprint) || (w.type === 'audio' && w.audio && (sounds || spotlit(w, spot)))) && w.plane === anchorPlane)
       .map((w) => ({
         key: w.key,
         type: w.type,
@@ -354,7 +365,8 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
         // The SNO a key wears, and its region's walls about it (ItemModel).
         wears: w.type === 'key' && w.keyItem?.model ? { model: w.keyItem.model, animation: w.keyItem.animation ?? NO_MOTION } : undefined,
         region: w.type === 'key' && w.keyItem?.model ? regionBox(w.at, w.height, 0, axes) : null,
-        text: w.type === 'message' ? w.text! : w.type === 'audio' ? w.audio!.title : itemMarkText(w),
+        text: w.type === 'message' ? w.text! : w.type === 'audio' ? w.audio!.title : w.type === 'blueprint' ? w.blueprint!.title : itemMarkText(w),
+        blueprint: w.type === 'blueprint' ? w.blueprint : undefined,
         mine: w.mine,
         author: w.author ?? '',
         coin: w.type === 'message' && findCashuToken(w.text!) !== null,
@@ -390,6 +402,7 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
         if (w.coin) return <CoinItem key={w.key} text={w.text} at={w.centre} onTap={open} />
         if (w.type === 'message') return <NoteItem key={w.key} w={w} birth={births[w.key]} onTap={open} />
         if (w.type === 'audio') return <AudioMark key={w.key} id={w.key} title={w.text} at={w.centre} onTap={open} />
+        if (w.type === 'blueprint' && w.blueprint) return <BlueprintMark key={w.key} card={w.blueprint} who={{ pubkey: w.author, mine: w.mine }} at={w.centre} axes={axes} onTap={open} />
         // A key: the cube and its short name, or at half while it is held.
         // With no model of its own, the cube is one gibson, as a message's
         // box is (owner, 2026-11-22; keyBoxSide); with one, as before.
@@ -410,6 +423,28 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
         )
       })}
     </>
+  )
+}
+
+/**
+ * A blueprint card in the world: its holo schematic, one gibson, still in the
+ * world's axes (HoloSchematic), its title and who left it in white over it,
+ * and a fingertip's tap that opens its card. Held already, it is drawn at
+ * half, as a held item is.
+ */
+export function BlueprintMark({ card, who, at, axes, onTap }: { card: BlueprintItem; who: { pubkey: string; mine: boolean }; at: [number, number, number]; axes: ViewAxes; onTap: () => void }): JSX.Element | null {
+  const side = noteBoxSide(useCyberspace((s) => s.scaleExp))
+  const view = useMemo(() => { const r = readRecord(card.record); return r ? finderView(r) : null }, [card])
+  const held = useBlueprints((s) => s.cards.some((c) => c.record.id === card.record.id))
+  const by = useByName(who) ?? ''
+  if (!view) return null
+  const opacity = held ? HELD_OPACITY : 1
+  return (
+    <group>
+      <HoloSchematic view={view} at={at} side={side} axes={axes} opacity={opacity} />
+      <WorldLabel text={card.title} color={NAME_WHITE} at={at} align="center" px={11} sub={by} subColor={NAME_WHITE} subScale={1} subOpacity={1} opacity={opacity} clear={{ trueSide: side * 1.1, minPx: 18 }} recede="name" />
+      <TapTarget px={TAP_PX} side={side} at={at} onTap={onTap} />
+    </group>
   )
 }
 

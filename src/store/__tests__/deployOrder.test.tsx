@@ -222,7 +222,7 @@ function sources(dir: string): string[] {
 describe('every list of your shards', () => {
   it('is sorted through the one helper, so the lists cannot drift apart', () => {
     const lists = sources(join(__dirname, '..', '..')).filter((p) => /<ShardFolders\b/.test(readFileSync(p, 'utf8')) && !p.endsWith('ShardFolders.tsx'))
-    expect(lists.map((p) => p.split(/[\\/]/).pop()).sort()).toEqual(['ChestCompose.tsx', 'LookPicker.tsx', 'MenuSheet.tsx', 'PlaceObjectPicker.tsx', 'StampLibrary.tsx'])
+    expect(lists.map((p) => p.split(/[\\/]/).pop()).sort()).toEqual(['BlueprintTool.tsx', 'ChestCompose.tsx', 'LookPicker.tsx', 'MenuSheet.tsx', 'PlaceObjectPicker.tsx', 'StampLibrary.tsx'])
     for (const p of lists) {
       const text = readFileSync(p, 'utf8')
       // The items it hands the folders are the helper's.

@@ -36,7 +36,7 @@ import { positionOf, useShards } from '../store/useShards'
 import { BagUnreadable, hiddenLabel, itemLineage, keyItemOf, type ChestItem, type Hidden } from '../lib/hidden'
 import { ItemThumb } from './ItemThumb'
 import { OpensWith } from './KeyListingRow'
-import { holdsEntry, holdsItem, openingKeys, type HeldFrom, type HeldItem, type HeldPlace } from '../lib/inventory'
+import { holdsEntry, holdsItem, openingKeys, setCardHeld, type HeldFrom, type HeldItem, type HeldPlace } from '../lib/inventory'
 import { carriedLabel } from '../lib/keyringLocks'
 import { useKeyringLookup } from '../store/useKeyring'
 import { useCyberspace } from '../store/useCyberspace'
@@ -58,6 +58,71 @@ import { useMutes } from '../store/useMutes'
 import { hidesThing, type Muted } from '../lib/muteList'
 import { isGuideKey, subjectOfHidden } from '../lib/commentSubjects'
 import { KeyInfo, type KeyInfoSource } from './KeyItemInfo'
+import { useBlueprints } from '../store/useBlueprints'
+import { finderView, readRecord } from '../lib/blueprint/format'
+import type { NostrEvent } from '../lib/events'
+import { BlueprintModel } from './blueprint/BlueprintModel'
+import { Chamfer, THUMB_PX } from './ui/Chamfer'
+import { ItemIcon } from './ItemIcon'
+
+// A chest's contents say a card is held when it is in BLUEPRINTS (lib/inventory.ts holdsEntry).
+setCardHeld((id) => useBlueprints.getState().cards.some((c) => c.record.id === id))
+
+/** Whether this identity holds a copy of this blueprint record, in BLUEPRINTS. */
+export function useHoldsCard(recordId: string | undefined): boolean {
+  return useBlueprints((s) => !!recordId && s.cards.some((c) => c.record.id === recordId))
+}
+
+/** A card's picture in the chamfered frame: the shape as smoke with its revealed blocks, as a finder sees it. */
+export function BlueprintThumb({ record, size = THUMB_PX }: { record: NostrEvent; size?: number }): JSX.Element {
+  const view = useMemo(() => { const r = readRecord(record); return r ? finderView(r) : null }, [record])
+  return (
+    <Chamfer className="itemthumb bp-place__thumb" size={size}>
+      {view ? <BlueprintModel view={view} size={size} /> : <ItemIcon type="blueprint" size={36} />}
+    </Chamfer>
+  )
+}
+
+/** A card's words: its title, who made it, and who left it here when that is someone else (DECK-0010 §7.2). */
+export function BlueprintLine({ title, maker, placer }: { title?: string; maker: string; placer?: string | null }): JSX.Element {
+  const by = useWho(maker)
+  const left = useWho(placer ?? '')
+  return (
+    <span className="item__line">
+      {title && <span className="item__name" title={title}>{title}</span>}
+      <span className="item__meta">by {by}{placer && placer !== maker && <> · left here by {left}</>}</span>
+    </span>
+  )
+}
+
+/**
+ * TAKE A COPY on a card: its record into BLUEPRINTS, with who left it here
+ * (DECK-0010 §7.4). Nothing leaves the world; IN BLUEPRINTS once held.
+ */
+export function TakeCopy({ record, placer }: { record: NostrEvent; placer?: string | null }): JSX.Element {
+  const held = useHoldsCard(record.id)
+  const take = (): void => { useBlueprints.getState().addFound(record, placer ?? undefined) }
+  return (
+    <button className={`chest__act chest__act--take bp-place__take${held ? ' is-on' : ''}`} onClick={take} disabled={held} title={held ? 'It is in your BLUEPRINTS' : 'Copy it into your BLUEPRINTS. It stays here for the next finder'}>
+      {held ? 'IN BLUEPRINTS' : 'TAKE A COPY'}
+    </button>
+  )
+}
+
+/** Who left a card in a chest: the card's own signer when its signature checked out, else the chest's place's author. */
+function cardPlacer(entry: ChestEntry, place: HeldPlace | null): string | undefined {
+  return entry.verified ? entry.event.pubkey : place?.author
+}
+
+/** A chest's contents taken: cards into BLUEPRINTS, everything else into ITEMS (useInventory take). */
+export function takeContents(entries: ChestEntry[], from: HeldFrom, place: HeldPlace | null): void {
+  const rest: ChestEntry[] = []
+  for (const e of entries) {
+    if (e.body.type === 'blueprint') { if (e.body.blueprint) useBlueprints.getState().addFound(e.body.blueprint.record, cardPlacer(e, place)) }
+    else rest.push(e)
+  }
+  if (rest.length > 0) useInventory.getState().take(rest, from, place)
+}
 
 /** The mark on an item that carries no signature: its author is a claim, never a fact (spec §7.6). */
 export function Unsigned(): JSX.Element {
@@ -436,18 +501,24 @@ export const CHEST_INLINE_PX = 48
 
 export function ChestContents({ entries, from, place, size }: { entries: ChestEntry[]; from: HeldFrom; place: HeldPlace | null; size?: number }): JSX.Element {
   const items = useInventory((s) => s.items)
-  const takeable = useMemo(() => takeableOf(entries, items), [entries, items])
+  // A card taken is held in BLUEPRINTS: the list follows that store too.
+  const cards = useBlueprints((s) => s.cards)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const takeable = useMemo(() => takeableOf(entries, items), [entries, items, cards])
   if (takeable.length === 0) return <span className="chest__status" role="status">Everything here is in your ITEMS</span>
   return (
     <ul className="chest__contents">
       {takeable.map((e) => <ContentRow key={e.id} entry={e} from={from} place={place} size={size} />)}
       <li className="chest__all">
-        <button className="chest__act chest__act--take" onClick={() => { useInventory.getState().take(takeable, from, place) }} title="Copy everything here into your ITEMS">TAKE ALL</button>
+        <button className="chest__act chest__act--take" onClick={() => takeContents(takeable, from, place)} title="Copy everything here into your ITEMS, and any blueprints into your BLUEPRINTS">TAKE ALL</button>
       </li>
     </ul>
   )
 }
 
+// A blueprint card (DECK-0010 §7) is taken with TAKE A COPY, into BLUEPRINTS and never into ITEMS: its
+// creator's record, with who left it here (the chest's or bag's signer) when that is someone else. Taking
+// removes nothing, so the row says IN BLUEPRINTS after and the card stays for the next finder.
 /**
  * One thing inside an opened chest, with TAKE: laid out as a row of ITEMS
  * (owner, 2026-11-15), the chamfered picture at the Shard Feed's size, the
@@ -467,6 +538,16 @@ function ContentRow({ entry, from, place, size }: { entry: ChestEntry; from: Hel
     const hider = found?.author ?? place?.author ?? null
     return { id: entry.id, event: entry.event, key, forger: entry.event.pubkey, verified: entry.verified, hider, guide: !!place?.guide || isGuideKey(hider), subject: found ? subjectOfHidden(found) : null }
   }, [type, entry, found, place])
+  const card = type === 'blueprint' ? entry.body.blueprint : undefined
+  if (card) {
+    return (
+      <li className="chest__row chest__row--thumb" style={size ? ({ '--chamfer-size': `${size}px` } as CSSProperties) : undefined}>
+        <BlueprintThumb record={card.record} size={size} />
+        <span className="held__line"><BlueprintLine title={card.title} maker={card.record.pubkey} placer={cardPlacer(entry, place)} /></span>
+        <span className="chest__row-acts"><TakeCopy record={card.record} placer={cardPlacer(entry, place)} /></span>
+      </li>
+    )
+  }
   return (
     <li className="chest__row chest__row--thumb" style={size ? ({ '--chamfer-size': `${size}px` } as CSSProperties) : undefined}>
       <ItemThumb type={type} coin={coin} shard={type === 'shard' ? entry.body.shard : undefined} image={entry.body.key?.image} model={entry.body.key?.model} size={size} audio={type === 'audio' ? entry.body.audio : undefined} />

@@ -288,6 +288,11 @@ const grounds = new Map<string, Promise<Uint8Array>>()
 const keys = new Map<string, { key: Uint8Array; lookupId: string }>()
 let followsOf: { me: string; list: string[] } | null = null
 
+/** Whom `me` follows, as last read for the Stack (empty before the first read): blueprint prizes rank by it too (lib/blueprint/smashRun.ts). */
+export function followsKnown(me: string): ReadonlySet<string> {
+  return new Set(followsOf && followsOf.me === me ? followsOf.list : [])
+}
+
 function sessionFor(): Session | null {
   const f = host?.field()
   if (!f) return null

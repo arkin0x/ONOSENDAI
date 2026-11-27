@@ -37,6 +37,9 @@
  * bench presents a shard (its camera sits on the model's -Z side and looks
  * along +Z, toward the black sun). Turn it off and the spin stays where the
  * orbit left it.
+ *
+ * A blueprint card ghosts as the holo schematic it will be (HoloSchematic),
+ * faint, one gibson, in the world's axes, with its title.
  */
 
 import { useFrame } from '@react-three/fiber'
@@ -58,6 +61,9 @@ import { AudioSphereGhost } from './AudioSphereGhost'
 import { turnShard } from '../lib/turn'
 import { GhostGlow } from './PointBillboards'
 import { softModel } from './softPick'
+import { HoloSchematic } from './HoloSchematic'
+import { finderView, readRecord } from '../lib/blueprint/format'
+import { noteBoxSide } from './WorldMessages'
 
 interface Props {
   axes: ViewAxes
@@ -152,6 +158,10 @@ export function ShardGhost({ axes }: Props): JSX.Element | null {
   })
 
 
+  // A blueprint card's schematic, as it will stand.
+  const card = pending?.type === 'blueprint' ? pending.card : null
+  const cardView = useMemo(() => { const r = card ? readRecord(card.record) : null; return r ? finderView(r) : null }, [card])
+
   // The door's name under what is sealed to it (4.3); its X is on the bar's chip.
   const me = useCyberspace((s) => s.identity.pubkey)
   const sealing = useShards((s) => (s.pending ? sealingDoor(s, me, (s.pending.type === 'chest' && s.pending.spot?.at) || at, plane, deployHeight)?.name ?? null : null))
@@ -175,6 +185,16 @@ export function ShardGhost({ axes }: Props): JSX.Element | null {
         px={13}
         opacity={0.5}
       />
+      </>
+    )
+  }
+
+  if (pending?.type === 'blueprint') {
+    return (
+      <>
+        <group ref={group}>{cardView && <HoloSchematic view={cardView} at={[0, 0, 0]} side={noteBoxSide(scaleExp)} axes={axes} opacity={0.55} />}</group>
+        {sealed}
+        <WorldLabel text={`BLUEPRINT · ${readRecord(pending.card.record)?.title ?? 'blueprint'}`} color="#ffd27d" follow={landingAt} align="center" px={13} opacity={0.6} />
       </>
     )
   }

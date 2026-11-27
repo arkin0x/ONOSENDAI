@@ -12,13 +12,13 @@ const door = { type: 'chest', event: { tags: [['door', '4']] } }
 const chest = { type: 'chest', event: { tags: [['t', 'x']] } }
 
 describe('the tabs', () => {
-  it('are in his order, ITEMS first (arkinox, 2026-11-01), SEEDS last (2026-11-13)', () => {
-    expect(NEARBY_TABS.map((t) => t.label)).toEqual(['ITEMS', 'CHESTS', 'DOORS', 'MESSAGES', 'SOUNDS', 'SHARDS', 'SEEDS'])
+  it('are in his order, ITEMS first (arkinox, 2026-11-01), SEEDS (2026-11-13), then BLUEPRINTS (DECK-0010 §7.3)', () => {
+    expect(NEARBY_TABS.map((t) => t.label)).toEqual(['ITEMS', 'CHESTS', 'DOORS', 'MESSAGES', 'SOUNDS', 'SHARDS', 'SEEDS', 'BLUEPRINTS'])
     expect(DEFAULT_NEARBY_TAB).toBe('items')
   })
 
   it('open on the first tab, left to right, with more than 0 in it', () => {
-    const none: Record<NearbyTab, number> = { items: 0, chests: 0, doors: 0, messages: 0, sounds: 0, shards: 0, seeds: 0 }
+    const none: Record<NearbyTab, number> = { items: 0, chests: 0, doors: 0, messages: 0, sounds: 0, shards: 0, seeds: 0, blueprints: 0 }
     expect(firstFilledTab(none)).toBe('items')
     expect(firstFilledTab({ ...none, items: 2, shards: 5 })).toBe('items')
     expect(firstFilledTab({ ...none, doors: 1, messages: 3 })).toBe('doors')
@@ -34,6 +34,11 @@ describe('the tabs', () => {
     const tabs = byTab([door, chest])
     expect(tabs.doors).toEqual([door])
     expect(tabs.chests).toEqual([chest])
+  })
+
+  it('list a blueprint card under BLUEPRINTS (DECK-0010 §7.3)', () => {
+    expect(tabOf({ type: 'blueprint' })).toBe('blueprints')
+    expect(byTab([{ type: 'blueprint' }]).blueprints).toHaveLength(1)
   })
 
   it('list a seed under SEEDS, never SHARDS', () => {

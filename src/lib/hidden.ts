@@ -24,6 +24,10 @@
  *   - a seed, kind 3351 (DECK-0008): one planting of a DNA, whose bloom every
  *     reader grows (lib/seeds/). A DNA, kind 3350, carried in the same bag is
  *     handed to the DNA resolver and is not an item of its own.
+ *   - a blueprint card, kind 3343 (DECK-0010 §7): a copy of a blueprint
+ *     record, signed by whoever placed it, its content the creator's whole
+ *     signed record (lib/blueprint/format.ts). The record is checked, its
+ *     signature included, or the card is dropped.
  * All five carry their coordinate in a `C` tag, decoded on discovery, and the
  * NIP-70 `-` tag (arkinox, 2026-10-20): they only ever live inside bags, and
  * a relay that honours `-` accepts the event only from its author, so no
@@ -72,10 +76,13 @@ import { cashuTokensAsWritten } from './cashu'
 import { countNftLinks, NFT_WORDS, replaceNftLinks } from './nftLink'
 import { AUDIO_KIND, audioItemOf, type AudioItem } from './audioItem'
 import { DNA_KIND, SEED_KIND, noteBagDna, seedItemOf, type SeedItem } from './seeds/seedItem'
+import { BLUEPRINT_CARD_KIND, cardRecord, cardTemplate, readRecord } from './blueprint/format'
 import { SEALED_KIND, openSealed, rememberSealed, sealedAddress, sealedEventRefusal, sealedItemOf, sealedPayload, sealedRefParts } from './sealed'
 
 /** The location-encrypted envelope (spec §8.6). */
 export const HIDDEN_KIND = 33330
+/** A blueprint card, inside the envelope or a chest (DECK-0010 §7): never published on its own. */
+export const BLUEPRINT_KIND = BLUEPRINT_CARD_KIND
 /**
  * The same envelope in the ephemeral range: a relay hands it to whoever is
  * subscribed at that moment and keeps nothing. Chat lives here. A 23330 is a
@@ -241,7 +248,18 @@ export const MAX_MESSAGE_LENGTH = 10_000
  * carried as an item in a chest): a bag's DNA is handed to the resolver and is
  * never an item of its own (fromInner), so nothing in the world is one.
  */
-export type HiddenType = 'shard' | 'message' | 'key' | 'chest' | 'audio' | 'seed' | 'dna'
+export type HiddenType = 'shard' | 'message' | 'key' | 'chest' | 'audio' | 'seed' | 'dna' | 'blueprint'
+
+/**
+ * What a blueprint card carries (DECK-0010 §7.2): the creator's signed
+ * record, checked by every rule of §5.4 and its signature verified, and its
+ * title. Who made it is the record's pubkey; who left it here is the signer
+ * of the bag, room bag or chest that holds the card.
+ */
+export interface BlueprintItem {
+  record: NostrEvent
+  title: string
+}
 
 /** A DNA carried in a chest (DECK-0008 §8.1): its name, the `dna` line of a written one, or null for a mixed one. */
 export interface DnaItem {
@@ -389,6 +407,23 @@ export interface ItemBody {
   seed?: SeedItem
   /** A DNA taken out of a chest (DECK-0008 §8.1). */
   dna?: DnaItem
+  /** A blueprint card (DECK-0010 §7). */
+  blueprint?: BlueprintItem
+}
+
+/**
+ * The blueprint a card carries, or null when the card must be dropped
+ * (DECK-0010 §7.2 step 2): its content is not a record that passes every
+ * check of §5.4, its signature included.
+ */
+export function blueprintItemOf(card: Pick<NostrEvent, 'kind' | 'content'>): BlueprintItem | null {
+  const record = cardRecord(card)
+  if (!record) return null
+  let authentic = false
+  try { authentic = verifyOnce(record as NostrEvent) } catch { authentic = false }
+  if (!authentic) return null
+  const view = readRecord(record)
+  return view ? { record: record as NostrEvent, title: view.title } : null
 }
 
 /**
@@ -439,6 +474,10 @@ export function readItem(inner: Pick<NostrEvent, 'kind' | 'content' | 'tags' | '
     const read = tryParseDna(inner.content)
     return read.ok ? { type: 'dna', dna: { name: read.dna.name } } : null
   }
+  if (inner.kind === BLUEPRINT_KIND) {
+    const blueprint = blueprintItemOf(inner)
+    return blueprint ? { type: 'blueprint', blueprint } : null
+  }
   return null
 }
 
@@ -453,13 +492,14 @@ export function messagePreview(text: string, max = 32): string {
 }
 
 /** What a hidden thing is called in a row, a chip or a ghost: a message's preview, else its name. */
-export function hiddenLabel(h: Pick<ItemBody, 'type' | 'text' | 'shard' | 'key' | 'chest' | 'audio' | 'seed' | 'dna'>, max = 32): string {
+export function hiddenLabel(h: Pick<ItemBody, 'type' | 'text' | 'shard' | 'key' | 'chest' | 'audio' | 'seed' | 'dna'> & Partial<Pick<ItemBody, 'blueprint'>>, max = 32): string {
   if (h.type === 'message') return messagePreview(h.text ?? '', max)
   if (h.type === 'audio') return h.audio?.title ?? 'audio'
   if (h.type === 'key') return h.key?.name ?? 'key'
   if (h.type === 'chest') return h.chest?.name ?? 'chest'
   if (h.type === 'seed') return h.seed?.title || 'seed'
   if (h.type === 'dna') return h.dna ? `${h.dna.name} DNA` : 'DNA'
+  if (h.type === 'blueprint') return h.blueprint?.title || 'blueprint'
   return h.shard?.name ?? 'shard'
 }
 
@@ -509,6 +549,8 @@ export interface Hidden {
   chest?: ChestItem
   audio?: AudioItem
   seed?: SeedItem
+  /** A blueprint card (DECK-0010 §7): the creator's record. Its placer is `author`, the bag's or chest's signer. */
+  blueprint?: BlueprintItem
   /**
    * Set when the item was hidden by reference: the entry itself, which is what
    * a rewrite of the bag must carry forward. `inner` is then the referenced
@@ -704,6 +746,17 @@ export function keyInnerTemplate(key: KeyItem, at: Position, plane: Plane, creat
 }
 
 /**
+ * The inner blueprint card template (kind 3343, DECK-0010 §7.1), signed by
+ * whoever places it: the creator's whole signed record as its content,
+ * unchanged (a copy left by a finder carries the same record, §7.5), its `C`
+ * and NIP-70's `-`. No title or other tag of its own: what it is lives in the
+ * record.
+ */
+export function blueprintInnerTemplate(record: NostrEvent, at: Position, plane: Plane, createdAt: number): EventTemplate {
+  return cardTemplate(record, positionHex(at, plane), createdAt)
+}
+
+/**
  * The inner chest event template (kind 3341), signed by the hider (B1 §2.2).
  * The content is the sealed payload (lib/chests.ts sealEntries); `lock` names
  * the public key it is sealed to and the one-time sender's public key, and
@@ -874,7 +927,7 @@ export function newBagSettings(height: number): BagSettings {
  * keys, chests, hidden audio, and the cashu tokens and nonfungible.cash claim links (NFTs,
  * lib/nftLink) written in its messages.
  */
-export interface BagContents { shard: number; message: number; key: number; chest: number; cashu: number; nft: number; audio: number; door: number; seed: number; dna: number }
+export interface BagContents { shard: number; message: number; key: number; chest: number; cashu: number; nft: number; audio: number; door: number; seed: number; dna: number; blueprint: number }
 
 /**
  * What a bag holds, counted as spec §7.7 counts (Contents). An inline item by
@@ -884,9 +937,14 @@ export interface BagContents { shard: number; message: number; key: number; ches
  * opened, or kept when it was sealed (lib/sealed.ts sealedItemOf), whether
  * the bag names it by an `a` reference or an `e`. Any other reference, and a
  * sealed entry whose item was never read, counts as nothing.
+ *
+ * A blueprint card counts as `blueprint` wherever it stands, inside a chest
+ * the bag holds too (DECK-0010 §7.6): `cardsInChests` is how many cards each
+ * chest of the bag holds, by the chest's event id, as its writer sealed it.
+ * What else a chest holds is never counted.
  */
-export function bagContents(inners: readonly (BagEntry | ChatRumor)[], held?: ReadonlyMap<string, Pick<Rumor, 'kind' | 'content' | 'tags'>>): BagContents {
-  const out: BagContents = { shard: 0, message: 0, key: 0, chest: 0, cashu: 0, nft: 0, audio: 0, door: 0, seed: 0, dna: 0 }
+export function bagContents(inners: readonly (BagEntry | ChatRumor)[], held?: ReadonlyMap<string, Pick<Rumor, 'kind' | 'content' | 'tags'>>, cardsInChests?: ReadonlyMap<string, number>): BagContents {
+  const out: BagContents = { shard: 0, message: 0, key: 0, chest: 0, cashu: 0, nft: 0, audio: 0, door: 0, seed: 0, dna: 0, blueprint: 0 }
   for (const entry of inners) {
     let e: Pick<Rumor, 'kind' | 'content' | 'tags'>
     if (isReference(entry)) {
@@ -900,11 +958,20 @@ export function bagContents(inners: readonly (BagEntry | ChatRumor)[], held?: Re
     else if (e.kind === MESSAGE_KIND) { out.message++; out.cashu += cashuTokensAsWritten(e.content).length; out.nft += countNftLinks(e.content) }
     else if (e.kind === KEY_KIND) out.key++
     // A door counts as `door`, never as `chest` (spec §7.7, #82); what its room holds is never counted.
-    else if (e.kind === CHEST_KIND) { if (isDoor(e.tags)) out.door++; else out.chest++ }
+    else if (e.kind === CHEST_KIND) {
+      if (isDoor(e.tags)) out.door++
+      else {
+        out.chest++
+        const id = (e as Partial<Rumor>).id
+        if (cardsInChests && typeof id === 'string') out.blueprint += cardsInChests.get(id) ?? 0
+      }
+    }
     else if (e.kind === AUDIO_KIND) out.audio++
     // Seeds and the DNAs hidden with them (DECK-0008 §8.2, Contents).
     else if (e.kind === SEED_KIND) out.seed++
     else if (e.kind === DNA_KIND) out.dna++
+    // A blueprint card (DECK-0010 §7.6), after `dna`.
+    else if (e.kind === BLUEPRINT_KIND) out.blueprint++
   }
   return out
 }
@@ -915,7 +982,7 @@ export function bagContents(inners: readonly (BagEntry | ChatRumor)[], held?: Re
  * it keeps the order spec §7.7 gives; `door` (DECK-0004 §3.7, spec #82)
  * after it, for the same reason.
  */
-export const CONTENTS_KINDS = ['shard', 'message', 'key', 'chest', 'cashu', 'nft', 'audio', 'door', 'seed', 'dna'] as const
+export const CONTENTS_KINDS = ['shard', 'message', 'key', 'chest', 'cashu', 'nft', 'audio', 'door', 'seed', 'dna', 'blueprint'] as const
 
 /**
  * The kinds anyone who reads them can redeem: a Cashu token and an NFT claim
@@ -947,9 +1014,9 @@ function isClaimable(kind: string): boolean {
  * `["contents", "nft"]` while a link is, with no count, and nothing once
  * neither is.
  */
-export function bagContentsTags(inners: readonly (BagEntry | ChatRumor)[], settings: Pick<BagSettings, 'contents' | 'money'>, held?: ReadonlyMap<string, Pick<Rumor, 'kind' | 'content' | 'tags'>>): string[][] {
+export function bagContentsTags(inners: readonly (BagEntry | ChatRumor)[], settings: Pick<BagSettings, 'contents' | 'money'>, held?: ReadonlyMap<string, Pick<Rumor, 'kind' | 'content' | 'tags'>>, cardsInChests?: ReadonlyMap<string, number>): string[][] {
   if (!settings.contents && !settings.money) return []
-  const c = bagContents(inners, held)
+  const c = bagContents(inners, held, cardsInChests)
   if (settings.contents) return CONTENTS_KINDS.filter((k) => c[k] > 0 && (settings.money || !isClaimable(k))).map((k) => ['contents', k, String(c[k])])
   return CLAIMABLE_KINDS.filter((k) => c[k] > 0).map((k) => ['contents', k])
 }
@@ -1092,8 +1159,8 @@ export interface BagPlace { at: Position; plane: Plane }
  * and buys little anyway — the location encryption is the real gate, and anyone
  * who can decrypt can re-sign identical content as themselves regardless.
  */
-export async function bagTemplate(inners: readonly (BagEntry | ChatRumor)[], regionKey: Uint8Array, lookupId: string, height: number, createdAt: number, kind: number = HIDDEN_KIND, settings: BagSettings = DEFAULT_BAG_SETTINGS, place?: BagPlace, held?: ReadonlyMap<string, Pick<Rumor, 'kind' | 'content' | 'tags'>>): Promise<EventTemplate> {
-  return bagTemplateAround(inners, await encryptForRegion(regionKey, JSON.stringify(inners)), lookupId, height, createdAt, kind, settings, place, held)
+export async function bagTemplate(inners: readonly (BagEntry | ChatRumor)[], regionKey: Uint8Array, lookupId: string, height: number, createdAt: number, kind: number = HIDDEN_KIND, settings: BagSettings = DEFAULT_BAG_SETTINGS, place?: BagPlace, held?: ReadonlyMap<string, Pick<Rumor, 'kind' | 'content' | 'tags'>>, cardsInChests?: ReadonlyMap<string, number>): Promise<EventTemplate> {
+  return bagTemplateAround(inners, await encryptForRegion(regionKey, JSON.stringify(inners)), lookupId, height, createdAt, kind, settings, place, held, cardsInChests)
 }
 
 /**
@@ -1102,7 +1169,7 @@ export async function bagTemplate(inners: readonly (BagEntry | ChatRumor)[], reg
  * to measure a bag without sealing it, since the length follows the
  * plaintext's (sealedLength).
  */
-export function bagTemplateAround(inners: readonly (BagEntry | ChatRumor)[], ciphertext: string, lookupId: string, height: number, createdAt: number, kind: number = HIDDEN_KIND, settings: BagSettings = DEFAULT_BAG_SETTINGS, place?: BagPlace, held?: ReadonlyMap<string, Pick<Rumor, 'kind' | 'content' | 'tags'>>): EventTemplate {
+export function bagTemplateAround(inners: readonly (BagEntry | ChatRumor)[], ciphertext: string, lookupId: string, height: number, createdAt: number, kind: number = HIDDEN_KIND, settings: BagSettings = DEFAULT_BAG_SETTINGS, place?: BagPlace, held?: ReadonlyMap<string, Pick<Rumor, 'kind' | 'content' | 'tags'>>, cardsInChests?: ReadonlyMap<string, number>): EventTemplate {
   const tags: string[][] = [['d', lookupId], ['encrypted', ALGO, ciphertext], ['version', '2']]
   if (settings.heightTag) tags.push([HEIGHT_TAG, String(height)])
   if (settings.hint) {
@@ -1110,7 +1177,7 @@ export function bagTemplateAround(inners: readonly (BagEntry | ChatRumor)[], cip
     if (!hintFits(settings.hint, height)) throw new Error(`A hint box of heights ${settings.hint.join(', ')} cannot contain a height ${height} region.`)
     tags.push(...hintTags(place.at, place.plane, settings.hint))
   }
-  tags.push(...bagContentsTags(inners, settings, held))
+  tags.push(...bagContentsTags(inners, settings, held, cardsInChests))
   return { kind, created_at: createdAt, content: settings.riddle.trim().slice(0, MAX_RIDDLE_LENGTH), tags }
 }
 

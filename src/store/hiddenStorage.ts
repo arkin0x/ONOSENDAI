@@ -80,7 +80,7 @@ export function provenOwner(d: MyDeployment | null | undefined): string | null {
 
 /** What a list shows. */
 export function isListed(d: MyDeployment | null | undefined): d is MyDeployment {
-  return !!d && !!d.eventId && !!d.inner && !!(d.shard || d.text || d.key || d.chest || d.audio)
+  return !!d && !!d.eventId && !!d.inner && !!(d.shard || d.text || d.key || d.chest || d.audio || d.blueprint)
 }
 
 export const rowKey = (d: MyDeployment | null | undefined): string => d?.eventId ?? JSON.stringify(d)

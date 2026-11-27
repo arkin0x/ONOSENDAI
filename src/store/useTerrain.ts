@@ -697,7 +697,9 @@ function makeField(owner: string, plane: number, at: Position): TerrainSession {
       // The database joins the field only once what it kept is read: a change in between never overwrites the saved inventory.
       if (terrainSession !== s) { db.close(); return }
       for (const k of kept.surveyed) s.surveyedKeys.add(k)
-      s.surveyedAt = new Map(Object.entries(kept.surveyedAt ?? {}))
+      // Merged, never replaced: a survey made while this was being read keeps its own time.
+      s.surveyedAt ??= new Map()
+      for (const [k, t] of Object.entries(kept.surveyedAt ?? {})) if (!s.surveyedAt.has(k)) s.surveyedAt.set(k, t)
       s.nextSeq = Math.max(s.nextSeq, kept.nextSeq)
       s.db = db
       await loadBuilder(db, owner).catch(() => undefined)

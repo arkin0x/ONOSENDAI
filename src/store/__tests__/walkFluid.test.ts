@@ -267,6 +267,28 @@ describe('acceleration', () => {
   })
 })
 
+describe('gravity off: forward follows the whole look (arkinox, 2026-11-27)', () => {
+  /** Facing -Z, pitched `deg` degrees up. */
+  function lookUp(deg: number): void {
+    const r = (deg * Math.PI) / 180
+    walkFacing.forward = { x: 0, y: Math.sin(r), z: -Math.cos(r) }
+    walkFacing.right = { x: 1, y: 0, z: 0 }
+    walkFacing.valid = true
+  }
+
+  it('looking 45 degrees up, a held forward climbs and goes on together, not straight along one axis', () => {
+    walk(false)
+    lookUp(45)
+    down('KeyW')
+    frames(700)
+    up('KeyW')
+    const at = rel(start)
+    expect(at[1]).toBeGreaterThan(2)
+    expect(at[2]).toBeLessThan(-2)
+    expect(Math.abs(Math.abs(at[1]) - Math.abs(at[2]))).toBeLessThanOrEqual(2)
+  })
+})
+
 describe('speed (arkinox, 2026-11-18: "my walk speed seems slow ... maybe faster when i go diagonal")', () => {
   /** Gibsons a second walked on flat ground under gravity, over 2 s at full speed, holding what `hold` holds, in frames of `ms`. */
   async function topSpeed(hold: () => void, release: () => void, deg: number, ms = 16): Promise<number> {

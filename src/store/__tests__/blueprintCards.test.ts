@@ -44,7 +44,7 @@ import { startPlaceBlueprint } from '../../lib/blueprint/place'
 import { useCyberspace } from '../useCyberspace'
 import { useInventory } from '../useInventory'
 import { useBlueprints } from '../useBlueprints'
-import { CARDS_LOCAL_NOTE, cardsStayLocal, useShards } from '../useShards'
+import { CARDS_LOCAL_NOTE, cardsStayLocal, forgetCardMemory, useShards } from '../useShards'
 
 const S = () => useShards.getState()
 const B = () => useBlueprints.getState()
@@ -188,6 +188,28 @@ describe('placing a card stays LOCAL until blueprints go live', () => {
     expect(await S().broadcast(d.lookupId)).toBe(false)
     expect(publishMany).not.toHaveBeenCalled()
     expect(S().broadcastError).toBe(CARDS_LOCAL_NOTE)
+  })
+
+  it.each([false, true])('a chest moved to another place with a card inside stays on this device (after a reload: %s)', async (reloaded) => {
+    const lock = forgeKey('Mover Key')
+    S().startDeployChest({ name: 'Mover', lock: { pubkey: lock.itemPubkey, label: 'Mover Key' }, requires: 'the Mover Key', contents: [{ kind: 'blueprint', card: cardOf(signedRecord('Carried along')) }] })
+    await S().deploy()
+    const before = S().mine.find((x) => x.type === 'chest')!
+    expect(before.published).toBe(false)
+    // A reload forgets the session's memory of which chest payloads hold cards: the move must still know.
+    if (reloaded) forgetCardMemory()
+    vi.mocked(publishMany).mockClear()
+    sent.length = 0
+    const c = useCyberspace.getState().cursor
+    useCyberspace.setState({ cursor: { x: c.x + (1n << 20n), y: c.y + (1n << 20n), z: c.z + (1n << 20n) }, live: true })
+    S().startMoveChest(before.eventId)
+    expect(S().pending?.type).toBe('chest')
+    await S().deploy()
+    expect(publishMany).not.toHaveBeenCalled()
+    expect(sent).toHaveLength(0)
+    const moved = S().mine.filter((x) => x.type === 'chest' && x.goneFrom === undefined)
+    expect(moved.length).toBeGreaterThan(0)
+    expect(moved.every((x) => !x.published)).toBe(true)
   })
 
   it('PUT IN CHEST lines up a new chest with the card inside', () => {

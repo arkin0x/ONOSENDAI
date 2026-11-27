@@ -39,6 +39,8 @@ import { withAuthoredConstrain } from '../../lib/walkConstrain'
 import { isKeyItem } from '../../lib/inventory'
 import { ModalClose } from '../ui/ModalClose'
 import { ItemThumb } from '../ItemThumb'
+import { BAR_WORDS, includedPrizes, kitPieces, prizeBar, setIncluded, type GuardInput } from '../../lib/blueprint/prizeGuard'
+import { usePublished } from '../../store/usePublished'
 import { ShardFolders, modelEditedAt, modelName, modelRef, useNewestFirst } from '../ShardFolders'
 import { Stacked, useModalStack } from '../modalStack'
 import { BlueprintModel } from './BlueprintModel'
@@ -171,21 +173,32 @@ function ArrangementStep(): JSX.Element {
   )
 }
 
+/** The guard's view of this device: who you are, what you published, the kit pieces, what you included. */
+function guardNow(): GuardInput {
+  return { me: useCyberspace.getState().identity.pubkey, ledger: usePublished.getState().ledger, kit: kitPieces(), included: includedPrizes() }
+}
+
+/**
+ * Whether a shard may be sealed as a prize: a workshop object by the whole
+ * guard (lib/blueprint/prizeGuard.ts), a shard from ITEMS by its kit marks
+ * only (it came to you from a bag or a chest, so it is out there already).
+ */
+export function prizeAllowed(shard: ShardModel, from: 'workshop' | 'items', g: GuardInput = guardNow()): boolean {
+  const bar = prizeBar(shard, g)
+  return from === 'workshop' ? bar === null : bar !== 'kit' && bar !== 'carries'
+}
+
 function PrizeStep(): JSX.Element {
   const st = useBlueprintTool()
   const workshop = useWorkshop((s) => s.shards)
   const newest: ShardModel[] = useNewestFirst(workshop, modelRef, modelEditedAt)
   const items = useInventory((s) => s.items)
+  const ledger = usePublished((s) => s.ledger)
+  const [included, setIncludedState] = useState(() => includedPrizes())
   const loot = useMemo(() => Object.values(items).filter((i) => i.type === 'shard' && i.shard && !i.cleared && !i.archived && !isKeyItem(i)), [items])
-  const pick = (shard: ShardModel, from: 'workshop' | 'items'): void => st.set({ prize: { name: shard.name || 'object', shard, from }, title: st.title || '' })
-  const Row = ({ shard, from }: { shard: ShardModel; from: 'workshop' | 'items' }): JSX.Element => (
-    <li>
-      <button className={`bpt-prize${st.prize?.shard === shard ? ' is-on' : ''}`} onClick={() => pick(shard, from)}>
-        <ItemThumb type="shard" shard={shard} size={80} lazy />
-        <span>{shard.name || 'object'}</span>
-      </button>
-    </li>
-  )
+  const g: GuardInput = { me: useCyberspace.getState().identity.pubkey, ledger, kit: kitPieces(), included }
+  const pick = (shard: ShardModel, from: 'workshop' | 'items'): void => { if (prizeAllowed(shard, from, g)) st.set({ prize: { name: shard.name || 'object', shard, from }, title: st.title || '' }) }
+  const include = (id: string, on: boolean): void => { setIncluded(id, on); setIncludedState(includedPrizes()) }
   return (
     <div className="bpt-body">
       <label className="bpt-field">
@@ -193,21 +206,43 @@ function PrizeStep(): JSX.Element {
         <input value={st.title} maxLength={64} placeholder="blueprint" onChange={(e) => st.set({ title: e.target.value })} />
       </label>
       <h3 className="bpt-h">FROM THE WORKSHOP</h3>
+      <p className="bpt-note">Your published objects. Kit pieces are never prizes; one you never published can be included by hand.</p>
       {/* Through the folders, as every list of your shards (hud/ShardFolders). */}
       {newest.length ? (
         <ul className="bpt-prizes">
-          <ShardFolders items={newest} refOf={modelRef} nameOf={modelName} row={(s, f) => (
-            <li key={s.id}>
-              <button className={`bpt-prize${st.prize?.shard === s ? ' is-on' : ''}`} onClick={() => pick(s, 'workshop')}>
-                <ItemThumb type="shard" shard={s} size={80} lazy />
-                <span>{f.mark(s.name || 'object')}</span>
-              </button>
-            </li>
-          )} />
+          <ShardFolders items={newest} refOf={modelRef} nameOf={modelName} row={(s, f) => {
+            const bar = prizeBar(s, g)
+            const unpublished = bar === 'unpublished' || (bar === null && g.ledger[s.id]?.pubkey !== g.me)
+            return (
+              <li key={s.id}>
+                <button className={`bpt-prize${st.prize?.shard === s ? ' is-on' : ''}${bar ? ' is-barred' : ''}`} disabled={!!bar} onClick={() => pick(s, 'workshop')} title={bar ? BAR_WORDS[bar] : undefined}>
+                  <ItemThumb type="shard" shard={s} size={80} lazy />
+                  <span>{f.mark(s.name || 'object')}</span>
+                  <small className="bpt-prize__bar">{bar ? BAR_WORDS[bar] : unpublished ? 'Included by hand' : ''}</small>
+                </button>
+                {unpublished && <button className="bpt-mini bpt-prize__include" onClick={() => include(s.id, bar === 'unpublished')}>{bar === 'unpublished' ? 'INCLUDE' : 'LEAVE OUT'}</button>}
+              </li>
+            )
+          }} />
         </ul>
       ) : <p className="bpt-empty">No models yet. Make one in the workshop.</p>}
       <h3 className="bpt-h">FROM ITEMS</h3>
-      {loot.length ? <ul className="bpt-prizes">{loot.map((i) => <Row key={i.rowKey} shard={i.shard!} from="items" />)}</ul> : <p className="bpt-empty">No shards in ITEMS yet.</p>}
+      {loot.length ? (
+        <ul className="bpt-prizes">
+          {loot.map((i) => {
+            const ok = prizeAllowed(i.shard!, 'items', g)
+            return (
+              <li key={i.rowKey}>
+                <button className={`bpt-prize${st.prize?.shard === i.shard ? ' is-on' : ''}${ok ? '' : ' is-barred'}`} disabled={!ok} onClick={() => pick(i.shard!, 'items')}>
+                  <ItemThumb type="shard" shard={i.shard!} size={80} lazy />
+                  <span>{i.shard!.name || 'object'}</span>
+                  <small className="bpt-prize__bar">{ok ? '' : BAR_WORDS.kit}</small>
+                </button>
+              </li>
+            )
+          })}
+        </ul>
+      ) : <p className="bpt-empty">No shards in ITEMS yet.</p>}
       <button className="bpt-go" disabled={!st.prize} onClick={() => st.setStep(2)}>NEXT <ArrowRight size={14} aria-hidden /></button>
     </div>
   )
@@ -294,6 +329,8 @@ function SealStep(): JSX.Element {
   const [done, setDone] = useState<string | null>(null)
   const seal = async (): Promise<void> => {
     if (!st.prize || st.sealing) return
+    // Checked again as it is sealed: a kit piece never goes into a record, however it was picked.
+    if (!prizeAllowed(st.prize.shard, st.prize.from)) { st.set({ error: 'That object cannot be a prize: kit pieces and pieces never published stay with you.' }); return }
     const views = (st.reveal === 'silhouette' || st.reveal === 'render') ? prizeImages(st.prize.shard, st.reveal, [...st.views]) : undefined
     const regionKey = st.lock === 'location' && st.place ? lockRegionKey(st.place.lo, a.size, st.height) : null
     const why = makeRefusal({ arrangement: a, reveal: st.reveal, text: st.text, views, lock: st.lock, height: st.height, regionKey })

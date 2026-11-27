@@ -2144,6 +2144,11 @@ let deployWaiting: DeployPending | null = null
  * sealed (MyDeployment `sealed`) for after a reload.
  */
 const cardPayloads = new Map<string, number>()
+
+/** For tests: forget what this session knows of chests' cards, as a reload does. */
+export function forgetCardMemory(): void {
+  cardPayloads.clear()
+}
 /** Bags signed here that carry a blueprint card while cards stay on this device: never sent to a relay (signBag, publishBag, sendBag). */
 const cardBags = new WeakSet<NostrEvent>()
 

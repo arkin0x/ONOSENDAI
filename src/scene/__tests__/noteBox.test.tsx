@@ -28,7 +28,7 @@ vi.mock('@react-three/drei', async () => {
 })
 
 import { ItemMark, NoteItem, noteBoxSide, patchNoteDepthPull, NOTE_BOX_GIBSONS, NOTE_DEPTH_PULL } from '../WorldMessages'
-import { bothFaces, shapeOf, FOLD_LINE_VERTS, foldLinePoints, LetterField, lettersDrawn, LETTER_GIBSONS, LETTER_SHAPE, LETTER_TURN_S, PAPER } from '../LetterField'
+import { bothFaces, shapeOf, FOLD_LINE_VERTS, foldLinePoints, LetterField, lettersDrawn, LETTER_GIBSONS, LETTER_LIFT, LETTER_SHAPE, LETTER_TURN_S, PAPER } from '../LetterField'
 import { TOKEN_OUTLINE } from '../ItemToken'
 import { LABEL_GAP_PX } from '../../lib/markerSize'
 import { authorColour } from '../../lib/authorColour'
@@ -336,7 +336,9 @@ describe('a message’s box', () => {
         // The real top: the ring's glyphs, turned to the camera, LETTER_SHAPE.flat across from the centre; or the paper's highest corner as drawn.
         const camera = r.state().camera
         const up = new Vector3(0, 1, 0).applyQuaternion(camera.quaternion)
-        const ringTop = toY(up.clone().multiplyScalar(LETTER_SHAPE.flat * width))
+        // The ring turns about where the letter rests, over its place (LETTER_LIFT).
+        const rest = new Vector3(0, LETTER_LIFT * width, 0)
+        const ringTop = toY(up.clone().multiplyScalar(LETTER_SHAPE.flat * width).add(rest))
         const m = new Matrix4(); paper(r).getMatrixAt(0, m)
         const corners = [[-0.5, 0.33], [0.5, 0.33], [0.5, -0.33], [-0.5, -0.33]].map(([x, y]) => toY(new Vector3(x, y, 0).applyMatrix4(m)))
         const top = Math.min(ringTop, ...corners)
@@ -458,8 +460,10 @@ describe('a large box among other things to tap', () => {
       createElement(Room),
       createElement(NoteItem, { w: NOTE, birth: undefined, onTap: message }),
     ))
-    await placeCamera(r, [0, 0, 3])
-    await r.tap(400, 400)
+    const camera = await placeCamera(r, [0, 0, 3])
+    // On the letter where it rests, over its place (LETTER_LIFT).
+    const v = new Vector3(0, LETTER_LIFT, 0).project(camera)
+    await r.tap(400, ((1 - v.y) / 2) * 800)
     expect(message).toHaveBeenCalledTimes(1)
     expect(room).not.toHaveBeenCalled()
     await r.tap(400 + 250, 400 - 200)

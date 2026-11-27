@@ -16,8 +16,12 @@
  * (its ring is glyphs) or a sound (its ring is bars).
  *
  * It turns slowly about the scene's up axis and bobs, as a letter does;
- * with reduced motion it holds still. The paper of the letter and the core
- * here are opaque and out of the bloom (shardFaces basicFaceProps); the
+ * with reduced motion it holds still. It rests over its place rather than
+ * about it (TOKEN_LIFT, lib/restLift.ts): its lowest point stands a little
+ * over the level of its place, where a floor at that height lies and a
+ * chest's base stands, so the floor never cuts its lower half. The paper of
+ * the letter and the core here are opaque and out of the bloom (shardFaces
+ * basicFaceProps); the
  * edges and the mark are light. Edges are drawn twice: as bands for the
  * look up close, and as lines, which are a pixel wide at any distance, so
  * the token never loses its edge far off (the letter's flap did).
@@ -33,6 +37,7 @@ import { basicFaceProps } from './shardFaces'
 import { bandOf, bothFaces, shapeOf } from './LetterField'
 import { LABEL_PRIORITY } from './WorldLabel'
 import { markFadeLeft } from '../lib/worldMarks'
+import { restLift } from '../lib/restLift'
 
 
 /** One turn of the token, seconds: a little quicker than a letter, so a row of both never turns as one. */
@@ -89,6 +94,27 @@ const Z_LINE = 0.011
 
 const CORE_GEOMETRY = shapeOf(TAG_OUTLINE)
 const EDGE_GEOMETRY = bothFaces(mergeGeometries([bandOf(TAG_OUTLINE, 0.026, true), ...MARK.map((s) => bandOf(s, 0.022, false))])!, Z_EDGE)
+
+/** The token's bob each way, for a token 1 across. */
+export const TOKEN_BOB = 0.03
+
+/**
+ * How far a token 1 across reaches under its middle as drawn: the lowest of
+ * its edge bands, which stand a little outside its outline, and its ring as
+ * it leans. It turns only about the up axis, so no turn changes a height.
+ */
+export const TOKEN_LOW = (() => {
+  const pos = EDGE_GEOMETRY.getAttribute('position')
+  let low = -TOKEN_RING_RADIUS * Math.cos(RING_LEAN)
+  for (let i = 0; i < pos.count; i++) low = Math.min(low, pos.getY(i))
+  return -low
+})()
+
+/**
+ * How far over its place a token is drawn, for a token 1 across: its lowest
+ * point at the bottom of its bob stands REST_HOVER over its place's level.
+ */
+export const TOKEN_LIFT = restLift(TOKEN_LOW, TOKEN_BOB)
 
 /** Every edge and stroke as line segments on both faces: a pixel wide at any distance. */
 export function tokenLinePoints(): Float32Array {
@@ -155,7 +181,7 @@ export function ItemToken({ id, at, side, colour, opacity = 1, fadeOut, groupRef
       materials.core.opacity = Math.min(opacity, 0.999) * left
     }
     const t = reduced ? 0 : state.clock.elapsedTime
-    g.position.set(at[0], at[1] + (reduced ? 0 : Math.sin(t * 1.25 + phase) * 0.03 * side), at[2])
+    g.position.set(at[0], at[1] + TOKEN_LIFT * side + (reduced ? 0 : Math.sin(t * 1.25 + phase) * TOKEN_BOB * side), at[2])
     // Held still with reduced motion, square on, never edge on.
     g.rotation.set(0, reduced ? 0 : phase + (t / TOKEN_TURN_S) * Math.PI * 2, 0)
     g.scale.setScalar(side)
@@ -164,7 +190,7 @@ export function ItemToken({ id, at, side, colour, opacity = 1, fadeOut, groupRef
   }, LABEL_PRIORITY)
 
   return (
-    <group ref={group} position={at} scale={side} rotation={[0, phase, 0]} name="item-token">
+    <group ref={group} position={[at[0], at[1] + TOKEN_LIFT * side, at[2]]} scale={side} rotation={[0, phase, 0]} name="item-token">
       <mesh geometry={CORE_GEOMETRY} material={materials.core} name="item-token-core" />
       <mesh geometry={EDGE_GEOMETRY} material={materials.edge} name="item-token-edges" />
       <lineSegments geometry={LINE_GEOMETRY} material={materials.line} frustumCulled={false} name="item-token-lines" />

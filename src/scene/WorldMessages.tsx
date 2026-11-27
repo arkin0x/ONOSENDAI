@@ -104,7 +104,9 @@ import { FarDot } from './FarDot'
 import { headlampUniforms } from './headlamp'
 import { basicFaceProps, TRANSLUCENT_ORDER } from './shardFaces'
 import { useDrawReach } from './buildZoom'
-import { dropLetter, LetterField, LETTER_GIBSONS, LETTER_SHAPE, putLetter } from './LetterField'
+import { restLift } from '../lib/restLift'
+import { useReducedMotion } from '../hooks/useReducedMotion'
+import { dropLetter, LetterField, LETTER_GIBSONS, LETTER_LIFT, LETTER_SHAPE, putLetter } from './LetterField'
 import { LevelRing } from './LevelRing'
 import { atlasIndex } from './glyphAtlas'
 import { authorColour } from '../lib/authorColour'
@@ -113,7 +115,7 @@ import { readId } from '../lib/messagesRead'
 import { sealBroken, useMessagesRead } from '../store/useMessagesRead'
 import { recordViewPose } from '../lib/viewPose'
 import { nameLabel, shortNpub } from '../lib/nameLabel'
-import { ItemToken, TOKEN_OUTLINE } from './ItemToken'
+import { ItemToken, TOKEN_LIFT, TOKEN_OUTLINE } from './ItemToken'
 import { HoloSchematic } from './HoloSchematic'
 import { finderView, readRecord } from '../lib/blueprint/format'
 import { useBlueprints } from '../store/useBlueprints'
@@ -229,6 +231,37 @@ export function coinSide(scaleExp: number): number {
 
 /** The ₿'s height as a share of the coin's diamond, tip to tip: as it stood on a wide screen, 31 pixels in 40 (a phone's labels drew it smaller, at 0.72). */
 const COIN_GLYPH = 31 / 40
+
+/**
+ * How far the ₿'s ink reaches under its middle, in the label's ems, its
+ * font size (WorldLabel: troika's fontSize 1, anchored at the middle of its
+ * line): measured in the world font (MonaspaceKrypton-Regular: ascender 0.7825,
+ * descender 0.2175, line gap 0.2, so the baseline is 0.2825 under the
+ * middle; the ₿ reaches 0.154 under its baseline), with the label's 0.06
+ * outline. The camera never rolls, so as the ₿ turns to face it this is the
+ * most it can reach downward, straight on; from above it reaches less.
+ */
+export const COIN_GLYPH_LOW = 0.2825 + 0.154 + 0.06
+
+/**
+ * How far a coin reaches under its middle at any turn, for a coin one gibson
+ * tip to tip: its diamond's tip (every point of it is within half its height
+ * of its middle, however it tumbles) or its ₿, whichever reaches further.
+ */
+export const COIN_REACH = Math.max(0.5, COIN_GLYPH_LOW * COIN_GLYPH)
+
+/** A coin's bob, each way, for a coin one gibson tip to tip: as an item's token bobs (ItemToken), so a field of things breathes together. */
+export const COIN_BOB = 0.03
+
+/**
+ * How far over its place a coin is drawn, for a coin one gibson tip to tip
+ * (lib/restLift.ts): its lowest point, at any turn and at the bottom of its
+ * bob, stands REST_HOVER over the level of its place, where a floor built
+ * at that height lies and a chest's base stands. It was drawn about its
+ * place, so the floor cut its lower half, ₿ and all (owner, 2026-11-27: "the
+ * B is cut off by the ground").
+ */
+export const COIN_LIFT = restLift(COIN_REACH, COIN_BOB)
 /** The note's own color: the box's blue, lit. */
 const AUDIO_BLUE = '#9fd0ff'
 
@@ -399,7 +432,7 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
             ? <ItemToken key={w.key} id={w.key} at={w.centre} side={noteBoxSide(scaleExp)} colour={authorColour(w.itemAuthor ?? w.author)} opacity={MOVING_OPACITY} />
             : <WorldMark key={w.key} kind="note" at={w.centre} side={noteBoxSide(scaleExp)} opacity={MOVING_OPACITY} />
           : <PlacedBox key={w.key} at={w.centre} opacity={MOVING_OPACITY} />
-        if (w.coin) return <CoinItem key={w.key} text={w.text} at={w.centre} onTap={open} />
+        if (w.coin) return <CoinItem key={w.key} id={w.key} text={w.text} at={w.centre} onTap={open} />
         if (w.type === 'message') return <NoteItem key={w.key} w={w} birth={births[w.key]} onTap={open} />
         if (w.type === 'audio') return <AudioMark key={w.key} id={w.key} title={w.text} at={w.centre} onTap={open} />
         if (w.type === 'blueprint' && w.blueprint) return <BlueprintMark key={w.key} card={w.blueprint} who={{ pubkey: w.author, mine: w.mine }} at={w.centre} axes={axes} onTap={open} />
@@ -415,10 +448,12 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
               : <HeldItemMark id={w.key} own={draw === 'own'} at={w.centre} wears={w.wears} region={w.region} axes={axes} appear={play} />}
             {/* TAKE on an item with no model: its token fades out (MARK_FADE_MS), and its name, over where it stood, with the rest. */}
             {draw !== 'item' && play && <TakenItem w={w} side={side} play={play} axes={axes} scaleExp={scaleExp} />}
-            {/* A fingertip over the mark at any distance, and over a one-gibson
-                cube the whole cube once it is larger (TapTarget `side`). A
-                held key keeps its fingertip: its box is the half one. */}
-            <TapTarget px={TAP_PX} side={draw === 'item' ? side : undefined} at={w.centre} onTap={open} />
+            {/* A fingertip over the mark at any distance. A key with no model
+                has its own over its token, where the token rests (ItemMark);
+                a key wearing one keeps this one at its place, as its model is
+                drawn about it, and its token while the model loads has its
+                own too. A held key keeps its fingertip: its box is the half one. */}
+            {(draw !== 'item' || side === undefined) && <TapTarget px={TAP_PX} at={w.centre} onTap={open} />}
           </group>
         )
       })}
@@ -457,6 +492,11 @@ export function BlueprintMark({ card, who, at, axes, onTap }: { card: BlueprintI
  */
 export function keyBoxSide(wears: ItemWears | undefined, scaleExp: number): number | undefined {
   return wears ? undefined : noteBoxSide(scaleExp)
+}
+
+/** Where an item's token of `side` rests over its place `at` (ItemToken TOKEN_LIFT), before its bob: what its name and its tap target stand at. */
+function tokenRest(at: [number, number, number], side: number): [number, number, number] {
+  return [at[0], at[1] + TOKEN_LIFT * side, at[2]]
 }
 
 /** Whether a placed thing's box is one gibson in the world: a message's (not a coin's), or a key's with no model (keyBoxSide). */
@@ -525,15 +565,19 @@ export function ItemMark({ id, text, sub, who, at, opacity = 1, wears, region = 
   if (model && axes && itemMarkShape(model, axes) === 'model') {
     return <ItemModelMark id={id ?? text} model={model} animation={wears?.animation ?? NO_MOTION} at={at} region={region} axes={axes} dot={who ? authorColour(who.pubkey) : undefined} opacity={opacity} onTap={onTap} label={FLOATING_NAME.item ? label : undefined} />
   }
+  const tokenSide = side ?? noteBoxSide(scaleExp)
   return (
     <>
       {/* In the world with no model drawn (none, or one still loading or that never came): the token (ItemToken), one gibson.
           Cyberspace TV's finds (no `who`), sized on screen, keep the cube. */}
       {who
-        ? <ItemToken id={id ?? text} at={at} side={side ?? noteBoxSide(scaleExp)} colour={authorColour(who.pubkey)} opacity={opacity} groupRef={token} />
+        ? <ItemToken id={id ?? text} at={at} side={tokenSide} colour={authorColour(who.pubkey)} opacity={opacity} groupRef={token} />
         : <WorldMark kind="note" at={at} opacity={opacity} side={side} />}
-      {/* Over the token as it is drawn, turning and bobbing: a few pixels over its highest point on screen (WorldLabel clear). */}
-      {FLOATING_NAME.item && <WorldLabel text={label.text} color={label.color} at={at} align="center" px={11} sub={label.sub} subColor={label.subColor} subScale={1} subOpacity={1} opacity={opacity} clear={who ? { object: token, points: TOKEN_OUTLINE } : undefined} recede="name" />}
+      {/* A fingertip over the token where it rests (TOKEN_LIFT), and the whole token once it is larger (TapTarget `side`):
+          a key with no model, and a key whose model has not come, alike. */}
+      {who && onTap && <TapTarget px={TAP_PX} side={tokenSide} at={tokenRest(at, tokenSide)} onTap={onTap} />}
+      {/* Over the token as it is drawn, turning and bobbing: a few pixels over its highest point on screen (WorldLabel clear), from where it rests (TOKEN_LIFT). */}
+      {FLOATING_NAME.item && <WorldLabel text={label.text} color={label.color} at={who ? tokenRest(at, tokenSide) : at} align="center" px={11} sub={label.sub} subColor={label.subColor} subScale={1} subOpacity={1} opacity={opacity} clear={who ? { object: token, points: TOKEN_OUTLINE } : undefined} recede="name" />}
     </>
   )
 }
@@ -601,6 +645,11 @@ const FLOURISH_HOLD_MS = 2600
  * any distance (WorldLabel `clear` radius, LETTER_BALL; the same rule as an
  * item's token, TOKEN_BALL), and the tap target covers the gibson once it is
  * larger than a fingertip.
+ *
+ * It rests over its place rather than about it (LETTER_LIFT): the paper's
+ * lowest point stands a little over the level of its place, where a floor at
+ * that height lies and a chest's base stands. Its name and its tap target
+ * go with it; its place is unchanged.
  */
 export function NoteItem({ w, birth, onTap }: { w: { key: string; lineage?: string; text: string; mine: boolean; author: string; centre: [number, number, number] }; birth: number | undefined; onTap: () => void }): JSX.Element {
   const profile = useProfile(w.author || null)
@@ -618,18 +667,21 @@ export function NoteItem({ w, birth, onTap }: { w: { key: string; lineage?: stri
   const id = readId(w)
   const broken = useMessagesRead((s) => sealBroken(s, id, yours))
   const initial = atlasIndex(sealInitial(profile?.name, safeNpubOf(w.author)))
+  // Where the letter rests: over its place, so a floor at its level never cuts it (LETTER_LIFT).
   const [cx, cy, cz] = w.centre
+  const ry = cy + LETTER_LIFT * side * LETTER_GIBSONS
+  const rest = useMemo<[number, number, number]>(() => [cx, ry, cz], [cx, ry, cz])
   useEffect(() => {
-    putLetter({ key: w.key, centre: [cx, cy, cz], width: side * LETTER_GIBSONS, colour: authorColour(w.author), initial, broken })
-  }, [w.key, cx, cy, cz, side, w.author, initial, broken])
+    putLetter({ key: w.key, centre: rest, width: side * LETTER_GIBSONS, colour: authorColour(w.author), initial, broken })
+  }, [w.key, rest, side, w.author, initial, broken])
   useEffect(() => () => dropLetter(w.key), [w.key])
   return (
     <group>
       {flourish && birth !== undefined
-        ? <DecodingLabel text={messageBillboard(w.text)} seed={seedOf(w.key)} birth={birth} at={w.centre} />
-        : <WorldLabel text={name} color={NAME_WHITE} at={w.centre} align="center" px={11} clear={{ shape: { flat: LETTER_SHAPE.flat * side * LETTER_GIBSONS, radius: LETTER_SHAPE.radius * side * LETTER_GIBSONS, height: LETTER_SHAPE.height * side * LETTER_GIBSONS } }} recede="credit" />}
-      {/* A fingertip over the letter at any distance, and its whole gibson once it is larger (TapTarget `side`). */}
-      <TapTarget px={TAP_PX} side={side} at={w.centre} onTap={onTap} />
+        ? <DecodingLabel text={messageBillboard(w.text)} seed={seedOf(w.key)} birth={birth} at={rest} />
+        : <WorldLabel text={name} color={NAME_WHITE} at={rest} align="center" px={11} clear={{ shape: { flat: LETTER_SHAPE.flat * side * LETTER_GIBSONS, radius: LETTER_SHAPE.radius * side * LETTER_GIBSONS, height: LETTER_SHAPE.height * side * LETTER_GIBSONS } }} recede="credit" />}
+      {/* A fingertip over the letter at any distance, and its whole gibson once it is larger (TapTarget `side`), where it rests. */}
+      <TapTarget px={TAP_PX} side={side} at={rest} onTap={onTap} />
     </group>
   )
 }
@@ -664,7 +716,7 @@ function TakenItem({ w, side, play, axes, scaleExp }: { w: { key: string; text: 
   return (
     <>
       {side !== undefined && <ItemToken id={w.key} at={w.centre} side={side} colour={authorColour(who.pubkey)} fadeOut={play.at} groupRef={token} />}
-      <NamedVanish id={w.key} who={who} label={{ text: w.text, color: NAME_WHITE, subColor: NAME_WHITE }} at={w.centre} wears={w.wears} region={w.region} axes={axes} play={play} clear={side === undefined ? { trueSide: placedBoxSide(scaleExp), minPx: 0 } : { object: token, points: TOKEN_OUTLINE }} />
+      <NamedVanish id={w.key} who={who} label={{ text: w.text, color: NAME_WHITE, subColor: NAME_WHITE }} at={side === undefined ? w.centre : tokenRest(w.centre, side)} wears={w.wears} region={w.region} axes={axes} play={play} clear={side === undefined ? { trueSide: placedBoxSide(scaleExp), minPx: 0 } : { object: token, points: TOKEN_OUTLINE }} />
     </>
   )
 }
@@ -764,12 +816,12 @@ function AudioNote({ at, opacity = 1 }: { at: [number, number, number]; opacity?
  * the mint answers, or when it cannot be reached, the coin is drawn as a
  * coin: nobody has said it is gone.
  */
-function CoinItem({ text, at, onTap }: { text: string; at: [number, number, number]; onTap: () => void }): JSX.Element | null {
+function CoinItem({ id, text, at, onTap }: { id: string; text: string; at: [number, number, number]; onTap: () => void }): JSX.Element | null {
   const { state } = useCashu(text)
   const kind = coinKind(state)
   const scaleExp = useCyberspace((s) => s.scaleExp)
   if (!markShown(kind, scaleExp)) return null
-  return <CoinMark kind={kind} at={at} onTap={onTap} />
+  return <CoinMark id={id} kind={kind} at={at} onTap={onTap} />
 }
 
 /**
@@ -781,19 +833,32 @@ function CoinItem({ text, at, onTap }: { text: string; at: [number, number, numb
  * coin, not a name over it, so it is drawn at the coin's size and goes with
  * it; a coin has no floating name (above).
  *
+ * It rests over its place rather than about it (COIN_LIFT): its lowest
+ * point, at any turn, stands a little over the level of its place, where a
+ * floor at that height lies and a chest's base stands, and it bobs gently
+ * there as an item's token does (still with reduced motion). Its place is
+ * unchanged; only where it is drawn is lifted.
+ *
  * Its tap target is a fingertip over it, or the whole coin once that is
  * larger, as a message's box has it; and as a chest's has it, none while the
- * coin is under MIN_VISIBLE_PX on screen (TapTarget `minVisible`).
+ * coin is under MIN_VISIBLE_PX on screen (TapTarget `minVisible`). It stands
+ * where the coin is drawn.
  */
-export function CoinMark({ kind, at, onTap }: { kind: 'coin' | 'spent'; at: [number, number, number]; onTap: () => void }): JSX.Element {
+export function CoinMark({ id, kind, at, onTap }: { id: string; kind: 'coin' | 'spent'; at: [number, number, number]; onTap: () => void }): JSX.Element {
   const side = coinSide(useCyberspace((s) => s.scaleExp))
   const spent = kind === 'spent'
+  const reduced = useReducedMotion()
   const outer = useRef<Group>(null)
   const body = useRef<Group>(null)
   const far = useRef<Points>(null)
+  // Its own moment in the bob, from its id, so a row of coins never bobs in step.
+  const phase = useMemo(() => (seedOf(id) / 4294967296) * Math.PI * 2, [id])
+  const rest: [number, number, number] = [at[0], at[1] + COIN_LIFT * side, at[2]]
   useFrame((state) => {
     const g = outer.current
     if (!g) return
+    const bob = reduced ? 0 : Math.sin(state.clock.elapsedTime * COIN_BOB_RATE + phase) * COIN_BOB * side
+    g.position.set(rest[0], rest[1] + bob, rest[2])
     const cam = state.camera as PerspectiveCamera
     // The coin at its true size, or the dot once that is too small to be anything.
     const shown = farDotShown(side, perPixelAt(cam.position.distanceTo(g.position), cam.fov, state.size.height))
@@ -802,17 +867,20 @@ export function CoinMark({ kind, at, onTap }: { kind: 'coin' | 'spent'; at: [num
   }, LABEL_PRIORITY)
   return (
     <group>
-      <group ref={outer} position={at} scale={side}>
+      <group ref={outer} position={rest} scale={side}>
         <FarDot dotRef={far} color={spent ? SPENT : COIN} opacity={spent ? 0.7 : 1} />
         <group ref={body}>
           <WorldMark kind={kind} at={ORIGIN} side={1} />
           <WorldLabel text="₿" color={spent ? SPENT : COIN} opacity={spent ? 0.7 : 1} at={ORIGIN} align="center" side={COIN_GLYPH} />
         </group>
       </group>
-      <TapTarget px={TAP_PX} side={side} minVisible at={at} onTap={onTap} />
+      <TapTarget px={TAP_PX} side={side} minVisible at={rest} onTap={onTap} />
     </group>
   )
 }
+
+/** The coin's bob, radians a second: an item token's (ItemToken). */
+const COIN_BOB_RATE = 1.25
 
 /** Where a coin's diamond and ₿ stand in its own frame: its middle. */
 const ORIGIN: [number, number, number] = [0, 0, 0]

@@ -70,6 +70,7 @@ import { basicFaceProps, NO_BLOOM_BLEND, TAG_BLEND } from './shardFaces'
 import { ATLAS_COLS, glyphAtlas, refreshGlyphAtlas } from './glyphAtlas'
 import { seedOf } from '../lib/decode'
 import { LABEL_PRIORITY } from './WorldLabel'
+import { restLift } from '../lib/restLift'
 
 /** A letter's width, in gibsons: the message's box was one gibson cubed, and the letter is as wide as that box. */
 export const LETTER_GIBSONS = 1
@@ -309,6 +310,30 @@ export function bothFaces(front: BufferGeometry, z: number, turn = false): Buffe
 const PAPER_GEOMETRY = shapeOf(PAPER_OUTLINE)
 /** Its edge and the flap's fold as bands, for a letter seen up close; the fold lines (foldLinePoints) keep them seen from far. */
 const FOLD_GEOMETRY = bothFaces(merged(bandOf(PAPER_OUTLINE, 0.022, true), bandOf(FLAP, 0.016, false)), Z_FOLD)
+
+/**
+ * How far a letter 1 wide reaches under its middle as it is drawn: the
+ * lowest point of its paper and its fold lines at its tilt (its turn about
+ * the up axis never changes a height; the seals sit inside the paper). The
+ * glyph ring is not counted: it turns to face the camera and reaches past
+ * the gibson (LETTER_SHAPE.flat), a halo about the letter rather than the
+ * letter, and counting it would float the letter most of a gibson up.
+ */
+export const LETTER_LOW = (() => {
+  const pos = FOLD_GEOMETRY.getAttribute('position')
+  const c = Math.cos(TILT), sn = Math.sin(TILT)
+  let low = 0
+  for (let i = 0; i < pos.count; i++) low = Math.min(low, pos.getX(i) * sn + pos.getY(i) * c)
+  return -low
+})()
+
+/**
+ * How far over its place a letter 1 wide is drawn (lib/restLift.ts): the
+ * paper's lowest point at the bottom of its bob stands REST_HOVER over the
+ * level of its place, where a floor at that height lies and a chest's base
+ * stands, so the floor never cuts its lower half (NoteItem).
+ */
+export const LETTER_LIFT = restLift(LETTER_LOW, BOB)
 const SEAL_GEOMETRY = bothFaces(shapeOf(wholeSealPoints()), Z_SEAL)
 const BROKEN_GEOMETRY = (() => {
   const [l, r] = brokenSealHalves()

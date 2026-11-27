@@ -136,8 +136,8 @@ const MARKS: Array<{ name: string; draw: () => ReactNode; thing?: string; measur
   { name: 'a chest', draw: () => createElement(LookMark, { key: 'm', look: treasure, model: treasure.closed, at: [0, 0, 0], axes: AXES }) },
   { name: 'a door', draw: () => createElement(LookMark, { key: 'm', look: door, model: door.closed, at: [0, 0, 0], axes: AXES }) },
   { name: 'an item wearing a model', draw: () => createElement(ItemModelMark, { key: 'm', id: 'item', model: item, animation: [], at: [0, 0, 0], region: null, axes: AXES }) },
-  { name: 'a coin', draw: () => createElement(CoinMark, { key: 'm', kind: 'coin', at: [0, 0, 0], onTap: () => {} }), thing: 'coin-mark', measure: trueLongestOf },
-  { name: 'a spent coin', draw: () => createElement(CoinMark, { key: 'm', kind: 'spent', at: [0, 0, 0], onTap: () => {} }), thing: 'coin-mark', measure: trueLongestOf },
+  { name: 'a coin', draw: () => createElement(CoinMark, { key: 'm', id: 'c', kind: 'coin', at: [0, 0, 0], onTap: () => {} }), thing: 'coin-mark', measure: trueLongestOf },
+  { name: 'a spent coin', draw: () => createElement(CoinMark, { key: 'm', id: 'c', kind: 'spent', at: [0, 0, 0], onTap: () => {} }), thing: 'coin-mark', measure: trueLongestOf },
 ]
 
 describe('drawn at its true size against a block at every distance (LookMark, ItemModelMark, CoinMark)', () => {

@@ -10,18 +10,21 @@
  * time. The totals are every device's added up (lib/miningRecord.ts); the
  * line at the foot says whether they are synced across your devices or kept
  * on this one, LIVE or LOCAL, and when they last synced (store/miningStats.ts).
- * Opening it saves what changed (no sooner than a minute after the last try)
- * and reads your other devices' numbers.
+ * On screen (unfolded and in view: the menu mounts its folded panels too),
+ * it reads your other devices' numbers, at most once a minute; it never
+ * writes, so opening the menu never asks your signer for a signature (review
+ * of #951). The foot says what is true now: synced, saved on this device
+ * only, or that the last sync failed.
  *
  * The look: the house chamfer on every tile, a cyan tick on the cut corner,
  * white tabular numbers (drawn from augmented-ui's cut corners and the FUI
  * HUD readouts the owner likes; no dependency).
  */
 
-import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { Boxes, Cloud, CloudOff, Cpu, DraftingCompass, Hammer, Pickaxe, ScanSearch, Timer } from 'lucide-react'
 import { useCyberspace } from '../store/useCyberspace'
-import { localFor, miningRecordFor, nudgeMining, useMiningStats } from '../store/miningStats'
+import { WRITE_EVERY_MS, isDirty, localFor, miningRecordFor, nudgeMining, useMiningStats, type MiningStatus } from '../store/miningStats'
 import { currentStreak, dayNumber, daysActive, longestStreak, rarestMined, topMined, totalsOf } from '../lib/miningRecord'
 import { blockKind, blockName } from '../lib/terrain/blocks'
 import { tileUrl } from '../lib/terrain/tiles'
@@ -64,6 +67,18 @@ function Swatch({ id, size = 22 }: { id: number; size?: number }): JSX.Element {
   return <span className={`terrain-swatch${k?.glow ? ' terrain-swatch--glow' : ''}`} style={style} aria-hidden />
 }
 
+/** The foot's words: whether the stats are synced, kept here, or failed to sync, and what to know about it. */
+export function syncLine(o: { enabled: boolean; live: boolean; status: MiningStatus; dirty: boolean; syncedAt: number; now: number }): { synced: boolean; words: string; when: string } {
+  if (!o.enabled) return { synced: false, words: 'Saved on this device only', when: 'Sync is off in Settings' }
+  if (!o.live) return { synced: false, words: 'Saved on this device only', when: 'Switch to LIVE to sync' }
+  if (o.status === 'unsupported') return { synced: false, words: 'Saved on this device only', when: 'Your signer cannot encrypt them' }
+  if (o.status === 'error') return { synced: false, words: 'Sync failed', when: syncedWords(o.syncedAt, o.now) }
+  if (o.status === 'syncing') return { synced: true, words: 'Syncing', when: syncedWords(o.syncedAt, o.now) }
+  const soon = `New stats save within ${WRITE_EVERY_MS / 60_000} min`
+  if (!o.syncedAt) return { synced: false, words: 'Not synced yet', when: o.dirty ? soon : '' }
+  return { synced: true, words: 'Synced across your devices', when: o.dirty ? soon : syncedWords(o.syncedAt, o.now) }
+}
+
 /** A tile: a number (or a date, `text`, drawn smaller) over its label; `quiet` for nothing yet. */
 function Tile({ value, label, wide = false, quiet = false, text = false, children }: { value: ReactNode; label: string; wide?: boolean; quiet?: boolean; text?: boolean; children?: ReactNode }): JSX.Element {
   return (
@@ -97,8 +112,15 @@ export function MiningPanel(): JSX.Element {
     const t = setInterval(() => setNow(Date.now()), 30_000)
     return () => clearInterval(t)
   }, [])
-  // Opening it saves what changed and reads the other devices.
-  useEffect(() => { if (me) nudgeMining('panel') }, [me])
+  // On screen, unfolded: read the other devices (never a write). A folded panel's body is not drawn, so it is never in view.
+  const body = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const el = body.current
+    if (!me || !el || typeof IntersectionObserver === 'undefined') return
+    const seen = new IntersectionObserver((entries) => { if (entries.some((e) => e.isIntersecting)) nudgeMining('panel') })
+    seen.observe(el)
+    return () => seen.disconnect()
+  }, [me])
 
   const rec = miningRecordFor(me)
   const { c, k } = totalsOf(rec)
@@ -106,13 +128,13 @@ export function MiningPanel(): JSX.Element {
   const top = topMined(k, TOP_KINDS)
   const today = dayNumber(now)
   const syncedAt = me ? localFor(me, undefined, false).syncedAt : 0
-  const synced = enabled && live
+  const line = syncLine({ enabled, live, status, dirty: isDirty(me), syncedAt, now })
   const icon = { size: 13, 'aria-hidden': true, strokeWidth: 2 } as const
 
   return (
     <section className="panel panel--mining">
       <header className="panel__head"><h2>Mining</h2></header>
-      <div className="mining">
+      <div className="mining" ref={body}>
         <Group icon={<ScanSearch {...icon} />} title="Surveys">
           <Tile value={num(c.surveys)} label="Surveys" />
           <Tile value={num(c.chunks)} label="Unique chunks" />
@@ -164,11 +186,11 @@ export function MiningPanel(): JSX.Element {
       </div>
       <footer className="mining__sync" role="status">
         <span className={`mining__mode mining__mode--${live ? 'live' : 'local'}`}>{live ? 'LIVE' : 'LOCAL'}</span>
-        {synced ? <Cloud size={13} aria-hidden /> : <CloudOff size={13} aria-hidden />}
-        <span className="mining__sync-words">{synced ? 'Synced across your devices' : 'Saved on this device only'}</span>
-        <span className="mining__sync-when">{synced ? (status === 'syncing' ? 'Syncing' : syncedWords(syncedAt, now)) : enabled ? 'Switch to LIVE to sync' : 'Sync is off in Settings'}</span>
+        {line.synced ? <Cloud size={13} aria-hidden /> : <CloudOff size={13} aria-hidden />}
+        <span className="mining__sync-words">{line.words}</span>
+        {line.when && <span className="mining__sync-when">{line.when}</span>}
       </footer>
-      {synced && (status === 'error' || status === 'unsupported') && note && <p className="notice" role="status">{note}</p>}
+      {enabled && live && (status === 'error' || status === 'unsupported') && note && <p className="notice" role="status">{note}</p>}
       <Explanation>Everything you do in TERRAIN, added up across your devices. Saved encrypted to you, so only you can read it. Counts and dates only, never where you were.</Explanation>
     </section>
   )

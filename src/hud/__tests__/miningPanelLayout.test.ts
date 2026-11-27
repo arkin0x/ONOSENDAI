@@ -71,7 +71,7 @@ describe('MINING renders the numbers', () => {
   it('every group, the kinds mined most, the rarest find and the sync line', () => {
     seed()
     const html = page()
-    for (const word of ['Surveys', 'Unique chunks', 'Blocks mined', 'Rarest find', 'Singularity core', 'Placed in the air', 'With the Compiler', 'Bare-handed', 'Prizes taken', 'Compiler crafted', 'Left in the world', 'In TERRAIN', 'Day streak', 'Longest streak', 'Synced across your devices', 'LIVE']) expect(html).toContain(word)
+    for (const word of ['Surveys', 'Unique chunks', 'Blocks mined', 'Rarest find', 'Singularity core', 'Placed in the air', 'With the Compiler', 'Bare-handed', 'Prizes taken', 'Compiler crafted', 'Left in the world', 'In TERRAIN', 'Day streak', 'Longest streak', 'Not synced yet', 'New stats save within 10 min', 'LIVE']) expect(html).toContain(word)
     expect(html).toContain('1,234')
     expect(html).toContain('41h 17m')
     expect(html).not.toMatch(/[\u{1F300}-\u{1FAFF}]/u)

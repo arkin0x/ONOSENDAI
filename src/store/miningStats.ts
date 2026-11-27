@@ -11,18 +11,27 @@
  * tutorial run is going. Counts are kept per identity in IndexedDB
  * (lib/kvStore.ts, `onosendai:mining:<pubkey>`; owner, 2026-11-19: all local
  * data per npub, and switching never deletes), with this device's random id
- * for that identity. Unique chunks are deduped against a set of salted hashes
- * kept on this device alone (`onosendai:mining:chunks:<pubkey>`); only the
- * count goes in the record.
+ * for that identity. Unique chunks are deduped against salted hashes kept on
+ * this device alone, one small record per chunk
+ * (`onosendai:mining:chunk:<pubkey>:<hash>`), so a survey reads and writes
+ * one of them, never the whole set; only the count goes in the record.
  *
  * THE SIGNER'S COST. A remote signer (Amber on a tablet) asks for every
- * signature, so nothing is written per action. A change marks the record
- * dirty; it is written at most once every WRITE_EVERY_MS, and also when the
- * page is hidden or unloads (best effort) and when the MINING panel opens,
- * those two no more than once every NUDGE_FLOOR_MS. One write is one sign,
- * plus one encrypt only the first time (to wrap a new record key). A load
- * costs one decrypt, at the first sync, which waits for the panel or the
- * first write: a player who never mines is never asked.
+ * signature, so nothing is written per action, and the review of #951
+ * measured the hour: at most about six signatures in an hour of play.
+ *   - Something done (a survey, a block mined, a smash...) marks the record
+ *     dirty. Time in TERRAIN alone never does: it rides along with the next
+ *     real change.
+ *   - A dirty record is written at most once every WRITE_EVERY_MS, whatever
+ *     asks: the timer, or the page going hidden or unloading (best effort,
+ *     for when a hidden page's timer never fires), held to the same
+ *     HIDE_FLOOR_MS since the last try.
+ *   - Opening MINING only reads (to show the other devices), and only once
+ *     the panel is unfolded and on screen, no more than once a READ_FLOOR_MS.
+ * One write is one sign, plus one encrypt only the first time (to wrap a new
+ * record key; one key a load, however many tries that first save takes). A
+ * load costs one decrypt, at the first sync, which waits for the panel on
+ * screen or the first write: a player who never mines is never asked.
  *
  * WRITING. Every write reads the relays first and merges (a G-counter per
  * device, so nothing is ever lost). Nothing is written:
@@ -54,17 +63,19 @@ export const WRITE_EVERY_MS = 10 * 60_000
 export const QUIET_MS = 20_000
 /** After a sync that did not write (the relay did not answer, a refusal), the next waits at least this long. */
 export const RETRY_MS = 2 * 60_000
-/** A write because the page was hidden or the panel opened waits at least this long after the last. */
-export const NUDGE_FLOOR_MS = 60_000
+/** A write because the page was hidden waits at least this long after the last try: the same as the timer's, so the hour holds six. */
+export const HIDE_FLOOR_MS = WRITE_EVERY_MS
+/** MINING on screen reads (never writes) at most this often. */
+export const READ_FLOOR_MS = 60_000
+/** The furthest past this device's clock an event is dated: a relay copy further ahead is written under at now, and the merge keeps every count. */
+export const MAX_AHEAD_S = 60
 /** How long after a write it is read back, in case another device wrote over it. */
 const VERIFY_MS = 9000
 
 const SETTING_KEY = 'onosendai:mining-sync'
 export const MINING_PREFIX = 'onosendai:mining:'
 const recordKey = (me: string): string => `${MINING_PREFIX}${me}`
-const chunksKey = (me: string): string => `${MINING_PREFIX}chunks:${me}`
-/** The most chunk hashes kept for dedupe: past it the oldest go (a chunk surveyed again then counts once more). */
-const MAX_CHUNK_HASHES = 20_000
+const chunkKey = (me: string, hash: string): string => `${MINING_PREFIX}chunk:${me}:${hash}`
 
 /** Signer's self-to-self NIP-44, as useCyberspace selfCrypto gives it. */
 export interface SelfNip44 {
@@ -98,10 +109,14 @@ export interface MiningLocal {
   salt: string
   /** Everything known: this device's entry (only it raises it) and every other device's as last read. */
   rec: MiningRecord
-  /** Bumped on every change here. */
+  /** Bumped on every change here, time in TERRAIN included. */
   rev: number
-  /** The rev the relay holds: dirty while it is behind rev. */
+  /** The rev the relay holds. */
   synced: number
+  /** Bumped on every thing done (never on time alone): what makes a write worth a signature. */
+  real: number
+  /** The `real` the relay holds: dirty while it is behind `real`. */
+  syncedReal: number
   /** When a write was last tried (ms): the throttle. */
   triedAt: number
   /** When the relay last answered a read or took a write (ms), or 0. */
@@ -146,7 +161,7 @@ function flip(): void { useMiningStats.setState((s) => ({ flips: s.flips + 1 }))
 const cache = new Map<string, { raw: string | null; local: MiningLocal }>()
 
 function fresh(): MiningLocal {
-  return { v: 1, device: newDeviceId(), salt: bytesToHex(newRecordKey()), rec: emptyRecord(), rev: 0, synced: 0, triedAt: 0, syncedAt: 0, wroteAt: 0 }
+  return { v: 1, device: newDeviceId(), salt: bytesToHex(newRecordKey()), rec: emptyRecord(), rev: 0, synced: 0, real: 0, syncedReal: 0, triedAt: 0, syncedAt: 0, wroteAt: 0 }
 }
 
 /** This identity's side, made (with a new device id) the first time it is asked for; with `create` false, an unsaved empty one. */
@@ -161,7 +176,7 @@ export function localFor(me: string, D: MiningDeps = deps, create = true): Minin
       const v = JSON.parse(raw) as Partial<MiningLocal>
       if (isDeviceId(v.device) && typeof v.salt === 'string' && /^[0-9a-f]{64}$/.test(v.salt)) {
         const num = (n: unknown): number => (typeof n === 'number' && Number.isFinite(n) && n >= 0 ? n : 0)
-        local = { v: 1, device: v.device, salt: v.salt, rec: validRecord(v.rec), rev: num(v.rev), synced: num(v.synced), triedAt: num(v.triedAt), syncedAt: num(v.syncedAt), wroteAt: num(v.wroteAt) }
+        local = { v: 1, device: v.device, salt: v.salt, rec: validRecord(v.rec), rev: num(v.rev), synced: num(v.synced), real: num(v.real), syncedReal: num(v.syncedReal), triedAt: num(v.triedAt), syncedAt: num(v.syncedAt), wroteAt: num(v.wroteAt) }
       }
     } catch { /* not a record: as new */ }
   }
@@ -187,11 +202,11 @@ function saveLocal(me: string, local: MiningLocal, D: MiningDeps = deps): void {
   cache.set(me, { raw: back, local })
 }
 
-/** Whether this identity has changes the relay does not hold yet. */
+/** Whether this identity has things done that the relay does not hold yet (time in TERRAIN alone is not). */
 export function isDirty(me: string, D: MiningDeps = deps): boolean {
   if (!me) return false
   const l = localFor(me, D, false)
-  return l.rev > l.synced
+  return l.real > l.syncedReal
 }
 
 /** Everything known for this identity: every device's numbers. */
@@ -210,16 +225,11 @@ export type MiningEvent =
   | { type: 'compiler' }
   | { type: 'blueprint'; what: 'made' | 'placed' | 'found' }
 
-/** Whether a chunk is new to this device's dedupe set (and adds it). Salted, never published. */
+/** Whether a chunk is new to this device's dedupe set (and adds it): one small record per chunk, salted, never published. */
 function newChunk(me: string, salt: string, chunk: string, D: MiningDeps): boolean {
-  const h = bytesToHex(sha256(new TextEncoder().encode(`${salt}:${chunk}`))).slice(0, 16)
-  let list: string[] = []
-  try { const raw = D.storage?.getItem(chunksKey(me)); if (raw) list = JSON.parse(raw) as string[] } catch { list = [] }
-  if (!Array.isArray(list)) list = []
-  if (list.includes(h)) return false
-  list.push(h)
-  if (list.length > MAX_CHUNK_HASHES) list = list.slice(list.length - MAX_CHUNK_HASHES)
-  try { D.storage?.setItem(chunksKey(me), JSON.stringify(list)) } catch { /* full: counted anyway */ }
+  const key = chunkKey(me, bytesToHex(sha256(new TextEncoder().encode(`${salt}:${chunk}`))).slice(0, 16))
+  try { if (D.storage?.getItem(key) != null) return false } catch { /* unreadable: counted as new */ }
+  try { D.storage?.setItem(key, '1') } catch { /* full: counted anyway */ }
   return true
 }
 
@@ -258,7 +268,7 @@ export function noteMining(ev: MiningEvent, who?: string): void {
   const rec: MiningRecord = { ...local.rec, devices: { ...local.rec.devices, [local.device]: { c, k, u: nowS } }, first, days }
   rec.best = { ...rec.best, streak: Math.max(rec.best.streak ?? 0, longestStreak(rec)) || undefined }
   if (!rec.best.streak) delete rec.best.streak
-  changed(me, { ...local, rec, rev: local.rev + 1 }, D)
+  changed(me, { ...local, rec, rev: local.rev + 1, real: local.real + 1 }, D, true)
 }
 
 /** Time in TERRAIN on screen, for `who`. Whole seconds are counted; the rest waits for the next call. */
@@ -275,13 +285,14 @@ export function addTerrainTime(seconds: number, who?: string): void {
   const dev = local.rec.devices[local.device] ?? emptyDevice()
   const c = { ...dev.c, terrainSec: (dev.c.terrainSec ?? 0) + whole }
   const rec: MiningRecord = { ...local.rec, devices: { ...local.rec.devices, [local.device]: { ...dev, c, u: Math.floor(D.now() / 1000) } } }
-  changed(me, { ...local, rec, rev: local.rev + 1 }, D)
+  // Time alone never asks for a write: it goes with the next one.
+  changed(me, { ...local, rec, rev: local.rev + 1 }, D, false)
 }
 
-function changed(me: string, local: MiningLocal, D: MiningDeps): void {
+function changed(me: string, local: MiningLocal, D: MiningDeps, real: boolean): void {
   saveLocal(me, local, D)
   flip()
-  if (useMiningStats.getState().enabled && me === D.self()) schedule()
+  if (real && useMiningStats.getState().enabled && me === D.self()) schedule()
 }
 
 // -- the relay's side ----------------------------------------------------------
@@ -290,9 +301,13 @@ function changed(me: string, local: MiningLocal, D: MiningDeps): void {
 let opened: { me: string; keys: Map<string, Uint8Array> } = { me: '', keys: new Map() }
 /** Wrapped keys the signer refused this load: not asked again until the switch is turned on again. */
 const failed = new Set<string>()
+/** The record key wrapped for a first save this load: used again while that save keeps failing, never a new encrypt per try. */
+let made: { me: string; wrapped: string; key: Uint8Array } | null = null
+/** Relay copies dated past this device's clock (by more than MAX_AHEAD_S) already written under once this load: not signed under again. */
+const aheadOf = new Set<string>()
 
 function keysFor(me: string): Map<string, Uint8Array> {
-  if (opened.me !== me) { opened = { me, keys: new Map() }; failed.clear() }
+  if (opened.me !== me) { opened = { me, keys: new Map() }; failed.clear(); aheadOf.clear(); made = null }
   return opened.keys
 }
 
@@ -302,6 +317,7 @@ const NOT_ANSWERED = 'The relay did not answer, so your mining stats were not sa
 const NOT_OPENED = 'Your saved mining stats did not open with your signer, so they were left as they are.'
 const STALE = 'The relay answered with an older copy of your mining stats, so they were left as they are for now.'
 const NO_NIP44 = 'Your signer has no NIP-44 encryption, so your mining stats stay on this device.'
+const AHEAD = 'Your mining stats on the relay are dated ahead of this device\'s clock, so this device\'s numbers wait for your next change to try again.'
 /** A read older than this device's own last write is not written over for this long. */
 const STALE_PATIENCE_S = 86_400
 
@@ -371,19 +387,27 @@ async function syncOnce(D: MiningDeps, write: boolean): Promise<Outcome> {
   const merged = mergeRecords(local.rec, remote.rec)
   const behind = !sameRecord(merged, remote.rec)
   // In step with the relay: nothing of this device's is missing from it.
-  local = { ...local, rec: merged, syncedAt: D.now(), ...(behind ? {} : { synced: local.rev }) }
+  local = { ...local, rec: merged, syncedAt: D.now(), ...(behind ? {} : { synced: local.rev, syncedReal: local.real }) }
   saveLocal(me, local, D)
   flip()
   if (!behind) return done('synced')
+  // Behind by time in TERRAIN alone: in step as far as a signature is concerned. Only reading: what is new waits for the write.
+  if (local.real <= local.syncedReal) return done('synced')
   if (!write || !mayWrite(D, me)) return done('idle')
+  const nowS = Math.floor(D.now() / 1000)
+  // The relay's copy dated well past this clock: written under at now once (the merge keeps every count), not again this load.
+  const ahead = remote.createdAt + 1 > nowS + MAX_AHEAD_S
+  if (ahead && remote.id && aheadOf.has(remote.id)) return done('error', AHEAD)
   // A copy older than this device's own last write: the relay answered with a stale copy. Left for a day.
   if (remote.createdAt < local.wroteAt && D.now() / 1000 - local.wroteAt < STALE_PATIENCE_S) return done('error', STALE)
   let text: string
   try { text = planRecord(merged) } catch (err) { return done('error', err instanceof Error ? err.message : String(err)) }
   const rev = local.rev
+  const real = local.real
   // The throttle counts tries, so a refusal is not asked again until the next window.
   saveLocal(me, { ...local, triedAt: D.now() }, D)
   let key = remote.key
+  if (!key && made && made.me === me) key = { wrapped: made.wrapped, key: made.key }
   if (!key) {
     if (!crypto.nip44Encrypt) return done('unsupported', NO_NIP44)
     const fresh = newRecordKey()
@@ -393,9 +417,11 @@ async function syncOnce(D: MiningDeps, write: boolean): Promise<Outcome> {
     }
     key = { wrapped, key: fresh }
     keysFor(me).set(wrapped, fresh)
+    made = { me, wrapped, key: fresh }
   }
   if (!mayWrite(D, me)) return none
-  const createdAt = Math.max(Math.floor(D.now() / 1000), remote.createdAt + 1)
+  const createdAt = ahead ? nowS : Math.max(nowS, remote.createdAt + 1)
+  if (ahead && remote.id) aheadOf.add(remote.id)
   let ev: NostrEvent
   try { ev = await D.sign(recordTemplate(sealRecord(text, key.key, key.wrapped), createdAt)) } catch (err) {
     return done('error', `Your mining stats were not signed: ${err instanceof Error ? err.message : String(err)}`)
@@ -409,7 +435,7 @@ async function syncOnce(D: MiningDeps, write: boolean): Promise<Outcome> {
   const res = await D.publish(ev)
   if (!res.ok) return done('error', `Your mining stats were not saved to the relay (${res.reason}).`)
   const now = localFor(me, D)
-  saveLocal(me, { ...now, synced: Math.max(now.synced, rev), syncedAt: D.now(), wroteAt: ev.created_at }, D)
+  saveLocal(me, { ...now, synced: Math.max(now.synced, rev), syncedReal: Math.max(now.syncedReal, real), syncedAt: D.now(), wroteAt: ev.created_at }, D)
   flip()
   useMiningStats.setState({ status: 'synced', note: null })
   return { wrote: true }
@@ -470,19 +496,22 @@ export function schedule(wait = QUIET_MS): void {
 }
 
 /**
- * The page is going (hidden or unloading) or the MINING panel opened: write
- * now when dirty, no sooner than NUDGE_FLOOR_MS after the last try. The panel
- * also reads, when it has not for a minute, to show the other devices.
+ * The page is going (hidden or unloading): write now when dirty, no sooner
+ * than HIDE_FLOOR_MS after the last try. MINING on screen (unfolded, in
+ * view): read only, to show the other devices, no more than once a
+ * READ_FLOOR_MS; never a write, so opening the menu costs no signature.
  */
 export function nudgeMining(why: 'hide' | 'panel'): void {
   const D = deps
   const me = D.self()
   if (!me || !useMiningStats.getState().enabled) return
   const local = localFor(me, D, false)
-  const dirty = local.rev > local.synced
   const now = D.now()
-  if (dirty && now - local.triedAt >= NUDGE_FLOOR_MS) { cancelTimer(); void syncMining(true); return }
-  if (why === 'panel' && now - local.syncedAt >= NUDGE_FLOOR_MS) void syncMining(false)
+  if (why === 'hide') {
+    if (local.real > local.syncedReal && now - local.triedAt >= HIDE_FLOOR_MS) { cancelTimer(); void syncMining(true) }
+    return
+  }
+  if (now - local.syncedAt >= READ_FLOOR_MS) void syncMining(false)
 }
 
 /** Another identity on screen: its own timer, if it has something to write. */
@@ -525,6 +554,8 @@ export function setMiningDeps(next: Partial<MiningDeps> | null): MiningDeps {
 export function resetMiningStats(): void {
   opened = { me: '', keys: new Map() }
   failed.clear()
+  aheadOf.clear()
+  made = null
   cache.clear()
   carry.clear()
   cancelTimer()

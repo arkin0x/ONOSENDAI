@@ -15,6 +15,8 @@ import {
   topMined, totalsOf, validRecord, withDay, type MiningRecord,
 } from '../miningRecord'
 import { bytesToHex, type NostrEvent } from '../events'
+import { inflateSync, strFromU8 } from 'fflate'
+import { fromBase64 } from '../hidesRecord'
 
 const A = 'a1a1a1a1a1a1a1a1'
 const B = 'b2b2b2b2b2b2b2b2'
@@ -54,7 +56,8 @@ describe('the event', () => {
 
   it('a malformed record drops only what is wrong in it', () => {
     const r = validRecord({ devices: { [A]: { c: { surveys: 2, mined: -1, placed: 1.5, bogus: 9 }, k: { 1: 3, 0: 4, 300: 1, x: 2 }, u: 5 }, nope: { c: { surveys: 1 } } }, first: { survey: 'x' }, best: { streak: 3 }, days: [[5, 3], [1, 2], 'z'] })
-    expect(r.devices).toEqual({ [A]: { c: { surveys: 2 }, k: { 1: 3 }, u: 5 } })
+    // `bogus` is a well-formed count under a name this version does not know: a newer client's, carried through.
+    expect(r.devices).toEqual({ [A]: { c: { surveys: 2, bogus: 9 }, k: { 1: 3 }, u: 5 } })
     expect(r.first).toEqual({})
     expect(r.best).toEqual({ streak: 3 })
     expect(r.days).toEqual([[1, 2]])
@@ -139,13 +142,16 @@ describe('rarity', () => {
 })
 
 describe('privacy', () => {
-  it('a device entry holds counts, block kinds and a time: never a coordinate or an id', () => {
+  it('a device entry this client makes holds counts, block kinds and a time; fields another client wrote are only carried, never added to', () => {
     const d = { ...emptyDevice(), c: { surveys: 1 }, k: { 1: 1 } }
     expect(Object.keys(d).sort()).toEqual(['c', 'k', 'u'])
-    const r = validRecord({ devices: { [A]: { ...d, at: { x: '1099511627776' }, chunk: 'abc' } }, lookup: 'f'.repeat(64) })
-    const text = JSON.stringify(r)
-    expect(text).not.toContain('1099511627776')
-    expect(text).not.toContain('chunk')
-    expect(text).not.toContain('f'.repeat(64))
+    expect(Object.keys(JSON.parse(strFromU8(inflateSync(fromBase64(encodeRecord(rec({ [A]: d }))))))).sort()).toEqual(['best', 'days', 'devices', 'first', 'v'])
+    // A newer client's fields come back exactly as read, at the same place, and nothing else.
+    const r = validRecord({ devices: { [A]: { ...d, note: 'n' } }, extra: 2 })
+    const back = JSON.parse(strFromU8(inflateSync(fromBase64(encodeRecord(r)))))
+    expect(back.devices[A]).toEqual({ note: 'n', c: { surveys: 1 }, k: { 1: 1 }, u: 0 })
+    expect(back.extra).toBe(2)
+    // A name that is not a field name is never carried.
+    expect(validRecord({ devices: {}, 'a b': 1, __proto__x: 2 }).x).toBeUndefined()
   })
 })

@@ -27,6 +27,13 @@
  * you were active are a union. Commutative, associative and idempotent, so
  * two devices can never write over each other's counts: whatever one
  * device's write missed, that device's next write brings back.
+ *
+ * WHAT A NEWER CLIENT ADDS is carried through, never dropped (review of
+ * #951): a counter this version does not know merges by the larger like the
+ * rest, a first it does not know by the earlier, a best by the larger, and
+ * any other field (at the top or in a device's entry) is kept as read, the
+ * copy just read standing over the one held. Only the panel's own numbers
+ * are shown.
  */
 
 import { deflateSync, inflateSync, strFromU8, strToU8 } from 'fflate'
@@ -79,28 +86,72 @@ export const COUNTERS = [
 ] as const
 export type Counter = (typeof COUNTERS)[number]
 
+/** Fields a newer client wrote that this one does not read, carried through as they were. */
+export type Extra = Record<string, unknown>
+
 /** One device's own numbers. Only that device ever raises them. */
 export interface DeviceStats {
-  /** The counters; a zero is left out. */
-  c: Partial<Record<Counter, number>>
+  /** The counters (COUNTERS, and any a newer client counts); a zero is left out. */
+  c: Partial<Record<Counter, number>> & Record<string, number | undefined>
   /** Blocks mined by kind: the block's DECK id to how many. */
   k: Record<string, number>
   /** When it last changed, unix seconds. */
   u: number
+  /** Any other field of the entry, carried through. */
+  x?: Extra
 }
 
 export interface MiningRecord {
   devices: Record<string, DeviceStats>
   /** Firsts, unix seconds: the earliest stands. */
-  first: { survey?: number; compiler?: number }
+  first: { survey?: number; compiler?: number } & Record<string, number | undefined>
   /** Bests: the largest stands. */
-  best: { streak?: number }
+  best: { streak?: number } & Record<string, number | undefined>
   /** Days with any mining, as runs [first, last] of local day numbers (days since 1970 in the player's time zone). */
   days: Array<[number, number]>
+  /** Any other top-level field, carried through. */
+  x?: Extra
 }
 
 export function emptyRecord(): MiningRecord { return { devices: {}, first: {}, best: {}, days: [] } }
 export function emptyDevice(): DeviceStats { return { c: {}, k: {}, u: 0 } }
+
+/** A name a newer client may have given a counter, a first or a best. */
+const FIELD_NAME = /^[A-Za-z][A-Za-z0-9_]{0,39}$/
+/** The most unknown names kept per object, so a record never swells. */
+const MAX_UNKNOWN = 64
+const RECORD_FIELDS = new Set(['v', 'devices', 'first', 'best', 'days'])
+const DEVICE_FIELDS = new Set(['c', 'k', 'u'])
+
+/** The fields of `o` outside `known`, or undefined when there are none. */
+function extrasOf(o: Record<string, unknown>, known: ReadonlySet<string>): Extra | undefined {
+  const out: Extra = {}
+  let n = 0
+  for (const [key, value] of Object.entries(o)) {
+    if (known.has(key) || !FIELD_NAME.test(key) || value === undefined) continue
+    if (++n > MAX_UNKNOWN) break
+    out[key] = value
+  }
+  return n ? out : undefined
+}
+
+/** The numbers of `o` that pass `ok`, by name, at most MAX_UNKNOWN of them beyond `known`. */
+function numbersOf(o: unknown, ok: (n: unknown) => n is number, known: readonly string[]): Record<string, number> {
+  const out: Record<string, number> = {}
+  if (!o || typeof o !== 'object') return out
+  let unknown = 0
+  for (const [key, n] of Object.entries(o as Record<string, unknown>)) {
+    if (!FIELD_NAME.test(key) || !ok(n)) continue
+    if (!known.includes(key) && ++unknown > MAX_UNKNOWN) continue
+    out[key] = n
+  }
+  return out
+}
+
+/** Two sets of carried fields as one: the second's stand over the first's. */
+function mergeExtra(a: Extra | undefined, b: Extra | undefined): Extra | undefined {
+  return a || b ? { ...a, ...b } : undefined
+}
 
 const DEVICE_ID = /^[0-9a-f]{16}$/
 const KIND_KEY = /^(?:[1-9]\d?|1\d\d|2[0-4]\d|25[0-5])$/
@@ -122,11 +173,12 @@ export function validDevice(o: unknown): DeviceStats | null {
   if (!o || typeof o !== 'object') return null
   const v = o as Record<string, unknown>
   const out = emptyDevice()
-  const c = v.c && typeof v.c === 'object' ? (v.c as Record<string, unknown>) : {}
-  for (const name of COUNTERS) if (okCount(c[name]) && c[name] > 0) out.c[name] = c[name] as number
+  for (const [name, n] of Object.entries(numbersOf(v.c, okCount, COUNTERS))) if (n > 0) out.c[name] = n
   const k = v.k && typeof v.k === 'object' ? (v.k as Record<string, unknown>) : {}
   for (const [id, n] of Object.entries(k)) if (KIND_KEY.test(id) && okCount(n) && n > 0) out.k[id] = n
   out.u = okTime(v.u) ? v.u : 0
+  const x = extrasOf(v, DEVICE_FIELDS)
+  if (x) out.x = x
   return out
 }
 
@@ -153,12 +205,11 @@ export function validRecord(o: unknown): MiningRecord {
     const dev = validDevice(d)
     if (dev) out.devices[id] = dev
   }
-  const first = v.first && typeof v.first === 'object' ? (v.first as Record<string, unknown>) : {}
-  if (okTime(first.survey)) out.first.survey = first.survey
-  if (okTime(first.compiler)) out.first.compiler = first.compiler
-  const best = v.best && typeof v.best === 'object' ? (v.best as Record<string, unknown>) : {}
-  if (okCount(best.streak) && best.streak > 0) out.best.streak = best.streak
+  out.first = numbersOf(v.first, okTime, ['survey', 'compiler'])
+  for (const [name, n] of Object.entries(numbersOf(v.best, okCount, ['streak']))) if (n > 0) out.best[name] = n
   if (Array.isArray(v.days)) out.days = normalDays(v.days.filter((r): r is [number, number] => Array.isArray(r) && r.length === 2))
+  const x = extrasOf(v, RECORD_FIELDS)
+  if (x) out.x = x
   return out
 }
 
@@ -172,7 +223,7 @@ function minOf(a: number | undefined, b: number | undefined): number | undefined
 /** Two entries for one device as one: every number the larger. */
 export function mergeDevice(a: DeviceStats, b: DeviceStats): DeviceStats {
   const out = emptyDevice()
-  for (const name of COUNTERS) {
+  for (const name of new Set([...Object.keys(a.c), ...Object.keys(b.c)])) {
     const n = maxOf(a.c[name], b.c[name])
     if (n) out.c[name] = n
   }
@@ -181,10 +232,12 @@ export function mergeDevice(a: DeviceStats, b: DeviceStats): DeviceStats {
     if (n) out.k[id] = n
   }
   out.u = Math.max(a.u, b.u)
+  const x = mergeExtra(a.x, b.x)
+  if (x) out.x = x
   return out
 }
 
-/** Two records as one (see MERGING above). Nothing either holds is lost. */
+/** Two records as one (see MERGING above). Nothing either holds is lost; of fields this version does not read, `b`'s stand. */
 export function mergeRecords(a: MiningRecord, b: MiningRecord): MiningRecord {
   const out = emptyRecord()
   for (const id of new Set([...Object.keys(a.devices), ...Object.keys(b.devices)])) {
@@ -192,20 +245,25 @@ export function mergeRecords(a: MiningRecord, b: MiningRecord): MiningRecord {
     const db = b.devices[id]
     out.devices[id] = da && db ? mergeDevice(da, db) : (da ?? db)!
   }
-  const survey = minOf(a.first.survey, b.first.survey)
-  const compiler = minOf(a.first.compiler, b.first.compiler)
-  if (survey !== undefined) out.first.survey = survey
-  if (compiler !== undefined) out.first.compiler = compiler
-  const streak = maxOf(a.best.streak, b.best.streak)
-  if (streak !== undefined) out.best.streak = streak
+  for (const name of new Set([...Object.keys(a.first), ...Object.keys(b.first)])) {
+    const t = minOf(a.first[name], b.first[name])
+    if (t !== undefined) out.first[name] = t
+  }
+  for (const name of new Set([...Object.keys(a.best), ...Object.keys(b.best)])) {
+    const n = maxOf(a.best[name], b.best[name])
+    if (n !== undefined) out.best[name] = n
+  }
   out.days = normalDays([...a.days, ...b.days])
+  const x = mergeExtra(a.x, b.x)
+  if (x) out.x = x
   return out
 }
 
 function canonical(r: MiningRecord): string {
   const sortObj = (o: Record<string, number | undefined>): Array<[string, number]> => Object.keys(o).filter((k) => o[k] !== undefined).sort().map((k) => [k, o[k] as number])
-  const devices = Object.keys(r.devices).sort().map((id) => [id, sortObj(r.devices[id].c), sortObj(r.devices[id].k), r.devices[id].u])
-  return JSON.stringify([devices, sortObj(r.first), sortObj(r.best), normalDays(r.days)])
+  const sortedJson = (x: Extra | undefined): string => (x ? JSON.stringify(Object.keys(x).sort().map((k) => [k, x[k]])) : '')
+  const devices = Object.keys(r.devices).sort().map((id) => [id, sortObj(r.devices[id].c), sortObj(r.devices[id].k), r.devices[id].u, sortedJson(r.devices[id].x)])
+  return JSON.stringify([devices, sortObj(r.first), sortObj(r.best), normalDays(r.days), sortedJson(r.x)])
 }
 
 /** Whether two records say the same thing. */
@@ -290,8 +348,12 @@ export function topMined(k: Readonly<Record<number, number>>, n: number): Array<
 
 /** The record's text before sealing: its JSON, deflated, base64. */
 export function encodeRecord(r: MiningRecord): string {
-  const devices = Object.fromEntries(Object.keys(r.devices).sort().map((id) => [id, r.devices[id]]))
-  return toBase64(deflateSync(strToU8(JSON.stringify({ v: 1, devices, first: r.first, best: r.best, days: normalDays(r.days) })), { level: 9 }))
+  // Carried fields first, so this version's own always stand.
+  const devices = Object.fromEntries(Object.keys(r.devices).sort().map((id) => {
+    const { x, ...d } = r.devices[id]
+    return [id, { ...x, ...d }]
+  }))
+  return toBase64(deflateSync(strToU8(JSON.stringify({ ...r.x, v: 1, devices, first: r.first, best: r.best, days: normalDays(r.days) })), { level: 9 }))
 }
 
 /** The record's text, read back. Throws when it is not a mining record at all. */

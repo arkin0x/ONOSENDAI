@@ -11,9 +11,9 @@ import { matchFilter } from 'nostr-tools/filter'
 import { v2 as nip44 } from 'nostr-tools/nip44'
 import { sha256 } from '@noble/hashes/sha2.js'
 import { bytesToHex, hexToBytes, type NostrEvent } from '../../lib/events'
-import { MINING_D, MINING_KIND, decodeRecord, openRecord, recordContent, totalsOf } from '../../lib/miningRecord'
+import { MINING_D, MINING_KIND, decodeRecord, emptyRecord, encodeRecord, openRecord, recordContent, recordTemplate, sealRecord, totalsOf } from '../../lib/miningRecord'
 import {
-  NUDGE_FLOOR_MS, QUIET_MS, WRITE_EVERY_MS, addTerrainTime, localFor, miningRecordFor, noteMining, nudgeMining, resetMiningStats, setMiningDeps, syncMining,
+  HIDE_FLOOR_MS, MAX_AHEAD_S, QUIET_MS, READ_FLOOR_MS, WRITE_EVERY_MS, addTerrainTime, localFor, miningRecordFor, noteMining, nudgeMining, resetMiningStats, setMiningDeps, syncMining,
   useMiningStats, type MiningDeps,
 } from '../miningStats'
 
@@ -144,6 +144,24 @@ describe('counting', () => {
     noteMining({ type: 'survey', chunk: 'k2' })
     expect(totalsOf(miningRecordFor(me)).c.surveys).toBe(3)
     expect(totalsOf(miningRecordFor(me)).c.chunks).toBe(2)
+  })
+
+  it('each chunk hash is its own small record: a survey reads and writes one, never the whole set', () => {
+    const d = device()
+    as(d)
+    noteMining({ type: 'survey', chunk: 'k1' })
+    noteMining({ type: 'survey', chunk: 'k2' })
+    const sets: string[] = []
+    const write = d.storage.setItem
+    d.storage.setItem = (k, v) => { sets.push(k); write(k, v) }
+    noteMining({ type: 'survey', chunk: 'k3' })
+    noteMining({ type: 'survey', chunk: 'k1' })
+    const chunkKeys = [...d.storage.m.keys()].filter((k) => k.startsWith(`onosendai:mining:chunk:${me}:`))
+    expect(chunkKeys).toHaveLength(3)
+    for (const k of chunkKeys) expect(d.storage.m.get(k)).toBe('1')
+    // The new chunk's own record and the counts, nothing else; the one seen before writes only the counts.
+    expect(sets.filter((k) => k.includes(':chunk:'))).toHaveLength(1)
+    expect(totalsOf(miningRecordFor(me)).c.chunks).toBe(3)
   })
 
   it('nothing counts during a tutorial run', () => {
@@ -298,7 +316,7 @@ describe('syncing', () => {
 })
 
 describe('the signer\'s cost: writes are throttled', () => {
-  it('at most one write in ten minutes however much changes; hiding the page writes sooner, no more than once a minute', async () => {
+  it('at most one write in ten minutes however much changes; hiding the page writes too, no sooner than HIDE_FLOOR_MS after the last try', async () => {
     vi.useFakeTimers({ now: 1_790_000_000_000 })
     const d = device()
     as(d)
@@ -314,36 +332,102 @@ describe('the signer\'s cost: writes are throttled', () => {
     expect(d.signed).toBe(2)
     expect(waited).toBeGreaterThan(WRITE_EVERY_MS - 21 * 20_000 - 2000)
     expect(totalsOf(onRelay()!.rec).c.mined).toBe(21)
-    // The page hidden right after a write: too soon.
+    // The page hidden after a write, five minutes on: still too soon.
     noteMining({ type: 'mine', kind: 1 })
+    await vi.advanceTimersByTimeAsync(5 * 60_000)
     nudgeMining('hide')
     await vi.advanceTimersByTimeAsync(1000)
     expect(d.signed).toBe(2)
-    // A minute on, hidden again: written at once, well inside the ten minutes.
-    await vi.advanceTimersByTimeAsync(NUDGE_FLOOR_MS)
+    // At the floor, hidden again: written at once (the timer may be asleep in a hidden page).
+    await vi.advanceTimersByTimeAsync(HIDE_FLOOR_MS - 5 * 60_000)
     nudgeMining('hide')
     await vi.advanceTimersByTimeAsync(1000)
     expect(d.signed).toBe(3)
     expect(totalsOf(onRelay()!.rec).c.mined).toBe(22)
     // Nothing changed: hiding writes nothing.
-    await vi.advanceTimersByTimeAsync(NUDGE_FLOOR_MS)
+    await vi.advanceTimersByTimeAsync(HIDE_FLOOR_MS)
     nudgeMining('hide')
     await vi.advanceTimersByTimeAsync(1000)
     expect(d.signed).toBe(3)
   })
 
-  it('opening the panel writes what changed, and otherwise only reads', async () => {
+  it('time in TERRAIN alone never asks for a signature; it goes with the next real change', async () => {
     vi.useFakeTimers({ now: 1_790_000_000_000 })
+    const d = device()
+    as(d)
+    noteMining({ type: 'mine', kind: 1 })
+    await vi.advanceTimersByTimeAsync(QUIET_MS + 100)
+    expect(d.signed).toBe(1)
+    // An hour idle in TERRAIN, the page hidden and shown every few minutes.
+    for (let t = 0; t < 3600; t += 30) {
+      addTerrainTime(30)
+      if (t % 300 === 0) nudgeMining('hide')
+      await vi.advanceTimersByTimeAsync(30_000)
+    }
+    expect(d.signed).toBe(1)
+    expect(totalsOf(onRelay()!.rec).c.terrainSec ?? 0).toBe(0)
+    // The next thing done carries the hour with it.
+    noteMining({ type: 'mine', kind: 1 })
+    await vi.advanceTimersByTimeAsync(QUIET_MS + 100)
+    expect(d.signed).toBe(2)
+    expect(totalsOf(onRelay()!.rec).c.terrainSec).toBe(3600)
+  })
+
+  it('an hour of play with the app switched every 90 s and the menu opened every 70 s: six signatures at most, one encrypt, one decrypt', async () => {
+    vi.useFakeTimers({ now: 1_790_000_000_000 })
+    // A record from another device already there, so the load has something to open.
+    const e = device()
+    as(e)
+    noteMining({ type: 'mine', kind: 2 })
+    await syncMining()
+    const d = device()
+    as(d)
+    const HOUR = 3600
+    for (let t = 1; t <= HOUR; t++) {
+      if (t % 4 === 0) noteMining({ type: 'mine', kind: 1 })
+      if (t % 25 === 0) noteMining({ type: 'place', air: false })
+      if (t % 30 === 0) addTerrainTime(30)
+      // Switching apps: hidden, then shown.
+      if (t % 90 === 0) nudgeMining('hide')
+      // The menu opened with MINING on screen.
+      if (t % 70 === 0) nudgeMining('panel')
+      await vi.advanceTimersByTimeAsync(1000)
+    }
+    expect(d.signed).toBeLessThanOrEqual(6)
+    expect(d.signed).toBeGreaterThanOrEqual(5)
+    expect(d.encrypts).toBe(0)
+    expect(d.decrypts).toBe(1)
+    // Nothing lost: the relay holds all but the last few minutes, and the device holds everything.
+    expect(totalsOf(miningRecordFor(me)).c.mined).toBe(HOUR / 4 + 1)
+    expect(totalsOf(onRelay()!.rec).c.mined).toBeGreaterThan(HOUR / 4 - 10 * 60 / 4)
+  })
+
+  it('MINING on screen only reads, at most once a minute: never a signature, one decrypt a load', async () => {
+    vi.useFakeTimers({ now: 1_790_000_000_000 })
+    const e = device()
+    as(e)
+    noteMining({ type: 'mine', kind: 2 })
+    await syncMining()
     const d = device()
     as(d)
     noteMining({ type: 'mine', kind: 1 })
     nudgeMining('panel')
     await vi.advanceTimersByTimeAsync(100)
-    expect(d.signed).toBe(1)
-    await vi.advanceTimersByTimeAsync(NUDGE_FLOOR_MS + 10_000)
+    expect(d.signed).toBe(0)
+    expect(d.decrypts).toBe(1)
+    // The other device's numbers, shown.
+    expect(totalsOf(miningRecordFor(me)).c.mined).toBe(2)
+    // Again within the minute: nothing at all.
+    let fetches = 0
+    as(d, { fetch: (f) => { fetches++; return relay.fetch(f) } })
     nudgeMining('panel')
     await vi.advanceTimersByTimeAsync(100)
-    expect(d.signed).toBe(1)
+    expect(fetches).toBe(0)
+    await vi.advanceTimersByTimeAsync(READ_FLOOR_MS)
+    nudgeMining('panel')
+    await vi.advanceTimersByTimeAsync(100)
+    expect(fetches).toBe(1)
+    expect(d.signed).toBe(0)
   })
 
   it('no timer in LOCAL, and none for a player who never mined', async () => {
@@ -360,3 +444,91 @@ describe('the signer\'s cost: writes are throttled', () => {
     expect(e.signed + e.decrypts + e.encrypts).toBe(0)
   })
 })
+
+describe('the first save failing, and a clock ahead', () => {
+  it('a first save the relay keeps refusing wraps one record key a load, not one a try', async () => {
+    const d = device()
+    as(d, { publish: async () => ({ ok: false, reason: 'refused' }) })
+    noteMining({ type: 'mine', kind: 1 })
+    await syncMining()
+    noteMining({ type: 'mine', kind: 1 })
+    await syncMining()
+    noteMining({ type: 'mine', kind: 1 })
+    await syncMining()
+    expect(d.signed).toBe(3)
+    expect(d.encrypts).toBe(1)
+    expect(useMiningStats.getState().status).toBe('error')
+  })
+
+  it('a relay copy dated a day ahead: written under at now (never past now + MAX_AHEAD_S), the counts merged, and not signed under twice', async () => {
+    const now = 1_790_000_000_000
+    vi.useFakeTimers({ now })
+    // Another device, a day fast, wrote a record.
+    const fast = device()
+    as(fast, { now: () => now + 86_400_000 })
+    noteMining({ type: 'mine', kind: 2 })
+    noteMining({ type: 'mine', kind: 2 })
+    await syncMining()
+    const ahead = onRelay()!.ev
+    expect(ahead.created_at).toBeGreaterThan(now / 1000 + 86_000)
+    const d = device()
+    const sent: NostrEvent[] = []
+    as(d, { publish: async (ev) => { sent.push(ev); return relay.publish(ev) } })
+    noteMining({ type: 'mine', kind: 1 })
+    expect((await syncMining()).wrote).toBe(true)
+    expect(sent).toHaveLength(1)
+    expect(sent[0].created_at).toBeLessThanOrEqual(Math.floor(now / 1000) + MAX_AHEAD_S)
+    // The fast device's numbers are merged in here; the relay keeps its newer-dated copy.
+    expect(totalsOf(miningRecordFor(me)).c.mined).toBe(3)
+    expect(onRelay()!.ev.id).toBe(ahead.id)
+    // Under that same copy, no second signature this load: said, and left for later.
+    noteMining({ type: 'mine', kind: 1 })
+    await syncMining()
+    expect(d.signed).toBe(1)
+    expect(useMiningStats.getState().status).toBe('error')
+  })
+
+  it('a relay copy a few seconds ahead is still written one second after it', async () => {
+    const now = 1_790_000_000_000
+    vi.useFakeTimers({ now })
+    const fast = device()
+    as(fast, { now: () => now + 20_000 })
+    noteMining({ type: 'mine', kind: 2 })
+    await syncMining()
+    const d = device()
+    as(d)
+    noteMining({ type: 'mine', kind: 1 })
+    expect((await syncMining()).wrote).toBe(true)
+    expect(onRelay()!.ev.created_at).toBe(Math.floor(now / 1000) + 21)
+    expect(totalsOf(onRelay()!.rec).c.mined).toBe(2)
+  })
+
+  it('what a newer client wrote (a counter, a first, a field) is carried through when this one writes', async () => {
+    const d = device()
+    as(d)
+    noteMining({ type: 'mine', kind: 1 })
+    await syncMining()
+    // A newer client on another device adds things this version does not know.
+    const c = recordContent(relay.events[0].content)!
+    const key = hexToBytes(nip44.decrypt(c.wrapped, selfKey))
+    const rec = decodeRecord(openRecord(c.body, key))
+    rec.devices['00112233aabbccdd'] = { c: { mined: 4, quarries: 7 }, k: {}, u: 1_790_000_000, x: { charge: 'full' } }
+    rec.first.quarry = 1_789_000_000
+    rec.x = { seasons: [1, 2] }
+    const at = relayAt() + 1
+    relay.events.length = 0
+    relay.events.push(finalizeEvent(recordTemplate(sealRecord(encodeRecord(rec), key, c.wrapped), at), sk) as unknown as NostrEvent)
+    noteMining({ type: 'mine', kind: 1 })
+    await syncMining()
+    const back = onRelay()!.rec
+    expect(back.devices['00112233aabbccdd'].c.quarries).toBe(7)
+    expect(back.devices['00112233aabbccdd'].x).toEqual({ charge: 'full' })
+    expect(back.first.quarry).toBe(1_789_000_000)
+    expect(back.x).toEqual({ seasons: [1, 2] })
+    expect(totalsOf(back).c.mined).toBe(6)
+    expect(emptyRecord().x).toBeUndefined()
+  })
+})
+
+/** The created_at of the record on the relay now. */
+function relayAt(): number { return relay.events[0]?.created_at ?? 0 }

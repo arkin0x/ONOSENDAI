@@ -46,10 +46,10 @@
  * keeps its place as a still gray diamond, so a visitor sees that someone was
  * here and the coin is gone, rather than a coin.
  *
- * Hidden audio (DECK-0007) is a small music note on the note's blue box
- * (arkinox, 2026-10-23), drawn when notes are; a tap opens its card, with
- * PLAY and DOWNLOAD. Its name is on that card, not floating in the world
- * (FLOATING_NAME). Only with Spatial Audio on in Settings, or while audio is
+ * Hidden audio (DECK-0007) is its layer slices and halo of level lines
+ * (SoundMark, under the one rulebook of 2026-11-27), drawn when notes are,
+ * its title over who left it; a tap opens its card, with PLAY and DOWNLOAD.
+ * Only with Spatial Audio on in Settings, or while audio is
  * being placed (AudioSpheres spatialAudioShown; arkinox, 2026-11-22); hidden,
  * it still plays (HiddenAudio) and its card still opens from the lists, and
  * while its card is open or a VIEW of it lasts it is drawn, so VIEW lands on
@@ -63,11 +63,11 @@
  * its card. TAKE fades the whole model out over it (scene/ItemVanish).
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react'
 import { nip19 } from 'nostr-tools'
-import { ACCENT, COIN } from '../lib/palette'
+import { COIN } from '../lib/palette'
 import { useFrame } from '@react-three/fiber'
-import { BoxGeometry, CircleGeometry, EdgesGeometry, OctahedronGeometry, PlaneGeometry, Vector3, type Group, type LineSegments, type Material, type Mesh, type PerspectiveCamera, type Points } from 'three'
+import { BoxGeometry, EdgesGeometry, OctahedronGeometry, type Group, type LineSegments, type Material, type Mesh, type PerspectiveCamera, type Points } from 'three'
 import { decodeText, seedOf, TEXT_DECODE_MS } from '../lib/decode'
 import { useCeremony } from '../store/useCeremony'
 import { useInventory } from '../store/useInventory'
@@ -100,7 +100,9 @@ import { useDrawReach } from './buildZoom'
 import { restLift } from '../lib/restLift'
 import { useReducedMotion } from '../hooks/useReducedMotion'
 import { dropLetter, LetterField, LETTER_GIBSONS, LETTER_LIFT, LETTER_SHAPE, putLetter } from './LetterField'
-import { LevelRing } from './LevelRing'
+import { SoundMark, SOUND_LIFT, SOUND_SHAPE, useSoundPlaying } from './SoundMark'
+import { useHiddenState } from '../hooks/useHiddenState'
+import { LABEL_PX } from '../lib/hiddenLook'
 import { atlasIndex } from './glyphAtlas'
 import { authorColour } from '../lib/authorColour'
 import { sealInitial } from '../lib/letterReveal'
@@ -108,7 +110,7 @@ import { readId } from '../lib/messagesRead'
 import { sealBroken, useMessagesRead } from '../store/useMessagesRead'
 import { recordViewPose } from '../lib/viewPose'
 import { nameLabel, shortNpub } from '../lib/nameLabel'
-import { ItemToken, TOKEN_LIFT, TOKEN_OUTLINE } from './ItemToken'
+import { ItemToken, TOKEN_LIFT, TOKEN_SHAPE } from './ItemToken'
 
 /** A message's tap target, in CSS pixels: a fingertip over the mark, at any zoom. */
 const TAP_PX = 44
@@ -251,19 +253,19 @@ export const COIN_BOB = 0.03
  * B is cut off by the ground").
  */
 export const COIN_LIFT = restLift(COIN_REACH, COIN_BOB)
-/** The note's own color: the box's blue, lit. */
-const AUDIO_BLUE = '#9fd0ff'
 
 /** What carries its name floating in the world, by what it is. */
 export type NamedKind = 'item' | 'chest' | 'door' | 'sound'
 
 /**
- * Whether a placed thing's name floats beside it in the world. A door, a
- * chest and a sound do not: the name is on its card, one tap away (arkinox,
- * 2026-11-02). An item keeps its name until the owner decides otherwise.
- * Messages, coins and shards are not in this list and are unchanged.
+ * Whether a placed thing's name floats beside it in the world. A door and a
+ * chest do not: the name is on its card, one tap away (arkinox, 2026-11-02).
+ * An item and a sound do, as every hidden thing does under the one rulebook:
+ * name over maker, white, a few pixels over its ring (owner ruling,
+ * 2026-11-27, lib/hiddenLook). Messages, coins and shards are not in this
+ * list.
  */
-export const FLOATING_NAME: Readonly<Record<NamedKind, boolean>> = { item: true, chest: false, door: false, sound: false }
+export const FLOATING_NAME: Readonly<Record<NamedKind, boolean>> = { item: true, chest: false, door: false, sound: true }
 
 /**
  * A mark's share of its full size at `depth` from the camera: full out to
@@ -356,7 +358,7 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
   // Whose ITEMS these are, and whether read: until then nothing held is shown by mistake.
   const itemsRead = useInventory((s) => s.owner === me && s.storage !== 'loading')
   const vanishing = useTakeVanish((s) => s.playing)
-  // A sound's box is drawn with Spatial Audio on, or while audio is placed in BUILD (AudioSpheres spatialAudioShown).
+  // A sound is drawn with Spatial Audio on, or while audio is placed in BUILD (AudioSpheres spatialAudioShown).
   const sounds = useSpatialAudioShown()
   // With it off, the one sound being looked at still is (its card open, or a VIEW of it: AudioSpheres soundSpot).
   const spot = useSoundSpot()
@@ -417,12 +419,12 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
         // A model-less item being moved is its token, faint (ItemToken); a message its faint box.
         if (w.key === moving) return worldCube(w) && draw === 'item'
           ? w.type === 'key'
-            ? <ItemToken key={w.key} id={w.key} at={w.centre} side={noteBoxSide(scaleExp)} colour={authorColour(w.itemAuthor ?? w.author)} opacity={MOVING_OPACITY} />
+            ? <MakerToken key={w.key} id={w.key} lineage={w.lineage} at={w.centre} side={noteBoxSide(scaleExp)} who={{ pubkey: w.itemAuthor ?? w.author, mine: w.mine }} opacity={MOVING_OPACITY} />
             : <WorldMark key={w.key} kind="note" at={w.centre} side={noteBoxSide(scaleExp)} opacity={MOVING_OPACITY} />
           : <PlacedBox key={w.key} at={w.centre} opacity={MOVING_OPACITY} />
         if (w.coin) return <CoinItem key={w.key} id={w.key} text={w.text} at={w.centre} onTap={open} />
         if (w.type === 'message') return <NoteItem key={w.key} w={w} birth={births[w.key]} onTap={open} />
-        if (w.type === 'audio') return <AudioMark key={w.key} id={w.key} title={w.text} at={w.centre} onTap={open} />
+        if (w.type === 'audio') return <AudioMark key={w.key} id={w.key} lineage={w.lineage} title={w.text} who={{ pubkey: w.itemAuthor ?? w.author, mine: w.mine }} at={w.centre} onTap={open} />
         // A key: the cube and its short name, or at half while it is held.
         // With no model of its own, the cube is one gibson, as a message's
         // box is (owner, 2026-11-22; keyBoxSide); with one, as before.
@@ -431,7 +433,7 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
         return (
           <group key={w.key}>
             {draw === 'item'
-              ? <ItemMark id={w.key} text={w.text} sub={author(w)} who={{ pubkey: w.itemAuthor ?? w.author, mine: w.mine }} at={w.centre} wears={w.wears} region={w.region} axes={axes} side={side} onTap={open} />
+              ? <ItemMark id={w.key} lineage={w.lineage} text={w.text} sub={author(w)} who={{ pubkey: w.itemAuthor ?? w.author, mine: w.mine }} at={w.centre} wears={w.wears} region={w.region} axes={axes} side={side} onTap={open} />
               : <HeldItemMark id={w.key} own={draw === 'own'} at={w.centre} wears={w.wears} region={w.region} axes={axes} appear={play} />}
             {/* TAKE on an item with no model: its token fades out (MARK_FADE_MS), and its name, over where it stood, with the rest. */}
             {draw !== 'item' && play && <TakenItem w={w} side={side} play={play} axes={axes} scaleExp={scaleExp} />}
@@ -501,8 +503,10 @@ const NO_MOTION: readonly ItemAnimation[] = []
  * stands just above it rather than through it. Without one (Cyberspace TV's
  * finds, a key whose model has not come) the cube is sized on screen.
  */
-export function ItemMark({ id, text, sub, who, at, opacity = 1, wears, region = null, axes, side, onTap }: {
+export function ItemMark({ id, lineage, text, sub, who, at, opacity = 1, wears, region = null, axes, side, onTap }: {
   id?: string
+  /** What it is remembered by once opened, a moved item's lineage (lib/messagesRead readId). */
+  lineage?: string
   text: string
   sub: string
   /** Who left it: their name (lib/nameLabel) takes the place of `sub`, and their colour is the token's. */
@@ -536,15 +540,28 @@ export function ItemMark({ id, text, sub, who, at, opacity = 1, wears, region = 
       {/* In the world with no model drawn (none, or one still loading or that never came): the token (ItemToken), one gibson.
           Cyberspace TV's finds (no `who`), sized on screen, keep the cube. */}
       {who
-        ? <ItemToken id={id ?? text} at={at} side={tokenSide} colour={authorColour(who.pubkey)} opacity={opacity} groupRef={token} />
+        ? <MakerToken id={id ?? text} lineage={lineage} at={at} side={tokenSide} who={who} opacity={opacity} groupRef={token} />
         : <WorldMark kind="note" at={at} opacity={opacity} side={side} />}
       {/* A fingertip over the token where it rests (TOKEN_LIFT), and the whole token once it is larger (TapTarget `side`):
           a key with no model, and a key whose model has not come, alike. */}
       {who && onTap && <TapTarget px={TAP_PX} side={tokenSide} at={tokenRest(at, tokenSide)} onTap={onTap} />}
-      {/* Over the token as it is drawn, turning and bobbing: a few pixels over its highest point on screen (WorldLabel clear), from where it rests (TOKEN_LIFT). */}
-      {FLOATING_NAME.item && <WorldLabel text={label.text} color={label.color} at={who ? tokenRest(at, tokenSide) : at} align="center" px={11} sub={label.sub} subColor={label.subColor} subScale={1} subOpacity={1} opacity={opacity} clear={who ? { object: token, points: TOKEN_OUTLINE } : undefined} recede="name" />}
+      {/* A few pixels over its ring, as every hidden thing's name stands (lib/hiddenLook labelShape), from where it rests (TOKEN_LIFT). */}
+      {FLOATING_NAME.item && <WorldLabel text={label.text} color={label.color} at={who ? tokenRest(at, tokenSide) : at} align="center" px={LABEL_PX} sub={label.sub} subColor={label.subColor} subScale={1} subOpacity={1} opacity={opacity} clear={who ? { shape: scaledShape(TOKEN_SHAPE, tokenSide) } : undefined} recede="name" />}
     </>
   )
+}
+
+/**
+ * An item's token in its maker's colours: their seal and initial, and its
+ * state under the rulebook (NEW, UNREAD, READ: hooks/useHiddenState). Every
+ * token in the world is drawn through here, standing, being moved or fading
+ * out under TAKE, so none of them loses its seal letter or its state.
+ */
+function MakerToken({ id, lineage, at, side, who, opacity, fadeOut, groupRef }: { id: string; lineage?: string; at: [number, number, number]; side: number; who: { pubkey: string; mine: boolean }; opacity?: number; fadeOut?: number; groupRef?: MutableRefObject<Group | null> }): JSX.Element {
+  const state = useHiddenState({ key: id, lineage }, who.mine)
+  const profile = useProfile(who.pubkey || null)
+  const initial = atlasIndex(sealInitial(profile?.name, safeNpubOf(who.pubkey)))
+  return <ItemToken id={id} at={at} side={side} colour={authorColour(who.pubkey)} initial={initial} state={state} opacity={opacity} fadeOut={fadeOut} groupRef={groupRef} />
 }
 
 /**
@@ -631,20 +648,22 @@ export function NoteItem({ w, birth, onTap }: { w: { key: string; lineage?: stri
   const side = noteBoxSide(useCyberspace((s) => s.scaleExp))
   const id = readId(w)
   const broken = useMessagesRead((s) => sealBroken(s, id, yours))
+  // NEW: found and not yet opened (hooks/useHiddenState), so its ring pulses.
+  const fresh = useHiddenState(w, yours) === 'new'
   const initial = atlasIndex(sealInitial(profile?.name, safeNpubOf(w.author)))
   // Where the letter rests: over its place, so a floor at its level never cuts it (LETTER_LIFT).
   const [cx, cy, cz] = w.centre
   const ry = cy + LETTER_LIFT * side * LETTER_GIBSONS
   const rest = useMemo<[number, number, number]>(() => [cx, ry, cz], [cx, ry, cz])
   useEffect(() => {
-    putLetter({ key: w.key, centre: rest, width: side * LETTER_GIBSONS, colour: authorColour(w.author), initial, broken })
-  }, [w.key, rest, side, w.author, initial, broken])
+    putLetter({ key: w.key, centre: rest, width: side * LETTER_GIBSONS, colour: authorColour(w.author), initial, broken, fresh })
+  }, [w.key, rest, side, w.author, initial, broken, fresh])
   useEffect(() => () => dropLetter(w.key), [w.key])
   return (
     <group>
       {flourish && birth !== undefined
         ? <DecodingLabel text={messageBillboard(w.text)} seed={seedOf(w.key)} birth={birth} at={rest} />
-        : <WorldLabel text={name} color={NAME_WHITE} at={rest} align="center" px={11} clear={{ shape: { flat: LETTER_SHAPE.flat * side * LETTER_GIBSONS, radius: LETTER_SHAPE.radius * side * LETTER_GIBSONS, height: LETTER_SHAPE.height * side * LETTER_GIBSONS } }} recede="credit" />}
+        : <WorldLabel text={MESSAGE_NAME} color={NAME_WHITE} at={rest} align="center" px={LABEL_PX} sub={name} subColor={NAME_WHITE} subScale={1} subOpacity={1} clear={{ shape: scaledShape(LETTER_SHAPE, side * LETTER_GIBSONS) }} recede="credit" />}
       {/* A fingertip over the letter at any distance, and its whole gibson once it is larger (TapTarget `side`), where it rests. */}
       <TapTarget px={TAP_PX} side={side} at={rest} onTap={onTap} />
     </group>
@@ -675,13 +694,13 @@ function NamedVanish({ who, label, ...rest }: Omit<Parameters<typeof ItemVanish>
  * standing label, so the name keeps its place); with one, its model fading
  * (ItemVanish) and its name over the half box it leaves.
  */
-function TakenItem({ w, side, play, axes, scaleExp }: { w: { key: string; text: string; centre: [number, number, number]; wears?: ItemWears; region: Box | null; author: string; itemAuthor?: string; mine: boolean }; side: number | undefined; play: Vanishing; axes: ViewAxes; scaleExp: number }): JSX.Element {
+function TakenItem({ w, side, play, axes, scaleExp }: { w: { key: string; lineage?: string; text: string; centre: [number, number, number]; wears?: ItemWears; region: Box | null; author: string; itemAuthor?: string; mine: boolean }; side: number | undefined; play: Vanishing; axes: ViewAxes; scaleExp: number }): JSX.Element {
   const token = useRef<Group | null>(null)
   const who = { pubkey: w.itemAuthor ?? w.author, mine: w.mine }
   return (
     <>
-      {side !== undefined && <ItemToken id={w.key} at={w.centre} side={side} colour={authorColour(who.pubkey)} fadeOut={play.at} groupRef={token} />}
-      <NamedVanish id={w.key} who={who} label={{ text: w.text, color: NAME_WHITE, subColor: NAME_WHITE }} at={side === undefined ? w.centre : tokenRest(w.centre, side)} wears={w.wears} region={w.region} axes={axes} play={play} clear={side === undefined ? { trueSide: placedBoxSide(scaleExp), minPx: 0 } : { object: token, points: TOKEN_OUTLINE }} />
+      {side !== undefined && <MakerToken id={w.key} lineage={w.lineage} at={w.centre} side={side} who={who} fadeOut={play.at} groupRef={token} />}
+      <NamedVanish id={w.key} who={who} label={{ text: w.text, color: NAME_WHITE, subColor: NAME_WHITE }} at={side === undefined ? w.centre : tokenRest(w.centre, side)} wears={w.wears} region={w.region} axes={axes} play={play} clear={side === undefined ? { trueSide: placedBoxSide(scaleExp), minPx: 0 } : { shape: scaledShape(TOKEN_SHAPE, side) }} />
     </>
   )
 }
@@ -696,71 +715,36 @@ function safeNpubOf(pubkey: string): string {
 }
 
 /**
- * Hidden audio in the world: the note's blue box with a music note on it and,
- * round it, a ring of level bars that move while it plays (owner,
- * 2026-11-26: "the audio look is amazing from the hidden message looks. lets
- * replace audio with this", direction 7, Voice line; LevelRing). Its name is
- * on its card, not beside it (FLOATING_NAME).
+ * Hidden audio in the world: its layer slices and its halo of level lines
+ * (SoundMark), under the one rulebook every hidden thing shares (owner
+ * ruling, 2026-11-27), one gibson across and resting over its place. Its
+ * name, the sound's title over who left it, stands a few pixels over its
+ * ring as every hidden thing's does. Heard playing, it counts as opened
+ * (READ), as opening its card does: store/useHiddenAudio marks it, whether
+ * or not it is drawn.
  */
-export function AudioMark({ id, title, at, opacity = 1, onTap }: { id?: string; title: string; at: [number, number, number]; opacity?: number; onTap?: () => void }): JSX.Element {
+export function AudioMark({ id, lineage, title, who, at, opacity = 1, onTap }: { id?: string; lineage?: string; title: string; who?: { pubkey: string; mine: boolean }; at: [number, number, number]; opacity?: number; onTap?: () => void }): JSX.Element {
+  const playing = useSoundPlaying(id)
+  const state = useHiddenState({ key: id ?? title, lineage }, !!who?.mine)
+  const by = useByName(who)
+  const side = noteBoxSide(useCyberspace((s) => s.scaleExp))
+  const rest = useMemo<[number, number, number]>(() => [at[0], at[1] + SOUND_LIFT * side, at[2]], [at, side])
   return (
     <group>
-      <PlacedBox at={at} opacity={opacity} />
-      <AudioNote at={at} opacity={opacity} />
-      <LevelRing id={id} at={at} opacity={opacity} />
-      {FLOATING_NAME.sound && <WorldLabel text={title} color={ACCENT} at={at} align="center" px={10} offsetPx={[0, -26]} opacity={opacity} recede="name" />}
-      {onTap && <TapTarget px={TAP_PX} at={at} onTap={onTap} />}
+      <SoundMark id={id ?? title} at={at} side={side} state={state} playing={playing} opacity={opacity} />
+      {FLOATING_NAME.sound && <WorldLabel text={title} color={NAME_WHITE} at={rest} align="center" px={LABEL_PX} sub={by} subColor={NAME_WHITE} subScale={1} subOpacity={1} opacity={opacity} clear={{ shape: scaledShape(SOUND_SHAPE, side) }} recede="name" />}
+      {onTap && <TapTarget px={TAP_PX} side={side} at={rest} onTap={onTap} />}
     </group>
   )
 }
 
-/**
- * How far the music note stands in front of the box's centre, toward the
- * camera, in the box's own units (its edge is 1): just past half its
- * diagonal, so the opaque box never hides it from any side.
- */
-export const NOTE_STANDOFF = (Math.sqrt(3) / 2) * 1.02
-
-/**
- * The music note on the box: a tilted oval head, a stem and a flag, flat
- * shapes turned to face the camera. Shapes, not a character: the scene's
- * font has no music note, and troika would fetch a fallback font for one.
- * Held to the box's size on screen (in the
- * box's own units its edge is 0.72, so the note stands about half of it).
- * The box is opaque, so the note stands just outside it on the camera's
- * side (NOTE_STANDOFF) and, like the box, is out of the bloom.
- */
-function AudioNote({ at, opacity = 1 }: { at: [number, number, number]; opacity?: number }): JSX.Element {
-  const group = useRef<Group>(null)
-  const toward = useMemo(() => new Vector3(), [])
-  const parts = useMemo(() => ({
-    head: new CircleGeometry(0.095, 20),
-    stem: new PlaneGeometry(0.035, 0.36),
-    flag: new PlaneGeometry(0.035, 0.16),
-  }), [])
-  useEffect(() => () => { parts.head.dispose(); parts.stem.dispose(); parts.flag.dispose() }, [parts])
-  useFrame((state) => {
-    const g = group.current
-    if (!g) return
-    const cam = state.camera as PerspectiveCamera
-    // The box's own size, so the note stands about half of it at any zoom.
-    const side = placedBoxSide(useCyberspace.getState().scaleExp)
-    g.scale.setScalar(side / NOTE_BOX_EDGE)
-    g.quaternion.copy(cam.quaternion)
-    // In front of the box, toward the camera, by NOTE_STANDOFF of its side.
-    g.position.set(at[0], at[1], at[2])
-    toward.copy(cam.position).sub(g.position)
-    if (toward.lengthSq() > 0) g.position.addScaledVector(toward.normalize(), side * NOTE_STANDOFF)
-  }, LABEL_PRIORITY)
-  const material = <meshBasicMaterial color={AUDIO_BLUE} toneMapped={false} {...basicFaceProps(opacity, { ghost: false, world: true })} />
-  return (
-    <group ref={group} position={at}>
-      <mesh geometry={parts.head} position={[-0.06, -0.15, 0]} rotation={[0, 0, 0.45]} scale={[1.35, 1, 1]} frustumCulled={false}>{material}</mesh>
-      <mesh geometry={parts.stem} position={[0.05, 0.02, 0]} frustumCulled={false}>{material}</mesh>
-      <mesh geometry={parts.flag} position={[0.11, 0.14, 0]} rotation={[0, 0, 0.9]} frustumCulled={false}>{material}</mesh>
-    </group>
-  )
+/** A label shape for a thing one across, at `side` scene units. */
+function scaledShape(shape: { flat: number; radius: number; height: number }, side: number): { flat: number; radius: number; height: number } {
+  return { flat: shape.flat * side, radius: shape.radius * side, height: shape.height * side }
 }
+
+/** A message's name over its maker: it has no title of its own. */
+const MESSAGE_NAME = 'message'
 
 /**
  * A coin in the world: the diamond and the ₿, and nothing else. Its token is
@@ -876,10 +860,8 @@ function DecodingLabel({ text, seed, birth, at }: { text: string; seed: number; 
 }
 
 
-/** A held item's and a sound's box: half a gibson, wherever you look from (owner, 2026-11-01). */
+/** A held item's box: half a gibson, wherever you look from (owner, 2026-11-01). */
 const PLACED_BOX_GIBSONS = 0.5
-/** The edge the music note was drawn against, in its own units. */
-const NOTE_BOX_EDGE = 0.72
 /** The box's side in scene units: a scene unit is 2^scaleExp gibsons. */
 export function placedBoxSide(scaleExp: number): number {
   return PLACED_BOX_GIBSONS / 2 ** scaleExp

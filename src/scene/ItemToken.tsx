@@ -1,114 +1,98 @@
 /**
  * ItemToken.tsx: an item that wears no model of its own, drawn as a token
- * from the same family as the sealed letter and the sound's level ring
- * (owner, 2026-11-27: "item with no mesh looks inconsistent. blue cube is
- * lost against a bright mesh bg").
+ * under the one rulebook every hidden thing shares (lib/hiddenLook.ts; owner
+ * ruling, 2026-11-27, option A of the hidden-item cohesion page: "the key
+ * item becomes a solid cut-corner card with the maker's hexagon seal and a
+ * notch code").
  *
- * A dark tag with its top-left and bottom-right corners cut, the HUD's
- * chamfer, one gibson across (keyBoxSide, as the cube it replaces): a solid
- * dark core, so it reads against a white wall, edged in bright light in its
- * author's colour with a soft glow, so it reads against the dark of space.
- * On both faces, a package drawn in lines, lucide's "package" shape: the
- * neutral mark of a thing you can take. Never a key: an item may be a key
- * item and still stand for anything (owner, 2026-11-27: "it might be a key
- * item but it may not be a literal key"). A thin ring circles it, tilted
- * and turning against it, a single line, so a token never reads as a letter
- * (its ring is glyphs) or a sound (its ring is bars).
+ * A solid card one gibson tall (keyBoxSide, as the cube it replaced), its
+ * top-left and bottom-right corners cut, the HUD's chamfer, in the shared
+ * face (hiddenParts faceMaterial). On both faces its maker's seal, the
+ * letter's hexagon in their colour with their initial pressed in, inlaid; a
+ * round hole at its top corner; and down its right edge a row of notches,
+ * the item's own code (lib/hiddenLook notchCode), so two tokens side by side
+ * never look the same. Never a literal key, and no box icon: an item may be
+ * a key item and still stand for anything (owner, 2026-11-27: "it might be a
+ * key item but it may not be a literal key").
  *
- * It turns slowly about the scene's up axis and bobs, as a letter does;
- * with reduced motion it holds still. It rests over its place rather than
- * about it (TOKEN_LIFT, lib/restLift.ts): its lowest point stands a little
- * over the level of its place, where a floor at that height lies and a
- * chest's base stands, so the floor never cuts its lower half. The paper of
- * the letter and the core here are opaque and out of the bloom (shardFaces
- * basicFaceProps); the
- * edges and the mark are light. Edges are drawn twice: as bands for the
- * look up close, and as lines, which are a pixel wide at any distance, so
- * the token never loses its edge far off (the letter's flap did).
+ * Every hard edge is outlined OUTLINE_PX wide at any distance, bright until
+ * its card has been opened and steel after. Round it, facing the camera, the
+ * thin line ring every item wears, the HUD's cyan, turning and riding the
+ * shared idle wave; a NEW item sends a pulse out of it every PULSE_S until
+ * its card is opened. It turns about the scene's up axis in the shared turn
+ * and bobs with the shared bob; with reduced motion it holds still, square
+ * on, and NEW is a faint still ring.
+ *
+ * It rests over its place rather than about it (TOKEN_LIFT, lib/restLift.ts):
+ * its lowest point stands a little over the level of its place, where a
+ * floor at that height lies and a chest's base stands, so the floor never
+ * cuts its lower half. The faces and the seal are opaque and out of the
+ * bloom; the outline and the ring are light.
  */
 
-import { useEffect, useMemo, useRef, type MutableRefObject } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, type MutableRefObject } from 'react'
 import { useFrame } from '@react-three/fiber'
-import { BufferAttribute, BufferGeometry, DoubleSide, EllipseCurve, LineBasicMaterial, MeshBasicMaterial, Vector3, type Group } from 'three'
-import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
+import { Color, DoubleSide, MeshBasicMaterial, PlaneGeometry, ShaderMaterial, type BufferGeometry, type Group, type InterleavedBufferAttribute, type Mesh } from 'three'
 import { useReducedMotion } from '../hooks/useReducedMotion'
 import { seedOf } from '../lib/decode'
+import { BOB, HIDDEN_FACE, RING_COLOUR, RING_REACH, SEAL_INK, bobAt, hiddenLook, labelShape, notchCode, pulseAt, ringTurnAt, turnAt, waveAt, wavePhaseAt, type HiddenState } from '../lib/hiddenLook'
 import { basicFaceProps } from './shardFaces'
-import { bandOf, bothFaces, shapeOf } from './LetterField'
+import { bothFaces } from './LetterField'
+import { ATLAS_UV, LINE_RING_SEGMENTS, PULSE_GEOMETRY, SEAL_DEPTH, circleHole, edgeSegments, faceMaterial, hexPoints, lineRingGeometry, lineRingMaterial, liveOutlineLines, outlineLines, outlineMaterial, pulseMaterial, sealInlay, segmentColours, setFaceOpacity, shapeFrom, sizeOutline, slab } from './hiddenParts'
+import { glyphAtlas } from './glyphAtlas'
 import { LABEL_PRIORITY } from './WorldLabel'
 import { markFadeLeft } from '../lib/worldMarks'
 import { restLift } from '../lib/restLift'
 
+/** One turn of the token, seconds: the shared turn. */
+export { TURN_S as TOKEN_TURN_S } from '../lib/hiddenLook'
+/** The core: the shared face. */
+export const TOKEN_CORE = HIDDEN_FACE
 
-/** One turn of the token, seconds: a little quicker than a letter, so a row of both never turns as one. */
-export const TOKEN_TURN_S = 20
-/** The core: the token's dark, opaque face. */
-export const TOKEN_CORE = '#08121c'
+/** The card, for a token 1 across: 0.62 wide and 0.82 tall, the HUD's corners cut, 0.07 thick. */
+const W = 0.31, H = 0.41, CUT = 0.11, T = 0.07
+/** A notch's depth for each step of the code, and where the row starts and how far apart they are. */
+const NOTCH_U = 0.024, NOTCH_TOP = 0.22, NOTCH_H = 0.055, NOTCH_STEP = 0.09
+/** The hole at the top corner, and the seal. */
+const HOLE = { x: -0.12, y: 0.27, r: 0.045 }
+const SEAL = { x: -0.04, y: -0.06, r: 0.12 }
 
-/** The tag's outline, for a token 1 across: 0.62 wide and 0.82 tall, the HUD's corners cut. */
-const W = 0.31, H = 0.41, CUT = 0.11
-export const TAG_OUTLINE: Array<[number, number]> = [[-W + CUT, H], [W, H], [W, -H + CUT], [W - CUT, -H], [-W, -H], [-W, H - CUT]]
-
-/** How far the ring leans back from upright, radians. */
-const RING_LEAN = 1.15
-/** The ring's radius, for a token 1 across. */
-const TOKEN_RING_RADIUS = 0.6
-
-/**
- * The token's outline in its own frame, for a token 1 across: the tag's
- * corners on both faces and the ring's points as it leans. Its name stands
- * a constant gap over the highest of them on screen, projected every frame
- * as the token turns and bobs (WorldLabel `clear` object and points).
- */
-export const TOKEN_OUTLINE: ReadonlyArray<readonly [number, number, number]> = (() => {
-  const out: Array<[number, number, number]> = []
-  for (const z of [0.012, -0.012]) for (const [x, y] of TAG_OUTLINE) out.push([x, y, z])
-  for (let k = 0; k < 16; k++) {
-    const t = (k / 16) * Math.PI * 2
-    out.push([TOKEN_RING_RADIUS * Math.cos(t), TOKEN_RING_RADIUS * Math.sin(t) * Math.cos(RING_LEAN), TOKEN_RING_RADIUS * Math.sin(t) * Math.sin(RING_LEAN)])
+/** The card's outline, for a token 1 across, its notch code cut down its right edge. */
+export function cardOutline(id: string): Array<[number, number]> {
+  const pts: Array<[number, number]> = [[-W + CUT, H], [W, H]]
+  let y = NOTCH_TOP
+  for (const b of notchCode(id)) {
+    pts.push([W, y], [W - b * NOTCH_U, y], [W - b * NOTCH_U, y - NOTCH_H], [W, y - NOTCH_H])
+    y -= NOTCH_STEP
   }
-  return out
+  pts.push([W, -H + CUT], [W - CUT, -H], [-W, -H], [-W, H - CUT])
+  return pts
+}
+
+/** The card made solid, with its hole. */
+export function cardGeometry(id: string): BufferGeometry {
+  return slab(shapeFrom(cardOutline(id), [circleHole(HOLE.x, HOLE.y, HOLE.r)]), T)
+}
+
+/** The maker's seal, inlaid on both faces. */
+const SEAL_GEOMETRY = sealInlay([shapeFrom(hexPoints(SEAL.r, SEAL.x, SEAL.y))], T)
+/** The seal's initial on both faces, turned on the back so it reads. */
+const INITIAL_GEOMETRY = (() => {
+  const g = new PlaneGeometry(SEAL.r * 1.25, SEAL.r * 1.25)
+  g.translate(SEAL.x, SEAL.y - SEAL.r * 0.04, 0)
+  return bothFaces(g, T / 2 + SEAL_DEPTH + 0.002, true)
 })()
 
-/** Lucide's package, in the tag's middle: a box seen corner on, a hexagon with the three edges that meet at its front corner. */
-function packageStrokes(r: number, cy: number): Array<Array<[number, number]>> {
-  const hex: Array<[number, number]> = [0, 1, 2, 3, 4, 5].map((k) => {
-    const a = Math.PI / 2 + (k * Math.PI) / 3
-    return [Math.cos(a) * r, cy + Math.sin(a) * r]
-  })
-  const mid: [number, number] = [0, cy]
-  return [
-    [...hex, hex[0]],
-    // The edges meeting at the near corner: up-left, up-right and down.
-    [hex[1], mid, hex[5]],
-    [mid, hex[3]],
-    // The tape across its top.
-    [[(hex[0][0] + hex[1][0]) / 2, (hex[0][1] + hex[1][1]) / 2], [(hex[5][0] + mid[0]) / 2 + 0.02, (hex[5][1] + mid[1]) / 2]],
-  ]
-}
-const MARK = packageStrokes(0.16, -0.02)
-
-/** Depths off the core, for a token 1 across. */
-const Z_EDGE = 0.008
-const Z_LINE = 0.011
-
-const CORE_GEOMETRY = shapeOf(TAG_OUTLINE)
-const EDGE_GEOMETRY = bothFaces(mergeGeometries([bandOf(TAG_OUTLINE, 0.026, true), ...MARK.map((s) => bandOf(s, 0.022, false))])!, Z_EDGE)
-
-/** The token's bob each way, for a token 1 across. */
-export const TOKEN_BOB = 0.03
+/** The token's bob each way, for a token 1 across: the shared bob. */
+export const TOKEN_BOB = BOB
 
 /**
- * How far a token 1 across reaches under its middle as drawn: the lowest of
- * its edge bands, which stand a little outside its outline, and its ring as
- * it leans. It turns only about the up axis, so no turn changes a height.
+ * How far a token 1 across reaches under its middle as drawn: its card's
+ * lowest edge. It turns only about the up axis, so no turn changes a height;
+ * its ring faces the camera, a halo about it rather than it, and is not
+ * counted, as a letter's ring is not.
  */
-export const TOKEN_LOW = (() => {
-  const pos = EDGE_GEOMETRY.getAttribute('position')
-  let low = -TOKEN_RING_RADIUS * Math.cos(RING_LEAN)
-  for (let i = 0; i < pos.count; i++) low = Math.min(low, pos.getY(i))
-  return -low
-})()
+export const TOKEN_LOW = H
 
 /**
  * How far over its place a token is drawn, for a token 1 across: its lowest
@@ -116,86 +100,166 @@ export const TOKEN_LOW = (() => {
  */
 export const TOKEN_LIFT = restLift(TOKEN_LOW, TOKEN_BOB)
 
-/** Every edge and stroke as line segments on both faces: a pixel wide at any distance. */
-export function tokenLinePoints(): Float32Array {
-  const out: number[] = []
-  const strokes: Array<{ pts: ReadonlyArray<readonly [number, number]>; closed: boolean }> = [{ pts: TAG_OUTLINE, closed: true }, ...MARK.map((pts) => ({ pts, closed: false }))]
-  for (const z of [Z_LINE, -Z_LINE]) {
-    for (const { pts, closed } of strokes) {
-      const n = closed ? pts.length : pts.length - 1
-      for (let i = 0; i < n; i++) { const a = pts[i], b = pts[(i + 1) % pts.length]; out.push(a[0], a[1], z, b[0], b[1], z) }
-    }
+/** The shape its name stands clear of, for a token 1 across (WorldLabel `clear` shape): the shared ring reach, and the card turning in it. */
+export const TOKEN_SHAPE = labelShape(0.52, 0.45)
+
+const INITIAL_VERTEX = /* glsl */ `
+  uniform float uGlyph;
+  varying vec2 vUv;
+  ${ATLAS_UV}
+  void main() {
+    vUv = atlasUv(uGlyph, uv);
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
   }
-  return new Float32Array(out)
-}
-const LINE_GEOMETRY = (() => {
-  const g = new BufferGeometry()
-  g.setAttribute('position', new BufferAttribute(tokenLinePoints(), 3))
-  return g
-})()
+`
+const INITIAL_FRAGMENT = /* glsl */ `
+  uniform sampler2D uAtlas;
+  uniform vec3 uColor;
+  uniform float uOpacity;
+  varying vec2 vUv;
+  void main() {
+    if (texture2D(uAtlas, vUv).a < 0.5) discard;
+    gl_FragColor = vec4(uColor, uOpacity);
+  }
+`
 
-/** The thin ring about it, flat in its own plane: tilted and turned in the frame. */
-const RING_GEOMETRY = (() => {
-  const pts = new EllipseCurve(0, 0, TOKEN_RING_RADIUS, TOKEN_RING_RADIUS, 0, Math.PI * 2, false, 0).getPoints(64)
-  return new BufferGeometry().setFromPoints(pts.map((p) => new Vector3(p.x, p.y, 0)))
-})()
-
-export function ItemToken({ id, at, side, colour, opacity = 1, fadeOut, groupRef }: {
-  /** What it stands for, for its own starting angle. */
+export function ItemToken({ id, at, side, colour, initial, state = 'unread', opacity = 1, fadeOut, groupRef }: {
+  /** What it stands for: its own starting angle and its notch code. */
   id: string
   at: [number, number, number]
-  /** Its width in scene units (keyBoxSide): one gibson. */
+  /** Its height in scene units (keyBoxSide): one gibson. */
   side: number
-  /** Its author's colour, a #hex: its edges, its mark and its ring. */
+  /** Its maker's colour, a #hex: its seal. */
   colour: string
+  /** Its maker's initial, as its index in the glyph atlas (glyphAtlas atlasIndex); none, no initial. */
+  initial?: number
+  /** NEW, UNREAD or READ (lib/hiddenLook hiddenState). */
+  state?: HiddenState
   opacity?: number
   /** From this moment (performance.now()), fading out over MARK_FADE_MS and then gone: TAKE. */
   fadeOut?: number
-  /** Handed the token's group, so its name can stand over its outline as drawn (TOKEN_OUTLINE). */
+  /** Handed the token's group, which stands where it rests and bobs. */
   groupRef?: MutableRefObject<Group | null>
 }): JSX.Element {
   const reduced = useReducedMotion()
   const own = useRef<Group | null>(null)
   const group = groupRef ?? own
+  const body = useRef<Group>(null)
   const ring = useRef<Group>(null)
+  const pulse = useRef<Mesh>(null)
+  const pulseNow = useMemo(() => ({ scale: 0, opacity: 0 }), [])
+  const look = hiddenLook(state)
+  // Fading out (TAKE), the faces are see-through from the start, so their opacity takes: the tag blend ignores it.
+  const faceOpacity = fadeOut !== undefined ? Math.min(opacity, 0.999) : opacity
   const materials = useMemo(() => ({
-    // Fading out (TAKE), the core is see-through from the start, so its opacity takes: the tag blend ignores it.
-    core: new MeshBasicMaterial({ color: TOKEN_CORE, toneMapped: false, ...basicFaceProps(fadeOut !== undefined ? Math.min(opacity, 0.999) : opacity, { ghost: false, world: true }), side: DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 2 }),
-    edge: new MeshBasicMaterial({ color: colour, toneMapped: false, transparent: true, opacity: 0.95 * opacity, depthWrite: false }),
-    line: new LineBasicMaterial({ color: colour, toneMapped: false, transparent: true, opacity: 0.95 * opacity, depthWrite: false }),
-    ring: new LineBasicMaterial({ color: colour, toneMapped: false, transparent: true, opacity: 0.5 * opacity, depthWrite: false }),
-  }), [colour, opacity, fadeOut])
+    core: faceMaterial(faceOpacity),
+    seal: new MeshBasicMaterial({ color: colour, toneMapped: false, ...basicFaceProps(faceOpacity, { ghost: false, world: true }), side: DoubleSide }),
+    initial: new ShaderMaterial({
+      vertexShader: INITIAL_VERTEX,
+      fragmentShader: INITIAL_FRAGMENT,
+      uniforms: { uAtlas: { value: glyphAtlas() }, uColor: { value: new Color(SEAL_INK) }, uOpacity: { value: faceOpacity }, uGlyph: { value: initial ?? 0 } },
+      ...basicFaceProps(faceOpacity, { ghost: false, world: true }),
+    }),
+    line: outlineMaterial({ color: look.outline, opacity }),
+    ring: lineRingMaterial(look.ringOpacity * opacity),
+    pulse: pulseMaterial(),
+  // The outline's colour, the ring's opacity and the initial are set from the state below, never by rebuilding.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [colour, faceOpacity, opacity])
   useEffect(() => () => { for (const m of Object.values(materials)) m.dispose() }, [materials])
+  // The maker's initial is a uniform: it changes (the npub's letter, then the profile's) without a rebuild.
+  useLayoutEffect(() => { materials.initial.uniforms.uGlyph.value = initial ?? 0 }, [materials, initial])
+  // The outline's colour and width follow the state, parsed once per change, not every frame.
+  useLayoutEffect(() => {
+    materials.line.color.set(look.outline)
+    materials.line.linewidth = look.outlinePx
+  }, [materials, look.outline, look.outlinePx])
+  // The card and its edges, by the item alone; its outline object, by them and the outline's material.
+  const card = useMemo(() => {
+    const geometry = cardGeometry(id)
+    return { geometry, edges: edgeSegments(geometry, 30) }
+  }, [id])
+  useEffect(() => () => card.geometry.dispose(), [card])
+  const cardLines = useMemo(() => {
+    const lines = outlineLines(card.edges, materials.line)
+    lines.name = 'item-token-lines'
+    return lines
+  }, [card, materials])
+  useEffect(() => () => cardLines.geometry.dispose(), [cardLines])
+  // The ring's geometry lives as long as the token, so the colours written into it survive a material rebuild.
+  const ringGeometry = useMemo(() => lineRingGeometry(), [])
+  useEffect(() => () => ringGeometry.dispose(), [ringGeometry])
+  const ringLine = useMemo(() => {
+    const l = liveOutlineLines(ringGeometry, materials.ring)
+    l.name = 'item-token-ring'
+    return l
+  }, [ringGeometry, materials])
   const phase = useMemo(() => (seedOf(id) / 4294967296) * Math.PI * 2, [id])
+  const ringColour = useMemo(() => new Color(RING_COLOUR), [])
+  // The ring geometry whose still colours are written (reduced motion); none while it moves, so turning reduced motion on writes its still pose.
+  const waved = useRef<unknown>(null)
 
-  useFrame((state) => {
+  useFrame((state3) => {
     const g = group.current
     if (!g) return
+    let left = 1
     if (fadeOut !== undefined) {
-      const left = markFadeLeft(performance.now() - fadeOut)
+      left = markFadeLeft(performance.now() - fadeOut)
       g.visible = left > 0
-      materials.edge.opacity = 0.95 * opacity * left
-      materials.line.opacity = 0.95 * opacity * left
-      materials.ring.opacity = 0.5 * opacity * left
-      // The core, see-through while it fades (its material above), goes with the rest.
-      materials.core.opacity = Math.min(opacity, 0.999) * left
+      setFaceOpacity(materials.core, faceOpacity * left)
+      materials.seal.opacity = faceOpacity * left
+      materials.initial.uniforms.uOpacity.value = faceOpacity * left
     }
-    const t = reduced ? 0 : state.clock.elapsedTime
-    g.position.set(at[0], at[1] + TOKEN_LIFT * side + (reduced ? 0 : Math.sin(t * 1.25 + phase) * TOKEN_BOB * side), at[2])
-    // Held still with reduced motion, square on, never edge on.
-    g.rotation.set(0, reduced ? 0 : phase + (t / TOKEN_TURN_S) * Math.PI * 2, 0)
+    sizeOutline(materials.line, state3.size)
+    sizeOutline(materials.ring, state3.size)
+    materials.line.opacity = opacity * left
+    materials.ring.opacity = look.ringOpacity * opacity * left
+    const t = state3.clock.elapsedTime
+    g.position.set(at[0], at[1] + (TOKEN_LIFT + bobAt(t, phase, reduced)) * side, at[2])
     g.scale.setScalar(side)
-    // The ring leans back and turns the other way, so it never lines up with the tag.
-    if (ring.current) ring.current.rotation.set(RING_LEAN, 0, -(t / (TOKEN_TURN_S * 0.75)) * Math.PI * 2)
+    if (body.current) body.current.rotation.set(0, turnAt(t, phase, reduced), 0)
+    const r = ring.current
+    if (r) {
+      // The ring faces the camera; the group holding it never turns.
+      r.quaternion.copy(state3.camera.quaternion)
+      // The idle wave running round it: rewritten each frame, once with reduced motion.
+      if (!reduced || waved.current !== ringGeometry) {
+        waved.current = reduced ? ringGeometry : null
+        const turn = ringTurnAt(t, reduced)
+        const wph = wavePhaseAt(t, reduced)
+        const cols = segmentColours(ringGeometry)
+        for (let i = 0; i < LINE_RING_SEGMENTS; i++) {
+          for (let k = 0; k < 2; k++) {
+            const v = 0.45 + 0.55 * waveAt(((i + k) / LINE_RING_SEGMENTS) * Math.PI * 2 + turn, wph)
+            const o = i * 6 + k * 3
+            cols[o] = ringColour.r * v; cols[o + 1] = ringColour.g * v; cols[o + 2] = ringColour.b * v
+          }
+        }
+        ;(ringGeometry.getAttribute('instanceColorStart') as InterleavedBufferAttribute).data.needsUpdate = true
+      }
+      const p = pulse.current
+      if (p) {
+        p.visible = look.pulse
+        if (look.pulse) {
+          const now = pulseAt(t, phase, reduced, pulseNow)
+          p.scale.setScalar(RING_REACH * now.scale)
+          materials.pulse.opacity = now.opacity * opacity * left
+        }
+      }
+    }
   }, LABEL_PRIORITY)
 
   return (
-    <group ref={group} position={[at[0], at[1] + TOKEN_LIFT * side, at[2]]} scale={side} rotation={[0, phase, 0]} name="item-token">
-      <mesh geometry={CORE_GEOMETRY} material={materials.core} name="item-token-core" />
-      <mesh geometry={EDGE_GEOMETRY} material={materials.edge} name="item-token-edges" />
-      <lineSegments geometry={LINE_GEOMETRY} material={materials.line} frustumCulled={false} name="item-token-lines" />
-      <group ref={ring} rotation={[RING_LEAN, 0, 0]}>
-        <lineLoop geometry={RING_GEOMETRY} material={materials.ring} frustumCulled={false} name="item-token-ring" />
+    <group ref={group} position={[at[0], at[1] + TOKEN_LIFT * side, at[2]]} scale={side} name="item-token">
+      <group ref={body} rotation={[0, phase, 0]}>
+        <mesh geometry={card.geometry} material={materials.core} name="item-token-core" />
+        <primitive object={cardLines} />
+        <mesh geometry={SEAL_GEOMETRY} material={materials.seal} name="item-token-seal" />
+        {initial !== undefined && <mesh geometry={INITIAL_GEOMETRY} material={materials.initial} name="item-token-initial" />}
+      </group>
+      <group ref={ring}>
+        <primitive object={ringLine} />
+        <mesh ref={pulse} geometry={PULSE_GEOMETRY} material={materials.pulse} visible={false} frustumCulled={false} name="item-token-pulse" />
       </group>
     </group>
   )

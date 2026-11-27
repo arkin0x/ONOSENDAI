@@ -14,7 +14,7 @@
  *
  * The Settings panel's "Spatial Audio" switch shows them (store/useLayers
  * spatialAudio; arkinox, 2026-11-22), off by default, and with them the
- * sound's own box in the world (WorldMessages AudioMark). Off is drawing
+ * sound itself in the world (WorldMessages AudioMark, SoundMark). Off is drawing
  * only: HiddenAudio plays and fades every sound exactly as it did. While
  * audio is being placed in BUILD (a new sound, a re-hide or a MOVE: useShards
  * pending of type audio) both are drawn whatever the switch says, so the

@@ -19,11 +19,13 @@ if (typeof localStorage === 'undefined') {
 import { useBlueprints } from '../../../store/useBlueprints'
 import { useCyberspace } from '../../../store/useCyberspace'
 import { useTerrain } from '../../../store/useTerrain'
-import { COMPILER_CARD_ID, COMPILER_KEY_HEX, COMPILER_LOOKUP, GAME_MAKER, grantCompilerIfDue, isGameCard, startCompilerGrant } from '../gameBlueprint'
+import { COMPILER_CARD_ID, COMPILER_KEY_HEX, COMPILER_LOOKUP, GAME_MAKER, QUARRY_CARD_ID, QUARRY_KEY_HEX, QUARRY_LOOKUP, QUARRY_TYPES, grantCompilerIfDue, grantQuarryIfDue, isGameCard, startCompilerGrant } from '../gameBlueprint'
 import { isItemBlueprint } from '../itemMark'
 import { readRecord, finderView } from '../format'
 import { keyOf } from '../keyClient'
-import { COMPILER_RECIPE, FERROVEIN, GLOWCORE, RUSTBAND } from '../recipes'
+import { CINDERROCK, COMPILER_RECIPE, FERROVEIN, GLOWCORE, QUARRY_CHARGE_RECIPE, RUSTBAND, UMBERSLATE } from '../recipes'
+import { openPrize } from '../format'
+import { hexToBytes } from '../../events'
 import { bytesToHex } from '../../events'
 
 const pic = 'data:image/png;base64,iVBORw0KGgo='
@@ -101,5 +103,69 @@ describe('the Compiler blueprint, the game\'s gift', () => {
     expect(f.revealed.size).toBe(5)
     expect(f.occupied.filter(Boolean)).toHaveLength(5)
     expect(useBlueprints.getState().fresh.has(card.rowKey)).toBe(true)
+  })
+})
+
+const hasQuarry = (pk: string): boolean => useBlueprints.getState().cards.some((c) => c.rowKey === `${pk}/${QUARRY_CARD_ID}`)
+
+describe('the Quarry Charge blueprint, granted the same way', () => {
+  it('its key and lookup are the recipe\'s, by the real derivation', async () => {
+    const k = await keyOf(QUARRY_CHARGE_RECIPE)
+    expect(bytesToHex(k.key)).toBe(QUARRY_KEY_HEX)
+    expect(k.lookup).toBe(QUARRY_LOOKUP)
+  }, 60_000)
+
+  it.each([UMBERSLATE, RUSTBAND, CINDERROCK, FERROVEIN])('the first block of type %i held grants it; nothing else does', async (id) => {
+    expect(QUARRY_TYPES).toContain(id)
+    const pk = fresh()
+    await as(pk)
+    // Gridstone and Glowcore are not in its recipe.
+    expect(await grantQuarryIfDue(pk, { 1: 9, [GLOWCORE]: 2 }, draw)).toBe(false)
+    expect(hasQuarry(pk)).toBe(false)
+    expect(await grantQuarryIfDue(pk, { [id]: 1 }, draw)).toBe(true)
+    expect(hasQuarry(pk)).toBe(true)
+  })
+
+  it('is granted once, and per npub: another identity does not have it, the first keeps it', async () => {
+    const a = fresh(), b = fresh()
+    await as(a)
+    expect(await grantQuarryIfDue(a, { [CINDERROCK]: 1 }, draw)).toBe(true)
+    expect(await grantQuarryIfDue(a, { [CINDERROCK]: 4, [UMBERSLATE]: 2 }, draw)).toBe(false)
+    expect(useBlueprints.getState().cards.filter((c) => c.rowKey === `${a}/${QUARRY_CARD_ID}`)).toHaveLength(1)
+    await as(b)
+    expect(hasQuarry(b)).toBe(false)
+    await as(a)
+    expect(hasQuarry(a)).toBe(true)
+  })
+
+  it('the watch grants it too, beside the Compiler\'s, on the first pickup', async () => {
+    const pk = fresh()
+    startCompilerGrant(draw)
+    useCyberspace.setState({ identity: { ...useCyberspace.getState().identity, pubkey: pk } })
+    // The identity switch settles (TERRAIN starts that identity's inventory afresh) before its blocks are read in.
+    await new Promise((r) => setTimeout(r, 50))
+    useTerrain.setState({ inventory: { ...useTerrain.getState().inventory, counts: { [UMBERSLATE]: 1 } } })
+    await useBlueprints.getState().load(pk)
+    await vi.waitFor(() => expect(hasQuarry(pk)).toBe(true), { timeout: 4000 })
+    // Umberslate is not in the Compiler's recipe.
+    expect(has(pk)).toBe(false)
+  })
+
+  it('every block revealed, its prize the seven charges, by the game, never placed, an item blueprint (the orange mark)', async () => {
+    const pk = fresh()
+    await as(pk)
+    await grantQuarryIfDue(pk, { [RUSTBAND]: 1 }, draw)
+    await vi.waitFor(() => expect(hasQuarry(pk)).toBe(true), { timeout: 4000 })
+    const card = useBlueprints.getState().cards.find((c) => c.rowKey === `${pk}/${QUARRY_CARD_ID}`)!
+    expect(isGameCard(card)).toBe(true)
+    expect(isItemBlueprint(card)).toBe(true)
+    expect(card.prizeKind).toBe('tool')
+    expect(card.record.pubkey).toBe(GAME_MAKER)
+    const v = readRecord(card.record)!
+    expect(v.title).toBe('The Quarry Charge')
+    expect(v.lookup).toBe(QUARRY_LOOKUP)
+    const f = finderView(v)
+    expect(f.revealed.size).toBe(7)
+    expect(await openPrize(hexToBytes(QUARRY_KEY_HEX), v.sealed)).toEqual({ type: 'tool', tool: 'quarry-charge', count: 7 })
   })
 })

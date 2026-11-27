@@ -22,7 +22,7 @@
  */
 
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
-import { Boxes, Cloud, CloudOff, Cpu, DraftingCompass, Hammer, Pickaxe, ScanSearch, Timer } from 'lucide-react'
+import { Bomb, Boxes, Cloud, CloudOff, Cpu, DraftingCompass, Hammer, Pickaxe, ScanSearch, Timer } from 'lucide-react'
 import { useCyberspace } from '../store/useCyberspace'
 import { WRITE_EVERY_MS, isDirty, localFor, miningRecordFor, nudgeMining, useMiningStats, type MiningStatus } from '../store/miningStats'
 import { currentStreak, dayNumber, daysActive, longestStreak, rarestMined, topMined, totalsOf } from '../lib/miningRecord'
@@ -166,6 +166,10 @@ export function MiningPanel(): JSX.Element {
           <Tile value={num(c.smashCompiler)} label="With the Compiler" />
           <Tile value={num(c.smashBare)} label="Bare-handed" />
           <Tile value={num(c.smashed)} label="Blocks smashed" />
+        </Group>
+        <Group icon={<Bomb {...icon} />} title="Quarry Charges" pairs>
+          <Tile value={num(c.charges)} label="Charges placed" />
+          <Tile value={num(c.quarried)} label="Blocks quarried" />
         </Group>
         <Group icon={<Cpu {...icon} />} title="Compiles">
           <Tile value={num(c.compiles)} label="Compiles" />

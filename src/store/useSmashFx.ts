@@ -21,6 +21,8 @@ export interface SmashShow {
   outcome: 'pending' | 'match' | 'miss'
   /** performance.now() when the outcome became known, or null while pending. */
   resolvedAt: number | null
+  /** The least radius the flash and the rings take, in cells: a Quarry Charge's blast is its whole box, however few blocks it took. */
+  minRadius?: number
 }
 
 interface SmashFxState {

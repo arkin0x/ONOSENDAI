@@ -30,7 +30,7 @@
  */
 
 import { useMemo, useState } from 'react'
-import { GAME_NO_DEPLOY, isGameCard } from '../../lib/blueprint/gameCard'
+import { gameNoDeploy, isGameCard } from '../../lib/blueprint/gameCard'
 import { useBlueprints } from '../../store/useBlueprints'
 import { MapPin, PackagePlus, Plus, X } from 'lucide-react'
 import { startPlaceBlueprint } from '../../lib/blueprint/place'
@@ -101,7 +101,7 @@ function LandingTile({ card, views, fresh }: { card: BlueprintCard; views: CardV
       <span className="bp-land__name" title={name}>{name}</span>
       <span className="bp-land__by">by <Who pubkey={card.record.pubkey} /></span>
       {game ? (
-        <span className="bp-land__gameline">{GAME_NO_DEPLOY}</span>
+        <span className="bp-land__gameline">{gameNoDeploy(card)}</span>
       ) : (
         <>
           <button type="button" className="bp-land__go" onClick={() => place('here')} title="Leave it where you stand, for others to find. They each take a copy">

@@ -224,6 +224,8 @@ export type MiningEvent =
   | { type: 'prize' }
   | { type: 'compiler' }
   | { type: 'blueprint'; what: 'made' | 'placed' | 'found' }
+  | { type: 'charge' }
+  | { type: 'blast'; blocks: number }
 
 /** Whether a chunk is new to this device's dedupe set (and adds it): one small record per chunk, salted, never published. */
 function newChunk(me: string, salt: string, chunk: string, D: MiningDeps): boolean {
@@ -261,6 +263,8 @@ export function noteMining(ev: MiningEvent, who?: string): void {
     case 'prize': add('prizes'); break
     case 'compiler': first.compiler = Math.min(first.compiler ?? nowS, nowS); break
     case 'blueprint': add(ev.what === 'made' ? 'bpMade' : ev.what === 'placed' ? 'bpPlaced' : 'bpFound'); break
+    case 'charge': add('charges'); break
+    case 'blast': add('quarried', ev.blocks); break
   }
   // A day with any mining: making and finding blueprints is not mining.
   const active = ev.type !== 'blueprint'

@@ -5,6 +5,7 @@
  * are taken (owner, 2026-11-27).
  */
 
+import { toolName } from '../lib/blueprint/gameCard'
 import { create } from 'zustand'
 
 /** One toy on its way to ITEMS: where it starts on screen, its colour, its name. */
@@ -58,7 +59,7 @@ export const usePrizePick = create<PrizePickState>((set, get) => ({
 
 /** What a prize is called: the shard's own name, or the tool's. The blueprint it came from is said beside it. */
 export function prizeName(toy: { prize: { type: string; payload?: { name?: unknown } }; name: string }): string {
-  if (toy.prize.type === 'tool') return 'The Compiler'
+  if (toy.prize.type === 'tool') return toolName(toy.prize)
   const n = toy.prize.payload?.name
   return typeof n === 'string' && n.trim() ? n.trim() : toy.name
 }

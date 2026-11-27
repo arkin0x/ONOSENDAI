@@ -37,6 +37,8 @@ import { cellIndex } from '../../lib/blueprint/format'
 import { chunkKey, chunkOf } from '../../lib/terrain/coords'
 import { EMPTY, kindId } from '../../lib/terrain/blocks'
 import { totalsOf } from '../../lib/miningRecord'
+import { useQuarry } from '../useQuarry'
+import { isQuarry } from '../../lib/terrain/terrainDb'
 import type { RayHit } from '../../lib/terrain/raycast'
 import { setAirPlacing } from '../airSwitch'
 import { surveyChunk } from '../../terrain/TerrainView'
@@ -188,5 +190,36 @@ describe('TERRAIN counts for MINING', () => {
     expect(T().mine(hitAt(...c))).toBe(true)
     expect(totals().surveys).toBe(0)
     expect(totals().mined).toBe(0)
+  })
+
+  it('a Quarry Charge: each one placed, and the blocks its blast took, as a smash counts the blocks it cleared', async () => {
+    await openSurveyed()
+    const s = terrainSession!
+    let g: [number, number, number] | null = null
+    for (let y = 30; y >= 4 && !g; y--) if (s.world.blockCs(6, y, 6) !== EMPTY && s.world.blockCs(6, y + 1, 6) === EMPTY) g = [6, y, 6]
+    T().gainCharges(7)
+    T().selectSlot(T().inventory.hotbar.findIndex(isQuarry))
+    const placedBefore = totals().placed ?? 0
+    expect(T().place({ cell: g!, normal: [0, 1, 0], distance: 2 })).toBe(true)
+    expect(totals().charges).toBe(1)
+    // A charge is not a block placed.
+    expect(totals().placed ?? 0).toBe(placedBefore)
+    const before = new Set<string>()
+    for (let dy = -2; dy <= 4; dy++) for (let dz = -3; dz <= 3; dz++) for (let dx = -3; dx <= 3; dx++) if (s.world.blockCs(6 + dx, g![1] + dy, 6 + dz) !== EMPTY) before.add(`${dx},${dy},${dz}`)
+    useQuarry.getState().detonate(useQuarry.getState().charges[0].id)
+    expect(totals().quarried).toBe(before.size)
+    expect(before.size).toBeGreaterThan(0)
+  })
+
+  it('a Quarry Charge counts nothing during a tutorial run', async () => {
+    tutorial = true
+    await openSurveyed()
+    T().gainCharges(1)
+    const s = terrainSession!
+    expect(useQuarry.getState().arm([6, 10, 6])).toBe(true)
+    useQuarry.getState().detonate(useQuarry.getState().charges[0].id)
+    void s
+    expect(totals().charges ?? 0).toBe(0)
+    expect(totals().quarried ?? 0).toBe(0)
   })
 })

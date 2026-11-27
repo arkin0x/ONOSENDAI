@@ -13,8 +13,11 @@
  *   generated ground, or the whole chunk when smaller). Folding happens when a
  *   chunk's log reaches FOLD_AT and when TERRAIN closes, in one transaction
  *   with the removal of the ops it folded, so nothing is ever lost between.
- * - surveyed: the chunks this identity has surveyed. The ground itself is
- *   never stored: everyone computes it again.
+ * - surveyed: the chunks this identity has surveyed, each with the ground
+ *   revision it was first surveyed at and when (DECK-0009 §3.10, §7.5: a
+ *   chunk keeps its first survey's revision). A row written before revision
+ *   3 names none, and is revision 2. The ground itself is never stored:
+ *   everyone computes it again.
  * - meta: the inventory (counts by block id, the hotbar, the chosen slot, the
  *   Quarry Charges), the first-visit hint's progress, and the Quarry Charge's
  *   drops still floating (never published).
@@ -25,6 +28,7 @@
 
 import { openDatabase, putMany, request } from '../idb'
 import { isLayer, type Layer } from './layer'
+import { storedRevision, type GroundRevision } from './groundRevision'
 
 export const TERRAIN_DB = 'onosendai:terrain'
 export const DB_VERSION = 1
@@ -66,6 +70,22 @@ export interface SurveyedRow {
   owner: string
   chunk: string
   t: number
+  /** The ground revision it was first surveyed at; absent on rows from before revision 3, which are revision 2 (surveyedOf). */
+  revision?: number
+  /** When it was first surveyed, Unix seconds; absent on older rows (surveyedOf reads `t`). */
+  surveyed?: number
+}
+
+/** A chunk's revision and first survey's date, as a surveyed row keeps them (an old row: revision 2, its `t`). */
+export interface ChunkSurvey {
+  revision: GroundRevision
+  surveyed: number
+}
+
+export function surveyedOf(r: Pick<SurveyedRow, 't' | 'revision' | 'surveyed'>): ChunkSurvey {
+  const s = r.surveyed
+  const t = typeof r.t === 'number' && Number.isFinite(r.t) ? Math.max(0, Math.floor(r.t / 1000)) : 0
+  return { revision: storedRevision(r.revision), surveyed: typeof s === 'number' && Number.isInteger(s) && s >= 0 ? s : t }
 }
 
 /**
@@ -257,8 +277,8 @@ export async function readKept(db: IDBDatabase, owner: string, chunks: readonly 
   }
 }
 
-/** What one identity kept that is not per chunk: every chunk it surveyed (keys), the inventory, the hint, and past its newest op. */
-export async function readOwner(db: IDBDatabase, owner: string): Promise<{ surveyed: string[]; inventory: Inventory; hint: number; nextSeq: number }> {
+/** What one identity kept that is not per chunk: every chunk it surveyed (keys, and each one's revision), the inventory, the hint, and past its newest op. */
+export async function readOwner(db: IDBDatabase, owner: string): Promise<{ surveyed: string[]; revisions: Map<string, ChunkSurvey>; inventory: Inventory; hint: number; nextSeq: number }> {
   const tx = db.transaction([OPS, SURVEYED, META], 'readonly')
   const [rows, inv, hint, last] = await Promise.all([
     request(tx.objectStore(SURVEYED).index(BY_OWNER).getAll(owner)) as Promise<SurveyedRow[]>,
@@ -267,8 +287,10 @@ export async function readOwner(db: IDBDatabase, owner: string): Promise<{ surve
     request(tx.objectStore(OPS).openCursor(IDBKeyRange.bound(`${owner}|`, `${owner}|~`), 'prev')) as Promise<IDBCursorWithValue | null>,
   ])
   const lastSeq = last && typeof (last.value as OpRow).seq === 'number' ? (last.value as OpRow).seq : 0
+  const kept = rows.filter((r) => r && typeof r.chunk === 'string')
   return {
-    surveyed: rows.filter((r) => r && typeof r.chunk === 'string').map((r) => r.chunk),
+    surveyed: kept.map((r) => r.chunk),
+    revisions: new Map(kept.map((r) => [r.chunk, surveyedOf(r)])),
     inventory: tidyInventory(inv?.value),
     hint: typeof hint?.value === 'number' ? hint.value : 0,
     nextSeq: lastSeq + 1,
@@ -279,8 +301,9 @@ export function writeOps(db: IDBDatabase, rows: OpRow[]): Promise<void> {
   return rows.length === 0 ? Promise.resolve() : putMany(db, OPS, rows)
 }
 
-export function writeSurveyed(db: IDBDatabase, owner: string, chunk: string, t: number): Promise<void> {
-  return putMany(db, SURVEYED, [{ rowKey: chunkRowKey(owner, chunk), owner, chunk, t } satisfies SurveyedRow])
+/** A chunk surveyed (at `t`, ms), at a ground revision, first surveyed at `surveyed` (Unix seconds). */
+export function writeSurveyed(db: IDBDatabase, owner: string, chunk: string, t: number, at: ChunkSurvey): Promise<void> {
+  return putMany(db, SURVEYED, [{ rowKey: chunkRowKey(owner, chunk), owner, chunk, t, revision: at.revision, surveyed: at.surveyed } satisfies SurveyedRow])
 }
 
 export function writeInventory(db: IDBDatabase, owner: string, inv: Inventory): Promise<void> {

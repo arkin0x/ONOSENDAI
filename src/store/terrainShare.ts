@@ -36,6 +36,14 @@
  * owner inside their home first, then you (this device's own blocks), then
  * whom you follow, then everyone else, the newest first in each; a layer's
  * co-builders count at its author's rank in the cells the author changed.
+ *
+ * THE GROUND'S REVISION (DECK-0009 §3.10, §7.5). Each layer's surveyed plane
+ * is read against the ground of the revision it names (2 or 3), and what a
+ * cell nobody changed shows is the ground at the base revision: the first
+ * counted survey by rank, then by its `surveyed` date. Every plane this
+ * device writes names its chunk's own revision (the slot's) and the date
+ * of its first survey, carried forward; a layer started from the author's
+ * other keys (§5.6) names the base revision among them.
  */
 
 import { create } from 'zustand'
@@ -43,10 +51,11 @@ import { CELLS, chunkKey, chunkOf, parseChunkKey, type ChunkBase } from '../lib/
 import { regionKeyAt, encryptForRegion } from '../lib/shardCrypto'
 import { reachDistance } from '../lib/terrain/world'
 import {
-  LAYER_KIND, LAYER_MAX_BYTES, COBUILDERS_MAX, changesOf, countedLayers, emptiedPlaintext, freeTextWithinBounds, inHome, layerShape, layerTags,
-  nextPlaintext, parsePlaintext, plaintextJson, resolveStack, serializedBytes, startFrom, withinRank,
-  type DecodedPlane, type LayerPlaintext, type PlaneChanges, type StackLayer, type StackView,
+  LAYER_KIND, LAYER_MAX_BYTES, COBUILDERS_MAX, baseRevision, carriedPlane, changesOf, countedLayers, emptiedPlaintext, freeTextWithinBounds, groundsNeeded, inHome, layerShape, layerTags,
+  nextPlaintext, parsePlaintext, planeGroundRevision, plaintextJson, resolveStack, serializedBytes, startFrom, surveyedToWrite, surveysOf, withinRank,
+  type DecodedPlane, type GroundAt, type LayerPlaintext, type PlaneChanges, type StackLayer, type StackView,
 } from '../lib/terrain/blockLayer'
+import { readSurveyed, type GroundRevision } from '../lib/terrain/groundRevision'
 import { readLayer, type KeyStatus } from '../lib/terrain/layerReader'
 import { deviceKeys, ensureBuilderKey, namedKey, noteFound, onBuilderChange, retireCurrent, waitingIds, builderRecord } from '../lib/terrain/builderKey'
 import { onActionSigned } from '../lib/terrain/builderTags'
@@ -93,8 +102,8 @@ export interface ShareDeps {
   query: (filter: Filter) => Promise<NostrEvent[]>
   /** What an author's movement actions say of some of their builder keys (named, retired, unnamed; unknown when they cannot be read). */
   keyStatus: (author: string, keys: string[]) => Promise<Map<string, KeyStatus>>
-  /** The revision 2 ground of a chunk. */
-  ground: (base: ChunkBase) => Promise<Uint8Array>
+  /** A chunk's ground at a revision (DECK-0009 §3.10). */
+  ground: (base: ChunkBase, revision: GroundRevision) => Promise<Uint8Array>
   muted: () => ReadonlySet<string>
   /** Whom `me` follows, newest contact list. */
   follows: (me: string) => Promise<string[]>
@@ -130,8 +139,10 @@ function current(): ShareDeps {
 export interface ShareSlot {
   base: ChunkBase
   key: string
-  /** The generated ground, once generated. */
+  /** The generated ground, once generated: the chunk's own revision's (yours where you surveyed; the base you are shown where not). */
   generated: Uint8Array | null
+  /** The revision `generated` is (2 when not said). */
+  revision?: GroundRevision
   /** Your own blocks: the ground with your layer and log over it; null where you have not surveyed. */
   own?: Uint8Array | null
 }
@@ -149,6 +160,13 @@ export interface ShareHost {
   redisplay: (key: string) => void
   /** Take these cells (cell to value) as your own in a chunk, kept on the device: another key's blocks a new key started from (§5.6). */
   adopt: (key: string, cells: ReadonlyMap<number, number>) => Promise<void>
+  /**
+   * Your blocks in a chunk move to another revision's ground, kept on the
+   * device: a layer started from your other keys' layers (§5.6) named their
+   * base revision. Cells you never changed take the new ground; `changed`
+   * are the cells you changed, kept as they are.
+   */
+  rebase: (key: string, revision: GroundRevision, surveyed: number, changed: ReadonlySet<number>) => Promise<void>
 }
 
 let host: ShareHost | null = null
@@ -224,6 +242,8 @@ interface ChunkView {
   lists: Map<string, readonly string[]>
   /** Whether the chunk is surveyed for you (§7.5): by your own layer, or someone else's counted one. */
   surveyed: boolean
+  /** The revision of the ground it shows where nobody changed a cell (§7.5), or null when not surveyed. */
+  baseRevision: GroundRevision | null
 }
 
 interface Session {
@@ -284,7 +304,9 @@ function keepReading(): void {
   }, READ_EVERY_MS)
 }
 const statuses = new Map<string, { s: KeyStatus; at: number }>()
+/** Grounds asked for, by chunk key and revision, and the ones at hand (for a chunk drawn at once). */
 const grounds = new Map<string, Promise<Uint8Array>>()
+const groundsReady = new Map<string, Uint8Array>()
 const keys = new Map<string, { key: Uint8Array; lookupId: string }>()
 let followsOf: { me: string; list: string[] } | null = null
 
@@ -324,6 +346,8 @@ export function resetShare(): void {
   drawing = 0
   statuses.clear()
   grounds.clear()
+  groundsReady.clear()
+  planeMemo.clear()
   keys.clear()
   followsOf = null
   hinted.clear()
@@ -345,16 +369,34 @@ export function chunkRegionKey(base: ChunkBase): { key: Uint8Array; lookupId: st
   return v
 }
 
-function groundOf(base: ChunkBase): Promise<Uint8Array> {
-  const k = chunkKey(base)
+const groundKey = (key: string, revision: GroundRevision): string => `${key}|${revision}`
+
+/** A chunk's ground at a revision, made once and kept for a while. */
+function groundOf(base: ChunkBase, revision: GroundRevision): Promise<Uint8Array> {
+  const k = groundKey(chunkKey(base), revision)
   let g = grounds.get(k)
   if (!g) {
-    g = current().ground(base)
-    grounds.set(k, g)
-    void g.catch(() => grounds.delete(k))
-    while (grounds.size > 64) grounds.delete(grounds.keys().next().value as string)
+    const made = current().ground(base, revision)
+    g = made
+    grounds.set(k, made)
+    made.then((v) => {
+      if (grounds.get(k) !== made) return
+      groundsReady.set(k, v)
+      while (groundsReady.size > 64) groundsReady.delete(groundsReady.keys().next().value as string)
+    }, () => grounds.delete(k))
+    while (grounds.size > 64) { const old = grounds.keys().next().value as string; grounds.delete(old); groundsReady.delete(old) }
   }
   return g
+}
+
+/** The grounds these plaintexts' planes are read against, and `extra` ones, at hand together. */
+async function groundsFor(base: ChunkBase, plaintexts: ReadonlyArray<LayerPlaintext | null>, extra: ReadonlyArray<[0 | 1, GroundRevision]> = []): Promise<GroundAt> {
+  const want = new Map<string, [0 | 1, GroundRevision]>()
+  for (const p of plaintexts) if (p) for (const [plane, r] of groundsNeeded(p)) want.set(`${plane}|${r}`, [plane, r])
+  for (const [plane, r] of extra) want.set(`${plane}|${r}`, [plane, r])
+  const got = new Map<string, Uint8Array>()
+  for (const [k, [plane, r]] of want) got.set(k, await groundOf({ ...base, plane }, r))
+  return (plane, r) => got.get(`${plane}|${r}`) ?? null
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -480,32 +522,43 @@ export function inCrew(pubkey: string): boolean {
 // ---------------------------------------------------------------------------------------------------------------
 // Your view: the Stack, with this device's own blocks as your layer.
 
-/** This device's own blocks as a layer of yours: the cells it changed (from the ground, or explicitly at it), newest of all of yours. */
-function ownLayer(me: string, own: Uint8Array, ground: Uint8Array, plane: 0 | 1, explicit: ReadonlySet<number>, cobuilders: readonly string[], createdAt: number): StackLayer {
+/** This device's own blocks as a layer of yours: the cells it changed (from its revision's ground, or explicitly at it), newest of all of yours. */
+function ownLayer(me: string, own: Uint8Array, ground: Uint8Array, revision: GroundRevision, surveyed: number, plane: 0 | 1, explicit: ReadonlySet<number>, cobuilders: readonly string[], createdAt: number): StackLayer {
   const values = Int32Array.from(own)
   const changed: number[] = []
   for (let c = 0; c < CELLS; c++) if (own[c] !== ground[c] || explicit.has(c)) changed.push(c)
-  const pl: DecodedPlane = { plane, survey: true, values, changed }
+  const pl: DecodedPlane = { plane, survey: true, ground: revision, surveyed, values, changed }
   return { id: '', author: me, builder: '', createdAt, cobuilders, planes: [pl] }
 }
 
 /**
  * What a chunk shows: the Stack over everyone's counted layers and this
  * device's own blocks (as yours), per cell the first candidate, else the
- * base (the ground where the plane is surveyed, open space where not). Also
- * which layer each cell shows.
+ * base: the ground at the base revision where the plane is surveyed (§7.5),
+ * open space where not. `ground` is the chunk's ground at `revision` (your
+ * own blocks' revision where you hold any); `groundAt` gives another
+ * revision's when the base is another, and `missing` names it when it is
+ * not at hand yet (`ground` stands in meanwhile). Also which layer each
+ * cell shows.
  */
-export function composeView(o: { ground: Uint8Array; own: Uint8Array | null; explicit: ReadonlySet<number>; others: readonly StackLayer[]; plane: 0 | 1; view: StackView; myCrew: readonly string[]; mutes: ReadonlySet<string>; now: number; ownAt?: number }): { blocks: Uint8Array; layers: StackLayer[]; from: Int32Array; surveyed: boolean } {
+export function composeView(o: {
+  ground: Uint8Array; revision?: GroundRevision; groundAt?: (revision: GroundRevision) => Uint8Array | null; own: Uint8Array | null; ownSurveyed?: number
+  explicit: ReadonlySet<number>; others: readonly StackLayer[]; plane: 0 | 1; view: StackView; myCrew: readonly string[]; mutes: ReadonlySet<string>; now: number; ownAt?: number
+}): { blocks: Uint8Array; layers: StackLayer[]; from: Int32Array; surveyed: boolean; baseRevision: GroundRevision | null; missing: GroundRevision | null } {
+  const revision = o.revision ?? 2
   const counted = countedLayers(o.others, o.view, o.mutes, o.now)
   // Your own blocks count as yours, never held back by the clock or the cap; dated as published (now while changes wait), so a newer layer of another device of yours wins as §7.3 says.
-  const layers = o.own && o.view.me ? [...counted, ownLayer(o.view.me, o.own, o.ground, o.plane, o.explicit, o.myCrew, o.ownAt ?? o.now)] : counted
+  const ownAt = o.ownAt ?? o.now
+  const layers = o.own && o.view.me ? [...counted, ownLayer(o.view.me, o.own, o.ground, revision, o.ownSurveyed ?? ownAt, o.plane, o.explicit, o.myCrew, ownAt)] : counted
   const r = resolveStack(layers, o.plane, o.view)
+  const atBase = r.baseRevision === null || r.baseRevision === revision ? o.ground : o.groundAt?.(r.baseRevision) ?? null
+  const base = atBase ?? o.ground
   const blocks = new Uint8Array(CELLS)
   for (let c = 0; c < CELLS; c++) {
     const v = r.values[c]
-    blocks[c] = v >= 0 ? Math.min(v, 255) : r.surveyed ? o.ground[c] : 0
+    blocks[c] = v >= 0 ? Math.min(v, 255) : r.surveyed ? base[c] : 0
   }
-  return { blocks, layers, from: r.from, surveyed: r.surveyed }
+  return { blocks, layers, from: r.from, surveyed: r.surveyed, baseRevision: r.baseRevision, missing: atBase ? null : r.baseRevision }
 }
 
 /** Whom a reader ranks where (§7): you, whom you follow, and who is home here. */
@@ -514,22 +567,108 @@ function stackView(me: string | null, base: ChunkBase): StackView {
   return { me, follows, home: (author) => inHome(author, base) }
 }
 
-/** The blocks a chunk shows you now (store/useTerrain.ts draws these). */
-export function viewOf(key: string, ground: Uint8Array, own: Uint8Array | null): Uint8Array {
+/** Grounds being made for a chunk drawn before its base revision's ground was at hand: drawn again once it is. */
+const awaitedGrounds = new Set<string>()
+
+/**
+ * The plane `surveyed` your own blocks stand at in the Stack: what your
+ * published layer names for it, else when you surveyed it on this device,
+ * else now.
+ */
+function ownSurveyedOf(s: Session, key: string, surveyedAt: number | undefined, now: number): number {
+  return publishedPlaneOf(s, key)?.surveyed ?? surveyedAt ?? now
+}
+
+/** What a session's published layer names for a chunk's plane, read once per version published (a layer can be 240 KB of text). */
+const planeMemo = new Map<string, { text: string; createdAt: number; at: { revision: GroundRevision; surveyed: number } | null }>()
+
+function publishedPlaneOf(s: Session, key: string): { revision: GroundRevision; surveyed: number } | null {
+  const row = s.rows.get(key)
+  if (!row?.plaintext) return null
+  const k = `${s.owner}|${key}`
+  const memo = planeMemo.get(k)
+  if (memo && memo.text === row.plaintext && memo.createdAt === row.createdAt) return memo.at
+  const pl = parsePlaintext(row.plaintext)?.planes.find((p) => p.plane === s.plane)
+  const r = pl ? planeGroundRevision(pl) : null
+  const at = pl && r !== null ? { revision: r, surveyed: readSurveyed(pl, row.createdAt) } : null
+  planeMemo.set(k, { text: row.plaintext, createdAt: row.createdAt, at })
+  while (planeMemo.size > 160) planeMemo.delete(planeMemo.keys().next().value as string)
+  return at
+}
+
+/**
+ * The blocks a chunk shows you now (store/useTerrain.ts draws these):
+ * `ground` is the chunk's ground at `revision` (your own blocks', where you
+ * hold any), `surveyedAt` when you surveyed it here.
+ */
+export function viewOf(key: string, ground: Uint8Array, own: Uint8Array | null, revision: GroundRevision = 2, surveyedAt?: number): Uint8Array {
   const s = sessionFor()
   const base = parseChunkKey(key)
   if (!s || !base) return own ? own.slice() : ground.slice()
   const d = current()
+  const now = Math.floor(d.now() / 1000)
   const v = composeView({
-    ground, own, explicit: new Set(s.rows.get(key)?.explicit ?? []), others: s.others.get(key)?.layers ?? [], plane: s.plane as 0 | 1,
-    view: stackView(d.me() || null, base), myCrew: s.crew, mutes: d.muted(), now: Math.floor(d.now() / 1000),
-    ownAt: (() => { const r = s.rows.get(key); return r && !r.dirty && r.createdAt ? r.createdAt : Math.floor(d.now() / 1000) })(),
+    ground, revision, groundAt: (r) => groundsReady.get(groundKey(key, r)) ?? null, own, ownSurveyed: own ? ownSurveyedOf(s, key, surveyedAt, now) : undefined,
+    explicit: new Set(s.rows.get(key)?.explicit ?? []), others: s.others.get(key)?.layers ?? [], plane: s.plane as 0 | 1,
+    view: stackView(d.me() || null, base), myCrew: s.crew, mutes: d.muted(), now,
+    ownAt: (() => { const r = s.rows.get(key); return r && !r.dirty && r.createdAt ? r.createdAt : now })(),
   })
+  // The base is another revision's ground, not made yet: drawn over this one meanwhile, and again once it is.
+  if (v.missing !== null) {
+    const gk = groundKey(key, v.missing)
+    if (!awaitedGrounds.has(gk)) {
+      awaitedGrounds.add(gk)
+      void groundOf(base, v.missing).then(() => host?.redisplay(key), () => undefined).finally(() => awaitedGrounds.delete(gk))
+    }
+  }
   const newest = new Map<string, StackLayer>()
   for (const l of v.layers) { const n = newest.get(l.author); if (!n || withinRank(l, n) < 0) newest.set(l.author, l) }
-  s.views.set(key, { layers: v.layers, from: v.from, lists: new Map([...newest].map(([a, l]) => [a, l.cobuilders])), surveyed: v.surveyed })
+  s.views.set(key, { layers: v.layers, from: v.from, lists: new Map([...newest].map(([a, l]) => [a, l.cobuilders])), surveyed: v.surveyed, baseRevision: v.baseRevision })
   while (s.views.size > 160) s.views.delete(s.views.keys().next().value as string)
   return v.blocks
+}
+
+/**
+ * The base revision a chunk shows you (§7.5) as last drawn, your own blocks
+ * counted; null when it is not surveyed for you or not drawn yet.
+ */
+export function shownRevision(key: string): GroundRevision | null {
+  return sessionFor()?.views.get(key)?.baseRevision ?? null
+}
+
+/**
+ * The base revision of a chunk by everyone else's counted layers alone
+ * (§7.5): the revision a first survey of yours there takes (§3.10), and the
+ * ground a chunk you never surveyed is drawn over. Null when nobody else
+ * surveyed it, as far as has been read.
+ */
+export function othersRevision(key: string): GroundRevision | null {
+  const s = sessionFor()
+  const base = parseChunkKey(key)
+  const others = s?.others.get(key)?.layers
+  if (!s || !base || !others?.length) return null
+  const d = current()
+  const view = stackView(d.me() || null, base)
+  return baseRevision(surveysOf(countedLayers(others, view, d.muted(), Math.floor(d.now() / 1000)), s.plane as 0 | 1, view))
+}
+
+/** What your published layer names for a chunk's plane, carried forward (§3.10): its revision and first survey's date; null before it surveyed there. */
+export function publishedPlane(key: string): { revision: GroundRevision; surveyed: number } | null {
+  const s = sessionFor()
+  return s ? publishedPlaneOf(s, key) : null
+}
+
+/** The cells you set explicitly in a chunk (§5.4), as kept. */
+export function explicitCells(key: string): ReadonlySet<number> {
+  return new Set(sessionFor()?.rows.get(key)?.explicit ?? [])
+}
+
+/** Cells to keep as explicit changes in a chunk (§5.4): yours at a value that is now the ground's (store/useTerrain.ts rebase). */
+export function addExplicit(key: string, cells: Iterable<number>): void {
+  const s = sessionFor()
+  const row = s?.rows.get(key)
+  if (!s || !row) return
+  saveRow(s, key, { ...row, explicit: [...new Set([...row.explicit, ...cells])] })
 }
 
 /**
@@ -931,32 +1070,35 @@ async function publishChunk(s: Session, key: string): Promise<void> {
   const explicit = new Set(row.explicit)
   let plain: LayerPlaintext | null
   let olds: OtherKey[] = []
-  let newKey: { mine: Map<0 | 1, PlaneChanges>; groundAt: (p: 0 | 1) => Uint8Array | null } | null = null
+  let newKey: { mine: Map<0 | 1, PlaneChanges>; groundAt: GroundAt } | null = null
+  const plane = s.plane as 0 | 1
+  const revision = slot.revision ?? 2
+  const createdAt = Math.max(Math.floor(d.now() / 1000), row.createdAt + 1)
+  // The plane names the chunk's own revision and its first survey's date, carried forward; a first survey's date is this version's (§5.4).
+  const at = { revision, surveyed: surveyedToWrite(prev, plane, row.createdAt, createdAt) }
   if (row.builder === k.pub) {
     // The same key: this plane as the device holds it, the twin carried, the Crew. Nothing changed: nothing to publish.
-    plain = nextPlaintext(prev, s.plane as 0 | 1, slot.own, slot.generated, s.crew, explicit)
+    plain = nextPlaintext(prev, plane, slot.own, slot.generated, at, s.crew, explicit, row.createdAt)
   } else {
     // A new key at this chunk (§5.6): the author's other keys' layers here first, then this device's changes over them.
     olds = await otherKeys(s, slot.base, k.pub)
-    const twin = (1 - s.plane) as 0 | 1
-    const grounds = new Map<number, Uint8Array>([[s.plane, slot.generated]])
-    if (olds.some((o) => o.plaintext.planes.some((p) => p.plane === twin)) || prev?.planes.some((p) => p.plane === twin)) grounds.set(twin, await groundOf({ ...slot.base, plane: twin }))
-    const groundAt = (p: 0 | 1): Uint8Array | null => grounds.get(p) ?? null
-    const mine = prev ? changesOf(prev, groundAt) : new Map<0 | 1, PlaneChanges>()
+    const groundAt = await groundsFor(slot.base, [prev, ...olds.map((o) => o.plaintext)], [[plane, revision]])
+    const mine = prev ? changesOf(prev, groundAt, row.createdAt) : new Map<0 | 1, PlaneChanges>()
     const here = new Map<number, number>()
     for (let c = 0; c < CELLS; c++) if (slot.own[c] !== slot.generated[c] || explicit.has(c)) here.set(c, slot.own[c])
-    mine.set(s.plane as 0 | 1, { survey: true, cells: here })
-    plain = startFrom(olds.filter((o) => o.valid).map((o) => ({ changes: changesOf(o.plaintext, groundAt), createdAt: o.createdAt, builder: o.builder, id: o.id })), mine, groundAt, s.crew)
+    mine.set(plane, { survey: true, cells: here, revision, surveyed: at.surveyed })
+    plain = startFrom(olds.filter((o) => o.valid).map((o) => ({ changes: changesOf(o.plaintext, groundAt, o.createdAt), createdAt: o.createdAt, builder: o.builder, id: o.id })), mine, groundAt, s.crew, { builder: k.pub, id: '' })
     newKey = { mine, groundAt }
   }
   if (plain) {
-    const createdAt = Math.max(Math.floor(d.now() / 1000), row.createdAt + 1)
     const ev = await signLayer({ plaintext: plain, author: s.owner, base: slot.base, sec: k.sec, createdAt })
     const res = await pacedPublish(ev, () => mayPublish(s) && !s.closed)
     if (!res.ok) throw new Held('Sharing again soon.')
     saveRow(s, key, { ...(s.rows.get(key) ?? row), plaintext: plaintextJson(plain), eventId: ev.id, builder: k.pub, createdAt, dirty: false })
+    // The new layer named the base revision among your keys' layers (§5.6): your blocks here move to it, then take what the other keys held.
+    if (newKey) await rebaseTo(s, key, plain, newKey.mine)
     // What the other keys held here is yours on this device now, in both planes, so the next version keeps it.
-    if (newKey) await carryIn(s, slot.base, plain, newKey.mine, newKey.groundAt)
+    if (newKey) await carryIn(s, slot.base, plain, newKey.mine, newKey.groundAt, createdAt)
     await emptyOlds(s, olds, slot.base, createdAt)
   } else {
     saveRow(s, key, { ...(s.rows.get(key) ?? row), dirty: false })
@@ -969,19 +1111,34 @@ async function publishChunk(s: Session, key: string): Promise<void> {
 
 /**
  * After a new key published a layer that started from the author's other
+ * keys' layers (§5.6) and named a revision other than the one this device
+ * holds the chunk at: this device's blocks there move to that revision
+ * (host.rebase), the cells it changed kept as they are.
+ */
+async function rebaseTo(s: Session, key: string, plain: LayerPlaintext, mine: Map<0 | 1, PlaneChanges>): Promise<void> {
+  const plane = s.plane as 0 | 1
+  const pl = plain.planes.find((p) => p.plane === plane)
+  const r = pl ? planeGroundRevision(pl) : null
+  const was = mine.get(plane)
+  if (!pl || r === null || !was || r === was.revision) return
+  await host?.rebase(key, r, readSurveyed(pl, Number.MAX_SAFE_INTEGER), new Set(was.cells.keys()))
+}
+
+/**
+ * After a new key published a layer that started from the author's other
  * keys' layers (§5.6): the cells it took from them, in each plane, are this
  * device's own now. Kept as `carried` in each plane's row (applied to the
  * device's blocks whenever the chunk loads, until changed), and taken into
  * a loaded chunk at once.
  */
-async function carryIn(s: Session, base: ChunkBase, plain: LayerPlaintext, mine: Map<0 | 1, PlaneChanges>, groundAt: (p: 0 | 1) => Uint8Array | null): Promise<void> {
-  for (const [plane, ch] of changesOf(plain, groundAt)) {
+async function carryIn(s: Session, base: ChunkBase, plain: LayerPlaintext, mine: Map<0 | 1, PlaneChanges>, groundAt: GroundAt, createdAt: number): Promise<void> {
+  for (const [plane, ch] of changesOf(plain, groundAt, createdAt)) {
     const own = mine.get(plane)?.cells
     const cells = new Map([...ch.cells].filter(([c]) => !own?.has(c)))
     if (cells.size === 0) continue
     const key = chunkKey({ ...base, plane })
     const row = s.rows.get(key) ?? (plane === s.plane ? await rowOf(s, key) : await storedRow(s, key))
-    const g = groundAt(plane)
+    const g = groundAt(plane, ch.revision)
     const explicit = new Set(row.explicit)
     if (g) for (const [c, v] of cells) if (v === g[c]) explicit.add(c)
     const next: ShareRow = { ...row, carried: [...new Set([...row.carried, ...cells.keys()])], explicit: [...explicit] }
@@ -1005,13 +1162,13 @@ async function storedRow(s: Session, key: string): Promise<ShareRow> {
   } catch { return emptyRow() }
 }
 
-/** When a chunk loads: the cells carried in from your other keys (carryIn) become your own blocks, as last published. */
-export function applyCarried(key: string, own: Uint8Array, ground: Uint8Array): void {
+/** When a chunk loads: the cells carried in from your other keys (carryIn) become your own blocks, as last published. `ground` is the chunk's at `revision`. */
+export function applyCarried(key: string, own: Uint8Array, ground: Uint8Array, revision: GroundRevision = 2): void {
   const s = sessionFor()
   const row = s?.rows.get(key)
   if (!s || !row?.plaintext || row.carried.length === 0) return
   const p = parsePlaintext(row.plaintext)
-  const ch = p ? changesOf(p, (plane) => (plane === s.plane ? ground : null)).get(s.plane as 0 | 1) : undefined
+  const ch = p ? changesOf(p, (plane, r) => (plane === s.plane && r === revision ? ground : null), row.createdAt).get(s.plane as 0 | 1) : undefined
   if (!ch) return
   for (const c of row.carried) { const v = ch.cells.get(c); if (v !== undefined) own[c] = Math.min(v, 255) }
 }
@@ -1052,7 +1209,7 @@ async function otherKeys(s: Session, base: ChunkBase, myKey: string): Promise<Ot
   for (const ev of newest.values()) {
     const st = status.get(ev.pubkey) ?? 'unknown'
     if (st === 'unknown') throw new Held(HOLD_OTHER_KEYS)
-    const r = await readLayer(ev, { verify: d.verify, key: rkey, lookupId, ground: (plane) => groundOf({ ...base, plane }), keyStatus: async () => st }).catch(() => null)
+    const r = await readLayer(ev, { verify: d.verify, key: rkey, lookupId, ground: (plane, rev) => groundOf({ ...base, plane }, rev), keyStatus: async () => st }).catch(() => null)
     if (!r || r.status === 'pending') throw new Held(HOLD_OTHER_KEYS)
     if (r.status !== 'counted') continue
     out.push({ builder: ev.pubkey, id: ev.id, createdAt: ev.created_at, plaintext: r.plaintext, valid: st === 'valid' })
@@ -1066,7 +1223,7 @@ async function emptyOlds(s: Session, olds: OtherKey[], base: ChunkBase, createdA
     const held = deviceKeys(s.owner).find((r) => r.pub === o.builder && !r.retire)
     if (!held || !o.valid) continue
     // It keeps your Crew: the newest of your layers here may be this one (§8), and an empty list would drop every lift.
-    const ev = await signLayer({ plaintext: emptiedPlaintext(o.plaintext, s.crew), author: s.owner, base, sec: held.sec, createdAt })
+    const ev = await signLayer({ plaintext: emptiedPlaintext(o.plaintext, s.crew, o.createdAt), author: s.owner, base, sec: held.sec, createdAt })
     await pacedPublish(ev, () => mayPublish(s) && !s.closed).catch(() => undefined)
   }
 }
@@ -1102,16 +1259,15 @@ async function republishRow(s: Session, store: IDBDatabase, k: { pub: string; se
   const at = parseChunkKey(`0:${r.key.slice(pubPrefix(s.owner).length)}`)
   if (!prev || !at) return
   if (pub.builder === k.pub && JSON.stringify(prev.cobuilders) === JSON.stringify(s.crew)) return
-  let plain: LayerPlaintext = { ...prev, cobuilders: [...s.crew] }
+  // The planes as published, each naming its revision and its first survey's date (§5.4), carried forward.
+  let plain: LayerPlaintext = { planes: prev.planes.map((pl) => carriedPlane(pl, pub.createdAt)), cobuilders: [...s.crew] }
   let olds: OtherKey[] = []
-  let newKey: { mine: Map<0 | 1, PlaneChanges>; groundAt: (p: 0 | 1) => Uint8Array | null } | null = null
+  let newKey: { mine: Map<0 | 1, PlaneChanges>; groundAt: GroundAt } | null = null
   if (pub.builder !== k.pub) {
     olds = await otherKeys(s, at, k.pub)
-    const grounds = new Map<number, Uint8Array>()
-    for (const p of [0, 1] as const) grounds.set(p, await groundOf({ ...at, plane: p }))
-    const groundAt = (p: 0 | 1): Uint8Array | null => grounds.get(p) ?? null
-    const mine = changesOf(prev, groundAt)
-    plain = startFrom(olds.filter((o) => o.valid).map((o) => ({ changes: changesOf(o.plaintext, groundAt), createdAt: o.createdAt, builder: o.builder, id: o.id })), mine, groundAt, s.crew)
+    const groundAt = await groundsFor(at, [prev, ...olds.map((o) => o.plaintext)])
+    const mine = changesOf(prev, groundAt, pub.createdAt)
+    plain = startFrom(olds.filter((o) => o.valid).map((o) => ({ changes: changesOf(o.plaintext, groundAt, o.createdAt), createdAt: o.createdAt, builder: o.builder, id: o.id })), mine, groundAt, s.crew, { builder: k.pub, id: pub.eventId ?? '' })
     newKey = { mine, groundAt }
   }
   const createdAt = Math.max(Math.floor(d.now() / 1000), pub.createdAt + 1)
@@ -1122,7 +1278,11 @@ async function republishRow(s: Session, store: IDBDatabase, k: { pub: string; se
   await putMany(store, META, [{ key: r.key, value: next }]).catch(() => undefined)
   // Rows loaded this session see it too.
   for (const [key, row] of s.rows) if (pubKey(s.owner, key) === r.key) s.rows.set(key, { ...row, ...next })
-  if (newKey) await carryIn(s, at, plain, newKey.mine, newKey.groundAt)
+  if (newKey) {
+    const key = chunkKey({ ...at, plane: s.plane as 0 | 1 })
+    if (host?.field()?.slot(key)?.own) await rebaseTo(s, key, plain, newKey.mine)
+    await carryIn(s, at, plain, newKey.mine, newKey.groundAt, createdAt)
+  }
   await emptyOlds(s, olds, at, createdAt)
 }
 
@@ -1302,7 +1462,7 @@ async function stackChunk(s: Session, base: ChunkBase, lookupId: string): Promis
     if (!allowed.has(shape.author)) continue
     const r = await readLayer(ev, {
       verify: d.verify, key: rkey, lookupId,
-      ground: (plane) => groundOf({ ...base, plane }),
+      ground: (plane, rev) => groundOf({ ...base, plane }, rev),
       keyStatus: async (author, builder) => status.get(`${author}|${builder}`) ?? 'unknown',
     }).catch(() => null)
     if (r?.status === 'counted') layers.push(r.layer)

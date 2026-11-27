@@ -39,7 +39,8 @@
 import { deflateSync, inflateSync, strFromU8, strToU8 } from 'fflate'
 import type { EventTemplate, NostrEvent } from './events'
 import { fromBase64, newRecordKey, openShard, sealShard, shardContent, toBase64 } from './hidesRecord'
-import { FEATURES, MAXK_AT_LEAST, RARE_TARGET } from './terrain/generate'
+import { MAXK_AT_LEAST, RARE_TARGET, featuresOf } from './terrain/generate'
+import { groundWriteRevision } from './terrain/groundRevision'
 
 export { newRecordKey, openShard as openRecord, sealShard as sealRecord, shardContent as recordContent }
 
@@ -327,7 +328,9 @@ export function longestStreak(r: Pick<MiningRecord, 'days' | 'best'>): number {
 export function rarityOf(id: number): number | null {
   const rare = RARE_TARGET[id]
   if (rare !== undefined) return rare
-  const vein = ({ 40: FEATURES.ferrovein, 41: FEATURES.cobaltine, 8: FEATURES.prismite, 42: FEATURES.glowcore } as Record<number, { t: number; minK: number }>)[id]
+  // The veins as the revision fresh chunks are surveyed at makes them (lib/terrain/groundRevision.ts).
+  const f = featuresOf(groundWriteRevision())
+  const vein = ({ 40: f.ferrovein, 41: f.cobaltine, 8: f.prismite, 42: f.glowcore } as Record<number, { t: number; minK: number }>)[id]
   if (vein) return (vein.t / 2 ** 32) * MAXK_AT_LEAST[vein.minK]
   return null
 }

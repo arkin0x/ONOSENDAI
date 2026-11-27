@@ -4,7 +4,8 @@
  * the author's co-builders), the event's tags and limits, builder key
  * validity, the home, and the Stack with co-builders, the rule every reader
  * uses to say which layer a cell shows. Written to the DECK at cyberspace
- * c4930ff, and checked against its vectors.
+ * c4930ff, and to revision 3 and the base revision at f4d553f (#128), and
+ * checked against its vectors.
  *
  * Nothing here talks to a relay, a signer or IndexedDB: the reader
  * (lib/terrain/layerReader.ts) and the store (store/terrainShare.ts) do.
@@ -19,6 +20,12 @@
  *   (how a layer removes a block another placed, or refills a hole another
  *   mined); in a `whole` a cell is changed when it differs from the base. A
  *   layer speaks only for the cells it changed (§5.4).
+ * - A surveyed plane names its ground revision (`ground`, 2 or 3) and its
+ *   first survey's date (`surveyed`); its cells are read against that
+ *   revision's ground. The base a reader shows is the ground at the base
+ *   revision (§7.5): the first counted survey by own rank, then the
+ *   earliest `surveyed` (baseRevision), so a chunk keeps the revision it
+ *   was first surveyed at (lib/terrain/groundRevision.ts).
  * - The Stack (§7): per cell, the first candidate in Stack order. Ranks: 1
  *   the home owner inside their home (the 3 by 3 by 3 chunks round the chunk
  *   of their spawn coordinate, in its plane, wrapping at the axis ends), 2
@@ -31,13 +38,12 @@
 
 import { CELLS, type ChunkBase } from './coords'
 import { coordToXyz } from 'cyberspace-core'
+import { isGroundRevision, readSurveyed, type GroundRevision } from './groundRevision'
 
 /** The block layer's kind (DECK-0009 §5.1; the owner confirmed 33339 on 2026-11-25). */
 export const LAYER_KIND = 33339
 /** The `version` tag's value (§5.1). */
 export const LAYER_VERSION = '1'
-/** The ground revision this client writes and reads (§3.10). */
-export const GROUND_REVISION = 2
 /** The longest serialized layer anyone may sign or read (§5.5): the bag guard. */
 export const LAYER_MAX_BYTES = 240_000
 export const PALETTE_MAX = 256
@@ -57,6 +63,8 @@ const AXIS_MASK = (1n << 85n) - 1n
 export interface PlaneObject {
   plane: 0 | 1
   survey: boolean
+  /** With `survey` true: the created_at of the first version in which the plane was surveyed, carried forward (§5.4). Read with readSurveyed. */
+  surveyed?: number
   ground?: number
   form: 'diff' | 'whole'
   pal: Array<number | null>
@@ -132,21 +140,34 @@ export function canonicalNumbers(text: string): boolean {
 export interface DecodedPlane {
   plane: 0 | 1
   survey: boolean
+  /** The ground revision its cells were read against (surveyed planes; a plane that does not survey reads over open space). */
+  ground: GroundRevision
+  /** Its first survey's date as read (§5.4: readSurveyed); the layer's created_at for a plane that does not survey. */
+  surveyed: number
   values: Int32Array
   changed: number[]
 }
 
+/** The revision whose ground a plane is read against: its own `ground` when it surveys and names one this client makes, else null (no ground needed, or set aside). */
+export function planeGroundRevision(pl: Pick<PlaneObject, 'survey' | 'ground'>): GroundRevision | null {
+  return pl.survey && isGroundRevision(pl.ground) ? pl.ground : null
+}
+
 /**
- * Decode a plane against its ground (the revision 2 ground of its chunk in its
- * plane). 'aside' for a surveyed plane under a revision this reader does not
- * implement (§3.10: a diff set aside; a whole read for its values only,
- * which takes no part in the Stack); null when malformed.
+ * Decode a plane against its own revision's ground (`ground`: the chunk's
+ * ground in its plane at planeGroundRevision(pl); unused when it does not
+ * survey), `createdAt` the layer's, for `surveyed`. 'aside' for a surveyed
+ * plane under a revision this reader does not implement (§3.10: a diff set
+ * aside; a whole read for its values only, which takes no part in the
+ * Stack); null when malformed.
  */
-export function decodePlane(pl: PlaneObject, ground: Uint8Array): DecodedPlane | 'aside' | null {
+export function decodePlane(pl: PlaneObject, ground: Uint8Array | null, createdAt = 0): DecodedPlane | 'aside' | null {
   const idx = expandRuns(pl.cells, CELLS, pl.pal.length)
   if (!idx) return null
-  if (pl.survey && pl.ground !== GROUND_REVISION) return 'aside'
-  const base = pl.survey ? ground : new Uint8Array(CELLS)
+  const revision = planeGroundRevision(pl)
+  if (pl.survey && revision === null) return 'aside'
+  if (pl.survey && !ground) throw new Error('decodePlane: a surveyed plane needs its own revision\'s ground')
+  const base = pl.survey ? ground! : new Uint8Array(CELLS)
   const values = new Int32Array(CELLS)
   const changed: number[] = []
   for (let o = 0; o < CELLS; o++) {
@@ -155,15 +176,24 @@ export function decodePlane(pl: PlaneObject, ground: Uint8Array): DecodedPlane |
     // A non-null cell of a diff is a change even at the base value; in a whole only a different value is.
     if (pl.form === 'diff' ? g !== null : values[o] !== base[o]) changed.push(o)
   }
-  return { plane: pl.plane, survey: pl.survey, values, changed }
+  const ground2: GroundRevision = revision ?? (isGroundRevision(pl.ground) ? pl.ground : 2)
+  return { plane: pl.plane, survey: pl.survey, ground: ground2, surveyed: pl.survey ? readSurveyed(pl, createdAt) : createdAt, values, changed }
+}
+
+/** What a writer names on a plane (§5.4, §3.10): the ground revision it is written against, and its first survey's date. */
+export interface PlaneAt {
+  revision: GroundRevision
+  surveyed: number
 }
 
 /**
- * Write a plane (§5.4): the cells that differ from the base, and `explicit`
- * cells written as changed at their base value (which only a diff can say),
- * in the shorter of the forms that can express them.
+ * Write a plane (§5.4): the cells that differ from the base (`ground`, the
+ * chunk's ground at `named.revision`, when it surveys), and `explicit` cells
+ * written as changed at their base value (which only a diff can say), in the
+ * shorter of the forms that can express them. A surveyed plane always names
+ * `surveyed`.
  */
-export function encodePlane(plane: 0 | 1, survey: boolean, values: ArrayLike<number>, ground: Uint8Array, explicit: ReadonlySet<number> = new Set()): PlaneObject {
+export function encodePlane(plane: 0 | 1, survey: boolean, values: ArrayLike<number>, ground: Uint8Array, named: PlaneAt, explicit: ReadonlySet<number> = new Set()): PlaneObject {
   const base = survey ? ground : new Uint8Array(CELLS)
   const make = (form: 'diff' | 'whole'): PlaneObject => {
     const pal: Array<number | null> = form === 'diff' ? [null] : []
@@ -176,7 +206,7 @@ export function encodePlane(plane: 0 | 1, survey: boolean, values: ArrayLike<num
       if (i === undefined) { i = pal.length; at.set(v, i); pal.push(v) }
       idx[o] = i
     }
-    return { plane, survey, ground: GROUND_REVISION, form, pal, cells: encodeRuns(idx) }
+    return { plane, survey, ...(survey ? { surveyed: named.surveyed } : {}), ground: named.revision, form, pal, cells: encodeRuns(idx) }
   }
   const d = make('diff')
   if (explicit.size > 0) return d
@@ -223,24 +253,49 @@ export function parsePlaintext(text: string): LayerPlaintext | null {
 /** The plaintext as compact JSON. */
 export function plaintextJson(p: LayerPlaintext): string {
   return JSON.stringify({
-    planes: [...p.planes].sort((a, b) => a.plane - b.plane).map((pl) => ({ plane: pl.plane, survey: pl.survey, ground: pl.ground ?? GROUND_REVISION, form: pl.form, pal: pl.pal, cells: pl.cells })),
+    planes: [...p.planes].sort((a, b) => a.plane - b.plane).map((pl) => ({
+      plane: pl.plane, survey: pl.survey, ...(pl.survey && pl.surveyed !== undefined ? { surveyed: pl.surveyed } : {}),
+      ground: pl.ground ?? 2, form: pl.form, pal: pl.pal, cells: pl.cells,
+    })),
     cobuilders: p.cobuilders,
   })
 }
 
 /**
- * The next plaintext: this plane as `values` hold it now over `ground`, its
- * `explicit` cells changed at their base value, the other plane carried as
- * `prev` holds it, unchanged (§5.6), and the Crew. Null when that is what
- * `prev` already says.
+ * A plane carried forward as it is (§5.6), but a surveyed plane always names
+ * `surveyed` (§5.4): one written before the field existed names what a
+ * reader already reads for it, its layer's `createdAt`.
  */
-export function nextPlaintext(prev: LayerPlaintext | null, plane: 0 | 1, values: ArrayLike<number>, ground: Uint8Array, cobuilders: readonly string[] = [], explicit: ReadonlySet<number> = new Set()): LayerPlaintext | null {
-  const mine = encodePlane(plane, true, values, ground, explicit)
+export function carriedPlane(pl: PlaneObject, createdAt: number): PlaneObject {
+  if (!pl.survey) return pl
+  const surveyed = readSurveyed(pl, createdAt)
+  return pl.surveyed === surveyed ? pl : { ...pl, surveyed }
+}
+
+/**
+ * The surveyed date a writer names on its plane (§5.4): the one `prev` (a
+ * layer of `prevCreatedAt`) already names for it, carried forward, or, on
+ * the plane's first survey, `createdAt`, the new version's own.
+ */
+export function surveyedToWrite(prev: LayerPlaintext | null, plane: 0 | 1, prevCreatedAt: number, createdAt: number): number {
+  const was = prev?.planes.find((p) => p.plane === plane)
+  return was?.survey ? readSurveyed(was, prevCreatedAt) : createdAt
+}
+
+/**
+ * The next plaintext: this plane as `values` hold it now over `ground` (the
+ * chunk's ground at `at.revision`), named as `at` says, its `explicit` cells
+ * changed at their base value, the other plane carried as `prev` (a layer of
+ * `prevCreatedAt`) holds it, unchanged (§5.6), and the Crew. Null when that
+ * is what `prev` already says.
+ */
+export function nextPlaintext(prev: LayerPlaintext | null, plane: 0 | 1, values: ArrayLike<number>, ground: Uint8Array, at: PlaneAt, cobuilders: readonly string[] = [], explicit: ReadonlySet<number> = new Set(), prevCreatedAt = at.surveyed): LayerPlaintext | null {
+  const mine = encodePlane(plane, true, values, ground, at, explicit)
   const was = prev?.planes.find((p) => p.plane === plane)
   const crew = [...cobuilders]
   if (prev && was && JSON.stringify(was) === JSON.stringify(mine) && JSON.stringify(prev.cobuilders) === JSON.stringify(crew)) return null
   const other = prev?.planes.find((p) => p.plane !== plane)
-  return { planes: other ? [mine, other].sort((a, b) => a.plane - b.plane) : [mine], cobuilders: crew }
+  return { planes: other ? [mine, carriedPlane(other, prevCreatedAt)].sort((a, b) => a.plane - b.plane) : [mine], cobuilders: crew }
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -385,6 +440,46 @@ export function countedLayers<T extends Pick<StackLayer, 'author' | 'createdAt'>
   return kept.filter((l) => allowed.has(l.author))
 }
 
+/** One counted survey of a plane, as §7.5 orders them. */
+export interface SurveyEntry {
+  revision: GroundRevision
+  /** The author's own rank (§7.3), never a co-builder's lift. */
+  rank: number
+  surveyed: number
+  author: string
+  builder: string
+  id: string
+}
+
+/**
+ * The base revision (§7.5): the revision of the first counted survey by own
+ * rank, then the smaller `surveyed`, then the lower author, builder key and
+ * event id; null when nothing surveys the plane. Rank comes first, so a
+ * stranger who dates a survey early cannot force a revision past the people
+ * a reader ranks above them; the earliest survey decides among equals, so a
+ * chunk keeps the revision it was first surveyed at.
+ */
+export function baseRevision(surveys: readonly SurveyEntry[]): GroundRevision | null {
+  const first = (a: SurveyEntry, b: SurveyEntry): number =>
+    a.rank - b.rank || a.surveyed - b.surveyed || lowerFirst(a.author, b.author) || lowerFirst(a.builder, b.builder) || lowerFirst(a.id, b.id)
+  let best: SurveyEntry | null = null
+  for (const e of surveys) if (!best || first(e, best) < 0) best = e
+  return best ? best.revision : null
+}
+
+/** The counted surveys of one plane over these layers (§7.5): inside a home, only a home owner's count. */
+export function surveysOf(layers: readonly StackLayer[], plane: 0 | 1, v: StackView): SurveyEntry[] {
+  const own = layers.map((l) => ownRank(l.author, v))
+  const anyHome = own.some((r) => r === 1)
+  const out: SurveyEntry[] = []
+  layers.forEach((l, i) => {
+    const pl = l.planes.find((p) => p.plane === plane)
+    if (!pl?.survey || (anyHome && own[i] !== 1)) return
+    out.push({ revision: pl.ground, rank: own[i], surveyed: pl.surveyed, author: l.author, builder: l.builder, id: l.id })
+  })
+  return out
+}
+
 /**
  * One plane of a chunk by the Stack (§7.4, §8), over counted layers. Per
  * cell: the candidates are the layers that changed it; a candidate whose
@@ -395,7 +490,7 @@ export function countedLayers<T extends Pick<StackLayer, 'author' | 'createdAt'>
  * says whether the plane is surveyed (inside a home only a home owner's
  * surveys count, §7.5).
  */
-export function resolveStack(layers: readonly StackLayer[], plane: 0 | 1, v: StackView): { values: Int32Array; from: Int32Array; rank: Int8Array; surveyed: boolean } {
+export function resolveStack(layers: readonly StackLayer[], plane: 0 | 1, v: StackView): { values: Int32Array; from: Int32Array; rank: Int8Array; surveyed: boolean; baseRevision: GroundRevision | null } {
   const values = new Int32Array(CELLS).fill(-1)
   const from = new Int32Array(CELLS).fill(-1)
   const rank = new Int8Array(CELLS)
@@ -406,8 +501,9 @@ export function resolveStack(layers: readonly StackLayer[], plane: 0 | 1, v: Sta
   const newestOf = new Map<string, StackLayer>()
   for (const l of layers) { const n = newestOf.get(l.author); if (!n || withinRank(l, n) < 0) newestOf.set(l.author, l) }
   for (const [a, l] of newestOf) lists.set(a, new Set(l.cobuilders.filter((c) => c !== a)))
-  const anyHome = own.some((r) => r === 1)
-  const surveyed = layers.some((_l, i) => !!planes[i]?.survey && (!anyHome || own[i] === 1))
+  // Surveyed, and at which revision the base is (§7.5).
+  const base = baseRevision(surveysOf(layers, plane, v))
+  const surveyed = base !== null
   // Per cell, the layers that changed it.
   const touching = new Map<number, number[]>()
   planes.forEach((pl, i) => { if (pl) for (const c of pl.changed) { const t = touching.get(c); if (t) t.push(i); else touching.set(c, [i]) } })
@@ -426,58 +522,104 @@ export function resolveStack(layers: readonly StackLayer[], plane: 0 | 1, v: Sta
     from[c] = best
     rank[c] = bestRank
   }
-  return { values, from, rank, surveyed }
+  return { values, from, rank, surveyed, baseRevision: base }
 }
 
 // ---------------------------------------------------------------------------------------------------------------
 // A new builder key at a chunk (§5.6)
 
-/** One plane's changed cells and their values, and whether it surveys. */
+/** One plane's changed cells and their values, whether it surveys, and (when it does) its revision and first survey's date. */
 export interface PlaneChanges {
   survey: boolean
   cells: Map<number, number>
+  revision: GroundRevision
+  surveyed: number
 }
 
-/** A plaintext's changed cells, per plane (planes this reader sets aside, or without a ground given, left out). */
-export function changesOf(p: LayerPlaintext, groundOf: (plane: 0 | 1) => Uint8Array | null): Map<0 | 1, PlaneChanges> {
+/** A chunk's ground in a plane at a revision, or null when not at hand. */
+export type GroundAt = (plane: 0 | 1, revision: GroundRevision) => Uint8Array | null
+
+/** The (plane, revision) grounds a plaintext's planes are read against. */
+export function groundsNeeded(p: LayerPlaintext): Array<[0 | 1, GroundRevision]> {
+  const out: Array<[0 | 1, GroundRevision]> = []
+  for (const pl of p.planes) { const r = planeGroundRevision(pl); if (r !== null) out.push([pl.plane, r]) }
+  return out
+}
+
+/**
+ * A plaintext's changed cells, per plane, each read against its own
+ * revision's ground; `createdAt` is the layer's (for `surveyed`). Planes this
+ * reader sets aside, or whose ground is not given, are left out.
+ */
+export function changesOf(p: LayerPlaintext, groundOf: GroundAt, createdAt = 0): Map<0 | 1, PlaneChanges> {
   const out = new Map<0 | 1, PlaneChanges>()
   for (const pl of p.planes) {
-    const g = groundOf(pl.plane)
-    if (!g) continue
-    const d = decodePlane(pl, g)
+    const r = planeGroundRevision(pl)
+    if (pl.survey && r === null) continue
+    const g = r === null ? null : groundOf(pl.plane, r)
+    if (pl.survey && !g) continue
+    const d = decodePlane(pl, g, createdAt)
     if (!d || d === 'aside') continue
-    out.set(pl.plane, { survey: d.survey, cells: new Map(d.changed.map((c) => [c, d.values[c]])) })
+    out.set(pl.plane, { survey: d.survey, cells: new Map(d.changed.map((c) => [c, d.values[c]])), revision: d.ground, surveyed: d.surveyed })
   }
   return out
+}
+
+/**
+ * What a new key's layer names on each surveyed plane (§5.6): the base
+ * revision of the plane in the writer's view among the author's layers there
+ * (all of one rank, so the earliest `surveyed`, then the lower builder key
+ * and event id), and that earliest `surveyed`. Null when no part surveys.
+ */
+export function startAt(parts: ReadonlyArray<{ changes: PlaneChanges; builder: string; id: string }>): PlaneAt | null {
+  const surveys = parts.filter((p) => p.changes.survey)
+  const revision = baseRevision(surveys.map((p) => ({ revision: p.changes.revision, rank: 0, surveyed: p.changes.surveyed, author: '', builder: p.builder, id: p.id })))
+  if (revision === null) return null
+  return { revision, surveyed: Math.min(...surveys.map((p) => p.changes.surveyed)) }
 }
 
 /**
  * Where a new key's layer at a chunk starts (§5.6): every plane of the
  * author's other keys' layers there, the twin included, with every changed
  * cell's value, the newer layer winning where two change one cell; then
- * this writer's own changes over them. A cell changed at its base value is
- * written explicitly, so it stays a change.
+ * this writer's own changes over them (`mine`, signed by `mineKey`). Each
+ * surveyed plane names the base revision among them and the earliest
+ * `surveyed` (startAt), and is written against that revision's ground; a
+ * cell changed at its base value is written explicitly, so it stays a
+ * change whichever revision the new layer names.
  */
-export function startFrom(others: ReadonlyArray<{ changes: Map<0 | 1, PlaneChanges>; createdAt: number; builder: string; id: string }>, mine: Map<0 | 1, PlaneChanges>, groundOf: (plane: 0 | 1) => Uint8Array | null, cobuilders: readonly string[]): LayerPlaintext {
+export function startFrom(others: ReadonlyArray<{ changes: Map<0 | 1, PlaneChanges>; createdAt: number; builder: string; id: string }>, mine: Map<0 | 1, PlaneChanges>, groundOf: GroundAt, cobuilders: readonly string[], mineKey: { builder: string; id: string } = { builder: '', id: '' }): LayerPlaintext {
   // Oldest first, so the newer layer's value is the one left standing.
   const order = [...others].sort((a, b) => -withinRank({ ...a, author: '' }, { ...b, author: '' }))
   const planes: PlaneObject[] = []
   for (const plane of [0, 1] as const) {
-    const parts = [...order.map((o) => o.changes.get(plane)), mine.get(plane)].filter((c): c is PlaneChanges => !!c)
-    const g = groundOf(plane)
-    if (parts.length === 0 || !g) continue
-    const survey = parts.some((c) => c.survey)
-    const base = survey ? g : new Uint8Array(CELLS)
+    const sources = [...order.map((o) => ({ changes: o.changes.get(plane), builder: o.builder, id: o.id })), { changes: mine.get(plane), ...mineKey }]
+      .filter((c): c is { changes: PlaneChanges; builder: string; id: string } => !!c.changes)
+    if (sources.length === 0) continue
+    const at = startAt(sources)
+    const g = at ? groundOf(plane, at.revision) : null
+    if (at && !g) continue
+    const base = g ?? new Uint8Array(CELLS)
     const values = Int32Array.from(base)
     const touched = new Set<number>()
-    for (const part of parts) for (const [c, v] of part.cells) { values[c] = v; touched.add(c) }
+    for (const { changes } of sources) for (const [c, v] of changes.cells) { values[c] = v; touched.add(c) }
     const explicit = new Set([...touched].filter((c) => values[c] === base[c]))
-    planes.push(encodePlane(plane, survey, values, g, explicit))
+    planes.push(encodePlane(plane, at !== null, values, base, at ?? { revision: 2, surveyed: 0 }, explicit))
   }
   return { planes, cobuilders: [...cobuilders] }
 }
 
-/** A version of a layer that changes no cell (§5.6): each plane keeps its `survey` and `ground`; the Crew is the writer's current one. */
-export function emptiedPlaintext(p: LayerPlaintext, cobuilders: readonly string[] = []): LayerPlaintext {
-  return { planes: p.planes.map((pl) => ({ plane: pl.plane, survey: pl.survey, ground: pl.ground ?? GROUND_REVISION, form: 'diff' as const, pal: [null], cells: [0, -(CELLS - 1)] })), cobuilders: [...cobuilders] }
+/**
+ * A version of a layer (one of `createdAt`) that changes no cell (§5.6): each
+ * plane keeps its `survey`, `ground` and `surveyed`; the Crew is the
+ * writer's current one.
+ */
+export function emptiedPlaintext(p: LayerPlaintext, cobuilders: readonly string[] = [], createdAt = 0): LayerPlaintext {
+  return {
+    planes: p.planes.map((pl) => ({
+      plane: pl.plane, survey: pl.survey, ...(pl.survey ? { surveyed: readSurveyed(pl, createdAt) } : {}),
+      ground: pl.ground ?? 2, form: 'diff' as const, pal: [null], cells: [0, -(CELLS - 1)],
+    })),
+    cobuilders: [...cobuilders],
+  }
 }

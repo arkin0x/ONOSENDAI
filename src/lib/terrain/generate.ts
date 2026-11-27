@@ -1,6 +1,6 @@
 /**
  * generate.ts - the ground of one chunk, from public facts only: DECK-0009
- * (Blocks, draft, cyberspace PR #122) §3, revision 2: revision 1 ported
+ * (Blocks, draft, cyberspace PR #122) §3, revisions 2 and 3: revision 1 ported
  * from its reference code (decks/blocks-reference.mjs) and checked against
  * its test vectors (lib/__tests__/terrainGenerate.test.ts), with the rock
  * and features of 2026-11-24 on top, so every client draws the same block in
@@ -28,6 +28,14 @@
  *   Prismite, Glowcore) and the rare band, one block each in the chunk's
  *   costliest cube (Voidpearl, Auroric, Chronite, Gibsonite, Singularity
  *   core, Relic shard, Genesis shard). Each waits for the terrain K it needs.
+ * - Revision 3 (cyberspace #128, the owner's option B of 2026-11-27) is
+ *   revision 2 with two vein rolls changed, so Glowcore and Cinderrock can be
+ *   found: a cinder vent first, in ground that is not volcanic, before
+ *   Ferrovein; and Glowcore from K 8 at a higher chance, in shorter veins.
+ *   Rock, caves and every other feature are revision 2's. Revision 2 is
+ *   frozen (layers on relays name it) and is still made exactly as before.
+ *   A chunk keeps the revision it was first surveyed at
+ *   (lib/terrain/groundRevision.ts), so `generate` takes the revision.
  *   scripts/terrain-calibrate.mjs measures what they make.
  *
  * Every value that decides a block is an integer below 2^53. Block ids are
@@ -38,8 +46,11 @@ import { sha256 } from '@noble/hashes/sha2.js'
 import { regionKeyAt } from '../shardCrypto'
 import { CELLS, fastCoordBytes, idx, type ChunkBase } from './coords'
 
-/** Which ground a layer's diff is against: the DECK's `ground` revision. */
-export const GENERATOR_VERSION = 2
+/** The ground revisions this client makes (DECK-0009 §3.10): 2 (frozen) and 3. */
+export type GroundRevision = 2 | 3
+export const GROUND_REVISIONS: readonly GroundRevision[] = [2, 3]
+/** Whether a `ground` value names a revision this client makes. */
+export const isGroundRevision = (v: unknown): v is GroundRevision => v === 2 || v === 3
 
 const enc = new TextEncoder()
 const TERRAIN_DOMAIN = enc.encode('CYBERSPACE_TERRAIN_K_V2')
@@ -100,11 +111,25 @@ function pickStratum(strata: ReadonlyArray<readonly [number, number]>, h: number
   return strata[0][0]
 }
 
+/** One feature's roll: a chance `t` / 2^32, the least K for it, and (for Glowcore) the modulus of its vein's size. */
+export interface FeatureRoll { readonly t: number; readonly minK: number; readonly size?: number }
+
+/** The rolls of one revision's features. `cinder` is revision 3's cinder vent (absent in revision 2). */
+export interface Features {
+  readonly ferrovein: FeatureRoll
+  readonly cobaltine: FeatureRoll
+  readonly prismite: FeatureRoll
+  readonly glowcore: FeatureRoll
+  readonly trees: FeatureRoll
+  readonly magma: FeatureRoll
+  readonly cinder?: FeatureRoll
+}
+
 /**
- * Features, revision 2: what each is placed by. An eligible chunk gets one
- * when a 32-bit draw from its feature stream is below `t` (so its chance is
- * t / 2^32, written beside it), `minK` being the least K of the chunk's
- * costliest cube for it to be eligible at all. Integers only, so any
+ * Features, revision 2 (frozen): what each is placed by. An eligible chunk
+ * gets one when a 32-bit draw from its feature stream is below `t` (so its
+ * chance is t / 2^32, written beside it), `minK` being the least K of the
+ * chunk's costliest cube for it to be eligible at all. Integers only, so any
  * language draws the same. Tidewater's threshold depends on the chunk's
  * K (poolThreshold).
  */
@@ -112,10 +137,25 @@ export const FEATURES = {
   ferrovein: { t: 3865470566, minK: 0 }, // 0.9
   cobaltine: { t: 2233382993, minK: 6 }, // 0.52
   prismite: { t: 1395864371, minK: 9 }, // 0.325
-  glowcore: { t: 429496729, minK: 10 }, // 0.1
+  glowcore: { t: 429496729, minK: 10, size: 7 }, // 0.1, veins of 2 + u8 mod 7
   trees: { t: 1460288880, minK: 0 }, // 0.34 of chunks with a tree site
   magma: { t: 536870912, minK: 11 }, // 0.125 of volcanic chunks
-} as const
+} as const satisfies Features
+
+/**
+ * Features, revision 3 (DECK-0009 §3.9's revision 3 paragraph): revision 2's,
+ * but Glowcore from K 8 at 0.12 in veins of 2 + u8 mod 3, and the cinder vent
+ * (0.42, a walk of 3 + u8 mod 6 anywhere, no K gate) in ground that is not
+ * volcanic, drawn just before Ferrovein.
+ */
+export const FEATURES_R3 = {
+  ...FEATURES,
+  glowcore: { t: 515396076, minK: 8, size: 3 }, // 0.12
+  cinder: { t: 1803886264, minK: 0 }, // 0.42 of chunks that are not volcanic
+} as const satisfies Features
+
+/** A revision's feature rolls. */
+export const featuresOf = (revision: GroundRevision): Features => (revision === 3 ? FEATURES_R3 : FEATURES)
 
 /**
  * Tidewater's threshold from the sum of the chunk's 64 cube K: a chance of
@@ -397,10 +437,16 @@ class Draws {
 }
 
 /** The thresholds in force (tests raise them to 2^32 to test the gates alone). */
-export interface Odds { features: typeof FEATURES; rare: ReadonlyArray<readonly [number, number, number]>; pools?: number }
+export interface Odds { features: Features; rare: ReadonlyArray<readonly [number, number, number]>; pools?: number }
 
-/** §3 The ground of one chunk, revision 2: one block id per cell, idx order (coords.ts idx). */
-export function generate(base: ChunkBase, odds: Odds = { features: FEATURES, rare: RARE_ODDS }): Generated {
+/**
+ * §3 The ground of one chunk at a revision (2 when not named): one block id
+ * per cell, idx order (coords.ts idx). Revision 2 is frozen: never change
+ * what it makes (the vectors pin it). `odds` defaults to the revision's own.
+ */
+export function generate(base: ChunkBase, odds?: Odds | null, revision: GroundRevision = 2): Generated {
+  if (!isGroundRevision(revision)) throw new Error(`ground revision ${String(revision)} is not one this client makes`)
+  odds ??= { features: featuresOf(revision), rare: RARE_ODDS }
   const L = lattices(base)
   const stream = chacha20Keystream(surveySeed(base), CELLS + FEATURE_BYTES)
   const fine = stream.subarray(0, CELLS)
@@ -546,6 +592,8 @@ export function generate(base: ChunkBase, odds: Odds = { features: FEATURES, rar
       return
     }
   }
+  // Revision 3's cinder vent, first, in ground that is not volcanic: a draw that shifts every draw after it.
+  if (revision === 3 && fam0.name !== 'volcanic' && f.cinder && draws.chance(f.cinder.t)) vein(B.CINDERROCK, 3 + (draws.u8() % 6), f.cinder.minK, null)
   if (draws.chance(f.ferrovein.t)) {
     const n = 2 + (draws.u8() % 4)
     for (let i = 0; i < n; i++) vein(B.FERROVEIN, 4 + (draws.u8() % 9), 0, null)
@@ -555,7 +603,7 @@ export function generate(base: ChunkBase, odds: Odds = { features: FEATURES, rar
     for (let i = 0; i < n; i++) vein(B.COBALTINE, 3 + (draws.u8() % 6), f.cobaltine.minK, null)
   }
   if (maxK >= f.prismite.minK && draws.chance(f.prismite.t)) vein(B.PRISMITE, 4 + (draws.u8() % 7), f.prismite.minK, null)
-  if (maxK >= f.glowcore.minK && draws.chance(f.glowcore.t)) vein(B.GLOWCORE, 2 + (draws.u8() % 7), f.glowcore.minK, maxCube)
+  if (maxK >= f.glowcore.minK && draws.chance(f.glowcore.t)) vein(B.GLOWCORE, 2 + (draws.u8() % (f.glowcore.size ?? 7)), f.glowcore.minK, maxCube)
   // 6. The rare band: one block (never a vein) in the chunk's costliest cube, rarer kinds needing higher K.
   for (const [id, minK, p] of odds.rare) {
     if (maxK < minK || !draws.chance(p)) continue

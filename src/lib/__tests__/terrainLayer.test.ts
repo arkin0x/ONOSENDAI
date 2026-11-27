@@ -17,13 +17,15 @@ import { regionKeyAt, encryptForRegion } from '../shardCrypto'
 import {
   FUTURE_SLACK_SECONDS, LAYER_KIND, builderKeyValid, canonicalNumbers, changesOf, countedLayers, decodePlane, emptiedPlaintext, encodePlane, expandRuns,
   freeTextWithinBounds, inHome, layerShape, layerTags, nextPlaintext, ownRank, parsePlaintext, plaintextJson, resolveStack, serializedBytes, startFrom,
-  type LayerPlaintext, type StackLayer, type StackView,
+  type LayerPlaintext, type PlaneAt, type StackLayer, type StackView,
 } from '../terrain/blockLayer'
 import { readLayer, type KeyStatus, type ReadDeps } from '../terrain/layerReader'
 import V from './fixtures/deck0009-layer-vectors.json'
 
 const ORIGIN = { x: 0n, y: 0n, z: 0n, plane: 0 }
 const origin = generate(ORIGIN).blocks
+/** What these tests' planes name: revision 2, first surveyed at 100. */
+const R2: PlaneAt = { revision: 2, surveyed: 100 }
 const { key: KEY, lookupId: LOOKUP } = regionKeyAt(ORIGIN, 5, 5)
 const pk = (n: number): string => n.toString(16).padStart(64, '0')
 let air = -1, rock = -1
@@ -47,7 +49,8 @@ describe('the DECK vectors', () => {
     expect(d.changed.map((c) => ({ x: c & 31, y: c >> 10, z: (c >> 5) & 31, value: d.values[c], ground: origin[c] }))).toEqual(V.layer.changed_cells)
     const explicit = new Set(d.changed.filter((c) => d.values[c] === origin[c]))
     expect(explicit.size).toBeGreaterThan(0)
-    expect(encodePlane(0, true, d.values, origin, explicit)).toEqual(plain.planes[0])
+    // Written back byte for byte, but for `surveyed`, which every surveyed plane now names (§5.4, revision 3's DECK).
+    expect(encodePlane(0, true, d.values, origin, R2, explicit)).toEqual({ ...plain.planes[0], surveyed: R2.surveyed })
     expect(parsePlaintext(V.layer.survey_only_plaintext)?.planes[0].cells).toEqual([0, -32767])
   })
 
@@ -69,7 +72,7 @@ describe('the DECK vectors', () => {
         const values = new Int32Array(32768)
         const changed = Object.keys(l.changed).map(Number).sort((a, b) => a - b)
         for (const k of changed) values[k] = (l.changed as Record<string, number>)[String(k)]
-        return { id: l.id, author: l.author, builder: l.builder, createdAt: l.created_at, cobuilders: l.cobuilders, planes: [{ plane: chunk.plane as 0 | 1, survey: false, values, changed }] }
+        return { id: l.id, author: l.author, builder: l.builder, createdAt: l.created_at, cobuilders: l.cobuilders, planes: [{ plane: chunk.plane as 0 | 1, survey: false, ground: 2 as const, surveyed: l.created_at, values, changed }] }
       })
       const counted = countedLayers(layers, view, new Set(c.mutes), S.now, c.cap)
       const r = resolveStack(counted, chunk.plane as 0 | 1, view)
@@ -87,14 +90,14 @@ describe('planes and the plaintext (§5.4)', () => {
   it('in a diff a cell set explicitly to its base value is a change; a whole cannot say it, so the plane stays a diff', () => {
     const values = Int32Array.from(origin)
     values[rock] = 0
-    const pl = encodePlane(0, true, values, origin, new Set([air]))
+    const pl = encodePlane(0, true, values, origin, R2, new Set([air]))
     expect(pl.form).toBe('diff')
     const d = decodePlane(pl, origin)
     if (!d || d === 'aside') throw new Error('plane')
     expect(d.changed).toEqual([air, rock].sort((a, b) => a - b))
     expect(d.values[air]).toBe(0)
     // Without it, only the mined rock is a change.
-    const d2 = decodePlane(encodePlane(0, true, values, origin), origin)
+    const d2 = decodePlane(encodePlane(0, true, values, origin, R2), origin)
     expect(d2 !== 'aside' && d2?.changed).toEqual([rock])
     // Every plane carries ground 2; a surveyed plane under another revision is set aside.
     expect(pl.ground).toBe(2)
@@ -104,13 +107,13 @@ describe('planes and the plaintext (§5.4)', () => {
   it('the next plaintext carries the twin plane and the Crew, and is null when nothing changed', () => {
     const v = origin.slice()
     v[air] = 8
-    const first = nextPlaintext(null, 0, v, origin, [pk(5)])!
+    const first = nextPlaintext(null, 0, v, origin, R2, [pk(5)])!
     expect(first.cobuilders).toEqual([pk(5)])
     expect(parsePlaintext(plaintextJson(first))).toEqual(first)
-    expect(nextPlaintext(first, 0, v, origin, [pk(5)])).toBeNull()
-    expect(nextPlaintext(first, 0, v, origin, [])?.cobuilders).toEqual([])
+    expect(nextPlaintext(first, 0, v, origin, R2, [pk(5)])).toBeNull()
+    expect(nextPlaintext(first, 0, v, origin, R2, [])?.cobuilders).toEqual([])
     const twin: LayerPlaintext = { cobuilders: [], planes: [{ ...first.planes[0], plane: 1 }] }
-    const both = nextPlaintext(twin, 0, v, origin)!
+    const both = nextPlaintext(twin, 0, v, origin, R2)!
     expect(both.planes.map((p) => p.plane)).toEqual([0, 1])
     expect(both.planes[1]).toEqual(twin.planes[0])
     expect(parsePlaintext(JSON.stringify({ cobuilders: ['nope'], planes: first.planes }))).toBeNull()
@@ -149,7 +152,7 @@ const deps = (status: KeyStatus = 'valid', over: Partial<ReadDeps> = {}): ReadDe
 describe('sealing and opening (§5.2, §6)', () => {
   const v = origin.slice()
   v[air] = 8
-  const plain = nextPlaintext(null, 0, v, origin, [pk(9)])!
+  const plain = nextPlaintext(null, 0, v, origin, R2, [pk(9)])!
 
   it('a layer sealed to the chunk\'s key opens again and counts', async () => {
     const ev = await signed(plain, pk(1), generateSecretKey())
@@ -176,7 +179,7 @@ describe('the Stack (§7)', () => {
   const layer = (author: string, value: number, createdAt: number, cells: number[] = [cell], cobuilders: string[] = []): StackLayer => {
     const values = Int32Array.from(origin)
     for (const c of cells) values[c] = value
-    const d = decodePlane(encodePlane(0, true, values, origin), origin)
+    const d = decodePlane(encodePlane(0, true, values, origin, R2), origin)
     if (!d || d === 'aside') throw new Error('plane')
     return { id: `${author.slice(0, 8)}${createdAt}`.padEnd(64, '0'), author, builder: author, createdAt, cobuilders, planes: [d] }
   }
@@ -220,9 +223,9 @@ describe('a new builder key at a chunk (§5.6)', () => {
   it('starts from the other keys\' layers, the newer winning, then applies its own changes; an emptied version changes nothing', () => {
     const a = origin.slice(); a[air] = 8; a[other] = 9
     const b = origin.slice(); b[air] = 10
-    const pa = nextPlaintext(null, 0, a, origin)!
-    const pb = nextPlaintext(null, 0, b, origin)!
-    const mine = new Map([[0 as const, { survey: true, cells: new Map([[rock, 0]]) }]])
+    const pa = nextPlaintext(null, 0, a, origin, R2)!
+    const pb = nextPlaintext(null, 0, b, origin, R2)!
+    const mine = new Map([[0 as const, { survey: true, cells: new Map([[rock, 0]]), revision: 2 as const, surveyed: 300 }]])
     const start = startFrom([
       { changes: changesOf(pa, ground), createdAt: 100, builder: pk(2), id: pk(20) },
       { changes: changesOf(pb, ground), createdAt: 200, builder: pk(3), id: pk(30) },

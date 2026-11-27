@@ -30,6 +30,7 @@ import { heldFromEntry } from '../inventory'
 import { BARE_HOLD_MS, COMPILER_HOLD_MS, RESOLVE_AFTER_MS, SWING_MS, compile, compiles, dropStep, missLine, relayAsker, smashGroup, type Found, type SmashDeps } from './smash'
 import { readRecord, type Prize, type RecordEvent } from './format'
 import type { ToyRow } from './blueprintDb'
+import { noteMining } from '../../store/miningStats'
 
 // Whether the Compiler is the chosen slot (otherwise the hand is bare): with the terrain store, where the preview asks it too.
 export { compilerInHand } from '../../store/useTerrain'
@@ -114,6 +115,7 @@ export async function strike(target: readonly [number, number, number], bare: bo
   // compiles (DECK-0010 §4.3); what compiles is the gather's arrangement.
   const refused = useTerrain.getState().clear(g.smash)
   if (refused) { useTerrain.getState().say(refused); return }
+  noteMining({ type: 'smash', bare, blocks: g.smash.length }, s.owner)
   const centre: [number, number, number] = [0, 0, 0]
   for (const c of g.smash) for (let a = 0; a < 3; a++) centre[a] += c[a] + 0.5
   for (let a = 0; a < 3; a++) centre[a] /= g.smash.length
@@ -141,6 +143,7 @@ export async function strike(target: readonly [number, number, number], bare: bo
     return
   }
   useSmashFx.getState().resolve(id, 'match')
+  noteMining({ type: 'compile' }, s.owner)
   const owner = useBlueprints.getState().owner || useCyberspace.getState().identity.pubkey
   const now = Math.floor(Date.now() / 1000)
   const toys: ToyRow[] = found.map((f, i) => ({
@@ -177,6 +180,7 @@ export function takeToy(rowKey: string): boolean {
     const had = useTerrain.getState().inventory.compiler === 'made'
     useTerrain.getState().gainCompiler()
     useTerrain.getState().say(had ? 'You already have the Compiler.' : 'The Compiler is yours: slot 1.')
+    if (!had) noteMining({ type: 'compiler' })
   } else {
     const event = prizeEvent(toy.prize, toy.record, toy.maker)
     const body = readItem(event, event.pubkey)
@@ -186,6 +190,7 @@ export function takeToy(rowKey: string): boolean {
     useInventory.getState().add([heldFromEntry(owner, { id: event.id, event, verified: true, body }, { chestId: `blueprint:${toy.lookup}`, chestName: toy.name }, null, Math.floor(Date.now() / 1000))])
   }
   bp.dropToy(rowKey)
+  noteMining({ type: 'prize' })
   return true
 }
 

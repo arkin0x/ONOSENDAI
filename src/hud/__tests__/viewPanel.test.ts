@@ -113,6 +113,7 @@ const ROWS: Array<[string, string, string]> = [
   ['view-block-shading', 'Block shading', 'Darker caves and corners.'],
   ['view-sfx', 'Sound effects', 'Short game sounds, like the boing when you bounce.'],
   ['view-hides-sync', 'Sync hidden list', 'Your hidden things on every device signed in as you.'],
+  ['view-mining-sync', 'Sync mining stats', 'Your MINING stats on every device signed in as you.'],
 ]
 
 /** The owner's groups (arkinox, 2026-11-22; Hide avatar moved to Effects the same day): [subheading, switch ids in order]. */
@@ -121,7 +122,7 @@ const GROUPS: Array<[string, string[]]> = [
   ['Movement', ['view-walk-gravity', 'view-walk-gravity-hard', 'view-walk-fluid', 'view-walk-limits']],
   ['Interface', ['view-walk-look']],
   ['Effects', ['view-headlamp', 'view-glow', 'view-block-shading', 'view-walk-avatar', 'view-sfx']],
-  ['Sync', ['view-hides-sync']],
+  ['Sync', ['view-hides-sync', 'view-mining-sync']],
 ]
 
 /** ROWS above in the panel's order since the grouping: group by group, row by row. */

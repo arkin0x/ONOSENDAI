@@ -27,6 +27,7 @@ import {
 } from '../lib/blueprint/blueprintDb'
 import { readRecord, recordLookup } from '../lib/blueprint/format'
 import type { NostrEvent } from '../lib/events'
+import { noteMining } from './miningStats'
 
 interface BlueprintsState {
   owner: string
@@ -118,6 +119,7 @@ export const useBlueprints = create<BlueprintsState>((set, get) => ({
     set({ owner, cards: [card, ...get().cards.filter((x) => x.rowKey !== card.rowKey)], fresh: new Set([...get().fresh, card.rowKey]) })
     get().remember([card.record])
     void persist((d) => writeCards(d, [card]))
+    noteMining({ type: 'blueprint', what: 'made' }, owner)
     return card
   },
 
@@ -131,6 +133,7 @@ export const useBlueprints = create<BlueprintsState>((set, get) => ({
     set({ owner, cards: [card, ...get().cards], fresh: new Set([...get().fresh, rowKey]) })
     get().remember([record])
     void persist((d) => writeCards(d, [card]))
+    noteMining({ type: 'blueprint', what: 'found' }, owner)
     return card
   },
 

@@ -64,11 +64,16 @@ export const COLUMNS: readonly Column[] = ['left', 'right']
  * the last panel either way. A layout saved before is moved to it once
  * (RIGHT_TOP, RIGHT_LAST, menuOf20261124).
  *
+ * `mining` is MINING (hud/MiningPanel.tsx; owner, 2026-11-27): your TERRAIN
+ * stats, right under CREATE, the other panel of things you make. A saved
+ * order from before gets it there by mergeOrder (after CREATE, wherever the
+ * player keeps it in the left column).
+ *
  * `modes` is the MODES settings panel (hud/ModesPanel.tsx; owner, 2026-11-24).
  * `tutorial` is the TUTORIAL panel (feedback 2026-11-11, item 17).
  */
 export const DEFAULT_ORDER = {
-  left: ['identity', 'items', 'games', 'agents', 'avatars', 'create', 'hidden', 'discovered', 'targets', 'links'],
+  left: ['identity', 'items', 'games', 'agents', 'avatars', 'create', 'mining', 'hidden', 'discovered', 'targets', 'links'],
   right: ['modes', 'tutorial', 'position', 'scale', 'viewat', 'proof', 'cloud', 'chain', 'hyperspace', 'view', 'legend', 'controls', 'relays', 'derezz'],
 } as const satisfies Record<Column, readonly string[]>
 

@@ -34,11 +34,11 @@ function Row({ row }: { row: CardRow }): JSX.Element {
     <li className={`survey-row${row.prized ? ' is-prized' : ''}`}>
       <Chamfer size={34}><Swatch id={row.id} size={24} /></Chamfer>
       <span className="survey-row__name">{row.name}</span>
+      <span className="survey-row__leader" aria-hidden />
       <span className={`survey-row__mark${row.visible ? ' is-visible' : ' is-buried'}`}>
         {row.visible ? <Eye size={11} strokeWidth={2.25} aria-hidden /> : <EyeOff size={11} strokeWidth={2.25} aria-hidden />}
         {row.visible ? 'visible' : 'buried'}
       </span>
-      <span className="survey-row__leader" aria-hidden />
       <span className="survey-row__count">{count(row.count)}</span>
     </li>
   )

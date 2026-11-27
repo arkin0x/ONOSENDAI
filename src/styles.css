@@ -15473,6 +15473,55 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
 .terrain-held__face--top { transform: rotateX(90deg) translateZ(calc(var(--held) / 2)); }
 .terrain-held__face--bottom { transform: rotateX(-90deg) translateZ(calc(var(--held) / 2)); filter: brightness(0.5); }
 
+/* A glowing block in hand (terrain/HeldGlow.tsx): its light round the carried block and a faint tint of it at the screen's
+   edges, light added to the scene behind (plus-lighter; screen where it is not known), as strong as the block's light
+   level (--held-glow-k, 0 to 1). Each is its own box on the page, so it adds to the scene itself. The halo's box is the
+   carried block's (.terrain-held), drawn before it. It breathes slowly only while motion is allowed: no flicker. */
+.terrain-held-halo {
+  --held: 132px;
+  position: fixed;
+  right: calc(var(--controls-right) + 60px);
+  bottom: calc(var(--held) * -0.2);
+  z-index: 0;
+  width: var(--held);
+  height: var(--held);
+  pointer-events: none;
+  mix-blend-mode: screen;
+  mix-blend-mode: plus-lighter;
+}
+@media (min-width: 1101px) {
+  .terrain-held-halo { --held: 180px; }
+}
+.terrain-held-halo__light {
+  position: absolute;
+  left: 50%;
+  top: 46%;
+  width: 270%;
+  height: 270%;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(var(--held-glow), calc(0.62 * var(--held-glow-k))) 0%, rgba(var(--held-glow), calc(0.3 * var(--held-glow-k))) 34%, rgba(var(--held-glow), calc(0.1 * var(--held-glow-k))) 62%, rgba(var(--held-glow), 0) 100%);
+}
+.terrain-held-halo__light.is-pulsing { animation: terrain-held-glow 3.6s ease-in-out infinite alternate; }
+@keyframes terrain-held-glow { from { opacity: 0.82; } to { opacity: 1; } }
+.terrain-held-vignette {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background: radial-gradient(ellipse 78% 72% at 50% 50%, rgba(var(--held-glow), 0) 58%, rgba(var(--held-glow), calc(0.09 * var(--held-glow-k))) 80%, rgba(var(--held-glow), calc(0.26 * var(--held-glow-k))) 100%);
+  mix-blend-mode: screen;
+  mix-blend-mode: plus-lighter;
+}
+@media (prefers-reduced-motion: reduce) {
+  .terrain-held-halo__light.is-pulsing { animation: none; }
+}
+body:has(.terrainview.is-covered) :is(.terrain-held-vignette, .terrain-held-halo),
+body:has(.terrainview.is-folded) .terrain-held-halo { visibility: hidden; }
+@media (max-width: 1099px) {
+  body:has(.terrainview.is-bag) :is(.terrain-held-vignette, .terrain-held-halo) { visibility: hidden; }
+}
+
 /* Under the open menu on a phone TERRAIN's controls go, as WALK's pad does (App crowded). */
 .terrainview.is-covered { visibility: hidden; }
 /* The pad put away (usePad; in TERRAIN only the open chat on a phone does it): PLACE, SURVEY, the hotbar, the first

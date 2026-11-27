@@ -28,18 +28,29 @@
  *    toys, scene/PrizeToys.tsx); no match leaves grey dust and one line.
  *
  * A bare hand (anything but the Compiler in hand) smashes the same way with a
- * 20 second hold, and only the Compiler's own recipe compiles for it.
+ * longer hold and a smaller reach (the 3 by 3 by 3 box round the hit), and
+ * only the Compiler's own recipe compiles for it.
  */
 
 import { gather, type Cell } from './arrangement'
-import { BLUEPRINT_RECORD_KIND, BLUEPRINT_RELAY_READY, isPrize, openPrize, readRecord, type Arrangement, type Prize, type RecordEvent } from './format'
+import { BLUEPRINT_RECORD_KIND, BLUEPRINT_RELAY_READY, WINDOW_ABOVE, WINDOW_BELOW, isPrize, openPrize, readRecord, type Arrangement, type Prize, type RecordEvent } from './format'
 import { keyOf } from './keyClient'
 import { COMPILER_RECIPE, sameArrangement } from './recipes'
 import type { NostrEvent } from '../events'
 
-/** The hold, in milliseconds: with the Compiler, and with a bare hand (owner, 2026-11-26). */
-export const COMPILER_HOLD_MS = 3000
-export const BARE_HOLD_MS = 20000
+/*
+ * ---- The smash's feel. The owner tunes these to taste (2026-11-27). ----
+ * The hold, in milliseconds, before the swing, with the Compiler and with a
+ * bare hand; the hold bar and the swing's animation stretch to fit it. And
+ * how far a smash reaches from the hit cell on each axis: the Compiler takes
+ * the whole 16 by 16 by 16 window (DECK-0010 §4: 8 below, 7 above), a bare
+ * hand only the 3 by 3 by 3 box round the hit (1 each way).
+ */
+export const COMPILER_HOLD_MS = 4000
+export const BARE_HOLD_MS = 7000
+export const COMPILER_REACH = { below: WINDOW_BELOW, above: WINDOW_ABOVE } as const
+export const BARE_REACH = { below: 1, above: 1 } as const
+/* ---- end of the owner's tuning ---- */
 /** From the end of the hold to the impact: the swing. */
 export const SWING_MS = 180
 /** From the impact until the outcome may show (the shatter's main burst). */
@@ -159,9 +170,9 @@ export function relayAsker(query: (filter: { kinds: number[]; '#d': string[]; li
   }
 }
 
-/** What one smash takes, from the blocks as drawn (`read`, cs offsets) at the hit. */
-export function smashGroup(read: (x: number, y: number, z: number) => number, hit: Cell): ReturnType<typeof gather> & { blocks: Array<{ at: [number, number, number]; id: number }> } {
-  const g = gather(read, hit)
+/** What one smash takes, from the blocks as drawn (`read`, cs offsets) at the hit; a bare hand reaches only BARE_REACH. */
+export function smashGroup(read: (x: number, y: number, z: number) => number, hit: Cell, bare = false): ReturnType<typeof gather> & { blocks: Array<{ at: [number, number, number]; id: number }> } {
+  const g = gather(read, hit, bare ? BARE_REACH : COMPILER_REACH)
   return { ...g, blocks: g.cells.map((at) => ({ at, id: read(at[0], at[1], at[2]) })) }
 }
 

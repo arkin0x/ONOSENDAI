@@ -340,7 +340,9 @@ export const useTerrain = create<TerrainState>((set, get) => ({
     }
     // With an empty slot chosen, the kind just mined is chosen instead.
     const slot = hotbar[inv.slot] === 0 && hotbar.includes(was) ? hotbar.indexOf(was) : inv.slot
-    saveInventory({ counts, hotbar, slot })
+    // Everything else the inventory holds (the Compiler and how it came) stays: dropping it here hid the held Compiler
+    // until a reload (owner, 2026-11-27), and a reload then lost a made one.
+    saveInventory({ ...inv, counts, hotbar, slot })
     return true
   },
 

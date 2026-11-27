@@ -43,11 +43,15 @@ function boxOf(cells: ReadonlyArray<Cell>): { lo: [number, number, number]; size
   return { lo, size: [hi[0] - lo[0] + 1, hi[1] - lo[1] + 1, hi[2] - lo[2] + 1] }
 }
 
+/** How far a smash reaches from the hit on each axis: the spec's window by default, smaller for a bare hand (smash.ts BARE_REACH). */
+export interface Reach { below: number; above: number }
+
 /** What a smash at `hit` takes (the hit cell must hold a block), and whether it is an isolated arrangement. */
-export function gather(read: (x: number, y: number, z: number) => number, hit: Cell): Gathered {
+export function gather(read: (x: number, y: number, z: number) => number, hit: Cell, reach: Reach = { below: WINDOW_BELOW, above: WINDOW_ABOVE }): Gathered {
   if (read(hit[0], hit[1], hit[2]) === 0) return { cells: [], lo: [hit[0], hit[1], hit[2]], size: [0, 0, 0], isolated: false, arrangement: null }
+  const below = reach.below, above = reach.above
   const inWindow = (x: number, y: number, z: number): boolean =>
-    x >= hit[0] - WINDOW_BELOW && x <= hit[0] + WINDOW_ABOVE && y >= hit[1] - WINDOW_BELOW && y <= hit[1] + WINDOW_ABOVE && z >= hit[2] - WINDOW_BELOW && z <= hit[2] + WINDOW_ABOVE
+    x >= hit[0] - below && x <= hit[0] + above && y >= hit[1] - below && y <= hit[1] + above && z >= hit[2] - below && z <= hit[2] + above
   const seen = new Set<string>([key(...hit)])
   const cells: Array<[number, number, number]> = [[hit[0], hit[1], hit[2]]]
   for (let i = 0; i < cells.length; i++) {

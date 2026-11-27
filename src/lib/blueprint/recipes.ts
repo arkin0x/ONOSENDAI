@@ -5,7 +5,8 @@
  *
  * The Compiler (owner, 2026-11-26): four Gridstone in a plus around a
  * Ferrovein, a Glowcore on top. The only recipe a bare hand can smash (a
- * 20 second hold), and the only way to get a Compiler. The plus lies flat
+ * longer hold, and only the 3 by 3 by 3 box round the hit, so it comes away
+ * whole when hit in its middle column), and the only way to get a Compiler. The plus lies flat
  * (cyberspace X and Z) and the Glowcore stands on it (+Y, TERRAIN's up): a
  * box 3 wide, 3 deep and 2 high, 18 cells read with the empty ones.
  */

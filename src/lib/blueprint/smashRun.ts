@@ -38,7 +38,7 @@ export function compilerInHand(): boolean {
   return isCompiler(inv.hotbar[inv.slot])
 }
 
-/** Start the smash hold at the block under the cross: 3 seconds with the Compiler, 20 bare. */
+/** Start the smash hold at the block under the cross: COMPILER_HOLD_MS with the Compiler, BARE_HOLD_MS bare (lib/blueprint/smash.ts). */
 export function holdSmash(): void {
   const s = terrainSession
   const hit = terrainCursor.hit
@@ -106,7 +106,7 @@ export async function strike(target: readonly [number, number, number], bare: bo
   const s = terrainSession
   if (!s) return
   const read = (x: number, y: number, z: number): number => s.world.blockCs(x, y, z)
-  const g = smashGroup(read, target)
+  const g = smashGroup(read, target, bare)
   if (!g.cells.length) { useTerrain.getState().say('Nothing there to smash.'); return }
   // The blocks are spent whether or not they compile (DECK-0010 §4.3).
   const refused = useTerrain.getState().clear(g.cells)

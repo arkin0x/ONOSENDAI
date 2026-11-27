@@ -1,7 +1,7 @@
 /**
  * smashHold.ts - SMASH is a hold, like SURVEY (terrain/surveyHold.ts), so it
- * is never done by accident: 3 seconds with the Compiler in hand, 20 with a
- * bare hand (owner, 2026-11-26). The bar fills as SURVEY's does; letting go,
+ * is never done by accident: COMPILER_HOLD_MS with the Compiler in hand,
+ * BARE_HOLD_MS with a bare hand (lib/blueprint/smash.ts; the owner tunes them). The bar fills as SURVEY's does; letting go,
  * a finger sliding off, or F coming up before the end cancels with nothing
  * spent. The block hit is fixed when the hold starts. When the hold completes
  * the swing begins (`swingAt`), and `done` runs once.

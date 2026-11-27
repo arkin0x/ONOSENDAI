@@ -14,8 +14,8 @@ vi.hoisted(() => {
 import { COMPILER_ID, emptyInventory, tidyInventory, withCompiler, withoutCompiler } from '../../terrain/terrainDb'
 import { shownCell, partsList, revealSummary } from '../../../store/useBlueprintTool'
 import { arrangementFrom } from '../arrangement'
-import { COMPILER_RECIPE, FERROVEIN, GLOWCORE, GRIDSTONE } from '../recipes'
-import { compile, relayAsker, type SmashDeps } from '../smash'
+import { COMPILER_RECIPE, FERROVEIN, GLOWCORE, GRIDSTONE, sameArrangement } from '../recipes'
+import { compile, relayAsker, smashGroup, type SmashDeps } from '../smash'
 import { heldPose } from '../../../terrain/HeldCompiler'
 import { ringSpot } from '../../../scene/PrizeToys'
 import { startSmashHold, cancelSmashHold, useSmashHold } from '../../../terrain/smashHold'
@@ -183,5 +183,44 @@ describe('the prize reveal at sealing', () => {
     const shown = await makeBlueprint({ arrangement, shown: () => true, title: 'test', prize: { type: 'sno', payload }, reveal: 'hidden', lock: 'standard', prizeName: 'Torch' }, sign)
     if ('refused' in shown) throw new Error(shown.refused)
     expect(readRecord(shown.record)!.prizeName).toBe('Torch')
+  })
+})
+
+describe('a bare hand reaches only the 3 by 3 by 3 box round the hit (owner, 2026-11-27)', () => {
+  // The Compiler's recipe laid out at the origin, in a world of nothing else.
+  const blocks = new Map<string, number>()
+  for (let i = 0; i < COMPILER_RECIPE.cells.length; i++) {
+    const id = COMPILER_RECIPE.cells[i]
+    if (!id) continue
+    const [sx, , sz] = COMPILER_RECIPE.size
+    const x = i % sx, rest = Math.floor(i / sx), z = rest % sz, y = Math.floor(rest / sz)
+    blocks.set(`${x},${y},${z}`, id)
+  }
+  const read = (x: number, y: number, z: number): number => blocks.get(`${x},${y},${z}`) ?? 0
+
+  it('hit in its middle column, the recipe comes away whole and isolated, bare or not', () => {
+    for (const hit of [[1, 0, 1], [1, 1, 1]] as const) {
+      const g = smashGroup(read, hit, true)
+      expect(g.cells).toHaveLength(6)
+      expect(g.isolated).toBe(true)
+      expect(sameArrangement(g.arrangement!, COMPILER_RECIPE)).toBe(true)
+    }
+  })
+
+  it('hit at an arm\'s end, a bare hand takes only what is within one cell, and it is not an arrangement', () => {
+    const g = smashGroup(read, [1, 0, 0], true)
+    expect(g.cells.length).toBeLessThan(6)
+    expect(g.cells.every(([x, y, z]) => Math.abs(x - 1) <= 1 && Math.abs(y) <= 1 && Math.abs(z) <= 1)).toBe(true)
+    expect(g.isolated).toBe(false)
+    // The Compiler's reach takes it all from the same hit.
+    const c = smashGroup(read, [1, 0, 0])
+    expect(c.cells).toHaveLength(6)
+    expect(c.isolated).toBe(true)
+  })
+
+  it('a long row: bare takes three blocks, the Compiler the window\'s sixteen', () => {
+    const row = (x: number, y: number, z: number): number => (y === 0 && z === 0 && x >= -20 && x <= 20 ? GRIDSTONE : 0)
+    expect(smashGroup(row, [0, 0, 0], true).cells).toHaveLength(3)
+    expect(smashGroup(row, [0, 0, 0]).cells).toHaveLength(16)
   })
 })

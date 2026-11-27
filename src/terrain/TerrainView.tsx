@@ -21,7 +21,7 @@
  */
 
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
-import { Backpack, Box, Hammer, Radar } from 'lucide-react'
+import { Backpack, Box, Hammer, HandFist, Radar } from 'lucide-react'
 import { HINT_DONE, headNow, offsetOf, surveyTarget as targetNow, terrainSession, useTerrain } from '../store/useTerrain'
 import { useWalk } from '../store/useWalk'
 import { terrainCursor } from '../scene/TerrainLayer'
@@ -45,7 +45,7 @@ import { HeldCompiler } from './HeldCompiler'
 import { useSmashHold } from './smashHold'
 import { cancelSmashHold, holdSmash } from '../lib/blueprint/smashRun'
 import { useSmashFx } from '../store/useSmashFx'
-import { RESOLVE_AFTER_MS } from '../lib/blueprint/smash'
+import { BARE_HOLD_MS, COMPILER_HOLD_MS, RESOLVE_AFTER_MS } from '../lib/blueprint/smash'
 import { PrizeCard, PrizeFlights, PrizePicker, PrizeStrip, usePrizesHere } from './PrizePanel'
 import { useBlueprintTool } from '../store/useBlueprintTool'
 import { recordAtCursor } from '../lib/blueprint/capture'
@@ -552,11 +552,12 @@ function TerrainScreen({ covered }: { covered: boolean }): JSX.Element {
       {/* PLACE beside FORWARD, and SURVEY (a hold) beside the row under it, while one is offered: just right of WALK's
           walk pad (owner, 2026-11-24), clear of the right column the menu opens over. Mining is a tap on the scene. */}
       <div className="terrain-tools" aria-label="Smash, place and survey">
-        {/* SMASH, a hold (smashHold.ts): 3 seconds with the Compiler, 20 with a bare hand. Its slot is always there. */}
+        {/* SMASH, a hold (smashHold.ts; the times are lib/blueprint/smash.ts COMPILER_HOLD_MS and BARE_HOLD_MS). A hammer
+            with the Compiler in hand, a fist with a bare hand (owner, 2026-11-27). Its slot is always there. */}
         <span className="terrain-tools__slot terrain-tools__slot--smash">
           <button
             className={`terrain-act terrain-act--smash${smashing ? ' is-holding' : ''}${bare ? ' is-bare' : ''}`}
-            style={{ ['--hold-ms' as string]: `${smashMs || 3000}ms` }}
+            style={{ ['--hold-ms' as string]: `${smashMs || (bare ? BARE_HOLD_MS : COMPILER_HOLD_MS)}ms` }}
             {...noCallout}
             onPointerDown={(e) => {
               e.preventDefault(); e.stopPropagation()
@@ -566,10 +567,10 @@ function TerrainScreen({ covered }: { covered: boolean }): JSX.Element {
             onPointerUp={cancelSmashHold}
             onPointerLeave={cancelSmashHold}
             onPointerCancel={cancelSmashHold}
-            title={bare ? 'Hold to smash the blocks at the cross with your bare hand (hold F, 20 seconds)' : 'Hold to smash the blocks at the cross with the Compiler (hold F)'}
+            title={bare ? `Hold to smash the blocks at the cross with your bare hand (hold F, ${BARE_HOLD_MS / 1000} seconds)` : `Hold to smash the blocks at the cross with the Compiler (hold F, ${COMPILER_HOLD_MS / 1000} seconds)`}
             aria-label="Hold to smash (hold F)"
           >
-            <Hammer size={15} strokeWidth={2.25} aria-hidden />{smashing ? 'Smashing' : 'SMASH'}<Key>F</Key>
+            {bare ? <HandFist size={15} strokeWidth={2.25} aria-hidden data-icon="fist" /> : <Hammer size={15} strokeWidth={2.25} aria-hidden data-icon="hammer" />}{smashing ? 'Smashing' : 'SMASH'}<Key>F</Key>
             <span className="terrain-act__bar" aria-hidden />
           </button>
         </span>

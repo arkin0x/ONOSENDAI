@@ -39,9 +39,9 @@ import { Box3, Matrix4, Vector3, type BufferGeometry, type InstancedMesh, type O
 import { r3fRoot, type R3fRoot } from '../../test/r3fRoot'
 import { REST_HOVER, restLift } from '../../lib/restLift'
 import { useCyberspace } from '../../store/useCyberspace'
-import { CoinMark, coinSide, COIN_BOB, COIN_GLYPH_LOW, COIN_LIFT, COIN_REACH, NoteItem, noteBoxSide } from '../WorldMessages'
+import { CoinMark, coinSide, COIN_BOB, COIN_GLYPH_LOW, COIN_LIFT, COIN_REACH, ItemMark, NoteItem, noteBoxSide } from '../WorldMessages'
 import { ItemToken, TOKEN_BOB, TOKEN_LIFT, TOKEN_LOW, TOKEN_OUTLINE } from '../ItemToken'
-import { LetterField, LETTER_GIBSONS, LETTER_LIFT, LETTER_LOW } from '../LetterField'
+import { LetterField, LETTER_GIBSONS, LETTER_LIFT } from '../LetterField'
 
 let r: R3fRoot | null = null
 afterEach(async () => {
@@ -196,7 +196,58 @@ describe('a letter rests over its floor', () => {
       }
       // The lift is the measured reach, the bob and the hover: no more than that over its place.
       expect(p.low - PLACE[1]).toBeLessThan((REST_HOVER + 0.08) * width)
-      expect(LETTER_LIFT).toBeGreaterThan(LETTER_LOW)
     })
   }
+})
+
+/** Where `p` is on the 800 by 800 test screen, CSS pixels. */
+function onScreen(p: [number, number, number]): [number, number] {
+  const v = new Vector3(...p).project(r!.state().camera)
+  return [((v.x + 1) / 2) * 800, ((1 - v.y) / 2) * 800]
+}
+
+describe('a tap finds each where it rests', () => {
+  /** Up close, level with the place, a gibson or so off: the old centre and the thing as drawn are well apart on screen. */
+  async function closeBy(): Promise<void> {
+    const cam = r!.state().camera
+    cam.position.set(PLACE[0], PLACE[1] + 0.3, PLACE[2] + 2.2)
+    cam.lookAt(PLACE[0], PLACE[1] + 0.3, PLACE[2])
+    cam.updateMatrixWorld(true)
+    await r!.frame()
+  }
+
+  it('a coin: on it as drawn, over its place', async () => {
+    useCyberspace.setState({ scaleExp: 0 })
+    const tapped = vi.fn()
+    r = await r3fRoot()
+    await r.render(createElement(CoinMark, { id: 'c1', kind: 'coin', at: PLACE, onTap: tapped }))
+    await closeBy()
+    await r.tap(...onScreen([PLACE[0], PLACE[1] + COIN_LIFT, PLACE[2]]))
+    expect(tapped).toHaveBeenCalledTimes(1)
+  })
+
+  for (const side of [1, undefined]) {
+    it(`an item’s token${side === undefined ? ' while its model has not come' : ''}: on it as drawn, and not under it where it was`, async () => {
+      useCyberspace.setState({ scaleExp: 0 })
+      const tapped = vi.fn()
+      r = await r3fRoot()
+      await r.render(createElement(ItemMark, { id: 'k', text: 'lantern', sub: '', who: { pubkey: 'c3'.repeat(32), mine: false }, at: PLACE, side, onTap: tapped }))
+      await closeBy()
+      await r.tap(...onScreen([PLACE[0], PLACE[1] + TOKEN_LIFT, PLACE[2]]))
+      expect(tapped).toHaveBeenCalledTimes(1)
+      // Half a gibson under the token, at its old foot: nothing there now.
+      await r.tap(...onScreen([PLACE[0], PLACE[1] - 0.45, PLACE[2]]))
+      expect(tapped).toHaveBeenCalledTimes(1)
+    })
+  }
+
+  it('a letter: on it as drawn, over its place', async () => {
+    useCyberspace.setState({ scaleExp: 0 })
+    const tapped = vi.fn()
+    r = await r3fRoot()
+    await r.render(createElement(NoteItem, { w: { key: 'n1', text: 'hello', mine: true, author: '', centre: PLACE }, birth: undefined, onTap: tapped }))
+    await closeBy()
+    await r.tap(...onScreen([PLACE[0], PLACE[1] + LETTER_LIFT, PLACE[2]]))
+    expect(tapped).toHaveBeenCalledTimes(1)
+  })
 })

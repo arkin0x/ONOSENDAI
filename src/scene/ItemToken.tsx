@@ -19,8 +19,9 @@
  * with reduced motion it holds still. It rests over its place rather than
  * about it (TOKEN_LIFT, lib/restLift.ts): its lowest point stands a little
  * over the level of its place, where a floor at that height lies and a
- * chest's base stands, so the floor never cuts its lower half. The paper of the letter and the core
- * here are opaque and out of the bloom (shardFaces basicFaceProps); the
+ * chest's base stands, so the floor never cuts its lower half. The paper of
+ * the letter and the core here are opaque and out of the bloom (shardFaces
+ * basicFaceProps); the
  * edges and the mark are light. Edges are drawn twice: as bands for the
  * look up close, and as lines, which are a pixel wide at any distance, so
  * the token never loses its edge far off (the letter's flap did).

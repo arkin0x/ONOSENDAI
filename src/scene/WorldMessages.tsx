@@ -222,9 +222,9 @@ export function coinSide(scaleExp: number): number {
 const COIN_GLYPH = 31 / 40
 
 /**
- * How far the ₿'s ink reaches under its middle, in the label's line heights
- * (WorldLabel: troika's fontSize 1, anchored at the middle of its line):
- * measured in the world font (MonaspaceKrypton-Regular: ascender 0.7825,
+ * How far the ₿'s ink reaches under its middle, in the label's ems, its
+ * font size (WorldLabel: troika's fontSize 1, anchored at the middle of its
+ * line): measured in the world font (MonaspaceKrypton-Regular: ascender 0.7825,
  * descender 0.2175, line gap 0.2, so the baseline is 0.2825 under the
  * middle; the ₿ reaches 0.154 under its baseline), with the label's 0.06
  * outline. The camera never rolls, so as the ₿ turns to face it this is the
@@ -435,11 +435,12 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
               : <HeldItemMark id={w.key} own={draw === 'own'} at={w.centre} wears={w.wears} region={w.region} axes={axes} appear={play} />}
             {/* TAKE on an item with no model: its token fades out (MARK_FADE_MS), and its name, over where it stood, with the rest. */}
             {draw !== 'item' && play && <TakenItem w={w} side={side} play={play} axes={axes} scaleExp={scaleExp} />}
-            {/* A fingertip over the mark at any distance, and over a one-gibson
-                token the whole of it once it is larger (TapTarget `side`),
-                where the token rests (TOKEN_LIFT). A held key keeps its
-                fingertip: its box is the half one. */}
-            <TapTarget px={TAP_PX} side={draw === 'item' ? side : undefined} at={draw === 'item' && side !== undefined ? tokenRest(w.centre, side) : w.centre} onTap={open} />
+            {/* A fingertip over the mark at any distance. A key with no model
+                has its own over its token, where the token rests (ItemMark);
+                a key wearing one keeps this one at its place, as its model is
+                drawn about it, and its token while the model loads has its
+                own too. A held key keeps its fingertip: its box is the half one. */}
+            {(draw !== 'item' || side === undefined) && <TapTarget px={TAP_PX} at={w.centre} onTap={open} />}
           </group>
         )
       })}
@@ -537,6 +538,9 @@ export function ItemMark({ id, text, sub, who, at, opacity = 1, wears, region = 
       {who
         ? <ItemToken id={id ?? text} at={at} side={tokenSide} colour={authorColour(who.pubkey)} opacity={opacity} groupRef={token} />
         : <WorldMark kind="note" at={at} opacity={opacity} side={side} />}
+      {/* A fingertip over the token where it rests (TOKEN_LIFT), and the whole token once it is larger (TapTarget `side`):
+          a key with no model, and a key whose model has not come, alike. */}
+      {who && onTap && <TapTarget px={TAP_PX} side={tokenSide} at={tokenRest(at, tokenSide)} onTap={onTap} />}
       {/* Over the token as it is drawn, turning and bobbing: a few pixels over its highest point on screen (WorldLabel clear), from where it rests (TOKEN_LIFT). */}
       {FLOATING_NAME.item && <WorldLabel text={label.text} color={label.color} at={who ? tokenRest(at, tokenSide) : at} align="center" px={11} sub={label.sub} subColor={label.subColor} subScale={1} subOpacity={1} opacity={opacity} clear={who ? { object: token, points: TOKEN_OUTLINE } : undefined} recede="name" />}
     </>
@@ -805,7 +809,7 @@ function CoinItem({ id, text, at, onTap }: { id: string; text: string; at: [numb
  * coin is under MIN_VISIBLE_PX on screen (TapTarget `minVisible`). It stands
  * where the coin is drawn.
  */
-export function CoinMark({ id = '', kind, at, onTap }: { id?: string; kind: 'coin' | 'spent'; at: [number, number, number]; onTap: () => void }): JSX.Element {
+export function CoinMark({ id, kind, at, onTap }: { id: string; kind: 'coin' | 'spent'; at: [number, number, number]; onTap: () => void }): JSX.Element {
   const side = coinSide(useCyberspace((s) => s.scaleExp))
   const spent = kind === 'spent'
   const reduced = useReducedMotion()

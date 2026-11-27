@@ -186,9 +186,15 @@ export function flatten(v: Vec, up: AxisName | null): Vec {
  * and F (lib/walkKeys.ts verticalAlong; gravity off only: under gravity Up
  * and Down are a jump and Down, never a push). Forward with a side is 45 degrees to that side, no faster than
  * forward alone.
+ *
+ * `free` (gravity off: arkinox, 2026-11-27, "id like the forward (and back)
+ * button to move me forward toward the direction im facing regardless"):
+ * forward and back go along the whole look, its pitch included, so looking
+ * up and pressing forward flies up and on the way you look; the sides stay
+ * laid flat across `up`.
  */
-export function wishOf(forward: Vec, right: Vec, up: AxisName, fwd: number, strafe: number, vertical: AxisDirection | null, vert: number): Vec {
-  const f = unit(flatten(forward, up))
+export function wishOf(forward: Vec, right: Vec, up: AxisName, fwd: number, strafe: number, vertical: AxisDirection | null, vert: number, free = false): Vec {
+  const f = unit(free ? forward : flatten(forward, up))
   const r = unit(flatten(right, up))
   const w: Vec = { x: f.x * fwd + r.x * strafe, y: f.y * fwd + r.y * strafe, z: f.z * fwd + r.z * strafe }
   if (vertical && vert !== 0) w[vertical.axis] += vertical.dir * vert

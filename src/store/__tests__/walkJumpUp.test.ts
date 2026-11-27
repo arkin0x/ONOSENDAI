@@ -336,10 +336,16 @@ describe('fluid WALK, gravity off', () => {
     expect(rel()).toEqual([0, 1, -1])
   })
 
-  it('W held, looking up 60 degrees: the way you face, laid across the camera\'s up, as before (+Y)', () => {
+  it('W held, looking up 60 degrees: along the whole look, up and on together (arkinox, 2026-11-27), never snapped to +Y alone', () => {
     walk()
     look(60)
-    onlyAlong(hold('KeyW'), { axis: 'y', dir: 1 })
+    const v = hold('KeyW')
+    // 60 degrees up from +Z (the canonical view faces the black sun): mostly +Y, some +Z (sin 60 to cos 60, about
+    // 1.7 to 1), none across.
+    expect(v[0]).toBe(0)
+    expect(v[1]).toBeGreaterThanOrEqual(2)
+    expect(v[2]).toBeGreaterThanOrEqual(1)
+    expect(v[1]).toBeGreaterThan(v[2])
   })
 })
 

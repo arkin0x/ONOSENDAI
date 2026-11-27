@@ -8,7 +8,9 @@
  *    hit, placed or natural ground, within the 16 by 16 by 16 box.
  * 2. Clear them all, as edits in your own layer (store/useTerrain.ts clear):
  *    the blocks are spent whether or not they compile. Nothing is said
- *    before the smash (the Compiler tells you nothing).
+ *    about prizes before the smash (the Compiler tells you nothing); while
+ *    you aim, only what would go, and whether it is a construction, pulses
+ *    (smashPreview.ts, by smashGroup itself).
  * 3. The shatter starts (store/useSmashFx.ts, scene/SmashFx.tsx).
  * 4. (Later: a drop step. An upgraded Compiler could let some of the smashed
  *    blocks fall as small blocks to pick up. `dropStep` below is where it
@@ -59,8 +61,30 @@ export const RESOLVE_AFTER_MS = 1200
 export const RING_MAX = 8
 /** The most prizes unsealed from one lookup (the spec's 4, raised at the owner's word; the ring shows RING_MAX). */
 export const PRIZES_MAX = 32
-/** The line a miss leaves (design page 3). */
+/** The line a smash leaves when nothing was compiled: not a construction, or one a bare hand cannot compile (design page 3). */
 export const MISS_LINE = 'Nothing compiled. The blocks are spent.'
+/** The line when a construction was compiled but no blueprint matches it (the preview said COMPILES: smashPreview.ts). */
+export const NO_MATCH_LINE = 'Compiled. No blueprint matches. The blocks are spent.'
+
+/** What a smash says when no relay answered and nothing on this device matched. */
+export const OFFLINE_LINE = 'No relay answered, so only blueprints on this device were checked. No blueprint matches. The blocks are spent.'
+
+/**
+ * The line a smash that found no prize leaves: a construction was compiled (the preview said COMPILES), so it says no
+ * blueprint matches, and why only this device was asked when no relay answered; anything else compiled nothing.
+ */
+export function missLine(compiled: boolean, offline: boolean, unknown: boolean): string {
+  if (!compiled) return MISS_LINE
+  return offline ? OFFLINE_LINE : unknown ? UNKNOWN_LINE : NO_MATCH_LINE
+}
+
+/** When it compiled into a prize this version cannot open. */
+export const UNKNOWN_LINE = 'It compiled into something this version cannot open yet.'
+
+/** Whether a smash compiles what it gathered: a construction, and with a bare hand only the Compiler's recipe (compile below). */
+export function compiles(a: Arrangement | null, bare: boolean): boolean {
+  return !!a && (!bare || sameArrangement(a, COMPILER_RECIPE))
+}
 
 /** One prize found: what it is, and whose blueprint gave it. */
 export interface Found {

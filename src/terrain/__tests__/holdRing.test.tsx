@@ -143,15 +143,17 @@ describe('every hold uses the one ring', () => {
     expect(HOLDS.map((h) => h.action.id).sort()).toEqual(Object.keys(HOLD_ACTIONS).sort())
   })
 
-  it('in TERRAIN, SMASH and SURVEY each show the ring at the cross in their colour, and the message slot gives way', async () => {
+  it('in TERRAIN, SMASH and SURVEY each show the ring at the cross in their colour, and the first-visit steps give way (the message stays: it stands over the cross)', async () => {
     useCyberspace.setState({ walking: true })
     const inv = withCompiler(emptyInventory(), 'granted')
     useTerrain.setState({ active: true, loading: false, sheet: false, inventory: { ...inv, slot: 0 } })
     const m = await mount(createElement(TerrainView))
     const message = (): Host => m.all().find((h) => String(h.props.className ?? '').startsWith('terrain-message'))!
+    const hint = (): Host => m.all().find((h) => String(h.props.className ?? '').startsWith('terrain-hint'))!
     try {
       expect(ring(m)).toBeUndefined()
       expect(message().props.className).toBe('terrain-message')
+      expect(hint().props.className).toBe('terrain-hint')
       const cases: Array<[keyof typeof HOLD_ACTIONS, () => void, () => void, number]> = [
         ['smash', () => startSmashHold(CELL, COMPILER_HOLD_MS, false, () => {}), cancelSmashHold, COMPILER_HOLD_MS],
         ['smash', () => startSmashHold(CELL, BARE_HOLD_MS, true, () => {}), cancelSmashHold, BARE_HOLD_MS],
@@ -165,11 +167,12 @@ describe('every hold uses the one ring', () => {
         expect(colour(r)).toBe(HOLD_ACTIONS[id].colour)
         expect(textOf(r)).toBe(`${HOLD_ACTIONS[id].label}${ms / 1000}s`)
         expect(fill(m)['--hold-ms']).toBe(`${ms}ms`)
-        expect(message().props.className).toBe('terrain-message is-under-hold')
+        expect(message().props.className).toBe('terrain-message')
+        expect(hint().props.className).toBe('terrain-hint is-under-hold')
         cancel()
         await settled()
         expect(ring(m)).toBeUndefined()
-        expect(message().props.className).toBe('terrain-message')
+        expect(hint().props.className).toBe('terrain-hint')
       }
       expect(HOLD_ACTIONS.smash.colour).toBe('#ff9a3c')
       expect(HOLD_ACTIONS.survey.colour).toBe('#7cffc4')

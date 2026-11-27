@@ -34,9 +34,9 @@
  * TERRAIN is WALK with block tools (store/useTerrain.ts): the camera and
  * the walker are WALK's. Here are only its marks, in the field's frame: the
  * block cursor on what the cross (or the mouse, or a tap) points at within
- * CURSOR_REACH (a plain outline, no glow), the chunks in reach and the chunk
- * SURVEY would fill; and a press waiting from the HUD is done here, where
- * the camera is.
+ * CURSOR_REACH (a plain outline, no glow), what a smash there would take
+ * (SmashPreview.tsx), the chunks in reach and the chunk SURVEY would fill;
+ * and a press waiting from the HUD is done here, where the camera is.
  */
 
 import { useEffect, useMemo, useRef } from 'react'
@@ -65,6 +65,7 @@ import { TapOccluder } from './TapOccluder'
 import { tapClaimNearer } from './TapTarget'
 import { SmashFx } from './SmashFx'
 import { SmashKick } from './SmashKick'
+import { SmashPreview } from './SmashPreview'
 import { pickToy } from './toySpots'
 import { usePrizePick } from '../store/usePrizePick'
 import { useAirPlace } from '../store/useAirPlace'
@@ -622,6 +623,8 @@ function Marks({ axes }: { axes: ViewAxes }): JSX.Element {
     <group ref={frame} name="terrain-marks" visible={false} matrixAutoUpdate={false}>
       {/* The targeted block: a thin plain outline that never blooms (owner, 2026-11-24: "get rid of the block preview glow"). */}
       <lineSegments ref={outline} geometry={CURSOR_EDGES} renderOrder={5} material={outlineMaterial} />
+      {/* What a smash there would take, pulsing (SmashPreview.tsx): the Compiler in hand, or any hand while SMASH is held. */}
+      <SmashPreview />
       {/* The ghost at arm's length: the block in hand, see through, where PLACE puts it in open air. */}
       <group ref={ghostGroup} visible={false}>
         <mesh geometry={GHOST_BOX} material={ghost.fill} renderOrder={4} raycast={() => {}} />

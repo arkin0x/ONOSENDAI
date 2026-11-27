@@ -33,8 +33,6 @@ export interface Gathered {
   arrangement: Arrangement | null
 }
 
-const key = (x: number, y: number, z: number): string => `${x},${y},${z}`
-
 function boxOf(cells: ReadonlyArray<Cell>): { lo: [number, number, number]; size: [number, number, number] } {
   const lo: [number, number, number] = [Infinity, Infinity, Infinity]
   const hi = [-Infinity, -Infinity, -Infinity]
@@ -59,7 +57,7 @@ export function gather(read: (x: number, y: number, z: number) => number, hit: C
   const far = n - 1
   const group = flood(read, hit, far, far)
   const { lo, size } = boxOf(group.cells)
-  const isolated = isolatedIn(read, group.set, lo, size)
+  const isolated = isolatedIn(read, group.has, lo, size)
   // An arrangement only when it stands alone and fits the reach on every axis.
   const arrangement = isolated && size.every((v) => v <= n) ? arrangementOf(read, group.cells, lo, size) : null
   return { cells: group.cells, lo, size, isolated, arrangement }
@@ -79,30 +77,39 @@ export function smashCells(read: (x: number, y: number, z: number) => number, hi
 }
 
 /** The occupied cells reachable from `hit` through faces, edges and corners, never more than `below` under or `above` over it on any axis. */
-function flood(read: (x: number, y: number, z: number) => number, hit: Cell, below: number, above: number): { cells: Array<[number, number, number]>; set: Set<string> } {
+function flood(read: (x: number, y: number, z: number) => number, hit: Cell, below: number, above: number): { cells: Array<[number, number, number]>; has: (x: number, y: number, z: number) => boolean } {
+  // What was looked at, in a grid over the window (one byte a cell: 1 looked at, 2 in the group), not a set of strings:
+  // the Compiler's window is 31 by 31 by 31, and the smash preview works it out each time the aim rests on a new block.
+  // A reach under one looks at the struck block alone, as the set of strings did (review of #948: a reach of 0 threw).
+  below = Math.max(0, below)
+  above = Math.max(0, above)
+  const w = below + above + 1
+  const x0 = hit[0] - below, y0 = hit[1] - below, z0 = hit[2] - below
+  const grid = new Uint8Array(w * w * w)
+  const at = (x: number, y: number, z: number): number => ((x - x0) * w + (y - y0)) * w + (z - z0)
   const inside = (x: number, y: number, z: number): boolean =>
-    x >= hit[0] - below && x <= hit[0] + above && y >= hit[1] - below && y <= hit[1] + above && z >= hit[2] - below && z <= hit[2] + above
-  const seen = new Set<string>([key(...hit)])
+    x >= x0 && x <= hit[0] + above && y >= y0 && y <= hit[1] + above && z >= z0 && z <= hit[2] + above
+  grid[at(hit[0], hit[1], hit[2])] = 2
   const cells: Array<[number, number, number]> = [[hit[0], hit[1], hit[2]]]
-  const set = new Set<string>([key(...hit)])
   for (let i = 0; i < cells.length; i++) {
     const [x, y, z] = cells[i]
     for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
       if (!dx && !dy && !dz) continue
       const nx = x + dx, ny = y + dy, nz = z + dz
-      const k = key(nx, ny, nz)
-      if (seen.has(k) || !inside(nx, ny, nz)) continue
-      seen.add(k)
-      if (read(nx, ny, nz) !== 0) { cells.push([nx, ny, nz]); set.add(k) }
+      if (!inside(nx, ny, nz)) continue
+      const k = at(nx, ny, nz)
+      if (grid[k]) continue
+      grid[k] = 1
+      if (read(nx, ny, nz) !== 0) { cells.push([nx, ny, nz]); grid[k] = 2 }
     }
   }
-  return { cells, set }
+  return { cells, has: (x, y, z) => inside(x, y, z) && grid[at(x, y, z)] === 2 }
 }
 
 /** Whether the box grown by one holds nothing but the group. */
-function isolatedIn(read: (x: number, y: number, z: number) => number, group: ReadonlySet<string>, lo: Cell, size: readonly [number, number, number]): boolean {
+function isolatedIn(read: (x: number, y: number, z: number) => number, inGroup: (x: number, y: number, z: number) => boolean, lo: Cell, size: readonly [number, number, number]): boolean {
   for (let y = lo[1] - 1; y <= lo[1] + size[1]; y++) for (let z = lo[2] - 1; z <= lo[2] + size[2]; z++) for (let x = lo[0] - 1; x <= lo[0] + size[0]; x++) {
-    if (read(x, y, z) !== 0 && !group.has(key(x, y, z))) return false
+    if (read(x, y, z) !== 0 && !inGroup(x, y, z)) return false
   }
   return true
 }

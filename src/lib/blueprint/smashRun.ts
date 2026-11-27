@@ -110,6 +110,8 @@ export async function strike(target: readonly [number, number, number], bare: bo
   // Started in another field or as another identity: nothing is spent.
   if (from && (from.field !== s || from.me !== useCyberspace.getState().identity.pubkey)) { useTerrain.getState().say('The smash stopped: you changed identity or place.'); return }
   const read = (x: number, y: number, z: number): number => s.world.blockCs(x, y, z)
+  // Who struck, as the impact lands.
+  const owner0 = useCyberspace.getState().identity.pubkey
   const g = smashGroup(read, target, bare)
   if (!g.smash.length) { useTerrain.getState().say('Nothing there to smash.'); return }
   // What goes is the smash set (a construction whole, else the reach's box round the hit), spent whether or not it
@@ -137,6 +139,14 @@ export async function strike(target: readonly [number, number, number], bare: bo
     try { ({ found, offline, unknown, more } = await compile(g.arrangement, bare, depsFor(lo, g.size))) } catch { found = [] }
   }
   await wait(struck + RESOLVE_AFTER_MS - performance.now())
+  // The prizes are the identity's that struck: one switched away from while it compiled gets none, and the new one none
+  // of its (review of #952).
+  const striker = from?.me ?? owner0
+  if (terrainSession !== s || useCyberspace.getState().identity.pubkey !== striker) {
+    useSmashFx.getState().resolve(id, 'miss')
+    useTerrain.getState().say(SWITCHED_LINE)
+    return
+  }
   if (!found.length) {
     useSmashFx.getState().resolve(id, 'miss')
     // Only what this code does: no recheck happens later, and a prize of an unknown type is not opened (review of #943).
@@ -145,7 +155,7 @@ export async function strike(target: readonly [number, number, number], bare: bo
   }
   useSmashFx.getState().resolve(id, 'match')
   noteMining({ type: 'compile' }, s.owner)
-  const owner = useBlueprints.getState().owner || useCyberspace.getState().identity.pubkey
+  const owner = striker
   const now = Math.floor(Date.now() / 1000)
   const toys: ToyRow[] = found.map((f, i) => ({
     rowKey: `${owner}/${f.lookup}/${f.record?.id ?? f.maker}/${Date.now()}-${toyCount++}/${i}`,
@@ -162,6 +172,13 @@ export async function strike(target: readonly [number, number, number], bare: bo
 
 // The lines a smash with no prize leaves live with the rules (smash.ts missLine).
 export { OFFLINE_LINE, UNKNOWN_LINE } from './smash'
+/** When the identity changed while a smash compiled: its prizes are not given to another. */
+export const SWITCHED_LINE = 'The smash stopped: you changed identity or place.'
+/** When a waiting prize is not the identity's on screen, or its blocks have not loaded yet. */
+export const NOT_YOURS_LINE = 'This prize was found by another of your identities. Switch back to take it.'
+/** When a waiting prize is the identity's on screen but TERRAIN still holds another's blocks. */
+export const NOT_LOADED_LINE = 'Your blocks are still loading. Try again in a moment.'
+
 /** When more matched than one smash opens. */
 export const MORE_LINE = 'More may be waiting: this smash opened the first ones it found.'
 
@@ -177,6 +194,11 @@ export function takeToy(rowKey: string): boolean {
   const bp = useBlueprints.getState()
   const toy = bp.toys.find((t) => t.rowKey === rowKey)
   if (!toy) return false
+  // Credited to the identity on screen, and only when the prize is its own and TERRAIN's inventory is that identity's
+  // (review of #952): a tool goes into that inventory, a shard into that identity's ITEMS.
+  const me = useCyberspace.getState().identity.pubkey
+  if (toy.owner !== me) { useTerrain.getState().say(NOT_YOURS_LINE); return false }
+  if (toy.prize.type === 'tool' && (!terrainSession || terrainSession.owner !== (me || 'local'))) { useTerrain.getState().say(NOT_LOADED_LINE); return false }
   if (toy.prize.type === 'tool' && toy.prize.tool === 'quarry-charge') {
     // No cap: each compile adds its count (DECK-0010 §8.6), beside the Compiler for good.
     const n = toolCount(toy.prize)

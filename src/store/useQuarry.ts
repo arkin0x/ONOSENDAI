@@ -29,7 +29,7 @@ import { headNow, offsetOf, terrainSession, useTerrain, type TerrainSession } fr
 import { quarryHooks } from './quarryHooks'
 import { useCyberspace } from './useCyberspace'
 import { useSmashFx } from './useSmashFx'
-import { readDrops, writeDrops } from '../lib/terrain/terrainDb'
+import { carriedInto, readDrops, writeDrops, writeInventoryAndDrops } from '../lib/terrain/terrainDb'
 import { BLAST_HALF, FUSE_BEEPS, FUSE_MS, bodyAt, blastCells, cellKey, makeDrop, stepCells, tidyDrops, type Drop } from '../lib/terrain/quarry'
 import { blastSound, fuseBeeps, pickupSound } from '../lib/blueprint/smashSound'
 import { noteMining } from './miningStats'
@@ -72,6 +72,25 @@ let nextId = 0
 /** Each burning charge's fuse and beeps. */
 const fuses = new Map<number, { timer: ReturnType<typeof setTimeout>; stop: () => void }>()
 let pruneTimer: ReturnType<typeof setTimeout> | undefined
+
+/** A drop's identity: its cell, its kind and when it evaporates. */
+const dropId = (d: Drop): string => `${d.key}|${d.id}|${d.expires}`
+/**
+ * Drops collected on this page, by identity and drop: a read of the stored
+ * drops that was under way when one was collected never brings it back
+ * (review of #952). Each forgets its drops once they would have evaporated.
+ */
+const collected = new Map<string, Map<string, number>>()
+
+/** The identity on screen as TERRAIN names it (store/useTerrain.ts syncOnce: '' is 'local'). */
+const onScreen = (): string => useCyberspace.getState().identity.pubkey || 'local'
+
+/** A charge's fuse out early: its beeps stop at once, it is gone, and it clears nothing. */
+function fizzle(id: number): void {
+  const fuse = fuses.get(id)
+  fuses.delete(id)
+  if (fuse) { clearTimeout(fuse.timer); fuse.stop() }
+}
 
 /** Keep the drops: one row per identity (never published). A failed write keeps them in memory for this page. */
 function persist(owner: string, drops: readonly Drop[]): void {
@@ -117,7 +136,8 @@ export const useQuarry = create<QuarryState>((set, get) => ({
     if (!charge) return
     set({ charges: get().charges.filter((c) => c.id !== id) })
     const s = terrainSession
-    if (!s || s.owner !== charge.owner || s.plane !== charge.plane) {
+    // The identity on screen at the fuse's end, the field's and the plane: all the charge's, or it fizzles (review of #952).
+    if (!s || s.owner !== charge.owner || onScreen() !== charge.owner || s.plane !== charge.plane) {
       fuse?.stop()
       useTerrain.getState().say(FIZZLED)
       return
@@ -153,15 +173,22 @@ export const useQuarry = create<QuarryState>((set, get) => ({
     const now = Date.now()
     const got = new Map<number, number>()
     const left: Drop[] = []
+    const taken: Drop[] = []
     for (const d of st.drops) {
-      if (d.expires > now && keys.has(d.key)) got.set(d.id, (got.get(d.id) ?? 0) + 1)
+      if (d.expires > now && keys.has(d.key)) { got.set(d.id, (got.get(d.id) ?? 0) + 1); taken.push(d) }
       else left.push(d)
     }
     if (!got.size) return 0
     let n = 0
-    for (const [id, count] of got) { useTerrain.getState().carry(id, count); n += count }
+    let inv = useTerrain.getState().inventory
+    for (const [id, count] of got) { inv = carriedInto(inv, id, count); n += count }
+    const gone = collected.get(st.owner) ?? new Map<string, number>()
+    for (const d of taken) gone.set(dropId(d), d.expires)
+    collected.set(st.owner, gone)
+    useTerrain.setState({ inventory: inv })
     set({ drops: left, version: st.version + 1 })
-    persist(st.owner, left)
+    // Carried and gone in one transaction (terrainDb.ts writeInventoryAndDrops), so a crash never leaves a drop both.
+    if (s.db) void writeInventoryAndDrops(s.db, st.owner, inv, left).catch(() => { /* kept in memory */ })
     pickupSound()
     schedulePrune()
     return n
@@ -214,13 +241,31 @@ quarryHooks.fieldReady.push((s) => {
   void readDrops(s.db, owner).then((raw) => {
     if (terrainSession !== s || useQuarry.getState().owner !== owner) return
     const now = Date.now()
-    const kept = tidyDrops(raw, now)
+    // Never one collected on this page, even if the read began before it was (review of #952).
+    const gone = collected.get(owner)
+    if (gone) for (const [k, expires] of gone) if (expires <= now) gone.delete(k)
+    const read = tidyDrops(raw, now)
+    const kept = gone ? read.filter((d) => !gone.has(dropId(d))) : read
     // Drops made on this page before the read landed stay with what was kept.
     const fresh = useQuarry.getState().drops.filter((d) => !mine.includes(d))
-    useQuarry.setState({ drops: [...kept, ...fresh], version: useQuarry.getState().version + 1 })
+    const drops = [...kept, ...fresh]
+    useQuarry.setState({ drops, version: useQuarry.getState().version + 1 })
+    // What is stored follows: a collected drop the read still held is written away.
+    if (kept.length !== read.length || fresh.length) persist(owner, drops)
     schedulePrune()
     collectWhereYouAre(null)
   }, () => { /* none kept, or none readable: none */ })
+})
+
+// A switch of identity during a fuse fizzles it at once, its beeps with it (review of #952): it never clears another identity's layer.
+useCyberspace.subscribe((c, prev) => {
+  if (c.identity.pubkey === prev.identity.pubkey) return
+  const me = c.identity.pubkey || 'local'
+  const gone = useQuarry.getState().charges.filter((ch) => ch.owner !== me)
+  if (!gone.length) return
+  for (const ch of gone) fizzle(ch.id)
+  useQuarry.setState({ charges: useQuarry.getState().charges.filter((ch) => ch.owner === me) })
+  useTerrain.getState().say(FIZZLED)
 })
 
 quarryHooks.arm = (cell) => useQuarry.getState().arm(cell)

@@ -48,7 +48,7 @@ import { generateChunk } from '../lib/terrain/blocksClient'
 import { EMPTY, blockName, kindId, solid as isSolid } from '../lib/terrain/blocks'
 import { terrainWallItems } from '../lib/terrain/walls'
 import {
-  FOLD_AT, HOTBAR_SLOTS, emptyInventory, foldChunk, isCompiler, isQuarry, openTerrainDb, opKey, placeable, readKept, readOwner, withCharges, withCompiler, withoutCompiler, writeHint, writeInventory, writeOps, writeSurveyed,
+  FOLD_AT, HOTBAR_SLOTS, carriedInto, emptyInventory, foldChunk, isCompiler, isQuarry, openTerrainDb, opKey, placeable, readKept, readOwner, withCharges, withCompiler, withoutCompiler, writeHint, writeInventory, writeOps, writeSurveyed,
   type Inventory, type OpRow,
 } from '../lib/terrain/terrainDb'
 import { compilerGranted } from '../lib/blueprint/devGrant'
@@ -370,20 +370,11 @@ export const useTerrain = create<TerrainState>((set, get) => ({
   },
 
   carry: (id, n = 1) => {
-    if (!(id > EMPTY && id < 255) || !(n > 0)) return
     const inv = get().inventory
-    const counts = { ...inv.counts, [id]: (inv.counts[id] ?? 0) + n }
-    let hotbar = inv.hotbar
-    // A kind newly carried takes the first empty slot, so it is ready to place.
-    if (!hotbar.includes(id)) {
-      const free = hotbar.indexOf(0)
-      if (free >= 0) { hotbar = [...hotbar]; hotbar[free] = id }
-    }
-    // With an empty slot chosen, the kind just carried is chosen instead.
-    const slot = hotbar[inv.slot] === 0 && hotbar.includes(id) ? hotbar.indexOf(id) : inv.slot
-    // Everything else the inventory holds (the Compiler and how it came, the charges) stays: dropping it here hid the held
-    // Compiler until a reload (owner, 2026-11-27), and a reload then lost a made one.
-    saveInventory({ ...inv, counts, hotbar, slot })
+    // Everything else the inventory holds (the Compiler and how it came, the charges) stays (terrainDb.ts carriedInto):
+    // dropping it here hid the held Compiler until a reload (owner, 2026-11-27), and a reload then lost a made one.
+    const next = carriedInto(inv, id, n)
+    if (next !== inv) saveInventory(next)
   },
 
   place: (hit, air) => {

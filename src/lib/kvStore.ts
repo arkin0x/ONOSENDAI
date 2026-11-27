@@ -114,6 +114,8 @@ export const MOVED_PREFIXES: readonly string[] = [
   'onosendai:chips-folded:',
   // The finds NEARBY counts new (the orange +N) per player (store/nearbyNew.ts).
   'onosendai:nearby-new:',
+  // TERRAIN's air placing (the ghost block) on or off per player (store/airSwitch.ts).
+  'onosendai:air-place:',
 ]
 
 /**

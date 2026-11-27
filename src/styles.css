@@ -15936,18 +15936,29 @@ body:has(.terrainview.is-folded) .terrain-held { visibility: hidden; }
 /* ===== end blueprints: drawing and EXAMINE (bp-draw) ===== */
 
 /* ===== blueprints: the Compiler, SMASH and prizes (bp-core) ===== */
-/* SMASH beside PLACE, in a second column, so the tools keep their height and nothing above them moves. */
-.terrain-tools { display: grid; grid-template-columns: auto auto; grid-template-rows: 54px 38px; column-gap: 4px; row-gap: 4px; }
+/* The tools two by two on every screen (owner, 2026-11-27: "place distance adjustment should be under place button;
+   survey can go to the right of it under smash"): PLACE and SMASH level with FORWARD (the pad's 54px row), the ghost
+   block's distance under PLACE and SURVEY under SMASH, level with the pad's row under it (38px). Each cell is always
+   kept, so nothing moves when one comes or goes. Every tool is --tool-w wide (86px, narrower on a phone held upright). */
+.terrain-tools { --tool-w: 86px; display: grid; grid-template-columns: var(--tool-w) var(--tool-w); grid-template-rows: 54px 38px; column-gap: 4px; row-gap: 4px; }
 .terrain-tools > .terrain-act--place { grid-column: 1; grid-row: 1; }
-.terrain-tools > .terrain-tools__slot { grid-column: 1; grid-row: 2; }
 .terrain-tools > .terrain-tools__slot--smash { grid-column: 2; grid-row: 1; height: 54px; }
+.terrain-tools > .terrain-tools__slot--air { grid-column: 1; grid-row: 2; height: 38px; }
+.terrain-tools > .terrain-tools__slot--survey { grid-column: 2; grid-row: 2; }
+.terrain-tools .terrain-act { width: var(--tool-w); }
 .terrain-act--smash { --terrain-line: rgba(255, 154, 60, 0.7); height: 54px; color: #ffd2a6; }
-/* A phone held upright: the LOOK ball takes the room beside PLACE, so SMASH stands over PLACE in the one column. */
+/* A phone held upright: the LOOK ball and JUMP stand beside the tools, so the two columns share the room between WALK's
+   pad and JUMP (4px either side, 4px between) and each tool is a tile: its icon over its word, its key in the corner
+   the chamfer leaves square, as the hotbar's slots carry their numbers. Never wider than on a desktop. */
 @media (max-width: 699px) and (min-height: 521px) {
-  .terrain-tools { grid-template-columns: auto; grid-template-rows: 54px 54px 38px; }
-  .terrain-tools > .terrain-act--place { grid-column: 1; grid-row: 2; }
-  .terrain-tools > .terrain-tools__slot { grid-column: 1; grid-row: 3; }
-  .terrain-tools > .terrain-tools__slot--smash { grid-column: 1; grid-row: 1; }
+  .terrain-tools {
+    left: calc(var(--walkpad-left) + var(--walkside-width) + 4px);
+    --tool-w: clamp(40px, calc((100vw - var(--controls-right) - var(--walkside-width) - 4px - var(--walkpad-left) - var(--walkside-width) - 4px - 4px) / 2), 86px);
+  }
+  .terrain-tools .terrain-act { flex-direction: column; gap: 2px; padding: 0 2px; font-size: 8.5px; letter-spacing: 0.04em; line-height: 1.1; white-space: nowrap; }
+  .terrain-tools .terrain-act .terrain-key { position: absolute; top: 2px; right: 2px; margin: 0; padding: 0 2px; font-size: 7.5px; line-height: 1.2; opacity: 0.7; }
+  .terrain-tools .terrain-act--survey { padding-top: 2px; }
+  .terrain-tools .terrain-act--survey svg { width: 13px; height: 13px; }
 }
 .terrain-act--smash.is-bare { --terrain-line: rgba(255, 255, 255, 0.45); color: #fff; }
 .terrain-act--smash .terrain-act__bar { background: rgba(255, 154, 60, 0.2); }
@@ -16579,22 +16590,10 @@ div.bpt-tile__hit { cursor: default; }
 /* ===== end blueprints: cards in the world (bp-place) ===== */
 
 /* ===== TERRAIN: the ghost block's distance (air-place) ===== */
-/* Beside PLACE while the ghost block shows (terrain/AirStepper.tsx): under SMASH, right of SURVEY's slot, in the
-   tools' free cell. Its slot is always kept, hidden while the ghost is off, so nothing round it ever moves. */
-.terrain-tools > .terrain-tools__slot--air { grid-column: 2; grid-row: 2; height: 38px; }
+/* Under PLACE while the ghost block shows, or would with air placing off (terrain/AirStepper.tsx), in the tools' two by
+   two (.terrain-tools, its cell placed there). Its slot is always kept, hidden while no ghost belongs, so nothing round
+   it ever moves. */
 .terrain-tools__slot--air.is-off { visibility: hidden; }
-/* A phone held upright: one column with the LOOK ball beside it and the first-visit steps just over it, so the stepper
-   stands left of SMASH, over WALK's pad (its GRAVITY key 4px under it), and every tool keeps its place. */
-@media (max-width: 699px) and (min-height: 521px) {
-  .terrain-tools > .terrain-tools__slot--air { position: absolute; grid-area: auto; top: 0; right: calc(100% + 8px); height: 28px; }
-}
-/* A short screen (a phone on its side): the tools stand level with the cross, so the cell under SMASH reaches toward
-   the hold ring's name plate under the cross; the stepper stands over PLACE instead, above the cross's line. The
-   preview line and the message stand right of the ring there, clear of it (.terrain-smash-preview, .terrain-message). */
-@media (max-height: 520px) {
-  /* Over PLACE, the tool it serves: over SMASH it reached the hold ring's name plate in a short window (review of #949). */
-  .terrain-tools > .terrain-tools__slot--air { position: absolute; grid-area: auto; bottom: calc(100% + 4px); left: 0; height: 28px; }
-}
 /* The frame: TERRAIN's chamfer, the line and fill of every tool, in three cells: nearer, the distance, farther. */
 .terrain-air {
   --air-line: var(--terrain-line);
@@ -16603,7 +16602,7 @@ div.bpt-tile__hit { cursor: default; }
   display: grid;
   grid-template-columns: 26px 1fr 26px;
   align-items: stretch;
-  width: 86px;
+  width: var(--tool-w, 86px);
   height: 100%;
   background: var(--air-line);
   clip-path: polygon(var(--terrain-cut) 0, 100% 0, 100% calc(100% - var(--terrain-cut)), calc(100% - var(--terrain-cut)) 100%, 0 100%, 0 var(--terrain-cut));
@@ -16647,13 +16646,27 @@ div.bpt-tile__hit { cursor: default; }
   font-variant-numeric: tabular-nums;
 }
 .terrain-air.is-bad .terrain-air__value { color: #ffb4b4; border-color: rgba(200, 100, 100, 0.45); }
-/* The wheel's hint, where there is a wheel: beside the frame with a clear gap, dimmer than the number, never in its cell. */
+/* The middle is a button: a tap turns air placing off and on (store/airSwitch.ts). */
+.terrain-air__value { padding: 0; border-top: 0; border-bottom: 0; background: transparent; font-family: inherit; color: inherit; text-shadow: inherit; touch-action: none; cursor: pointer; }
+.terrain-air__value:active { background: rgba(124, 255, 196, 0.22); }
+.terrain-air__value:disabled { cursor: default; }
+/* Off: the frame's line dims, − and + dim with it, and the middle shows an eye struck through over the number struck
+   through, so it reads as off at a glance and still says which distance comes back. */
+.terrain-air.is-paused { --air-line: rgba(255, 255, 255, 0.28); }
+.terrain-air.is-paused .terrain-air__value { flex-direction: column; gap: 0; color: rgba(255, 255, 255, 0.82); }
+.terrain-air.is-paused .terrain-air__struck { font-size: 9px; line-height: 1; opacity: 0.6; text-decoration-thickness: 1.5px; }
+/* A phone held upright: the stepper as narrow as its tile, the middle a little wider than − and +. */
+@media (max-width: 699px) and (min-height: 521px) {
+  .terrain-air { grid-template-columns: 1fr 1.15fr 1fr; }
+  .terrain-air__value { font-size: 11px; }
+}
+/* The keys' hints, where there is a wheel and a keyboard: under the frame with a clear gap (SURVEY stands beside it,
+   the hotbar further under), dimmer than the number, never in its cell. */
 .terrain-tools__slot--air { position: relative; }
 .terrain-air__hint {
   position: absolute;
-  left: calc(100% + 8px);
-  top: 50%;
-  transform: translateY(-50%);
+  left: 0;
+  top: calc(100% + 6px);
   display: none;
   align-items: center;
   gap: 4px;
@@ -16668,11 +16681,11 @@ div.bpt-tile__hit { cursor: default; }
 @media (hover: hover) and (pointer: fine) {
   .terrain-air__hint { display: inline-flex; }
 }
-/* A narrow window held upright: SMASH stands right beside the stepper, so the hint stays in the tooltip. */
+/* A narrow window held upright: the hotbar stands right under the tools, so the hints stay in the tooltip. */
 @media (hover: hover) and (pointer: fine) and (max-width: 699px) and (min-height: 521px) {
   .terrain-air__hint { display: none; }
 }
-/* A short window: the hint would reach toward the cross and the hold ring's plate, so it stays in the tooltip too. */
+/* A short window: the hotbar stands close under the tools there too, so the hints stay in the tooltip. */
 @media (hover: hover) and (pointer: fine) and (max-height: 520px) {
   .terrain-air__hint { display: none; }
 }

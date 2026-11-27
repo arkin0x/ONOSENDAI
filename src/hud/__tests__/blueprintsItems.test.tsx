@@ -75,6 +75,7 @@ import { useShards } from '../../store/useShards'
 import { NEW_MARK } from '../ItemsGrid'
 import { InventoryPanel, useItemsModal, useOpenActions } from '../InventoryPanel'
 import { NO_BLUEPRINTS, NO_HELD, cardViews, settingsLine, useBlueprintsModal } from '../blueprint/BlueprintsModal'
+import { COMPILER_LOOKUP, GAME_NO_DEPLOY, compilerRecord } from '../../lib/blueprint/gameBlueprint'
 
 /** Two blocks side by side: a Gridstone and a Glowcore. */
 const ARR: Arrangement = { size: [2, 1, 1], cells: Uint16Array.from([1, 42]) }
@@ -202,7 +203,7 @@ describe('the BLUEPRINTS modal', () => {
     const mine = rowOf(m, shrine.rowKey)
     expect(textOf(mine)).toContain('Sky Shrine')
     expect(textOf(mine)).toContain('by you')
-    expect(textOf(mine)).toContain('MATERIALS 1 known / 1 unknown · CONSTRUCTION May be built anywhere. · PRIZE Hints only')
+    expect(textOf(mine)).toContain('MATERIALS 1 known / 1 unknown · CONSTRUCTION May be built anywhere · PRIZE Hints only')
     expect(textOf(mine)).toContain(NEW_MARK)
     expect(isNewBlueprint(useItemsSeen.getState().seen, shrine)).toBe(false)
     expect(isNewBlueprint(useItemsSeen.getState().seen, cipher)).toBe(false)
@@ -211,7 +212,7 @@ describe('the BLUEPRINTS modal', () => {
     const held = rowOf(m, cipher.rowKey)
     expect(textOf(held)).toMatch(/^Pocket Cipherby npub1/)
     expect(textOf(held)).toContain('left here by npub1')
-    expect(textOf(held)).toContain('MATERIALS 1 known / 1 unknown · CONSTRUCTION Must be built in a specific h4 region. · PRIZE Hints only')
+    expect(textOf(held)).toContain('MATERIALS 1 known / 1 unknown · CONSTRUCTION Must be built in a specific h4 region · PRIZE Hints only')
     await m.press(/^✕$/)
     expect(useBlueprintsModal.getState().open).toBe(false)
     await m.unmount()
@@ -337,6 +338,32 @@ describe('the BLUEPRINTS modal', () => {
     await m.unmount()
   })
 
+  it('the game\'s Compiler blueprint is by ONOSENDAI, wears the item mark, and is never placed: a plain line instead', async () => {
+    const record = await compilerRecord({ iso: 'data:image/png;base64,AAAA' })
+    const compiler: BlueprintCard = { rowKey: `${me}/${record.id}`, owner: me, lookup: COMPILER_LOOKUP, record: record as NostrEvent, source: 'game', prizeKind: 'tool', at: SEEN_SINCE + 30 }
+    const shrine = made('Sky Shrine', SEEN_SINCE + 5, { prizeKind: 'sno' })
+    holdBlueprints([compiler, shrine])
+    useBlueprintsModal.setState({ open: true, focus: compiler.rowKey })
+    const m = await mount(createElement(InventoryPanel))
+    const row = rowOf(m, compiler.rowKey)
+    expect(textOf(row)).toContain('by ONOSENDAI')
+    expect(textOf(row)).toContain(GAME_NO_DEPLOY)
+    const acts = under(row, (n) => n.props.role === 'group').map((g) => under(g, (n) => n.type === 'button').map(textOf))[0]
+    expect(acts).toEqual(['EXAMINE', 'ARCHIVE'])
+    expect(row.props['data-item']).toBe(true)
+    expect(under(row, (n) => n.props.className === 'bp-item-tab')).toHaveLength(1)
+    expect(String(under(row, (n) => String(n.props.className ?? '').split(' ').includes('chamfer'))[0]!.props.className)).toContain('bp-item')
+    // ITEMS' own tile wears it too.
+    const tile = tiles(grids(m)[2]!).find((t) => t.props['data-tile'] === compiler.rowKey)!
+    expect(under(tile, (n) => n.props.className === 'bp-item-tab')).toHaveLength(1)
+    // A shard prize does not.
+    await m.press(/^MINE 1$/)
+    const mine = rowOf(m, shrine.rowKey)
+    expect(mine.props['data-item']).toBeUndefined()
+    expect(under(mine, (n) => n.props.className === 'bp-item-tab')).toHaveLength(0)
+    await m.unmount()
+  })
+
   it('an empty HELD says where blueprints are found', async () => {
     holdBlueprints([])
     useBlueprintsModal.setState({ open: true, focus: null })
@@ -351,7 +378,7 @@ describe('a card\'s words', () => {
   it('reads its three settings in one short line, as a finder sees it', () => {
     const v = cardViews(made('Sky Shrine', SEEN_SINCE + 5))!
     expect(v.full?.revealed.size).toBe(2)
-    expect(settingsLine(v)).toBe('MATERIALS 1 known / 1 unknown · CONSTRUCTION May be built anywhere. · PRIZE Hints only')
+    expect(settingsLine(v)).toBe('MATERIALS 1 known / 1 unknown · CONSTRUCTION May be built anywhere · PRIZE Hints only')
     expect(cardViews(found('Pocket Cipher', SEEN_SINCE, generateSecretKey()))!.full).toBeNull()
   })
 })

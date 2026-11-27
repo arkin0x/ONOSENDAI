@@ -43,8 +43,8 @@ export const TEXT_MAX = 280
 export const VIEW_MAX_CHARS = 16_384
 /** The `encrypted` tag's mark: the key is made by building, never fetched (§5.1). */
 export const PRIZE_MARK = 'cyberspace:blueprint'
-/** The relay whitelist needs the owner's go: until then records stay on this device and cards are placed LOCAL only. */
-export const BLUEPRINT_RELAY_READY = false
+/** The relay takes kind 33343 records (cyberspace-relay #52, 2026-11-27, the owner's go). Cards still travel only inside bags and sealed entries (§7.1, §10). Set false to keep records and cards on this device. */
+export const BLUEPRINT_RELAY_READY = true
 
 /** An arrangement in its box: its size and every cell's block id in scan order (cellIndex); 0 is empty. */
 export interface Arrangement {
@@ -172,8 +172,9 @@ export interface SheetPrize {
   text?: string
   views?: Partial<Record<PrizeView, string>>
   /**
-   * The prize's own name, present only when its maker chose to show it (not in DECK-0010 yet: a reader ignores a
-   * field it does not know, §5.3, so this is safe to write and is proposed to the spec as prize.name).
+   * The prize's own name, present only when its maker chose to show it (DECK-0010 §5.3): 1 to 64 characters, not empty
+   * once trimmed, no control characters. A malformed one fails the whole record (§5.4). Readers show it trimmed, with
+   * runs of whitespace as one space.
    */
   name?: string
 }
@@ -272,7 +273,7 @@ export interface RecordEvent { id: string; pubkey: string; created_at: number; k
 
 /** A record's template (§5.1): the sheet as content; d, version, the sealed prize, the title and alt as tags. */
 export function recordTemplate(o: { lookup: string; sheet: Sheet; sealed: string; title: string; createdAt: number; noBroadcast?: boolean }): { kind: number; created_at: number; tags: string[][]; content: string } {
-  const title = [...o.title.trim()].slice(0, TITLE_MAX).join('')
+  const title = [...plainText(o.title)].slice(0, TITLE_MAX).join('').trim()
   return {
     kind: BLUEPRINT_RECORD_KIND,
     created_at: o.createdAt,
@@ -319,32 +320,90 @@ export function integersOnly(json: string): boolean {
   return true
 }
 
+/** The tags a record may carry, each at most once, with its exact element count (DECK-0010 §5.1, §5.4). */
+export const RECORD_TAGS: Readonly<Record<string, number>> = { d: 2, version: 2, encrypted: 4, title: 2, alt: 2, 'no-broadcast': 1 }
+const SHEET_FIELDS = ['size', 'pal', 'cells', 'lock', 'height', 'prize']
+const SIZE_FIELDS = ['x', 'y', 'z']
+const PRIZE_FIELDS = ['reveal', 'text', 'name', 'views']
+/**
+ * The UTF-16 units of `s` that free text may not hold (§5.3): control
+ * characters (U+0000 to U+001F, U+007F) and lone surrogates. Scanned by hand,
+ * not by a lookbehind, which Safari 15.4 cannot parse.
+ */
+function badUnits(s: string): number[] {
+  const out: number[] = []
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i)
+    if (c <= 0x1f || c === 0x7f) out.push(i)
+    else if (c >= 0xd800 && c <= 0xdbff) {
+      const n = s.charCodeAt(i + 1)
+      if (n >= 0xdc00 && n <= 0xdfff) i++
+      else out.push(i)
+    } else if (c >= 0xdc00 && c <= 0xdfff) out.push(i)
+  }
+  return out
+}
+/** Free text holds no control character and no lone surrogate (§5.3). */
+export const freeTextOk = (s: unknown): boolean => typeof s === 'string' && badUnits(s).length === 0
+/** Free text as a writer puts it in a record: control characters (a line break, a tab) and lone surrogates as spaces, trimmed. */
+export function plainText(s: string): string {
+  const bad = new Set(badUnits(s))
+  if (!bad.size) return s.trim()
+  let out = ''
+  for (let i = 0; i < s.length; i++) out += bad.has(i) ? ' ' : s[i]
+  return out.trim()
+}
+
+/** A record's canonical serialization (§5.2): its fields in this order, compact. What a card's content must be, byte for byte. */
+export function canonicalRecord(ev: RecordEvent): string {
+  return JSON.stringify({ id: ev.id, pubkey: ev.pubkey, created_at: ev.created_at, kind: ev.kind, tags: ev.tags, content: ev.content, sig: ev.sig })
+}
+
 /** Why a record fails §5.4 (apart from its id and signature, which the caller checks), or null when it passes. */
 export function recordRefusal(ev: RecordEvent): string | null {
   if (ev.kind !== BLUEPRINT_RECORD_KIND) return 'kind'
   if (serializedLength(ev) > RECORD_MAX_BYTES) return 'too large'
-  const tags = (n: string): string[][] => ev.tags.filter((t) => t[0] === n)
-  const d = tags('d'), v = tags('version'), e = tags('encrypted'), ti = tags('title')
-  if (d.length !== 1 || !HEX64.test(d[0][1] ?? '')) return 'd'
-  if (v.length !== 1 || v[0][1] !== '1') return 'version'
-  if (e.length !== 1 || e[0][1] !== 'aes-256-gcm' || typeof e[0][2] !== 'string' || e[0][3] !== PRIZE_MARK) return 'encrypted'
-  if (ti.length > 1 || (ti.length && [...(ti[0][1] ?? '')].length > TITLE_MAX)) return 'title'
-  for (const bad of ['C', 'H', 'h', 'hint', '-', 'contents', 'X', 'Y', 'Z', 'S']) if (tags(bad).length) return `forbidden tag ${bad}`
+  if (!Array.isArray(ev.tags)) return 'tags'
+  const seen = new Set<string>()
+  for (const t of ev.tags) {
+    if (!Array.isArray(t) || typeof t[0] !== 'string' || !Object.prototype.hasOwnProperty.call(RECORD_TAGS, t[0])) return `unknown tag ${Array.isArray(t) ? String(t[0]) : ''}`
+    if (seen.has(t[0])) return `tag ${t[0]} twice`
+    if (t.length !== RECORD_TAGS[t[0]] || t.some((x) => typeof x !== 'string')) return `tag ${t[0]} elements`
+    seen.add(t[0])
+  }
+  const tag = (n: string): string[] | undefined => ev.tags.find((t) => t[0] === n)
+  const d = tag('d'), v = tag('version'), e = tag('encrypted'), ti = tag('title'), alt = tag('alt')
+  if (!d || !HEX64.test(d[1])) return 'd'
+  if (!v || v[1] !== '1') return 'version'
+  if (!e || e[1] !== 'aes-256-gcm' || e[3] !== PRIZE_MARK) return 'encrypted'
+  if (ti && [...ti[1]].length > TITLE_MAX) return 'title'
+  if (alt && new TextEncoder().encode(alt[1]).length > TEXT_MAX) return 'alt'
   let sheet: Sheet
   try { sheet = JSON.parse(ev.content) as Sheet } catch { return 'content' }
-  if (!integersOnly(ev.content)) return 'number form'
   if (!sheet || typeof sheet !== 'object' || Array.isArray(sheet)) return 'content'
+  if (Object.keys(sheet).some((k) => !SHEET_FIELDS.includes(k))) return 'unknown sheet field'
+  if (sheet.size && typeof sheet.size === 'object' && Object.keys(sheet.size).some((k) => !SIZE_FIELDS.includes(k))) return 'unknown size field'
+  if (sheet.prize && typeof sheet.prize === 'object' && Object.keys(sheet.prize).some((k) => !PRIZE_FIELDS.includes(k))) return 'unknown prize field'
+  // Written plainly: compact, no escape but \" and \\ (read, written back, compared).
+  if (JSON.stringify(sheet) !== ev.content) return 'content not written plainly'
+  if (!integersOnly(ev.content)) return 'number form'
+  for (const s of [ti?.[1], alt?.[1], sheet.prize?.text, sheet.prize?.name]) if (s !== undefined && !freeTextOk(s)) return 'free text'
   if (!readSheetShape(sheet)) return 'shape'
   if (sheet.lock === 'location') {
     if (!Number.isInteger(sheet.height) || sheet.height! < 1 || sheet.height! > 85) return 'height'
   } else if (sheet.lock !== 'standard' || 'height' in sheet) return 'lock'
   const p = sheet.prize
-  if (!p || !PRIZE_REVEALS.includes(p.reveal)) return 'prize reveal'
+  if (!p || typeof p !== 'object' || !PRIZE_REVEALS.includes(p.reveal)) return 'prize reveal'
   if ('text' in p && (typeof p.text !== 'string' || [...p.text].length > TEXT_MAX)) return 'prize text'
-  if ('name' in p && (typeof p.name !== 'string' || [...p.name].length > TITLE_MAX)) return 'prize name'
+  // A malformed or empty prize name fails the record (§5.4), never read as no name.
+  if ('name' in p && (typeof p.name !== 'string' || [...p.name].length > TITLE_MAX || !p.name.trim())) return 'prize name'
   if (p.reveal === 'hidden' && ('text' in p || 'views' in p)) return 'hidden prize shows something'
   if (p.reveal === 'description' && (typeof p.text !== 'string' || !p.text.trim() || 'views' in p)) return 'description'
-  if ((p.reveal === 'silhouette' || p.reveal === 'render') && (!p.views || typeof p.views !== 'object' || !Object.keys(p.views).length || Object.keys(p.views).some((k) => !PRIZE_VIEWS.includes(k as PrizeView)))) return 'views'
+  if (p.reveal === 'silhouette' || p.reveal === 'render') {
+    if (!p.views || typeof p.views !== 'object' || Array.isArray(p.views)) return 'views'
+    const keys = Object.keys(p.views)
+    if (!keys.length || keys.some((k) => !PRIZE_VIEWS.includes(k as PrizeView))) return 'views'
+  } else if ('views' in p) return 'views'
   return null
 }
 
@@ -371,7 +430,8 @@ export function readRecord(ev: RecordEvent): RecordView | null {
   const views: Partial<Record<PrizeView, string>> = {}
   for (const [k, uri] of Object.entries(sheet.prize.views ?? {})) if (typeof uri === 'string' && uri.length <= VIEW_MAX_CHARS && DATA_URI.test(uri)) views[k as PrizeView] = uri
   const title = ev.tags.find((t) => t[0] === 'title')?.[1]?.trim()
-  const prizeName = typeof sheet.prize.name === 'string' && sheet.prize.name.trim() ? sheet.prize.name.trim() : null
+  // Shown trimmed, with runs of whitespace as one space (§5.3); a record with an empty one never got this far.
+  const prizeName = typeof sheet.prize.name === 'string' ? sheet.prize.name.trim().replace(/\s+/g, ' ') : null
   return { lookup: ev.tags.find((t) => t[0] === 'd')![1], title: title || 'blueprint', sheet, cells, sealed: ev.tags.find((t) => t[0] === 'encrypted')![2], views, prizeName }
 }
 
@@ -419,7 +479,8 @@ export function cardTemplate(record: RecordEvent, coordHex: string, createdAt: n
     kind: BLUEPRINT_CARD_KIND,
     created_at: createdAt,
     tags: [['C', coordHex], ['-'], ...(lineage ? [['d', lineage]] : [])],
-    content: JSON.stringify({ id: record.id, pubkey: record.pubkey, created_at: record.created_at, kind: record.kind, tags: record.tags, content: record.content, sig: record.sig }),
+    // The record's canonical serialization, byte for byte (§5.2, §7.1).
+    content: canonicalRecord(record),
   }
 }
 
@@ -429,6 +490,8 @@ export function cardRecord(card: Pick<RecordEvent, 'kind' | 'content'>): RecordE
   let r: RecordEvent
   try { r = JSON.parse(card.content) as RecordEvent } catch { return null }
   if (!r || typeof r !== 'object' || typeof r.id !== 'string' || typeof r.pubkey !== 'string' || typeof r.sig !== 'string' || !Array.isArray(r.tags) || typeof r.content !== 'string') return null
+  // The content must be the record's canonical serialization, byte for byte (§7.2 step 2): any other order or spacing drops the card.
+  if (canonicalRecord(r) !== card.content) return null
   return recordRefusal(r) ? null : r
 }
 

@@ -54,7 +54,7 @@ import { compilerGranted } from '../lib/blueprint/devGrant'
 import type { Position, ViewAxes } from '../lib/space'
 import type { RayHit } from '../lib/terrain/raycast'
 import {
-  applyCarried, connectShareHost, fieldClosing, liveChanged, noteChange, noteMove, prepareChunk, READ_RING, identityLeaving, readNear, sharedKeys, surveyedForYou, terrainClosed, terrainOpened, viewOf,
+  applyCarried, connectShareHost, fieldClosing, liveChanged, noteChange, noteChanges, noteMove, prepareChunk, READ_RING, identityLeaving, readNear, sharedKeys, surveyedForYou, terrainClosed, terrainOpened, viewOf,
 } from './terrainShare'
 import { loadBuilder, releaseBuilderDb } from '../lib/terrain/builderKey'
 import './terrainShareLive'
@@ -404,10 +404,12 @@ export const useTerrain = create<TerrainState>((set, get) => ({
     if (cells.some((c) => !cellInReach(s, c))) return OUT_OF_REACH
     const slots = new Set<ChunkSlot | null>(cells.map((c) => s.world.slotAtCs(c[0], c[1], c[2])))
     for (const sl of slots) if (!surveyShown(s, sl)) return 'Survey this chunk before building in it.'
+    const changes: Change[] = []
     for (const [dx, dy, dz] of cells) {
       const change = s.world.setCs(dx, dy, dz, EMPTY)
-      if (change) record(s, change)
+      if (change) changes.push(change)
     }
+    recordMany(s, changes)
     return null
   },
 
@@ -475,20 +477,40 @@ async function foldKey(s: TerrainSession, key: string): Promise<void> {
 
 /** Record a change: the log in memory and on the device, the layer folded when the log is long. */
 function record(s: TerrainSession, change: Change): void {
-  const slot = s.world.slotByKey(change.chunk)
-  const ownBefore = slot?.own ? slot.own[change.cell] : change.was
-  if (slot?.own) slot.own[change.cell] = change.id
-  // What it was, for the layer: setting a cell to its ground over someone else's block is written as a change (DECK-0009 §5.4).
-  noteChange(change.chunk, slot?.generated ? { cell: change.cell, ownBefore, ownAfter: change.id, shownBefore: change.was, ground: slot.generated[change.cell] } : undefined)
-  const seq = s.nextSeq++
-  const list = s.pending.get(change.chunk) ?? []
-  list.push({ seq, change })
-  s.pending.set(change.chunk, list)
-  s.version++
-  const row: OpRow = { rowKey: opKey(s.owner, seq), owner: s.owner, chunk: change.chunk, seq, cell: change.cell, id: change.id, t: Date.now() }
-  if (s.db) keep(writeOps(s.db, [row]))
+  recordMany(s, [change])
+}
+
+/**
+ * Changes kept as one batch: one database write and one state update for
+ * all of them, however many (a smash can clear thousands of cells: review of
+ * #943), and each chunk past FOLD_AT folded once.
+ */
+function recordMany(s: TerrainSession, changes: readonly Change[]): void {
+  if (!changes.length) return
+  const rows: OpRow[] = []
+  const full = new Set<string>()
+  const noted = new Map<string, Array<Parameters<typeof noteChange>[1]>>()
+  const t = Date.now()
+  for (const change of changes) {
+    const slot = s.world.slotByKey(change.chunk)
+    const ownBefore = slot?.own ? slot.own[change.cell] : change.was
+    if (slot?.own) slot.own[change.cell] = change.id
+    // What it was, for the layer: setting a cell to its ground over someone else's block is written as a change (DECK-0009 §5.4).
+    const notes = noted.get(change.chunk) ?? []
+    notes.push(slot?.generated ? { cell: change.cell, ownBefore, ownAfter: change.id, shownBefore: change.was, ground: slot.generated[change.cell] } : undefined)
+    noted.set(change.chunk, notes)
+    const seq = s.nextSeq++
+    const list = s.pending.get(change.chunk) ?? []
+    list.push({ seq, change })
+    s.pending.set(change.chunk, list)
+    s.version++
+    rows.push({ rowKey: opKey(s.owner, seq), owner: s.owner, chunk: change.chunk, seq, cell: change.cell, id: change.id, t })
+    if (list.length >= FOLD_AT) full.add(change.chunk)
+  }
+  for (const [chunk, notes] of noted) noteChanges(chunk, notes)
+  if (s.db) keep(writeOps(s.db, rows))
   useTerrain.setState({ waiting: countWaiting(s) })
-  if (list.length >= FOLD_AT) void foldKey(s, change.chunk)
+  for (const chunk of full) void foldKey(s, chunk)
 }
 
 /** One more of something done, for the tutorial's TERRAIN route (TerrainState `tally`). */

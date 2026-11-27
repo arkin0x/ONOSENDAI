@@ -30,6 +30,8 @@ import type { NostrEvent } from '../lib/events'
 
 interface BlueprintsState {
   owner: string
+  /** The identity whose cards have been read from this device (load finished), or ''. */
+  loadedFor: string
   cards: BlueprintCard[]
   /** Prizes waiting to be taken (BUILT). */
   toys: ToyRow[]
@@ -40,6 +42,8 @@ interface BlueprintsState {
   load: (owner?: string) => Promise<void>
   /** Keep a blueprint this identity made (MINE). */
   addMade: (card: Omit<BlueprintCard, 'rowKey' | 'owner' | 'source' | 'at'>) => BlueprintCard
+  /** The game's own blueprint (lib/blueprint/gameBlueprint.ts), kept like any card, marked NEW. */
+  addGame: (card: Omit<BlueprintCard, 'rowKey' | 'owner' | 'source' | 'at'>) => BlueprintCard
   /** Keep a blueprint found somewhere (HELD): the maker's record, and who left it there when that was someone else. Null when already held. */
   addFound: (record: NostrEvent, leftBy?: string) => BlueprintCard | null
   /** Records with this lookup: held cards first, then everything this device has seen. */
@@ -76,6 +80,7 @@ const seenMemory = new Map<string, NostrEvent>()
 
 export const useBlueprints = create<BlueprintsState>((set, get) => ({
   owner: '',
+  loadedFor: '',
   cards: [],
   toys: [],
   putAway: new Set(),
@@ -87,7 +92,7 @@ export const useBlueprints = create<BlueprintsState>((set, get) => ({
       useCyberspace.subscribe((s, prev) => { if (s.identity.pubkey !== prev.identity.pubkey) void get().load(s.identity.pubkey) })
     }
     const who = owner ?? useCyberspace.getState().identity.pubkey
-    if (who !== get().owner) set({ owner: who, cards: [], toys: [], putAway: new Set(), fresh: new Set() })
+    if (who !== get().owner) set({ owner: who, loadedFor: '', cards: [], toys: [], putAway: new Set(), fresh: new Set() })
     const d = await database()
     if (!d || get().owner !== who) return
     const [cards, toys] = await Promise.all([readCards(d, who).catch(() => []), readToys(d, who).catch(() => [])])
@@ -96,7 +101,15 @@ export const useBlueprints = create<BlueprintsState>((set, get) => ({
     for (const c of get().cards) byKey.set(c.rowKey, c)
     const toyKeys = new Map(toys.map((t) => [t.rowKey, t]))
     for (const t of get().toys) toyKeys.set(t.rowKey, t)
-    set({ cards: [...byKey.values()].sort((a, b) => b.at - a.at), toys: [...toyKeys.values()] })
+    set({ cards: [...byKey.values()].sort((a, b) => b.at - a.at), toys: [...toyKeys.values()], loadedFor: who })
+  },
+
+  addGame: (c) => {
+    const owner = get().owner || useCyberspace.getState().identity.pubkey
+    const card: BlueprintCard = { prizeKind: 'tool', ...c, rowKey: `${owner}/${c.record.id}`, owner, source: 'game', at: now() }
+    set({ owner, cards: [card, ...get().cards.filter((x) => x.rowKey !== card.rowKey)], fresh: new Set([...get().fresh, card.rowKey]) })
+    void persist((d) => writeCards(d, [card]))
+    return card
   },
 
   addMade: (c) => {

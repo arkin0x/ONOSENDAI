@@ -1,8 +1,8 @@
 /**
  * chirality.test.ts - every flat blueprint picture is a view a player could
  * really see (axis audit, 2026-11-27; CYBERSPACE_V2 §11.1: facing +Z with +Y
- * up, +X is on the right). An L-shaped build, cells (0,0,0), (1,0,0) and
- * (0,0,1), is projected by the game's own frame as the oracle: cyberspace to
+ * up, +X is on the right). A corner of three arms, cells (0,0,0), (1,0,0),
+ * (0,0,1) and (0,1,0) (3D, so a vertical flip is caught too), is projected by the game's own frame as the oracle: cyberspace to
  * render through sno-core toRender (Z negated) and a three.js camera placed
  * as the game places it (lib/space.ts topDownQuaternion for the view from
  * above). Each drawing must put every pair of cells on the same sides as the
@@ -17,12 +17,13 @@ import { axisGrid, isoLayout, isoPoint, type AxisView } from '../draw'
 import { projectPrizePoint } from '../prizeViews'
 import { cellIndex, type FinderView } from '../format'
 
-const L_CELLS: Array<[number, number, number]> = [[0, 0, 0], [1, 0, 0], [0, 0, 1]]
-const size: [number, number, number] = [2, 1, 2]
+const L_CELLS: Array<[number, number, number]> = [[0, 0, 0], [1, 0, 0], [0, 0, 1], [0, 1, 0]]
+const size: [number, number, number] = [2, 2, 2]
+const L_INDEX = L_CELLS.map(([x, y, z]) => cellIndex(size, x, y, z))
 const view: FinderView = {
   size,
-  occupied: Array.from({ length: 4 }, (_, i) => [0, 1, 2].includes(i)),
-  revealed: new Map([[0, 1], [1, 1], [2, 1]]),
+  occupied: Array.from({ length: 8 }, (_, i) => L_INDEX.includes(i)),
+  revealed: new Map(L_INDEX.map((i) => [i, 1])),
 }
 const centre = (c: readonly number[]): [number, number, number] => [c[0] + 0.5, c[1] + 0.5, c[2] + 0.5]
 
@@ -64,7 +65,7 @@ describe('chirality: the pictures match the game camera', () => {
       const g = axisGrid(view, v)
       const shown = g.cells.filter((c): c is NonNullable<typeof c> => !!c)
       const drawn = shown.map((c) => [c.col, c.row] as [number, number])
-      const seen = shown.map((c) => oracle(cam, centre(L_CELLS[[cellIndex(size, 0, 0, 0), cellIndex(size, 1, 0, 0), cellIndex(size, 0, 0, 1)].indexOf(c.index)])))
+      const seen = shown.map((c) => oracle(cam, centre(L_CELLS[L_INDEX.indexOf(c.index)])))
       expect(shown.length).toBeGreaterThanOrEqual(2)
       expect(sameSides(drawn, seen)).toBe(true)
     })
@@ -86,6 +87,13 @@ describe('chirality: the pictures match the game camera', () => {
       expect(sameSides(drawn, seen)).toBe(true)
     })
   }
+
+  it('a drawing flipped top to bottom would fail too', () => {
+    const cam = camera('x')
+    const flipped = L_CELLS.map((c) => { const p = projectPrizePoint(centre(c), 'x'); return [p[0], -p[1]] as [number, number] })
+    const seen = L_CELLS.map((c) => oracle(cam, centre(c)))
+    expect(sameSides(flipped, seen)).toBe(false)
+  })
 
   it('a mirrored drawing would fail: the test can tell a mirror image', () => {
     const cam = camera('z')

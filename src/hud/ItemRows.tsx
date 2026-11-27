@@ -110,8 +110,9 @@ export function TakeCopy({ record, placer }: { record: NostrEvent; placer?: stri
 }
 
 /** Who left a card in a chest: the card's own signer when its signature checked out, else the chest's place's author. */
+/** Who left a card found in a chest: the chest's signer (DECK-0010 §7.2), falling back to the card's own signer. */
 function cardPlacer(entry: ChestEntry, place: HeldPlace | null): string | undefined {
-  return entry.verified ? entry.event.pubkey : place?.author
+  return place?.author ?? (entry.verified ? entry.event.pubkey : undefined)
 }
 
 /** A chest's contents taken: cards into BLUEPRINTS, everything else into ITEMS (useInventory take). */

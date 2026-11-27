@@ -28,7 +28,7 @@
  *    toys, scene/PrizeToys.tsx); no match leaves grey dust and one line.
  *
  * A bare hand (anything but the Compiler in hand) smashes the same way with a
- * longer hold and a smaller reach (the 3 by 3 by 3 box round the hit), and
+ * longer hold and a smaller reach (a build of 3 by 3 by 3 at most), and
  * only the Compiler's own recipe compiles for it.
  */
 
@@ -42,14 +42,14 @@ import type { NostrEvent } from '../events'
  * ---- The smash's feel. The owner tunes these to taste (2026-11-27). ----
  * The hold, in milliseconds, before the swing, with the Compiler and with a
  * bare hand; the hold bar and the swing's animation stretch to fit it. And
- * how far a smash reaches from the hit cell on each axis: the Compiler takes
- * the whole 16 by 16 by 16 window (DECK-0010 §4: 8 below, 7 above), a bare
- * hand only the 3 by 3 by 3 box round the hit (1 each way).
+ * how many cells a smash reaches on each axis: the Compiler 16 (DECK-0010 §4),
+ * a bare hand 3. A build at most that on every axis compiles wherever it is
+ * struck (lib/blueprint/arrangement.ts gather).
  */
 export const COMPILER_HOLD_MS = 4000
 export const BARE_HOLD_MS = 7000
-export const COMPILER_REACH = { below: WINDOW_BELOW, above: WINDOW_ABOVE } as const
-export const BARE_REACH = { below: 1, above: 1 } as const
+export const COMPILER_REACH = WINDOW_BELOW + WINDOW_ABOVE + 1
+export const BARE_REACH = 3
 /* ---- end of the owner's tuning ---- */
 /** From the end of the hold to the impact: the swing. */
 export const SWING_MS = 180
@@ -121,15 +121,16 @@ export function rankRecords(records: readonly RecordEvent[], lookup: string, dep
 }
 
 /** The prizes behind the records of one lookup, opened with the key, in order; a record whose prize does not open is passed over. */
-export async function prizesOf(records: readonly RecordEvent[], lookup: string, key: Uint8Array, deps: Pick<SmashDeps, 'me' | 'follows' | 'muted'>, max = PRIZES_MAX, unknown = { count: 0 }): Promise<Found[]> {
+export async function prizesOf(records: readonly RecordEvent[], lookup: string, key: Uint8Array, deps: Pick<SmashDeps, 'me' | 'follows' | 'muted'>, max = PRIZES_MAX, unknown = { count: 0 }, more = { left: false }): Promise<Found[]> {
   const out: Found[] = []
   for (const r of rankRecords(records, lookup, deps)) {
-    if (out.length >= max) break
+    // Past the cap, the rest are not opened, and the smash says more may be waiting.
+    if (out.length >= max) { more.left = true; break }
     const v = readRecord(r)!
     const prize = await openPrize(key, v.sealed)
     // The Compiler comes only from its own recipe (§8.1): a record's tool prize is passed over.
     if (!isPrize(prize) || prize.type === 'tool') {
-      // A prize this version cannot show is kept with its record on the device (remembered), and said (§5.5).
+      // A prize this version cannot open is counted and said in plain words; its record stays on the device (§5.5).
       if (prize && typeof prize === 'object' && !isPrize(prize)) unknown.count++
       continue
     }
@@ -139,15 +140,21 @@ export async function prizesOf(records: readonly RecordEvent[], lookup: string, 
 }
 
 /** Every prize for an arrangement: a bare hand only ever compiles the Compiler's recipe. */
-export async function compile(a: Arrangement, bare: boolean, deps: SmashDeps): Promise<{ lookup: string; found: Found[]; offline: boolean; unknown: number }> {
+/** The most location-lock heights one smash tries (each costs a region key and a key); more held are said as "more may be waiting". */
+export const LOCK_HEIGHTS_TRIED = 4
+
+export async function compile(a: Arrangement, bare: boolean, deps: SmashDeps): Promise<{ lookup: string; found: Found[]; offline: boolean; unknown: number; more: boolean }> {
   // The Compiler's own recipe yields the Compiler, and only it (§6.1): known by its blocks, so its key is never made twice.
-  if (sameArrangement(a, COMPILER_RECIPE)) return { lookup: await compilerRecipeLookup(), found: [{ prize: { type: 'tool', tool: 'compiler' }, name: 'The Compiler', maker: 'game', lookup: await compilerRecipeLookup(), record: null }], offline: false, unknown: 0 }
-  if (bare) return { lookup: '', found: [], offline: false, unknown: 0 }
+  if (sameArrangement(a, COMPILER_RECIPE)) return { lookup: await compilerRecipeLookup(), found: [{ prize: { type: 'tool', tool: 'compiler' }, name: 'The Compiler', maker: 'game', lookup: await compilerRecipeLookup(), record: null }], offline: false, unknown: 0, more: false }
+  if (bare) return { lookup: '', found: [], offline: false, unknown: 0, more: false }
   const { key, lookup } = await keyOf(a)
   const unknown = { count: 0 }
+  const more = { left: false }
   const keys: Array<{ key: Uint8Array; lookup: string }> = [{ key, lookup }]
   // A location lock adds a region's key: the same arrangement built inside it has a second lookup, one per height tried (§3.5).
-  for (const h of [...new Set(deps.lockHeights())].slice(0, 4)) {
+  const heights = [...new Set(deps.lockHeights())]
+  if (heights.length > LOCK_HEIGHTS_TRIED) more.left = true
+  for (const h of heights.slice(0, LOCK_HEIGHTS_TRIED)) {
     const region = deps.regionKey(h)
     if (region) keys.push(await keyOf(a, region))
   }
@@ -157,9 +164,9 @@ export async function compile(a: Arrangement, bare: boolean, deps: SmashDeps): P
     const [known, relay] = await Promise.all([deps.known(k.lookup), deps.relay(k.lookup).catch(() => undefined)])
     if (relay === undefined) offline = true
     if (relay?.length) deps.remember(relay)
-    found.push(...await prizesOf([...known, ...(relay ?? [])], k.lookup, k.key, deps, PRIZES_MAX, unknown))
+    found.push(...await prizesOf([...known, ...(relay ?? [])], k.lookup, k.key, deps, PRIZES_MAX, unknown, more))
   }
-  return { lookup, found, offline, unknown: unknown.count }
+  return { lookup, found, offline, unknown: unknown.count, more: more.left }
 }
 
 /** Ask the relay for records with a lookup, through `query`, only once records are accepted there (null: not asked). */

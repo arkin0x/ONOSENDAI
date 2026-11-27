@@ -15699,7 +15699,10 @@ body:has(.terrainview.is-folded) .terrain-held { visibility: hidden; }
 .bp-ex__panel--iso { flex-direction: row; align-items: flex-start; gap: 28px; }
 .bp-ex__isocol { flex: none; width: 320px; display: flex; flex-direction: column; align-items: center; gap: 12px; }
 .bp-ex__views { flex: none; width: calc(var(--bp-vw, 120px) + 40px + 16px + 160px); display: flex; flex-direction: column; gap: 10px; }
-.bp-ex__kicker { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.14em; color: var(--bp-cyan); }
+.bp-ex__kicker { display: flex; align-items: center; gap: 10px; min-width: 0; font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.14em; color: var(--bp-cyan); }
+/* The ONOSENDAI wordmark, drawn at a fixed height from its full-size file so it stays crisp. */
+.bp-ex__wordmark { display: block; flex: none; height: 26px; width: auto; max-width: 100%; }
+.bp-ex__titlerow { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; min-width: 0; }
 .bp-ex__name { margin: 0; font-family: var(--mono); font-weight: 700; font-size: 26px; line-height: 1.05; letter-spacing: 0.08em; text-transform: uppercase; overflow-wrap: anywhere; }
 .bp-ex__settings { margin: 0; display: grid; gap: 6px; }
 .bp-ex__settings div { display: grid; grid-template-columns: 92px 1fr; gap: 8px; align-items: baseline; }
@@ -15711,10 +15714,8 @@ body:has(.terrainview.is-folded) .terrain-held { visibility: hidden; }
 .bp-ex__bar { height: 6px; margin-top: 6px; background: rgba(120, 128, 140, 0.35); }
 .bp-ex__bar i { display: block; height: 100%; background: var(--bp-cyan); box-shadow: 0 0 10px #00e5ff; }
 .bp-ex__meter-n { font-family: var(--mono); font-size: 9px; color: rgba(234, 246, 255, 0.55); margin-top: 5px; }
-.bp-ex__cost { display: flex; justify-content: space-between; gap: 8px; margin-top: 8px; padding-top: 6px; border-top: 1px dashed rgba(234, 246, 255, 0.25); font-family: var(--mono); font-size: 9px; color: rgba(234, 246, 255, 0.72); letter-spacing: 0.04em; }
+.bp-ex__cost { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; padding-top: 6px; border-top: 1px dashed rgba(234, 246, 255, 0.25); font-family: var(--mono); font-size: 9px; color: rgba(234, 246, 255, 0.72); letter-spacing: 0.04em; }
 .bp-ex__cost b { color: #f7c66b; font-size: 11px; }
-.bp-ex__sunrow { display: flex; gap: 12px; align-items: center; }
-.bp-ex__sunrow p { margin: 0; font-size: 12px; line-height: 1.4; color: rgba(234, 246, 255, 0.82); }
 .bp-ex__compass { flex: none; }
 .bp-ex__note { margin: 4px 0 0; font-family: "Caveat", "Segoe Print", "Bradley Hand", "Comic Sans MS", cursive; font-size: 19px; line-height: 1.15; transform: rotate(-2.2deg); overflow-wrap: anywhere; }
 .bp-ex__note span { display: block; text-align: right; font-size: 17px; color: rgba(234, 246, 255, 0.6); margin-top: 4px; }
@@ -16080,7 +16081,128 @@ body:has(.terrainview.is-folded) .terrain-held { visibility: hidden; }
 @media (max-width: 520px) {
   .bp-items__undo-icon { margin: 0 12px 0 6px; }
 }
+/* Item blueprints (lib/blueprint/itemMark): the picture's outline in the Compiler's orange and a small
+   chamfered tab with a hammer in its top right corner; the orange comes from ITEM_ORANGE (--bp-item-orange). */
+.chamfer.bp-item { --chamfer-line: var(--bp-item-orange, #f47000) !important; }
+.bp-item-tab {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: max(16px, 24%);
+  height: max(16px, 24%);
+  color: #120700;
+  background: var(--bp-item-orange, #f47000);
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 6px 100%, 0 calc(100% - 6px));
+  box-shadow: 0 0 6px rgba(244, 112, 0, 0.5);
+  pointer-events: none;
+}
+.bp-item-tab > svg { width: 62%; height: 62%; max-width: 13px; max-height: 13px; }
+/* The ITEM chip beside an item blueprint's name, on EXAMINE and on its card. */
+.bp-item-chip {
+  flex: none;
+  display: inline-block;
+  height: 18px;
+  padding: 0 7px;
+  font-family: var(--mono);
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 18px;
+  letter-spacing: 0.14em;
+  color: #120700;
+  background: var(--bp-item-orange, #f47000);
+  border-radius: 2px;
+  text-shadow: none;
+}
+.bp-place__titlerow { display: flex; align-items: center; justify-content: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.bp-place__titlerow > .secret__look-name { margin: 0; }
+/* Where PLACE HERE and PUT IN A CHEST stand on another card: the game's own is never placed. */
+.bp-items__gameline { flex: 1 1 140px; min-width: 0; font-size: 10px; line-height: 1.35; color: rgba(234, 246, 255, 0.86); text-shadow: 0 1px 2px #000; text-align: right; }
 /* ===== end blueprints: ITEMS column (bp-items) ===== */
+
+/* ===== blueprints: the BLUEPRINT tool's first page (bp-land) ===== */
+/* BlueprintLanding.tsx: CREATE NEW over the blueprints held, each tile with DEPLOY.
+   Controls are opaque and chamfered the house way: the outer box is the line, an
+   inset layer is the fill, so the cut corners keep their outline. */
+.bp-land { display: flex; flex-direction: column; gap: 14px; min-width: 0; color: #eaf6ff; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.75); }
+.bp-land__create,
+.bp-land__go {
+  --bl-cut: 10px;
+  --bl-line: var(--accent, #00e5ff);
+  --bl-fill: #062033;
+  position: relative;
+  isolation: isolate;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 0;
+  border-radius: 0;
+  background: var(--bl-line);
+  color: #eaf6ff;
+  font-family: var(--mono);
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-shadow: inherit;
+  cursor: pointer;
+  touch-action: manipulation;
+  clip-path: polygon(var(--bl-cut) 0, 100% 0, 100% calc(100% - var(--bl-cut)), calc(100% - var(--bl-cut)) 100%, 0 100%, 0 var(--bl-cut));
+}
+.bp-land__create::before,
+.bp-land__go::before {
+  --bl-in: calc(var(--bl-cut) - 0.5858px);
+  content: '';
+  position: absolute;
+  inset: 1px;
+  z-index: -1;
+  background: var(--bl-fill);
+  clip-path: polygon(var(--bl-in) 0, 100% 0, 100% calc(100% - var(--bl-in)), calc(100% - var(--bl-in)) 100%, 0 100%, 0 var(--bl-in));
+  transition: background 0.15s;
+}
+.bp-land__create { width: 100%; min-height: 52px; font-size: 14px; --bl-cut: 14px; --bl-fill: linear-gradient(180deg, #0b3a55, #062033); box-shadow: 0 0 18px rgba(0, 229, 255, 0.18); }
+.bp-land__create:hover::before, .bp-land__create:focus-visible::before { background: linear-gradient(180deg, #0f4c6e, #08304a); }
+.bp-land__empty { margin: 0; font-size: 12px; line-height: 1.45; color: rgba(234, 246, 255, 0.86); text-align: center; }
+/* The tiles: as many columns as fit, never narrower than a thumbnail and its words. */
+.bp-land__grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
+.bp-land__tile {
+  position: relative;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 10px 8px;
+  background: rgba(4, 14, 28, 0.82);
+  border: 1px solid rgba(120, 200, 255, 0.28);
+  border-radius: 3px;
+}
+.bp-land__tile.is-new { border-color: var(--game, #f7c66b); box-shadow: 0 0 12px rgba(247, 198, 107, 0.2); }
+.bp-land__pic { position: relative; padding: 0; border: 0; background: none; cursor: pointer; touch-action: manipulation; }
+.bp-land__pic > .chamfer {
+  --chamfer-line: rgba(120, 200, 255, 0.55);
+  --chamfer-fill: radial-gradient(120% 90% at 30% 20%, rgba(80, 160, 255, 0.22), transparent 64%), #061328;
+}
+.bp-land__pic .bp-model { width: 100% !important; height: 100% !important; }
+.bp-land__pic:hover > .chamfer, .bp-land__pic:focus-visible > .chamfer { --chamfer-line: var(--accent, #00e5ff); }
+.bp-land__new { position: absolute; top: -6px; right: -10px; padding: 0 5px; height: 16px; line-height: 16px; font-family: var(--mono); font-size: 8px; font-weight: 700; letter-spacing: 0.12em; color: #05070d; background: var(--game, #f7c66b); border-radius: 2px; text-shadow: none; }
+.bp-land__name { max-width: 100%; margin-top: 4px; font-size: 12px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bp-land__by { max-width: 100%; font-size: 10px; color: rgba(234, 246, 255, 0.78); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bp-land__go { width: 100%; min-height: 36px; margin-top: 4px; font-size: 11px; }
+.bp-land__go:hover::before, .bp-land__go:focus-visible::before { background: #0b3a55; }
+.bp-land__chest { display: inline-flex; align-items: center; justify-content: center; gap: 5px; width: 100%; min-height: 30px; padding: 0 6px; font-family: var(--mono); font-size: 9px; letter-spacing: 0.1em; color: rgba(234, 246, 255, 0.86); text-shadow: inherit; background: rgba(2, 10, 24, 0.9); border: 1px solid rgba(120, 200, 255, 0.35); border-radius: 3px; cursor: pointer; touch-action: manipulation; white-space: nowrap; }
+.bp-land__chest:hover, .bp-land__chest:focus-visible { border-color: var(--accent, #00e5ff); color: #fff; }
+/* Why it could not start: over the top of the tile, so nothing under it moves. */
+.bp-land__refusal { position: absolute; left: 6px; right: 6px; top: 6px; display: flex; align-items: flex-start; gap: 6px; padding: 8px; font-size: 10.5px; line-height: 1.4; color: #fff; background: rgba(40, 6, 16, 0.96); border: 1px solid rgba(255, 59, 107, 0.7); border-radius: 3px; z-index: 1; }
+.bp-land__refusal > span { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.bp-land__dismiss { flex: none; display: grid; place-items: center; width: 24px; height: 24px; padding: 0; color: #fff; background: rgba(0, 0, 0, 0.4); border: 1px solid rgba(255, 255, 255, 0.35); border-radius: 3px; cursor: pointer; }
+@media (max-width: 380px) {
+  .bp-land__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+}
+/* The game's own blueprint: a plain line in DEPLOY and PUT IN A CHEST's place, at their height (36 + 4 + 30). */
+.bp-land__gameline { display: flex; align-items: center; justify-content: center; width: 100%; min-height: 70px; margin-top: 4px; padding: 0 4px; box-sizing: border-box; font-size: 10px; line-height: 1.4; text-align: center; color: rgba(234, 246, 255, 0.86); }
+/* ===== end blueprints: the BLUEPRINT tool's first page (bp-land) ===== */
 
 /* ===== blueprints: the BLUEPRINT tool in BUILD (bp-tool) ===== */
 /* The sheet: drafting paper, its fine grid dim and on whole pixels, showing only in the open areas. Every control
@@ -16203,9 +16325,15 @@ div.bpt-tile__hit { cursor: default; }
 .bpt-pal { --c-cut: 5px; --c-fill: #050c18; flex: none; width: 36px; height: 36px; display: inline-flex; align-items: center; justify-content: center; font-size: 7px; cursor: pointer; }
 .bpt-layer { display: flex; align-items: center; gap: 8px; font-size: 11px; letter-spacing: 0.1em; }
 .bpt-layer__brush { margin-left: auto; color: rgba(255, 255, 255, 0.75); letter-spacing: 0; }
-.bpt-cage-wrap { position: relative; align-self: center; padding: 26px 0 18px 28px; }
+.bpt-cage-wrap { position: relative; --gpad: 28px; padding: 26px 0 18px var(--gpad); --cell: 16px; }
+/* A phone: +Z above the grid's left corner instead of beside it, so the grid has the whole width for bigger cells. */
+@media (max-width: 519px) {
+  .bpt-cage-wrap { --gpad: 0px; }
+  .bpt-cage-wrap .bpt-cage__axis--z { top: 6px; left: 0; line-height: 1; }
+  .bpt-cage-wrap .bpt-cage__axis--z br { display: none; }
+  .bpt-cage-wrap .bpt-cage__axis--x { left: 0; }
+}
 .bpt-cage {
-  --cell: 16px;
   --pitch: calc(var(--cell) + 1px);
   --cage-minor: rgba(176, 150, 255, 0.2);
   --cage-major: rgba(196, 172, 255, 0.55);
@@ -16227,15 +16355,31 @@ div.bpt-tile__hit { cursor: default; }
   outline: 1px solid rgba(214, 196, 255, 0.85);
   outline-offset: 0;
 }
-@media (min-width: 520px) { .bpt-cage { --cell: 20px; } }
 .bpt-cell { width: var(--cell); height: var(--cell); padding: 0; border: 0; border-radius: 0; background: #020306; display: block; cursor: pointer; }
 .bpt-cell.is-below { background: rgba(176, 150, 255, 0.16); }
 .bpt-cell .bpt-swatch { display: block; width: 100% !important; height: 100% !important; box-shadow: none; }
 .bpt-cage__axis { position: absolute; font-size: 9px; letter-spacing: 0.1em; text-shadow: 0 1px 2px #000; }
-.bpt-cage__axis--x { bottom: 0; left: 28px; color: #ff6b6b; }
+.bpt-cage__axis--x { bottom: 0; left: var(--gpad); color: #ff6b6b; }
 .bpt-cage__axis--z { left: 0; top: 26px; line-height: 1.2; text-align: center; color: #6ba8ff; }
-.bpt-cage__sun { position: absolute; top: 4px; left: calc(50% + 14px); width: 14px; height: 14px; margin-left: -7px; border-radius: 50%; background: #000; box-shadow: 0 0 0 2px #e8acff, 0 0 8px 2px #d48cff; }
-.bpt-compose__foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.bpt-cage__sun { position: absolute; top: 4px; left: calc(var(--gpad) + 8 * (var(--cell) + 1px) + 0.5px); width: 14px; height: 14px; margin-left: -7px; border-radius: 50%; background: #000; box-shadow: 0 0 0 2px #e8acff, 0 0 8px 2px #d48cff; }
+.bpt-layer__go { margin-left: auto; padding: 0 12px; min-height: 36px; }
+/* A phone: the preview and the block in hand in a row over the grid. */
+.bpt-compose__main { display: flex; flex-direction: column; gap: 6px; }
+.bpt-compose__side { display: flex; align-items: center; gap: 10px; min-height: 64px; }
+.bpt-compose__preview { flex: none; display: block; padding: 0; border: 0; background: none; cursor: pointer; width: 64px; height: 64px; }
+.bpt-compose__preview.is-big { width: 160px; height: 160px; }
+.bpt-compose__preview.is-empty { outline: 1px dashed rgba(143, 233, 255, 0.22); cursor: default; }
+.bpt-compose__preview .bp-model { width: 100% !important; height: 100% !important; }
+.bpt-compose__side .bpt-layer__brush { margin-left: 0; font-size: 11px; }
+.bpt-cage-wrap { flex: 1 1 auto; min-width: 0; display: flex; justify-content: flex-start; }
+/* Wider: a column left of the grid, the grid shifted right (owner: "grid can be moved right so the preview has room"). */
+@media (min-width: 520px) {
+  .bpt-compose__main { flex-direction: row; align-items: flex-start; gap: 12px; }
+  .bpt-compose__side { flex: none; width: 120px; flex-direction: column; align-items: stretch; padding-top: 26px; }
+  .bpt-compose__preview { width: 120px; height: 120px; }
+  .bpt-compose__preview.is-big { width: 120px; height: 120px; }
+  .bpt-compose__side .bpt-layer__brush { text-align: center; }
+}
 @media (max-width: 420px) {
   .bpt-reveal { flex-direction: column; align-items: stretch; }
   .bpt-reveal__preview { align-self: center; }
@@ -16244,6 +16388,12 @@ div.bpt-tile__hit { cursor: default; }
 .bpt-switch b { display: block; font-size: 11px; font-weight: 700; letter-spacing: 0.06em; }
 .bpt-switch small { display: block; margin-top: 2px; min-height: 1.3em; font-size: 10px; color: rgba(255, 255, 255, 0.62); }
 .bpt-sum__k { font-size: 9px; letter-spacing: 0.12em; color: var(--bp-ink); }
+/* Item blueprints and item prizes (lib/blueprint/itemMark.ts): an orange chamfered tab with a hammer on the thumbnail's
+   top-right, an orange outline in lists, and an ITEM chip by a title. --item is the Compiler's orange. */
+.item-chip { flex: none; display: inline-flex; align-items: center; padding: 2px 6px; font-size: 9px; font-weight: 700; letter-spacing: 0.14em; color: #120600; background: var(--item, #f47000); clip-path: polygon(4px 0, 100% 0, 100% calc(100% - 4px), calc(100% - 4px) 100%, 0 100%, 0 4px); }
+.prize-row__thumb { position: relative; flex: none; display: inline-block; line-height: 0; }
+.item-tab { position: absolute; top: 0; right: 0; width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center; color: #120600; background: var(--item, #f47000); clip-path: polygon(0 0, 100% 0, 100% 100%, 6px 100%, 0 calc(100% - 6px)); }
+.prize-row.is-item .prize-row__thumb { outline: 1px solid var(--item, #f47000); outline-offset: 1px; }
 /* ===== end blueprints (bp-tool) ===== */
 /* ===== blueprints: cards in the world (bp-place) ===== */
 /* DISCOVERED NEARBY gains BLUEPRINTS: eight tabs, two rows of four on a phone. */

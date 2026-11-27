@@ -46,7 +46,7 @@ beforeEach(() => {
   useWorkshop.setState({ shards: [shard('torch', 'Torch'), shard('key', 'Silver Key'), shard('tile-kit/arch', 'Arch')] })
   usePublished.setState({ ledger: { torch: { at: 1, fp: '', pubkey: me } } })
   useShardFolders.setState({ storage: 'memory', tree: { folders: { f1: { id: 'f1', name: 'Folder 1', parent: null, at: 1 } }, assign: { torch: 'f1' }, collapsed: {}, alias: {} } })
-  useBlueprintTool.setState({ open: true, step: 1, prize: null, arrangement: { size: [1, 1, 1], cells: Uint16Array.from([1]) } })
+  useBlueprintTool.setState({ open: true, view: 'make', step: 1, prize: null, arrangement: { size: [1, 1, 1], cells: Uint16Array.from([1]) } })
 })
 
 describe('the prize step', () => {

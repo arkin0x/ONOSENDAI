@@ -7,7 +7,8 @@
  * yet (lib/itemsSeen isNewBlueprint) until BLUEPRINTS is opened.
  *
  * Your own blueprint's tile shows every block, as you made it; a found one
- * shows what a finder sees. A tap opens BLUEPRINTS at that row.
+ * shows what a finder sees. An item blueprint wears the orange mark (an
+ * orange outline and a hammer tab). A tap opens BLUEPRINTS at that row.
  */
 
 import { GRID_SLOTS, gridOf, isNewBlueprint } from '../../lib/itemsSeen'
@@ -16,7 +17,7 @@ import { useItemsSeen } from '../../store/useItemsSeen'
 import { NEW_MARK, TILE_PX } from '../ItemsGrid'
 import { Chamfer } from '../ui/Chamfer'
 import { BlueprintModel } from './BlueprintModel'
-import { NO_BLUEPRINTS, useBlueprintsModal, useListedCards } from './BlueprintsModal'
+import { ITEM_STYLE, ItemTab, NO_BLUEPRINTS, itemChamfer, useBlueprintsModal, useListedCards } from './BlueprintsModal'
 
 export function BlueprintsGrid(): JSX.Element {
   const owner = useBlueprints((s) => s.owner)
@@ -31,9 +32,13 @@ export function BlueprintsGrid(): JSX.Element {
       {shown.map(({ card, views }) => {
         const fresh = !!seen && isNewBlueprint(seen, card)
         const name = views.record.title
+        const thumb = itemChamfer(card)
         return (
-          <button type="button" key={card.rowKey} className={`items-tile bp-items__tile${fresh ? ' is-new' : ''}`} data-tile={card.rowKey} onClick={() => open(card.rowKey)} title={name} aria-label={fresh ? `${name}, new` : name}>
-            <Chamfer size={TILE_PX}><BlueprintModel view={views.full ?? views.finder} size={TILE_PX} label={name} /></Chamfer>
+          <button type="button" key={card.rowKey} className={`items-tile bp-items__tile${fresh ? ' is-new' : ''}`} style={ITEM_STYLE} data-tile={card.rowKey} data-item={thumb.item || undefined} onClick={() => open(card.rowKey)} title={name} aria-label={`${name}${thumb.item ? ', an item blueprint' : ''}${fresh ? ', new' : ''}`}>
+            <Chamfer size={TILE_PX} className={thumb.className || undefined}>
+              <BlueprintModel view={views.full ?? views.finder} size={TILE_PX} label={name} />
+              {thumb.item && <ItemTab />}
+            </Chamfer>
             {fresh && <span className="items-tile__new" aria-hidden="true">{NEW_MARK}</span>}
           </button>
         )

@@ -60,6 +60,7 @@ import { CHEST_MAX_PLAINTEXT, forgeKey, isLockPubkey, sizeRefusal, templateBytes
 import { attributed } from '../lib/client'
 import { MAX_ITEM_NAME, MAX_MESSAGE_LENGTH, blueprintInnerTemplate, messageInnerTemplate, shardInnerTemplate } from '../lib/hidden'
 import { useBlueprints } from '../store/useBlueprints'
+import { isGameCard } from '../lib/blueprint/gameCard'
 import { findCashuToken } from '../lib/cashu'
 import { hasNftLink } from '../lib/nftLink'
 import { useCyberspace } from '../store/useCyberspace'
@@ -337,7 +338,8 @@ export function ChestCompose({ onDone, target = { mode: 'place' } }: { onDone: (
   const [adding, setAdding] = useState<'message' | 'shard' | 'item' | 'mine' | 'forge' | 'audio' | 'blueprint' | null>(null)
   // + BLUEPRINT's list: every blueprint you hold, made or found, not archived; one already in the chest is marked.
   const cards = useBlueprints((s) => s.cards)
-  const heldCards = useMemo(() => cards.filter((c) => !c.archived), [cards])
+  // The game's own blueprint (the Compiler's) is never put anywhere: everyone has it (lib/blueprint/gameBlueprint.ts).
+  const heldCards = useMemo(() => cards.filter((c) => !c.archived && !isGameCard(c)), [cards])
   const cardsIn = useMemo(() => new Set(contents.flatMap((c) => (c.kind === 'blueprint' ? [c.card.record.id] : c.kind === 'sealed' && c.type === 'blueprint' ? [cardRecordId(c.entry)] : []))), [contents])
   const [text, setText] = useState('')
   // FORGE NEW's item, its keypair made when the forge opens; dropped by CANCEL.

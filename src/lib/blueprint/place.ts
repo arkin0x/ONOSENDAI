@@ -21,6 +21,7 @@
  * Returns why it could not start, in plain words, or null.
  */
 
+import { GAME_NO_DEPLOY } from './gameCard'
 import { leaveModals } from '../../hud/modalStack'
 import { copyLinedUp, useShards } from '../../store/useShards'
 import type { BlueprintCard } from './blueprintDb'
@@ -35,6 +36,8 @@ export const PLACE_LINED_UP = 'Finish or cancel what is lined up first.'
 
 /** Start placing a card: 'here' leaves it where you stand, 'chest' puts it in a new chest. */
 export function startPlaceBlueprint(card: BlueprintCard, where: 'here' | 'chest'): string | null {
+  // The game's own blueprint is never placed: it is no one's record, and everyone has it.
+  if (card.source === 'game') return GAME_NO_DEPLOY
   if (!readRecord(card.record)) return CARD_UNREADABLE
   let shards = useShards.getState()
   if (shards.deployStatus === 'working') return PLACE_BUSY

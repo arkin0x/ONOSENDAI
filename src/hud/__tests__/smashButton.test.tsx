@@ -46,11 +46,11 @@ afterEach(() => {
 })
 
 describe('the owner\'s tuning', () => {
-  it('a bare hand holds 7 seconds and reaches the 3 by 3 by 3 box; the Compiler holds 4 and reaches the whole window', () => {
+  it('a bare hand holds 7 seconds and reaches 3 cells; the Compiler holds 4 and reaches 16', () => {
     expect(BARE_HOLD_MS).toBe(7000)
     expect(COMPILER_HOLD_MS).toBe(4000)
-    expect(BARE_REACH).toEqual({ below: 1, above: 1 })
-    expect(COMPILER_REACH).toEqual({ below: 8, above: 7 })
+    expect(BARE_REACH).toBe(3)
+    expect(COMPILER_REACH).toBe(16)
   })
 })
 

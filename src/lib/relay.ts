@@ -1249,7 +1249,16 @@ type OnceResult = PublishResult & { byRelay?: Map<string, string | null> }
 /** The result as callers see it, without the per-relay detail. */
 const plain = (r: OnceResult): PublishResult => (r.ok ? r : { ok: false, reason: r.reason })
 
+/**
+ * A blueprint card (kind 3343, DECK-0010 §7.1 and §10) is never sent on its
+ * own: it travels only inside a bag (33330) or a sealed entry (33335), and
+ * the relay refuses it alone. Every send below passes through here.
+ */
+export const CARD_KIND_NEVER_ALONE = 3343
+export const CARD_ALONE_REASON = 'a blueprint card goes only inside a bag'
+
 async function publishOnce(listed: string[], event: NostrEvent, onAccept?: (url: string) => void): Promise<OnceResult> {
+  if (event.kind === CARD_KIND_NEVER_ALONE) return { ok: false, reason: CARD_ALONE_REASON }
   const relays = skipHung(listed)
   if (relays.length === 0) return { ok: false, reason: HUNG_REASON }
   // Protected events (the `-` tag) are only accepted from an authenticated
@@ -1388,6 +1397,7 @@ export async function countRelay(url: string, filter: Filter, maxWait = MAX_WAIT
  * (store/useTvWatching) is the one caller. Whether it was sent.
  */
 export async function publishLight(event: NostrEvent): Promise<boolean> {
+  if (event.kind === CARD_KIND_NEVER_ALONE) return false
   const url = normalizeURL(CYBERSPACE_RELAY)
   if (!pool?.listConnectionStatus().get(url) || authPending(url)) return false
   await paceSends([url], event.kind)

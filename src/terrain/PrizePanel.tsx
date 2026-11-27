@@ -10,6 +10,7 @@
  * wait in ITEMS › BLUEPRINTS › BUILT, so nothing is lost by a stray tap.
  */
 
+import { ITEM_ORANGE, isItemPrize } from '../lib/blueprint/itemMark'
 import { useEffect, useMemo, useState } from 'react'
 import { Boxes, EyeOff, Hammer, PackageCheck, Sparkles } from 'lucide-react'
 import { fromPayload } from 'sno-core/shards'
@@ -108,6 +109,7 @@ export function PrizeCard(): JSX.Element | null {
           <div className="prize-card__head">
             {toy.prize.type === 'tool' ? <Hammer size={16} strokeWidth={2} aria-hidden /> : <Boxes size={16} strokeWidth={2} aria-hidden />}
             <h2>{prizeName(toy)}</h2>
+            {isItemPrize(toy.prize) && <span className="item-chip" style={{ ['--item' as string]: ITEM_ORANGE }}>ITEM</span>}
             <ModalClose onClose={close} />
           </div>
           <div className="prize-card__spin">{shard ? <CardSpin shard={shard} size={180} /> : <Hammer size={64} strokeWidth={1.25} aria-hidden />}</div>
@@ -140,8 +142,11 @@ export function PrizePicker({ here }: { here: ToyRow[] }): JSX.Element | null {
             {here.map((t) => {
               const shard = prizeModel(t)
               return (
-                <li key={t.rowKey} className="prize-row">
-                  <ItemThumb type="shard" shard={shard ?? undefined} size={80} />
+                <li key={t.rowKey} className={`prize-row${isItemPrize(t.prize) ? ' is-item' : ''}`} style={{ ['--item' as string]: ITEM_ORANGE }}>
+                  <span className="prize-row__thumb">
+                    <ItemThumb type="shard" shard={shard ?? undefined} size={80} />
+                    {isItemPrize(t.prize) && <span className="item-tab" aria-label="Item"><Hammer size={11} strokeWidth={2.5} aria-hidden /></span>}
+                  </span>
                   <span className="prize-row__text">
                     <span className="prize-row__name">{prizeName(t)}</span>
                     <span className="prize-row__by">{t.maker === 'game' ? 'From its own recipe' : <>From {t.name}, by <MakerName maker={t.maker} /></>}</span>

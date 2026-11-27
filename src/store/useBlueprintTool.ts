@@ -30,6 +30,13 @@ export interface ToolPrize {
 
 export interface BlueprintToolState {
   open: boolean
+  /**
+   * BUILD > BLUEPRINT opens on the blueprints you have, each with DEPLOY, and CREATE NEW over them (owner,
+   * 2026-11-27: "this gives both paths then"); 'make' is the four steps.
+   */
+  view: 'list' | 'make'
+  /** The blueprint just sealed: first in the list, marked NEW. */
+  freshRowKey: string | null
   step: ToolStep
   arrangement: Arrangement | null
   /** Where the arrangement stood (its box's low corner) or will be built: the place a location lock locks to. */
@@ -60,6 +67,10 @@ export interface BlueprintToolState {
   sealing: boolean
   error: string | null
   openTool: () => void
+  /** CREATE NEW: the four steps from the start. */
+  createNew: () => void
+  /** Sealed: back to the list, the new blueprint first. */
+  sealed: (rowKey: string) => void
   close: () => void
   setStep: (s: ToolStep) => void
   /** RECORD in TERRAIN found a stand-alone build. */
@@ -76,8 +87,18 @@ export interface BlueprintToolState {
 const CAGE = MAX_SIDE
 const fresh = (): Pick<BlueprintToolState, 'typeHidden' | 'flipped' | 'randomPct' | 'seed'> => ({ typeHidden: new Set(), flipped: new Set(), randomPct: 100, seed: Math.floor(Math.random() * 1e9) })
 
+/**
+ * The prize and lock settings a new blueprint starts from: a new capture, a
+ * new cage and MAKE ANOTHER all start here, so the last blueprint's choices
+ * (its prize's name shown, above all) never carry into the next unasked
+ * (review of #943, 2026-11-27).
+ */
+export const startSettings = (): Pick<BlueprintToolState, 'reveal' | 'views' | 'showName' | 'text' | 'lock' | 'height'> => ({ reveal: 'hidden', views: new Set<PrizeView>(['iso']), showName: false, text: '', lock: 'standard', height: 8 })
+
 export const useBlueprintTool = create<BlueprintToolState>((set, get) => ({
   open: false,
+  view: 'list',
+  freshRowKey: null,
   step: 0,
   arrangement: null,
   place: null,
@@ -88,19 +109,16 @@ export const useBlueprintTool = create<BlueprintToolState>((set, get) => ({
   composing: false,
   prize: null,
   ...fresh(),
-  reveal: 'hidden',
-  views: new Set<PrizeView>(['iso']),
-  showName: false,
-  text: '',
-  lock: 'standard',
-  height: 8,
+  ...startSettings(),
   title: '',
   sealing: false,
   error: null,
-  openTool: () => set({ open: true, capturing: false, error: null }),
+  openTool: () => set({ open: true, capturing: false, error: null, view: 'list' }),
+  createNew: () => set({ view: 'make', step: 0, arrangement: null, place: null, prize: null, title: '', composing: false, error: null, ...fresh(), ...startSettings() }),
+  sealed: (rowKey) => set({ view: 'list', freshRowKey: rowKey, step: 0, arrangement: null, place: null, prize: null, title: '', composing: false, error: null, ...fresh(), ...startSettings() }),
   close: () => set({ open: false, capturing: false, composing: false, error: null }),
   setStep: (step) => set({ step, error: null }),
-  captured: (a, place) => set({ arrangement: a, place, capturing: false, composing: false, open: true, step: 1, ...fresh(), error: null }),
+  captured: (a, place) => set({ arrangement: a, place, capturing: false, composing: false, open: true, view: 'make', step: 1, ...fresh(), ...startSettings(), error: null }),
   set: (p) => set(p),
   paint: (x, z) => {
     const { cage, layer, brush } = get()
@@ -113,8 +131,8 @@ export const useBlueprintTool = create<BlueprintToolState>((set, get) => ({
     const blocks: Array<{ at: [number, number, number]; id: number }> = []
     get().cage.forEach((id, i) => { if (id) blocks.push({ at: [i % CAGE, Math.floor(i / (CAGE * CAGE)), Math.floor(i / CAGE) % CAGE], id }) })
     const a = arrangementFrom(blocks)
-    if (!a) return 'Place at least one block in the cage.'
-    set({ arrangement: a, place, composing: false, step: 1, ...fresh(), error: null })
+    if (!a) return 'Place at least one block on the grid.'
+    set({ arrangement: a, place, composing: false, step: 1, ...fresh(), ...startSettings(), error: null })
     return null
   },
   toggleType: (id) => {
@@ -132,7 +150,7 @@ export const useBlueprintTool = create<BlueprintToolState>((set, get) => ({
     else f.add(index)
     set({ flipped: f })
   },
-  reset: () => set({ ...fresh() }),
+  reset: () => set({ ...fresh(), ...startSettings() }),
 }))
 
 /** A steady number in 0 to 1 for a cell and a seed: the random shortcut never reshuffles as the maker toggles. */

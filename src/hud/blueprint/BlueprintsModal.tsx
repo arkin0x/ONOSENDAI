@@ -27,7 +27,7 @@
  * keep saying so while it stays open.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from 'react'
 import { Archive, Hammer, PackageCheck, DraftingCompass, Undo2 } from 'lucide-react'
 import { create } from 'zustand'
 import { fromPayload } from 'sno-core/shards'
@@ -42,6 +42,8 @@ import {
   type FinderView, type RecordView,
 } from '../../lib/blueprint/format'
 import { takeToy } from '../../lib/blueprint/smashRun'
+import { GAME_MAKER, GAME_NO_DEPLOY, isGameCard } from '../../lib/blueprint/gameCard'
+import { ITEM_ORANGE, isItemBlueprint } from '../../lib/blueprint/itemMark'
 import { startPlaceBlueprint } from '../../lib/blueprint/place'
 import { useBlueprints } from '../../store/useBlueprints'
 import { useCyberspace } from '../../store/useCyberspace'
@@ -118,12 +120,38 @@ export function tabOf(card: Pick<BlueprintCard, 'source' | 'archived'>): Bluepri
   return card.source === 'made' ? 'mine' : 'held'
 }
 
-/** A person's name over a blueprint: "you", their display name, or a short npub. */
-function Who({ pubkey }: { pubkey: string }): JSX.Element {
-  const me = useCyberspace((s) => s.identity.pubkey)
-  const profile = useProfile(pubkey && pubkey !== me ? pubkey : null)
-  return <>{nameLabel(pubkey, me, profile?.name)}</>
+/** How the game is named as a blueprint's maker. */
+export const GAME_MAKER_NAME = 'ONOSENDAI'
+
+/** A maker's name as words: the game, "you", their display name, or a short npub. */
+function makerLabel(pubkey: string, me: string, name: string | null | undefined): string {
+  return pubkey === GAME_MAKER ? GAME_MAKER_NAME : nameLabel(pubkey, me, name ?? undefined)
 }
+
+/** A person's name over a blueprint: ONOSENDAI for the game's own (no profile is looked up), "you", their display name, or a short npub. */
+export function Who({ pubkey }: { pubkey: string }): JSX.Element {
+  const me = useCyberspace((s) => s.identity.pubkey)
+  const profile = useProfile(pubkey && pubkey !== me && pubkey !== GAME_MAKER ? pubkey : null)
+  return <>{makerLabel(pubkey, me, profile?.name)}</>
+}
+
+/**
+ * The orange mark of an item blueprint (lib/blueprint/itemMark): a small
+ * chamfered tab with a hammer in the picture's top right corner, inside the
+ * Chamfer. Its picture's outline turns orange by `itemChamfer`.
+ */
+export function ItemTab(): JSX.Element {
+  return <span className="bp-item-tab" aria-hidden="true"><Hammer size={11} strokeWidth={2.5} /></span>
+}
+
+/** The Chamfer class and style for a blueprint's picture: orange outline for an item blueprint. */
+export function itemChamfer(card: Pick<BlueprintCard, 'prizeKind' | 'source'>, className = ''): { className: string; item: boolean } {
+  const item = isItemBlueprint(card)
+  return { className: `${className}${item ? ' bp-item' : ''}`.trim(), item }
+}
+
+/** The orange the item mark draws in, for the CSS (lib/blueprint/itemMark ITEM_ORANGE). */
+export const ITEM_STYLE = { '--bp-item-orange': ITEM_ORANGE } as CSSProperties
 
 /** Below this width a row's actions fold behind one ACTIONS button. */
 export const NARROW_QUERY = '(max-width: 519.98px)'
@@ -149,6 +177,34 @@ export function useNarrow(): boolean {
   return narrow
 }
 
+/**
+ * EXAMINE for a card held: what a finder gets, and for your own the switch to
+ * every block. BLUEPRINTS' rows and the BLUEPRINT tool's first page open this.
+ */
+export function BlueprintExamine({ card, views, onClose }: { card: BlueprintCard; views: CardViews; onClose: () => void }): JSX.Element {
+  const makerName = useProfile(card.record.pubkey === GAME_MAKER ? null : card.record.pubkey)?.name
+  const me = useCyberspace((s) => s.identity.pubkey)
+  const prize = views.record.sheet.prize
+  return (
+    <ExamineSheet
+      onClose={onClose}
+      maker={views.full ? { view: views.full, prizeName: views.record.prizeName } : undefined}
+      bp={{
+        name: views.record.title,
+        maker: makerLabel(card.record.pubkey, me, makerName),
+        item: isItemBlueprint(card),
+        description: prize.text ?? '',
+        view: views.finder,
+        prize: { reveal: prize.reveal, text: prize.text, views: views.record.views, name: views.record.prizeName },
+        lock: views.record.sheet.lock,
+        height: views.record.sheet.height,
+        drawnAt: card.record.created_at,
+        revision: 1,
+      }}
+    />
+  )
+}
+
 /** A row a tile was tapped for: scrolled to the middle of the list, so the eye lands on it. */
 function useFocused(focused: boolean): RefObject<HTMLLIElement> {
   const ref = useRef<HTMLLIElement>(null)
@@ -166,8 +222,6 @@ export function BlueprintRow({ card, views, fresh = false, focused = false, onAr
   const ref = useFocused(focused)
   const [examining, setExamining] = useState(false)
   const [refusal, setRefusal] = useState<string | null>(null)
-  const makerName = useProfile(card.record.pubkey)?.name
-  const me = useCyberspace((s) => s.identity.pubkey)
   // Your own shows the whole arrangement; a found one what a finder sees.
   const view = views.full ?? views.finder
   const name = views.record.title
@@ -181,21 +235,25 @@ export function BlueprintRow({ card, views, fresh = false, focused = false, onAr
     useBlueprints.getState().archive(card.rowKey, on)
     if (on) onArchive?.()
   }
-  const prize = views.record.sheet.prize
+  const game = isGameCard(card)
+  const thumb = itemChamfer(card, 'bp-items__thumb')
   const acts = (
     <>
       <button className="chest__act" onClick={() => setExamining(true)} title="Every clue on one drafting sheet">EXAMINE</button>
-      {!card.archived && <button className="chest__act" onClick={() => place('here')} title="Leave it where you stand, for others to find. They each take a copy">PLACE HERE</button>}
-      {!card.archived && <button className="chest__act" onClick={() => place('chest')} title="Put a copy in one of your chests">PUT IN A CHEST</button>}
+      {/* The game's own is never placed: a plain line where PLACE HERE and PUT IN A CHEST would be. */}
+      {!card.archived && game && <span className="bp-items__gameline">{GAME_NO_DEPLOY}</span>}
+      {!card.archived && !game && <button className="chest__act" onClick={() => place('here')} title="Leave it where you stand, for others to find. They each take a copy">PLACE HERE</button>}
+      {!card.archived && !game && <button className="chest__act" onClick={() => place('chest')} title="Put a copy in one of your chests">PUT IN A CHEST</button>}
       {card.archived
         ? <button className="chest__act" onClick={() => archive(false)} title="Back to its list">UNARCHIVE</button>
         : <button className="chest__act" onClick={() => archive(true)} title="File it away under ARCHIVED. UNDO brings it straight back">ARCHIVE</button>}
     </>
   )
   return (
-    <li ref={ref} className={`secrets__row held__row held__row--loot bp-items__row${focused ? ' held__row--focus' : ''}`} data-actions-row={card.rowKey} data-blueprint={card.rowKey}>
-      <Chamfer className="bp-items__thumb" decorative={false}>
-        <BlueprintModel view={view} size={THUMB_PX} label={views.full ? `${name}: every block, as you made it` : `${name}: as a finder sees it`} />
+    <li ref={ref} className={`secrets__row held__row held__row--loot bp-items__row${focused ? ' held__row--focus' : ''}`} style={ITEM_STYLE} data-actions-row={card.rowKey} data-blueprint={card.rowKey} data-item={thumb.item || undefined}>
+      <Chamfer className={thumb.className} decorative={false}>
+        <BlueprintModel view={view} size={THUMB_PX} label={`${views.full ? `${name}: every block, as you made it` : `${name}: as a finder sees it`}${thumb.item ? ', an item blueprint' : ''}`} />
+        {thumb.item && <ItemTab />}
       </Chamfer>
       <span className="item__line held__line">
         <span className="item__name" title={name}>{name}</span>
@@ -225,23 +283,7 @@ export function BlueprintRow({ card, views, fresh = false, focused = false, onAr
         <span className="held__acts bp-items__acts" role="group" aria-label={`Actions for ${name}`}>{acts}</span>
       )}
       {refusal && <span className="held__refusal" role="status">{refusal}</span>}
-      {examining && (
-        <ExamineSheet
-          onClose={() => setExamining(false)}
-          maker={views.full ? { view: views.full, prizeName: views.record.prizeName } : undefined}
-          bp={{
-            name,
-            maker: nameLabel(card.record.pubkey, me, makerName),
-            description: prize.text ?? '',
-            view: views.finder,
-            prize: { reveal: prize.reveal, text: prize.text, views: views.record.views, name: views.record.prizeName },
-            lock: views.record.sheet.lock,
-            height: views.record.sheet.height,
-            drawnAt: card.record.created_at,
-            revision: 1,
-          }}
-        />
-      )}
+      {examining && <BlueprintExamine card={card} views={views} onClose={() => setExamining(false)} />}
     </li>
   )
 }

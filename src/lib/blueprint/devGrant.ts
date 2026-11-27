@@ -3,7 +3,7 @@
  *
  * Nobody starts with a Compiler: the only way to one is building its recipe
  * from real blocks and smashing it with a bare hand (owner, 2026-11-26). On
- * a Vercel preview and on localhost the owner wants to try it at once
+ * a Vercel preview deployment (VERCEL_ENV 'preview') and on localhost the owner wants to try it at once
  * (owner, 2026-11-27: "on the vercel preview we can start with the compiler
  * to try it out"), so there every identity starts with one, marked
  * 'granted' (lib/terrain/terrainDb.ts). `?compiler=0` turns the grant off on
@@ -22,13 +22,25 @@ export function productionHost(): boolean {
   try { return PRODUCTION_HOSTS.has(location.hostname.toLowerCase()) } catch { return true }
 }
 
-/** Whether this page may grant: a Vercel preview, localhost, or a dev server; never production. */
+/** Vercel's deployment environment for this build: 'preview', 'production', or '' off Vercel. */
+export function vercelEnv(): string {
+  try { const v = (import.meta.env as Record<string, unknown>).VITE_VERCEL_ENV; return typeof v === 'string' ? v : '' } catch { return '' }
+}
+
+/**
+ * Whether this page may grant: a Vercel preview deployment, localhost, or a
+ * dev server; never production. A production deployment also has a
+ * *.vercel.app address, so the address alone is not enough: the build must
+ * be a preview (review of #943, 2026-11-27).
+ */
 export function previewHost(): boolean {
+  const env = vercelEnv()
   if (productionHost()) return false
   if (import.meta.env.DEV) return true
   try {
     const h = location.hostname.toLowerCase()
-    return h === 'localhost' || h === '127.0.0.1' || h.endsWith('.vercel.app')
+    if (h === 'localhost' || h === '127.0.0.1') return true
+    return h.endsWith('.vercel.app') && env === 'preview'
   } catch { return false }
 }
 

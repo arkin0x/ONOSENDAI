@@ -61,7 +61,9 @@ import { BlueprintLine, ChestBlock, KeyLine, TakeCopy } from './ItemRows'
 import { BLUEPRINT_RELAY_READY, finderView, readRecord } from '../lib/blueprint/format'
 import { blockCount, hiddenCount } from '../lib/blueprint/draw'
 import { BlueprintModel } from './blueprint/BlueprintModel'
-import { ExamineSheet, constructionWords, materialsWords, prizeShort } from './blueprint/ExamineSheet'
+import { ExamineSheet, ItemChip, constructionWords, materialsWords, prizeShort } from './blueprint/ExamineSheet'
+import { isItemBlueprint } from '../lib/blueprint/itemMark'
+import { useBlueprints } from '../store/useBlueprints'
 import { Chamfer } from './ui/Chamfer'
 import { ConfirmModal } from './ConfirmModal'
 import { ItemFace } from './ItemIcon'
@@ -99,6 +101,12 @@ export function BlueprintCardBody({ item, placer }: { item: WorldItem; placer: s
   const view = useMemo(() => (read ? finderView(read) : null), [read])
   const maker = useProfile(card?.record.pubkey ?? null)
   const [examining, setExamining] = useState(false)
+  // A found card's prize stays sealed until it is built: it wears the item mark only when this device holds it and knows (your own).
+  const itemMark = useBlueprints((s) => {
+    const id = card?.record.id
+    const held = id ? s.cards.find((c) => c.record.id === id) : undefined
+    return !!held && isItemBlueprint(held)
+  })
   if (!card || !read || !view) return <p className="secret__status" role="status">A blueprint was found here and could not be read.</p>
   const total = blockCount(view)
   const shown = total - hiddenCount(view)
@@ -107,7 +115,10 @@ export function BlueprintCardBody({ item, placer }: { item: WorldItem; placer: s
   const makerName = profileLabel(maker, nip19.npubEncode(card.record.pubkey))
   return (
     <div className="bp-place__card">
-      <h3 className="secret__look-name">{card.title}</h3>
+      <div className="bp-place__titlerow">
+        <h3 className="secret__look-name">{card.title}</h3>
+        {itemMark && <ItemChip />}
+      </div>
       <div className="bp-place__model">
         <Chamfer size={CARD_MODEL_PX} decorative={false}>
           <BlueprintModel view={view} size={CARD_MODEL_PX} label={`${card.title}: ${shown} of ${total} blocks shown, the rest as smoke`} />
@@ -131,7 +142,7 @@ export function BlueprintCardBody({ item, placer }: { item: WorldItem; placer: s
       </div>
       {examining && (
         <ExamineSheet
-          bp={{ name: card.title, maker: makerName, description: prize.text ?? '', view, prize: { reveal: prize.reveal, text: prize.text, views: read.views, name: read.prizeName }, lock: read.sheet.lock, height: read.sheet.height, drawnAt: card.record.created_at }}
+          bp={{ name: card.title, maker: makerName, description: prize.text ?? '', view, prize: { reveal: prize.reveal, text: prize.text, views: read.views, name: read.prizeName }, lock: read.sheet.lock, height: read.sheet.height, drawnAt: card.record.created_at, item: itemMark }}
           onClose={() => setExamining(false)}
         />
       )}

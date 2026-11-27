@@ -47,11 +47,15 @@ export function holdSmash(): void {
   if (useSmashHold.getState().since !== null) return
   const bare = !compilerInHand()
   const ms = bare ? BARE_HOLD_MS : COMPILER_HOLD_MS
+  // The field and the identity as the hold starts: the impact clears blocks in this field, for this identity, or none
+  // (a switch of identity mid-swing would otherwise clear the new identity's layer: review of #943).
+  const field = s
+  const me = useCyberspace.getState().identity.pubkey
   humStart(ms)
   startSmashHold(hit.cell, ms, bare, (target, b) => {
     humStop()
     whoosh()
-    setTimeout(() => { void strike(target, b) }, SWING_MS)
+    setTimeout(() => { void strike(target, b, { field, me }) }, SWING_MS)
   })
 }
 
@@ -102,9 +106,11 @@ let toyCount = 0
 const wait = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, Math.max(0, ms)))
 
 /** The impact: clear the group, start the shatter, compile, then show what it made. */
-export async function strike(target: readonly [number, number, number], bare: boolean): Promise<void> {
+export async function strike(target: readonly [number, number, number], bare: boolean, from?: { field: typeof terrainSession; me: string }): Promise<void> {
   const s = terrainSession
   if (!s) return
+  // Started in another field or as another identity: nothing is spent.
+  if (from && (from.field !== s || from.me !== useCyberspace.getState().identity.pubkey)) { useTerrain.getState().say('The smash stopped: you changed identity or place.'); return }
   const read = (x: number, y: number, z: number): number => s.world.blockCs(x, y, z)
   const g = smashGroup(read, target, bare)
   if (!g.cells.length) { useTerrain.getState().say('Nothing there to smash.'); return }
@@ -125,14 +131,16 @@ export async function strike(target: readonly [number, number, number], bare: bo
   let found: Found[] = []
   let offline = false
   let unknown = 0
+  let more = false
   if (g.isolated && g.arrangement) {
     const lo = { x: o.x + BigInt(g.lo[0]), y: o.y + BigInt(g.lo[1]), z: o.z + BigInt(g.lo[2]) }
-    try { ({ found, offline, unknown } = await compile(g.arrangement, bare, depsFor(lo, g.size))) } catch { found = [] }
+    try { ({ found, offline, unknown, more } = await compile(g.arrangement, bare, depsFor(lo, g.size))) } catch { found = [] }
   }
   await wait(struck + RESOLVE_AFTER_MS - performance.now())
   if (!found.length) {
     useSmashFx.getState().resolve(id, 'miss')
-    useTerrain.getState().say(offline ? 'Compiled offline. Checking when you reconnect.' : unknown ? 'It compiled into something this version cannot show yet. It is kept.' : MISS_LINE)
+    // Only what this code does: no recheck happens later, and a prize of an unknown type is not opened (review of #943).
+    useTerrain.getState().say(offline ? OFFLINE_LINE : unknown ? UNKNOWN_LINE : MISS_LINE)
     return
   }
   useSmashFx.getState().resolve(id, 'match')
@@ -147,7 +155,16 @@ export async function strike(target: readonly [number, number, number], bare: bo
   }))
   useBlueprints.getState().addToys(toys)
   for (const l of new Set(found.map((f) => f.lookup))) useBlueprints.getState().noteBuilt(l)
+  // More matched than were opened (PRIZES_MAX, or more location-lock heights than are tried): said, never hidden.
+  if (more) useTerrain.getState().say(MORE_LINE)
 }
+
+/** What a smash says when no relay answered and nothing on this device matched. */
+export const OFFLINE_LINE = 'No relay answered, so only blueprints on this device were checked. Nothing compiled. The blocks are spent.'
+/** When it compiled into a prize this version cannot open. */
+export const UNKNOWN_LINE = 'It compiled into something this version cannot open yet.'
+/** When more matched than one smash opens. */
+export const MORE_LINE = 'More may be waiting: this smash opened the first ones it found.'
 
 /** The ITEMS row of a SNO prize: the shard as its creator made it, from this blueprint (DECK-0010 §6.3). */
 function prizeEvent(prize: Extract<Prize, { type: 'sno' }>, record: RecordEvent | undefined, maker: string): NostrEvent {
@@ -179,6 +196,8 @@ export function takeToy(rowKey: string): boolean {
 
 // A hold is for the hand it started with: choosing another slot lets go (a Compiler hold never finishes bare, or the other way round).
 useTerrain.subscribe((t, prev) => { if (t.inventory.slot !== prev.inventory.slot || t.active !== prev.active) cancelSmashHold() })
+// A change of identity ends a hold too: the smash belongs to the identity that began it.
+useCyberspace.subscribe((c, prev) => { if (c.identity.pubkey !== prev.identity.pubkey) cancelSmashHold() })
 
 /** Whether a smash hold is under way. */
 export const smashHolding = (): boolean => useSmashHold.getState().since !== null

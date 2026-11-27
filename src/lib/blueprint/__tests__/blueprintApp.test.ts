@@ -12,16 +12,17 @@ vi.hoisted(() => {
   }
 })
 import { COMPILER_ID, emptyInventory, tidyInventory, withCompiler, withoutCompiler } from '../../terrain/terrainDb'
-import { shownCell, partsList, revealSummary } from '../../../store/useBlueprintTool'
+import { shownCell, partsList, revealSummary, useBlueprintTool } from '../../../store/useBlueprintTool'
 import { arrangementFrom } from '../arrangement'
-import { COMPILER_RECIPE, FERROVEIN, GLOWCORE, GRIDSTONE, sameArrangement } from '../recipes'
+import { COMPILER_RECIPE, FERROVEIN, GLOWCORE, GRIDSTONE, RUSTBAND, sameArrangement } from '../recipes'
 import { compile, relayAsker, smashGroup, type SmashDeps } from '../smash'
 import { heldPose } from '../../../terrain/HeldCompiler'
 import { ringSpot } from '../../../scene/PrizeToys'
 import { startSmashHold, cancelSmashHold, useSmashHold } from '../../../terrain/smashHold'
-import { makeBlueprint, makeRefusal } from '../make'
+import { makeBlueprint, makeRefusal, publishRecord } from '../make'
 import { keyOf } from '../keyClient'
-import { readRecord, type RecordEvent } from '../format'
+import { encodeArrangement, readRecord, type RecordEvent } from '../format'
+import { bytesToHex } from '../../events'
 
 describe('the Compiler in slot 1', () => {
   it('joins slot 1 and shifts the block slots one along, keeping the chosen block chosen', () => {
@@ -55,9 +56,18 @@ describe('the dev grant', () => {
     expect(g.previewHost()).toBe(false)
     expect(g.compilerGranted()).toBe(false)
   })
-  it('grants on a Vercel preview, and ?compiler=0 turns it off', async () => {
+  it('a production deployment never grants, even on its *.vercel.app address', async () => {
+    vi.stubGlobal('location', { hostname: 'onosendai-abc123.vercel.app', search: '' })
+    vi.stubEnv('DEV', false)
+    vi.stubEnv('VITE_VERCEL_ENV', 'production')
+    const g = await import('../devGrant')
+    expect(g.previewHost()).toBe(false)
+    expect(g.compilerGranted()).toBe(false)
+  })
+  it('grants on a Vercel preview deployment, and ?compiler=0 turns it off', async () => {
     vi.stubGlobal('location', { hostname: 'onosendai-git-x.vercel.app', search: '?compiler=0' })
     vi.stubEnv('DEV', false)
+    vi.stubEnv('VITE_VERCEL_ENV', 'preview')
     const g = await import('../devGrant')
     expect(g.previewHost()).toBe(true)
     expect(g.compilerGranted()).toBe(false)
@@ -115,10 +125,12 @@ describe('compiling', () => {
     expect(found.map((f) => [f.name, f.maker])).toEqual([['Rail', 'b'.repeat(64)]])
   })
 
-  it('records are never asked of the relay until it takes them', async () => {
+  it('records are asked of the relay when LIVE (it takes them since cyberspace-relay #52), never in LOCAL', async () => {
     const query = vi.fn(async () => [])
-    expect(await relayAsker(query, () => true)('a'.repeat(64))).toBeNull()
+    expect(await relayAsker(query, () => false)('a'.repeat(64))).toBeNull()
     expect(query).not.toHaveBeenCalled()
+    expect(await relayAsker(query, () => true)('a'.repeat(64))).toEqual([])
+    expect(query).toHaveBeenCalledWith({ kinds: [33343], '#d': ['a'.repeat(64)], limit: 50 })
   })
 
   it('a blueprint whose blocks do not all touch is refused before sealing', () => {
@@ -187,7 +199,7 @@ describe('the prize reveal at sealing', () => {
 })
 
 describe('a bare hand reaches only the 3 by 3 by 3 box round the hit (owner, 2026-11-27)', () => {
-  // The Compiler's recipe laid out at the origin, in a world of nothing else.
+  // The Compiler's recipe laid out at the origin, in a world of nothing else (scan order: X fastest, then Z, then Y).
   const blocks = new Map<string, number>()
   for (let i = 0; i < COMPILER_RECIPE.cells.length; i++) {
     const id = COMPILER_RECIPE.cells[i]
@@ -198,29 +210,124 @@ describe('a bare hand reaches only the 3 by 3 by 3 box round the hit (owner, 202
   }
   const read = (x: number, y: number, z: number): number => blocks.get(`${x},${y},${z}`) ?? 0
 
-  it('hit in its middle column, the recipe comes away whole and isolated, bare or not', () => {
-    for (const hit of [[1, 0, 1], [1, 1, 1]] as const) {
+  it('the Compiler is the hammer (owner, 2026-11-27): a T of two Ferrovein, a Glowcore and two Rustband, 3 by 3 by 1', () => {
+    expect(COMPILER_RECIPE.size).toEqual([3, 3, 1])
+    expect(blocks).toEqual(new Map([['1,0,0', FERROVEIN], ['1,1,0', FERROVEIN], ['0,2,0', RUSTBAND], ['1,2,0', GLOWCORE], ['2,2,0', RUSTBAND]]))
+  })
+
+  it('its key and lookup, for the spec\'s vector (500,000 rounds)', async () => {
+    expect(bytesToHex(encodeArrangement(COMPILER_RECIPE))).toBe('435942455253504143455f424c55455052494e545f56310301030000002800000000002800000005002a0005')
+    const k = await keyOf(COMPILER_RECIPE)
+    expect(k.lookup).toBe('84b131f9c9fd4fe30f118e8c115e7dfd86c7debd3d2f7cef26ddddae053f8564')
+    expect(bytesToHex(k.key)).toBe('593eabd69f12d642d07764e4a7599d1ce1aa1f75912928ef892dfdead5821e77')
+  }, 60_000)
+
+  it('struck at any of its five blocks, a bare hand takes the hammer whole and compiles it (owner, 2026-11-27)', () => {
+    for (const hit of [[1, 0, 0], [1, 1, 0], [0, 2, 0], [1, 2, 0], [2, 2, 0]] as const) {
       const g = smashGroup(read, hit, true)
-      expect(g.cells).toHaveLength(6)
-      expect(g.isolated).toBe(true)
-      expect(sameArrangement(g.arrangement!, COMPILER_RECIPE)).toBe(true)
+      expect(g.cells, hit.join(',')).toHaveLength(5)
+      expect(g.isolated, hit.join(',')).toBe(true)
+      expect(sameArrangement(g.arrangement!, COMPILER_RECIPE), hit.join(',')).toBe(true)
     }
   })
 
-  it('hit at an arm\'s end, a bare hand takes only what is within one cell, and it is not an arrangement', () => {
-    const g = smashGroup(read, [1, 0, 0], true)
-    expect(g.cells.length).toBeLessThan(6)
-    expect(g.cells.every(([x, y, z]) => Math.abs(x - 1) <= 1 && Math.abs(y) <= 1 && Math.abs(z) <= 1)).toBe(true)
-    expect(g.isolated).toBe(false)
-    // The Compiler's reach takes it all from the same hit.
-    const c = smashGroup(read, [1, 0, 0])
-    expect(c.cells).toHaveLength(6)
-    expect(c.isolated).toBe(true)
+  it('a block touching it joins the group, so it is no longer the recipe; ground under it leaves it not isolated: no compile', () => {
+    const beside = (x: number, y: number, z: number): number => (x === 1 && y === 0 && z === 1 ? GRIDSTONE : read(x, y, z))
+    const g = smashGroup(beside, [2, 2, 0], true)
+    expect(g.arrangement && sameArrangement(g.arrangement, COMPILER_RECIPE)).toBeFalsy()
+    // Standing on ground: the group runs into the ground, past a bare hand's 3, so nothing compiles and only the 3-cell window round the hit goes.
+    const ground = (x: number, y: number, z: number): number => (y < 0 ? GRIDSTONE : read(x, y, z))
+    const u = smashGroup(ground, [0, 2, 0], true)
+    expect(u.isolated).toBe(false)
+    expect(u.arrangement).toBeNull()
+    expect(u.cells.every(([x, y, z]) => Math.abs(x) <= 1 && Math.abs(y - 2) <= 1 && Math.abs(z) <= 1)).toBe(true)
   })
 
-  it('a long row: bare takes three blocks, the Compiler the window\'s sixteen', () => {
+  it('a group of extent 4 (one past a bare hand\'s 3) does not compile bare-handed; the Compiler compiles it', () => {
+    const four = (x: number, y: number, z: number): number => (y === 0 && z === 0 && x >= 0 && x <= 3 ? GRIDSTONE : 0)
+    for (const x of [0, 3]) {
+      const g = smashGroup(four, [x, 0, 0], true)
+      expect(g.arrangement).toBeNull()
+      expect(g.cells.length).toBeLessThan(4)
+      expect(smashGroup(four, [x, 0, 0]).isolated).toBe(true)
+    }
+  })
+
+  it('a 16-long build compiles with the Compiler struck at either end; 17 long never does', () => {
+    const row = (n: number) => (x: number, y: number, z: number): number => (y === 0 && z === 0 && x >= 0 && x < n ? GRIDSTONE : 0)
+    for (const x of [0, 15]) {
+      const g = smashGroup(row(16), [x, 0, 0])
+      expect(g.isolated).toBe(true)
+      expect(g.cells).toHaveLength(16)
+      expect(g.arrangement!.size).toEqual([16, 1, 1])
+    }
+    for (const x of [0, 8, 16]) {
+      const g = smashGroup(row(17), [x, 0, 0])
+      expect(g.arrangement).toBeNull()
+      expect(g.cells.length).toBeLessThanOrEqual(16)
+    }
+  })
+
+  it('a long row (not a construction): bare takes three blocks round the hit, the Compiler the window\'s sixteen', () => {
     const row = (x: number, y: number, z: number): number => (y === 0 && z === 0 && x >= -20 && x <= 20 ? GRIDSTONE : 0)
     expect(smashGroup(row, [0, 0, 0], true).cells).toHaveLength(3)
     expect(smashGroup(row, [0, 0, 0]).cells).toHaveLength(16)
+  })
+})
+
+describe('sealing, blueprints live (2026-11-27)', () => {
+  const rail = arrangementFrom([{ at: [0, 0, 0], id: GRIDSTONE }, { at: [1, 0, 0], id: FERROVEIN }])!
+  const signer = async (t: Parameters<Parameters<typeof makeBlueprint>[1]>[0]): Promise<RecordEvent> => ({ ...t, id: 'f'.repeat(64), pubkey: 'b'.repeat(64), sig: 'c'.repeat(128) })
+
+  it('a record over 98,304 bytes is refused when sealing, in plain words (DECK-0010 §5.2)', async () => {
+    const big = { v: 2, name: 'Huge', blob: 'x'.repeat(100_000) }
+    const made = await makeBlueprint({ arrangement: rail, shown: () => true, title: 'Big', prize: { type: 'sno', payload: big }, reveal: 'hidden', lock: 'standard' }, signer)
+    expect('refused' in made && made.refused).toMatch(/Too big to seal: choose fewer prize pictures, or a smaller prize/)
+  })
+
+  it('LIVE, the sealed record is published; LOCAL keeps it; a refusal says so', async () => {
+    const made = await makeBlueprint({ arrangement: rail, shown: () => true, title: 'Rail', prize: { type: 'sno', payload: { v: 2, name: 'Rail piece' } }, reveal: 'hidden', lock: 'standard' }, signer)
+    if ('refused' in made) throw new Error(made.refused)
+    const sentKinds: number[] = []
+    const send = async (ev: { kind: number }): Promise<{ ok: boolean }> => { sentKinds.push(ev.kind); return { ok: true } }
+    expect(await publishRecord(made.record, true, send)).toBe('sent')
+    expect(sentKinds).toEqual([33343])
+    expect(await publishRecord(made.record, false, send)).toBe('kept')
+    expect(sentKinds).toEqual([33343])
+    expect(await publishRecord(made.record, true, async () => ({ ok: false }))).toBe('failed')
+  })
+
+  it('a new capture, a new cage and MAKE ANOTHER start from the default settings: the prize name hidden again', () => {
+    const T = useBlueprintTool
+    T.getState().set({ reveal: 'render', views: new Set(['x', 'y']), showName: true, text: 'old', lock: 'location', height: 3 })
+    T.getState().reset()
+    expect(T.getState()).toMatchObject({ reveal: 'hidden', showName: false, text: '', lock: 'standard', height: 8 })
+    expect([...T.getState().views]).toEqual(['iso'])
+    T.getState().set({ showName: true, reveal: 'render' })
+    T.getState().captured(rail, { lo: { x: 0n, y: 0n, z: 0n }, plane: 0 })
+    expect(T.getState()).toMatchObject({ showName: false, reveal: 'hidden' })
+    T.getState().set({ showName: true, cage: (() => { const c = new Uint16Array(16 ** 3); c[0] = GRIDSTONE; return c })() })
+    expect(T.getState().takeCage({ lo: { x: 0n, y: 0n, z: 0n }, plane: 0 })).toBeNull()
+    expect(T.getState().showName).toBe(false)
+  })
+})
+
+describe('a smash says what it did not try (review of #943)', () => {
+  it('past the prize cap, "more may be waiting" instead of a silent cut', async () => {
+    const { prizesOf } = await import('../smash')
+    const rail = arrangementFrom([{ at: [0, 0, 0], id: GRIDSTONE }, { at: [1, 0, 0], id: FERROVEIN }])!
+    const by = (pk: string) => async (t: Parameters<Parameters<typeof makeBlueprint>[1]>[0]): Promise<RecordEvent> => ({ ...t, id: pk.slice(0, 1).repeat(64), pubkey: pk, sig: 'c'.repeat(128) })
+    const a = await makeBlueprint({ arrangement: rail, shown: () => true, title: 'One', prize: { type: 'sno', payload: { v: 2, name: 'A' } }, reveal: 'hidden', lock: 'standard' }, by('1'.repeat(64)))
+    const b = await makeBlueprint({ arrangement: rail, shown: () => true, title: 'Two', prize: { type: 'sno', payload: { v: 2, name: 'B' } }, reveal: 'hidden', lock: 'standard' }, by('2'.repeat(64)))
+    if ('refused' in a || 'refused' in b) throw new Error('refused')
+    const key = (await keyOf(rail)).key
+    const more = { left: false }
+    const deps = { me: () => 'f'.repeat(64), follows: () => new Set<string>(), muted: () => new Set<string>() }
+    const found = await prizesOf([a.record, b.record], a.lookup, key, deps, 1, { count: 0 }, more)
+    expect(found).toHaveLength(1)
+    expect(more.left).toBe(true)
+    const all = { left: false }
+    expect(await prizesOf([a.record, b.record], a.lookup, key, deps, 8, { count: 0 }, all)).toHaveLength(2)
+    expect(all.left).toBe(false)
   })
 })

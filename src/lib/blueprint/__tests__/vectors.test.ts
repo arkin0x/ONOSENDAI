@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest'
 import { verifyEvent } from 'nostr-tools/pure'
 import vectors from './fixtures/blueprints-vectors.json'
 import { arrangementFrom, gather } from '../arrangement'
-import { cardRecord, deriveKey, encodeArrangement, expandRuns, lookupOf, openPrize, readSheetShape, recordRefusal, type RecordEvent, type Sheet } from '../format'
+import { RECORD_MAX_BYTES, canonicalRecord, cardRecord, cardTemplate, deriveKey, encodeArrangement, expandRuns, lookupOf, openPrize, readRecord, readSheetShape, recordRefusal, serializedLength, type RecordEvent, type Sheet } from '../format'
 import { rankRecords } from '../smash'
 import { regionKeyAt } from '../../shardCrypto'
 import { bytesToHex, hexToBytes } from '../../events'
@@ -45,7 +45,18 @@ describe('DECK-0010 vectors', () => {
   }, 60_000)
 
   it('gathers: the group, isolation and the lookup', async () => {
+    // The owner's rule of 2026-11-27 (a construction of at most 16 on every axis compiles struck at any block) changes
+    // this vector, which DECK-0010 still gives under the old window: a row of 16 struck at its eighth cell now comes
+    // away whole and isolated. The spec is to follow; until then the case is checked under the new rule.
+    const superseded = new Set(['row-16-eighth'])
     for (const g of vectors.gather as unknown as Array<{ name: string; world: Cell4[]; hit: [number, number, number]; smashed: Cell4[]; isolated: boolean; lookup?: string | null }>) {
+      if (superseded.has(g.name)) {
+        const m = new Map(g.world.map(([x, y, z, id]) => [`${x},${y},${z}`, id]))
+        const got = gather((x, y, z) => m.get(`${x},${y},${z}`) ?? 0, g.hit)
+        expect(got.cells, g.name).toHaveLength(g.world.length)
+        expect(got.isolated, g.name).toBe(true)
+        continue
+      }
       const m = new Map(g.world.map(([x, y, z, id]) => [`${x},${y},${z}`, id]))
       const read = (x: number, y: number, z: number): number => m.get(`${x},${y},${z}`) ?? 0
       const got = gather(read, g.hit)
@@ -74,15 +85,54 @@ describe('DECK-0010 vectors', () => {
       expect(opened, name).not.toBeNull()
       if (r.prize) expect(opened, name).toEqual(r.prize)
     }
-    for (const r of vectors.record.reject as unknown as Array<{ name: string; event?: RecordEvent }>) {
+    // Every refused record fails by our own check (the signature aside), so a reader drops it whatever signed it.
+    const rejects = vectors.record.reject as unknown as Array<{ name: string; event?: RecordEvent }>
+    expect(rejects.map((r) => r.name)).toEqual(expect.arrayContaining(['client-tag', 'title-extra-element', 'unknown-sheet-field', 'unknown-prize-field', 'needless-escape', 'whitespace', 'control-character', 'empty-prize-name', 'prize-name-too-long', 'too-large']))
+    for (const r of rejects) {
       if (!r.event) continue
-      const ok = verifyEvent(r.event as Parameters<typeof verifyEvent>[0]) && recordRefusal(r.event) === null
-      expect(ok, r.name).toBe(false)
+      expect(recordRefusal(r.event), r.name).not.toBeNull()
+      expect(readRecord(r.event), r.name).toBeNull()
     }
   })
 
-  it('cards carry the record unchanged; an altered record does not verify', () => {
+  it('size bounds (§5.2, §10): the worst record at the cap, its card, the chest room left and the sealed entry', () => {
+    const sb = vectors.size_bounds as unknown as Record<string, number>
+    const Q = (n: number): string => '"'.repeat(n), F = (n: number): string => 'f'.repeat(n)
+    const view = 'data:image/png;base64,' + 'A'.repeat(16_384 - 22)
+    const pal: Array<number | null> = [0, null]
+    for (let i = 1; pal.length < 256; i++) pal.push(i)
+    const sheet = { size: { x: 16, y: 16, z: 16 }, pal, cells: [0, -4095], lock: 'location', height: 85, prize: { reveal: 'render', text: Q(280), name: Q(64), views: { x: view, y: view, z: view, iso: view } } }
+    const recAt = (n: number, quotes: boolean): RecordEvent => ({
+      id: F(64), pubkey: F(64), created_at: 9999999999, kind: 33343,
+      tags: [['d', F(64)], ['version', '1'], ['encrypted', 'aes-256-gcm', 'A'.repeat(n), 'cyberspace:blueprint'], ['title', quotes ? Q(64) : 'a'.repeat(64)], ['alt', quotes ? Q(280) : 'a'.repeat(280)], ['no-broadcast']],
+      content: JSON.stringify(quotes ? sheet : { ...sheet, prize: { ...sheet.prize, text: 'a'.repeat(280), name: 'a'.repeat(64) } }), sig: F(128),
+    })
+    const bytes = (t: string): number => new TextEncoder().encode(t).length
+    let lo = 0, hi = 200_000
+    while (lo < hi) { const m = (lo + hi + 1) >> 1; if (serializedLength(recAt(m, true)) <= RECORD_MAX_BYTES) lo = m; else hi = m - 1 }
+    const R = canonicalRecord(recAt(lo, true))
+    const esc = (t: string): number => [...t].filter((c) => c === '"' || c === '\\').length
+    expect(bytes(R)).toBe(sb.record_bytes)
+    expect(esc(canonicalRecord(recAt(lo, false)))).toBe(sb.structural_escapes)
+    expect(esc(R)).toBe(sb.escapes)
+    // The card as this client writes it (cardTemplate: C, the protected marker, a lineage d), serialized canonically.
+    const t = cardTemplate(recAt(lo, true), F(64), 9999999999, F(64))
+    expect(t.content).toBe(R)
+    const card = canonicalRecord({ id: F(64), pubkey: F(64), created_at: t.created_at, kind: t.kind, tags: t.tags, content: t.content, sig: F(128) })
+    expect(bytes(card)).toBe(sb.card_bytes)
+    expect(bytes(card) - bytes(R) - esc(R)).toBe(sb.card_own_fields)
+    expect(131_072 - bytes(`[${card}]`)).toBe(sb.chest_room_left)
+    expect(sb.sealed_entry_bytes).toBeLessThanOrEqual(240_000)
+    expect(bytes(R) + 8 * (64 + 280 + 280 + 64)).toBe(sb.relay_worst_bytes)
+  })
+
+  it('cards carry the record unchanged; an altered record does not verify; a card not in the canonical serialization is dropped', () => {
     const c = vectors.card as unknown as Record<string, { event: RecordEvent }>
+    expect(cardRecord(c.reject_not_canonical.event)).toBeNull()
+    // Its record is fine: only the card's serialization of it is not.
+    const inside = JSON.parse(c.reject_not_canonical.event.content) as RecordEvent
+    expect(recordRefusal(inside)).toBeNull()
+    expect(canonicalRecord(inside)).not.toBe(c.reject_not_canonical.event.content)
     for (const name of ['by_creator', 'copy_by_finder']) {
       const rec = cardRecord(c[name].event)
       expect(rec, name).not.toBeNull()

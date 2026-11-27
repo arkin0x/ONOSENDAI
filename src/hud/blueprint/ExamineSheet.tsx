@@ -4,11 +4,12 @@
  * a fine grid, cyan and white ink. The sheet is a strip of panels that scrolls
  * sideways, as long as the build needs:
  *
- * 1. title and summary: the name, then MATERIALS (known and unknown blocks),
- *    CONSTRUCTION (anywhere, or a specific region) and PRIZE (a mystery,
- *    hints only or public information), how many blocks are shown with a
- *    bar, how many are still hidden and how many a miss burns (all of them),
- *    the compass and the maker's note in the margin;
+ * 1. title and summary: the ONOSENDAI logo over the name, then MATERIALS
+ *    (known and unknown blocks), CONSTRUCTION (anywhere, or a specific
+ *    region) and PRIZE (a mystery, hints only or public information); while
+ *    any block is unknown, how many are known with a bar, how many are
+ *    unknown and how many any incorrect block burns on compile (all of
+ *    them); and the maker's note in the margin;
  * 2. isometric: seen from the (+X, +Y, -Z) corner, behind and to the right
  *    of a player facing the sun: +X runs down to the right, +Z up to the
  *    right, the black sun beyond the build. The build opens as an exploded
@@ -58,6 +59,7 @@ import {
   type CompassOrientation,
 } from '../../lib/blueprint/draw'
 import { PRIZE_VIEWS_SHOWN, type FinderView, type LockKind, type PrizeReveal, type PrizeView } from '../../lib/blueprint/format'
+import { ITEM_ORANGE } from '../../lib/blueprint/itemMark'
 import { blockKind } from '../../lib/terrain/blocks'
 import { tileUrl } from '../../lib/terrain/tiles'
 import { Chamfer } from '../ui/Chamfer'
@@ -85,6 +87,8 @@ export interface ExamineBlueprint {
   drawnAt?: number
   /** Its revision, 1 for the first. */
   revision?: number
+  /** An item blueprint (lib/blueprint/itemMark): an orange ITEM chip beside its name. */
+  item?: boolean
 }
 
 /** For a maker examining their own blueprint: the whole arrangement and the prize's real name, if it has one to give. */
@@ -118,6 +122,11 @@ type Register = (cv: HTMLCanvasElement, e: Omit<Entry, 'visible'> | null) => voi
 
 const easeInOutCubic = (p: number): number => (p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2)
 const pxRatio = (): number => (typeof window === 'undefined' ? 1 : Math.min(2, window.devicePixelRatio || 1))
+
+/** The orange ITEM chip beside an item blueprint's name, on the sheet and on its card. */
+export function ItemChip(): JSX.Element {
+  return <span className="bp-item-chip" style={{ '--bp-item-orange': ITEM_ORANGE } as CSSProperties} title="An item blueprint: its prize is an item, not a shard">ITEM</span>
+}
 
 /** One canvas on the sheet, drawn by the sheet's clock. */
 function SheetCanvas({ w, h, paint, reg, label, explodes = false, className }: { w: number; h: number; paint: Paint; reg: Register; label: string; explodes?: boolean; className?: string }): JSX.Element {
@@ -166,8 +175,8 @@ export function materialsWords(known: number, unknown: number): string {
 
 /** CONSTRUCTION, in the summary, the title block, the BLUEPRINTS list and the card. */
 export function constructionWords(lock: LockKind, height?: number): string {
-  if (lock !== 'location') return 'May be built anywhere.'
-  return height !== undefined && Number.isFinite(height) ? `Must be built in a specific h${height} region.` : 'Must be built in a specific region.'
+  if (lock !== 'location') return 'May be built anywhere'
+  return height !== undefined && Number.isFinite(height) ? `Must be built in a specific h${height} region` : 'Must be built in a specific region'
 }
 
 /** CONSTRUCTION in the title block, short: "Anywhere" or "h5 region" ("region" with no height). */
@@ -413,22 +422,29 @@ export function ExamineSheet({ bp, maker, onClose }: { bp: ExamineBlueprint; mak
             <div className={`bp-ex__sheet${asMaker ? ' bp-ex__sheet--maker' : ''}`} data-mark={asMaker ? "MAKER'S VIEW · EVERY BLOCK" : undefined}>
               {/* 1. Title and settings */}
               <section className="bp-ex__panel bp-ex__panel--title">
-                <div className="bp-ex__kicker">{asMaker ? "ONOSENDAI · MAKER'S VIEW" : 'ONOSENDAI · BLUEPRINT'}</div>
-                <h2 className="bp-ex__name">{bp.name}</h2>
+                <div className="bp-ex__kicker">
+                  {/* The app's own wordmark (public/logo.png, as the menu shows it); its size is reserved before it loads. */}
+                  <img className="bp-ex__wordmark" src="/logo.png" alt="ONOSENDAI" width={1969} height={354} decoding="async" />
+                  <span>{asMaker ? "MAKER'S VIEW" : 'BLUEPRINT'}</span>
+                </div>
+                <div className="bp-ex__titlerow">
+                  <h2 className="bp-ex__name">{bp.name}</h2>
+                  {bp.item && <ItemChip />}
+                </div>
                 <dl className="bp-ex__settings">
                   <div><dt>MATERIALS</dt><dd>{materialsWords(finderShown, finderHidden)}</dd></div>
                   <div><dt>CONSTRUCTION</dt><dd>{construction}</dd></div>
                   <div><dt>PRIZE</dt><dd>{prizeShort(bp.prize.reveal, !!prizeName)}</dd></div>
                 </dl>
-                <div className="bp-ex__meter">
-                  <div className="bp-ex__meter-l">{maker ? 'FINDERS SEE' : 'KNOWN MATERIALS'} <b>{finderShown} / {total}</b></div>
-                  <div className="bp-ex__bar"><i style={{ width: `${total ? (100 * finderShown) / total : 0}%` }} /></div>
-                  <div className="bp-ex__meter-n">{asMaker ? 'You see every block, as you made it.' : 'Smoke marks a block not shown yet.'}</div>
-                  <div className="bp-ex__cost"><span>STILL HIDDEN <b>{finderHidden}</b></span><span>A MISS BURNS ALL <b>{total}</b></span></div>
-                </div>
-                <div className="bp-ex__sunrow">
-                  <Compass reg={reg} orientation="iso" px={88} />
-                </div>
+                {/* Only while something is unknown to a finder: the same in FINDER and MAKER, so switching moves nothing. */}
+                {finderHidden > 0 && (
+                  <div className="bp-ex__meter">
+                    <div className="bp-ex__meter-l">{maker ? 'FINDERS SEE' : 'KNOWN MATERIALS'} <b>{finderShown} / {total}</b></div>
+                    <div className="bp-ex__bar"><i style={{ width: `${total ? (100 * finderShown) / total : 0}%` }} /></div>
+                    <div className="bp-ex__meter-n">{asMaker ? 'You see every block, as you made it.' : 'Smoke marks a block not shown yet.'}</div>
+                    <div className="bp-ex__cost"><span>UNKNOWN <b>{finderHidden}</b></span><span>ANY INCORRECT BLOCK BURNS ALL <b>{total}</b> ON COMPILE</span></div>
+                  </div>
+                )}
                 {note && <p className="bp-ex__note">{note}<span>~ {bp.maker}</span></p>}
                 <div className="bp-ex__stamps"><div className="bp-ex__stamp"><b>REV {rev}</b><span>{bp.drawnAt ? `DRAWN ${date}` : 'DRAFT'}</span></div></div>
               </section>
@@ -437,11 +453,11 @@ export function ExamineSheet({ bp, maker, onClose }: { bp: ExamineBlueprint; mak
               <section className="bp-ex__panel bp-ex__panel--iso">
                 <div className="bp-ex__isocol">
                   <div className="bp-ex__ph">
-                    <span>ISOMETRIC</span>
+                    <span>ISOMETRIC VIEW</span>
                     <button type="button" className="bp-ex__replay" onClick={replay} title="Watch the layers come together again"><RotateCcw size={12} strokeWidth={2.25} aria-hidden />REPLAY</button>
                   </div>
                   <SheetCanvas w={ISO_PX} h={ISO_PX} paint={paintIso} reg={reg} explodes className="bp-ex__isocv" label={`${asMaker ? `Isometric model: all ${total} blocks, as you made it` : `Isometric model: ${shown} of ${total} blocks shown, the rest as smoke`}. Seen from behind and to the right of a player facing the sun: +X runs down to the right, +Z up to the right, the black sun beyond the build`} />
-                  <div className="bp-ex__foot">1 block = 1 gibson · box {sx} × {sy} × {sz}</div>
+                  <div className="bp-ex__foot">1 block = 1 gibson · volume {sx} × {sy} × {sz}</div>
                 </div>
                 <div className="bp-ex__views" style={{ '--bp-vw': `${viewsCol}px` } as CSSProperties}>
                   <div className="bp-ex__ph"><span>THREE VIEWS · ONE ALONG EACH AXIS</span></div>
@@ -515,7 +531,7 @@ export function ExamineSheet({ bp, maker, onClose }: { bp: ExamineBlueprint; mak
                       </div>
                     ))}
                   </div>
-                  <div className="bp-ex__btot">{total} BLOCKS IN ALL · BOX {sx} × {sy} × {sz}</div>
+                  <div className="bp-ex__btot">{total} BLOCKS IN ALL · VOLUME {sx} × {sy} × {sz}</div>
                 </div>
                 <div className="bp-ex__box">
                   <div className="bp-ex__bh"><span>PRIZE</span><b>{prizeShort(bp.prize.reveal, !!prizeName)}</b></div>

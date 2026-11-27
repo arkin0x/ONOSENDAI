@@ -6,6 +6,10 @@
  * - the compose cage: every cell is whole device pixels wide and starts on a
  *   whole device pixel, one pitch from the next, so its grid lines are crisp;
  *   the +X and +Z labels and the black sun stand clear of it;
+ * - the compose step: USE THIS (at the top) and the preview are both on
+ *   screen without scrolling at every size (owner, 2026-11-27);
+ * - the landing list (BUILD > BLUEPRINT): CREATE NEW and every DEPLOY are on
+ *   the page, nothing wider than the screen;
  * - the prize step: no folder-edit control is there; tiles never overlap each
  *   other; inside a tile the thumbnail, name, status line and action stack
  *   without overlapping; the folder chips never overlap.
@@ -25,8 +29,11 @@ const SIZES = [
   { name: '375 dpr2', w: 375, h: 812, dpr: 2, touch: true },
   { name: '375 dpr3', w: 375, h: 812, dpr: 3, touch: true },
   { name: '430 dpr3', w: 430, h: 932, dpr: 3, touch: true },
+  { name: '1024x768 dpr1', w: 1024, h: 768, dpr: 1, touch: false },
   { name: '1440 dpr1', w: 1440, h: 900, dpr: 1, touch: false },
   { name: '1441 dpr2', w: 1441, h: 901, dpr: 2, touch: false },
+  // A tablet in a browser, its height cut by the browser's bars (owner, 2026-11-27: USE THIS was under the fold).
+  { name: '714x600 dpr2', w: 714, h: 600, dpr: 2, touch: true },
 ]
 const SHOTS = process.env.SHOTS ?? ''
 const problems = []
@@ -41,10 +48,23 @@ for (const size of SIZES) {
   const page = await ctx.newPage()
   await page.goto(URL)
   await page.waitForTimeout(9000)
-  // The compose cage, with a few blocks on two layers.
+  // The landing list first: two blueprints held, CREATE NEW over them.
   await page.evaluate(async () => {
     const T = (await import('/src/store/useBlueprintTool.ts')).useBlueprintTool
     T.getState().openTool()
+  })
+  await page.waitForTimeout(800)
+  if (SHOTS) await page.screenshot({ path: `${SHOTS}/layout-${size.w}-dpr${size.dpr}-list.png` })
+  const list = await page.evaluate(() => {
+    const create = [...document.querySelectorAll('.bpt button')].find((b) => /CREATE NEW/i.test(b.textContent ?? ''))
+    return { create: !!create, scrollW: document.documentElement.scrollWidth, w: window.innerWidth }
+  })
+  if (!list.create) problems.push(`${size.name}: the list has no CREATE NEW`)
+  if (list.scrollW > list.w + 0.5) problems.push(`${size.name}: the list scrolls sideways (${list.scrollW} > ${list.w})`)
+  // The compose grid, with a few blocks on two layers.
+  await page.evaluate(async () => {
+    const T = (await import('/src/store/useBlueprintTool.ts')).useBlueprintTool
+    T.getState().createNew()
     T.getState().set({ composing: true, step: 0 })
     for (const [x, y, z, id] of [[6, 0, 6, 1], [7, 0, 6, 40], [7, 1, 6, 42], [0, 0, 0, 8], [15, 0, 15, 1]]) { T.getState().set({ layer: y, brush: id }); T.getState().paint(x, z) }
     T.getState().set({ layer: 1 })
@@ -55,8 +75,14 @@ for (const size of SIZES) {
     const cells = [...document.querySelectorAll('.bpt-cell')].map((c) => c.getBoundingClientRect())
     const box = document.querySelector('.bpt-cage')?.getBoundingClientRect()
     const r = (s) => document.querySelector(s)?.getBoundingClientRect()
-    return { cells: cells.map((c) => [c.left, c.top, c.width, c.height]), box: box && [box.left, box.top, box.right, box.bottom], x: r('.bpt-cage__axis--x'), z: r('.bpt-cage__axis--z'), sun: r('.bpt-cage__sun') }
+    const scroll = document.querySelector('.bpt-scroll')?.getBoundingClientRect()
+    const vis = (q) => { const e = r(q); return !!e && !!scroll && e.width > 0 && e.top >= scroll.top - 0.5 && e.bottom <= scroll.bottom + 0.5 && e.left >= 0 && e.right <= window.innerWidth + 0.5 }
+    return { cells: cells.map((c) => [c.left, c.top, c.width, c.height]), box: box && [box.left, box.top, box.right, box.bottom], x: r('.bpt-cage__axis--x'), z: r('.bpt-cage__axis--z'), sun: r('.bpt-cage__sun'), go: vis('.bpt-layer__go'), preview: vis('.bpt-compose__preview'), grid: vis('.bpt-cage'), scrollW: document.documentElement.scrollWidth, w: window.innerWidth }
   })
+  // USE THIS, the preview and the whole grid on screen with no scrolling, and no sideways page scroll (owner, 2026-11-27).
+  for (const k of ['go', 'preview', 'grid']) if (!cage[k]) problems.push(`${size.name}: ${k === 'go' ? 'USE THIS' : k} is not fully on screen without scrolling`)
+  if (cage.scrollW > cage.w + 0.5) problems.push(`${size.name}: the compose step scrolls sideways`)
+  if (size.touch && size.w <= 430 && cage.cells.length && cage.cells[0][2] < 18) problems.push(`${size.name}: grid cells are ${cage.cells[0][2]}px, too small to tap`)
   if (cage.cells.length !== 256) problems.push(`${size.name}: the cage has ${cage.cells.length} cells`)
   const dev = (v) => Math.abs(v * size.dpr - Math.round(v * size.dpr)) < 0.02
   const bad = cage.cells.filter(([l, t, w, h]) => !dev(l) || !dev(t) || !dev(w) || !dev(h))

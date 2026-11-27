@@ -1,12 +1,18 @@
 import { describe, expect, it } from 'vitest'
 import { gather, arrangementFrom, connected } from '../arrangement'
-import {
+import { type Arrangement,
   encodeArrangement, deriveKey, lookupOf, sealPrize, openPrize, cellIndex, cellAt, DOMAIN, sheetShape, readSheetShape, finderView, readRecord,
   recordTemplate, recordLookup, recordRefusal, toRuns, expandRuns, cardTemplate, cardRecord, type RecordEvent, type Sheet,
 } from '../format'
-import { COMPILER_RECIPE, FERROVEIN, GLOWCORE, GRIDSTONE } from '../recipes'
+import { FERROVEIN, GLOWCORE, GRIDSTONE } from '../recipes'
 import { prizesOf, makerRank, rankRecords } from '../smash'
 import { bytesToHex } from '../../events'
+
+/** The spec's own vector arrangement (DECK-0010's compiler_recipe vector, the plus of 2026-11-26): four Gridstone in a plus round a Ferrovein, a Glowcore on top. The game's Compiler is now the hammer (recipes.ts). */
+const COMPILER_RECIPE: Arrangement = arrangementFrom([
+  { at: [1, 0, 0], id: GRIDSTONE }, { at: [0, 0, 1], id: GRIDSTONE }, { at: [1, 0, 1], id: FERROVEIN },
+  { at: [2, 0, 1], id: GRIDSTONE }, { at: [1, 0, 2], id: GRIDSTONE }, { at: [1, 1, 1], id: GLOWCORE },
+])!
 
 /** A sparse world of blocks for gather. */
 function world(cells: Array<[number, number, number, number]>): (x: number, y: number, z: number) => number {
@@ -70,20 +76,18 @@ describe('gather (DECK-0010 §4)', () => {
     expect(g.isolated).toBe(false)
   })
 
-  it('the window is the hit minus 8 to plus 7: a line of 16 comes away whole only from its ninth cell', () => {
+  it('a construction of at most 16 on every axis comes away whole wherever it is struck (owner, 2026-11-27); 17 never compiles', () => {
     const line = (n: number): Array<[number, number, number, number]> => Array.from({ length: n }, (_, i) => [i, 0, 0, 1])
-    const ninth = gather(world(line(16)), [8, 0, 0])
-    expect(ninth.cells.length).toBe(16)
-    expect(ninth.isolated).toBe(true)
-    const end = gather(world(line(16)), [0, 0, 0])
+    for (const x of [0, 7, 8, 15]) {
+      const g = gather(world(line(16)), [x, 0, 0])
+      expect(g.cells.length, String(x)).toBe(16)
+      expect(g.isolated, String(x)).toBe(true)
+    }
+    // Too long: the window round the hit goes (hit - 8 to + 7), with nothing compiled.
+    const end = gather(world(line(17)), [0, 0, 0])
     expect(end.cells.length).toBe(8)
     expect(end.isolated).toBe(false)
-    // 8 or fewer come away whole wherever they are hit; 9 struck at the minus end loses its last cell
-    // (DECK-0010 §4.1 says 9: the window reaches only 7 above the hit).
-    expect(gather(world(line(8)), [0, 0, 0]).isolated).toBe(true)
-    expect(gather(world(line(8)), [7, 0, 0]).isolated).toBe(true)
-    expect(gather(world(line(9)), [0, 0, 0]).isolated).toBe(false)
-    expect(gather(world(line(9)), [8, 0, 0]).isolated).toBe(true)
+    expect(end.arrangement).toBeNull()
   })
 
   it('natural ground under a build is taken with it', () => {
@@ -148,7 +152,7 @@ describe('the sheet and the record (DECK-0010 §5)', () => {
     expect(recordRefusal(ev)).toBeNull()
     expect(readRecord(ev)?.title).toBe('Sky Shrine')
     expect(recordLookup(ev)).toBe('a'.repeat(64))
-    expect(recordRefusal({ ...ev, tags: [...ev.tags, ['C', '00']] })).toBe('forbidden tag C')
+    expect(recordRefusal({ ...ev, tags: [...ev.tags, ['C', '00']] })).toBe('unknown tag C')
     expect(recordRefusal({ ...ev, content: JSON.stringify({ ...sheet, lock: 'location' }) })).toBe('height')
     const card = cardTemplate(ev, 'ff'.repeat(32), 9)
     expect(card.tags).toContainEqual(['-'])
@@ -171,5 +175,26 @@ describe('unsealing order (DECK-0010 §6)', () => {
     expect(found.map((f) => f.maker)).toEqual([me, friend, stranger])
     expect(found[2].record!.id).toBe('1')
     expect(makerRank(friend, deps)).toBe(2)
+  })
+})
+
+describe('strict records (DECK-0010 at 83929cd)', () => {
+  it('no client tag, or any other, is ever added to a record or a card by the publish wrapper', async () => {
+    const { attributed } = await import('../../client')
+    for (const kind of [33343, 3343]) expect(attributed({ kind, created_at: 1, tags: [['d', 'x']], content: '' }).tags).toEqual([['d', 'x']])
+    expect(attributed({ kind: 1, created_at: 1, tags: [], content: '' }).tags.some((t) => t[0] === 'client')).toBe(true)
+  })
+
+  it('a writer puts free text in plain: a line break or tab in the words becomes a space, and a blank prize name is never written', async () => {
+    const { makeBlueprint } = await import('../make')
+    const a = { size: [1, 1, 1] as [number, number, number], cells: Uint16Array.from([1]) }
+    const made = await makeBlueprint({ arrangement: a, shown: () => true, title: 'Two\\nlines'.replace('\\\\n', '\n'), prize: { type: 'sno', payload: { v: 2 } }, reveal: 'description', text: 'A\tsmall\nlamp', lock: 'standard', prizeName: '   ' },
+      async (t) => ({ ...t, id: 'f'.repeat(64), pubkey: 'b'.repeat(64), sig: 'c'.repeat(128) }))
+    if ('refused' in made) throw new Error(made.refused)
+    expect(recordRefusal(made.record)).toBeNull()
+    const sheet = JSON.parse(made.record.content)
+    expect(sheet.prize.text).toBe('A small lamp')
+    expect('name' in sheet.prize).toBe(false)
+    expect(made.record.tags.find((t) => t[0] === 'title')?.[1]).not.toMatch(/\n/)
   })
 })

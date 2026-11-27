@@ -7,18 +7,34 @@
  * steps (owner, 2026-11-27): a made blueprint waits in the list until it is
  * placed.
  *
- * Nothing is published: the relay does not take kind 33343 yet
- * (lib/blueprint/format.ts BLUEPRINT_RELAY_READY), so the record lives on
- * this device, where a smash finds it, and travels inside every card placed.
+ * The record is kept on this device, where a smash finds it, and travels
+ * inside every card placed. LIVE, it is also published (publishRecord), so a
+ * smash anywhere finds it; the relay takes kind 33343 since cyberspace-relay
+ * #52 (lib/blueprint/format.ts BLUEPRINT_RELAY_READY). LOCAL keeps it here.
  */
 
 import { keyOf } from './keyClient'
 import {
-  RECORD_MAX_BYTES, recordRefusal, recordTemplate, serializedLength, sealPrize, sheetShape, toBase64, bytesFromCells,
+  RECORD_MAX_BYTES, plainText, recordRefusal, recordTemplate, serializedLength, sealPrize, sheetShape, toBase64, bytesFromCells,
   type Arrangement, type LockKind, type Prize, type PrizeReveal, type PrizeView, type RecordEvent, type Sheet,
 } from './format'
 import { connected } from './arrangement'
-import { bytesToHex } from '../events'
+import { bytesToHex, type NostrEvent } from '../events'
+import { BLUEPRINT_RELAY_READY } from './format'
+import { publishMany, relaySet } from '../relay'
+
+/** A sealed record to the relays when blueprints are live and the app is LIVE: 'sent', 'kept' (LOCAL, or not live) or 'failed'. */
+export async function publishRecord(record: RecordEvent, live: boolean, send: (ev: NostrEvent) => Promise<{ ok: boolean }> = (ev) => publishMany(relaySet(), ev)): Promise<'sent' | 'kept' | 'failed'> {
+  if (!BLUEPRINT_RELAY_READY || !live) return 'kept'
+  try { return (await send(record as unknown as NostrEvent)).ok ? 'sent' : 'failed' } catch { return 'failed' }
+}
+
+/** What the toast says after sealing, for each way the record went. */
+export const SEALED_WORDS: Record<'sent' | 'kept' | 'failed', string> = {
+  sent: 'Sealed and published. It waits in ITEMS, BLUEPRINTS.',
+  kept: 'Sealed and kept on this device (LOCAL). It waits in ITEMS, BLUEPRINTS.',
+  failed: 'Sealed. No relay took it yet; it still travels in every card you place. It waits in ITEMS, BLUEPRINTS.',
+}
 
 export interface MakeInput {
   arrangement: Arrangement
@@ -58,9 +74,12 @@ export async function makeBlueprint(m: MakeInput, sign: (t: ReturnType<typeof re
   const { key, lookup } = await keyOf(m.arrangement, m.lock === 'location' ? m.regionKey : null)
   const sealed = await sealPrize(key, m.prize)
   const prize: Sheet['prize'] = { reveal: m.reveal }
-  if (m.reveal !== 'hidden' && m.text?.trim()) prize.text = [...m.text.trim()].slice(0, 280).join('')
+  // Free text goes in plain (no control characters, §5.3); a prize name empty once trimmed is never written (§5.4 fails it).
+  const text = m.text ? [...plainText(m.text)].slice(0, 280).join('').trim() : ''
+  if (m.reveal !== 'hidden' && text) prize.text = text
   if (m.reveal === 'silhouette' || m.reveal === 'render') prize.views = m.views
-  if (m.prizeName?.trim()) prize.name = [...m.prizeName.trim()].slice(0, 64).join('')
+  const name = m.prizeName ? [...plainText(m.prizeName)].slice(0, 64).join('').trim() : ''
+  if (name) prize.name = name
   const sheet: Sheet = { ...sheetShape(m.arrangement, m.shown), lock: m.lock, ...(m.lock === 'location' ? { height: m.height } : {}), prize }
   const template = recordTemplate({ lookup, sheet, sealed, title: m.title, createdAt: Math.floor(Date.now() / 1000), noBroadcast: m.noBroadcast })
   // The size limit (§5.2), measured before asking the signer: pictures are what usually push it over.

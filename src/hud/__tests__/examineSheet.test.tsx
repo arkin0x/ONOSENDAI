@@ -25,6 +25,12 @@ function blueprint(reveal: PrizeReveal, extra: Partial<ExamineBlueprint['prize']
 }
 
 const noop = (): void => {}
+function under(h: Host, pick: (n: Host) => boolean): Host[] {
+  const out: Host[] = []
+  const walk = (n: Host | string): void => { if (typeof n === 'string') return; if (pick(n)) out.push(n); n.children.forEach(walk) }
+  walk(h)
+  return out
+}
 const sheetOf = (m: { all: () => Host[] }): Host => m.all().find((h) => h.props.role === 'dialog')!
 const prizeBox = (m: { all: () => Host[] }): string => {
   const box = m.all().find((h) => h.props.className === 'bp-ex__box' && textOf(h).startsWith('PRIZE'))
@@ -95,7 +101,7 @@ describe('the summary', () => {
 
   it('reads MATERIALS, CONSTRUCTION, PRIZE in that order, with no numbers in front', async () => {
     const m = await mount(createElement(ExamineSheet, { bp: blueprint('silhouette'), onClose: noop }))
-    expect(rows(m)).toEqual(['MATERIALS1 known / 1 unknown', 'CONSTRUCTIONMay be built anywhere.', 'PRIZEHints only'])
+    expect(rows(m)).toEqual(['MATERIALS1 known / 1 unknown', 'CONSTRUCTIONMay be built anywhere', 'PRIZEHints only'])
     expect(m.says('RECIPE')).toBe(false)
     expect(m.all().filter((h) => h.type === 'dt').map(textOf)).toEqual(['MATERIALS', 'CONSTRUCTION', 'PRIZE'])
     expect(m.all().filter((h) => h.type === 'span' && textOf(h) === 'LOCK')).toHaveLength(0)
@@ -104,7 +110,7 @@ describe('the summary', () => {
 
   it('a location lock names its height, here and in the title block', async () => {
     const m = await mount(createElement(ExamineSheet, { bp: { ...blueprint('hidden'), lock: 'location', height: 5 }, onClose: noop }))
-    expect(rows(m)[1]).toBe('CONSTRUCTIONMust be built in a specific h5 region.')
+    expect(rows(m)[1]).toBe('CONSTRUCTIONMust be built in a specific h5 region')
     const tb = m.all().find((h) => h.props.className === 'bp-ex__tbgrid')!
     expect(textOf(tb)).toContain('CONSTRUCTIONh5 region')
     expect(textOf(tb)).toContain('VOLUME2 × 1 × 1')
@@ -117,8 +123,10 @@ describe('the summary', () => {
   it('drops the old captions: no Y0 line and no paragraph by the compass; the views are named for the sun', async () => {
     const m = await mount(createElement(ExamineSheet, { bp: blueprint('render'), onClose: noop }))
     expect(m.says('Y0 at the bottom')).toBe(false)
-    expect(m.says('1 block = 1 gibson · box 2 × 1 × 1')).toBe(true)
+    expect(m.says('1 block = 1 gibson · volume 2 × 1 × 1')).toBe(true)
     expect(m.says('Every view on this sheet')).toBe(false)
+    expect(m.says('box')).toBe(false)
+    expect(m.says('BOX')).toBe(false)
     expect(m.says('FACING THE SUN')).toBe(true)
     expect(m.says('FROM THE SUN')).toBe(false)
     expect(m.says('+Z up · the sun at the top edge')).toBe(true)
@@ -139,6 +147,41 @@ describe('the summary', () => {
     await named.unmount()
   })
 
+  it('the sheet opens with the ONOSENDAI wordmark and BLUEPRINT, and keeps no big compass in the summary', async () => {
+    const m = await mount(createElement(ExamineSheet, { bp: blueprint('silhouette'), onClose: noop }))
+    const kicker = m.all().find((h) => h.props.className === 'bp-ex__kicker')!
+    expect(under(kicker, (h) => h.type === 'img').map((h) => [h.props.src, h.props.alt])).toEqual([['/logo.png', 'ONOSENDAI']])
+    expect(textOf(kicker)).toBe('BLUEPRINT')
+    expect(m.says('ONOSENDAI · BLUEPRINT')).toBe(false)
+    const title = m.all().find((h) => h.type === 'section' && String(h.props.className).includes('bp-ex__panel--title'))!
+    expect(under(title, (h) => h.type === 'canvas')).toHaveLength(0)
+    expect(m.says('ISOMETRIC VIEW')).toBe(true)
+    await m.unmount()
+  })
+
+  it('the known materials box shows only while something is unknown, with UNKNOWN and what an incorrect block costs', async () => {
+    const m = await mount(createElement(ExamineSheet, { bp: blueprint('silhouette'), onClose: noop }))
+    const meter = m.all().find((h) => h.props.className === 'bp-ex__meter')!
+    expect(textOf(meter)).toContain('UNKNOWN 1')
+    expect(textOf(meter)).toContain('ANY INCORRECT BLOCK BURNS ALL 2 ON COMPILE')
+    expect(textOf(meter)).not.toContain('STILL HIDDEN')
+    expect(textOf(meter)).not.toContain('A MISS')
+    await m.unmount()
+    const all = await mount(createElement(ExamineSheet, { bp: { ...blueprint('silhouette'), view: FULL }, onClose: noop }))
+    expect(all.all().filter((h) => h.props.className === 'bp-ex__meter')).toHaveLength(0)
+    await all.unmount()
+  })
+
+  it('an item blueprint wears an orange ITEM chip beside its name; others do not', async () => {
+    const m = await mount(createElement(ExamineSheet, { bp: { ...blueprint('render'), item: true }, onClose: noop }))
+    const row = m.all().find((h) => h.props.className === 'bp-ex__titlerow')!
+    expect(textOf(row)).toBe('Sky ShrineITEM')
+    await m.unmount()
+    const plain = await mount(createElement(ExamineSheet, { bp: blueprint('render'), onClose: noop }))
+    expect(plain.all().filter((h) => h.props.className === 'bp-item-chip')).toHaveLength(0)
+    await plain.unmount()
+  })
+
   it('PRIZE takes one of three values', () => {
     expect(prizeShort('hidden', false)).toBe('A mystery')
     expect(prizeShort('description', false)).toBe('Hints only')
@@ -148,8 +191,8 @@ describe('the summary', () => {
     expect(prizeShort('hidden', true)).toBe('Public information')
     expect(prizeShort('description', true)).toBe('Public information')
     expect(materialsWords(5, 0)).toBe('5 known / 0 unknown')
-    expect(constructionWords('standard')).toBe('May be built anywhere.')
-    expect(constructionWords('location', 5)).toBe('Must be built in a specific h5 region.')
+    expect(constructionWords('standard')).toBe('May be built anywhere')
+    expect(constructionWords('location', 5)).toBe('Must be built in a specific h5 region')
     expect(constructionShort('standard')).toBe('Anywhere')
     expect(constructionShort('location', 5)).toBe('h5 region')
     expect(constructionShort('location')).toBe('region')
@@ -182,7 +225,7 @@ describe('FINDER and MAKER', () => {
     await m.press(/^MAKER:/)
     expect(makerBtn().props['aria-checked']).toBe(true)
     expect(sheetOf(m)).toMatchObject({ props: { 'data-as': 'maker', 'data-shown': 2 } })
-    expect(m.says("ONOSENDAI · MAKER'S VIEW")).toBe(true)
+    expect(textOf(m.all().find((h) => h.props.className === 'bp-ex__kicker')!)).toBe("MAKER'S VIEW")
     expect(m.says('EVERY BLOCK')).toBe(true)
     // Nothing comes or goes: the same panels, and the parts list keeps its slots.
     expect(m.all().filter((h) => h.type === 'section').length).toBe(panels)

@@ -31,7 +31,7 @@ import { KINDS, blockKind, blockName } from '../../lib/terrain/blocks'
 import { tileUrl } from '../../lib/terrain/tiles'
 import { MAX_SIDE, PRIZE_VIEWS_SHOWN, fullView, type PrizeReveal, type PrizeView } from '../../lib/blueprint/format'
 import { blockCount } from '../../lib/blueprint/arrangement'
-import { makeBlueprint, makeRefusal, makerSecret } from '../../lib/blueprint/make'
+import { SEALED_WORDS, makeBlueprint, makeRefusal, makerSecret, publishRecord } from '../../lib/blueprint/make'
 import { prizeImagesWhole } from '../../lib/blueprint/prizeViews'
 import { Switch } from '../ui/Switch'
 import { LOCK_HEIGHT_MAX } from '../../lib/blueprint/smashRun'
@@ -47,6 +47,7 @@ import { useShardFolders } from '../../store/useShardFolders'
 import { flatFolders, folderOf, isWithin, pathOf } from '../../lib/shardFolders'
 import { Stacked, useModalStack } from '../modalStack'
 import { BlueprintModel } from './BlueprintModel'
+import { BlueprintLanding } from './BlueprintLanding'
 import { ExamineSheet, constructionWords, materialsWords, prizeShort } from './ExamineSheet'
 import type { Position } from '../../lib/space'
 import type { NostrEvent } from '../../lib/events'
@@ -107,6 +108,16 @@ function usePixelSnap(): (el: HTMLElement | null) => void {
     if (!el) return
     const snap = (): void => {
       el.style.transform = ''
+      // The grid's cells: as big as the room left for it allows, 14 to 20 whole pixels, so the whole step fits without
+      // scrolling (owner, 2026-11-27: "beware on mobile").
+      const wrap = el.parentElement
+      const scroll = el.closest('.bpt-scroll')
+      if (wrap && scroll) {
+        const w = wrap.clientWidth - (parseFloat(getComputedStyle(wrap).paddingLeft) || 0)
+        const h = scroll.getBoundingClientRect().bottom - wrap.getBoundingClientRect().top - 26 - 18 - 8
+        const cell = Math.max(14, Math.min(20, Math.floor((w - 17) / 16), Math.floor((h - 17) / 16)))
+        wrap.style.setProperty('--cell', `${cell}px`)
+      }
       const r = el.getBoundingClientRect()
       const dpr = window.devicePixelRatio || 1
       const dx = Math.round(r.left * dpr) / dpr - r.left
@@ -116,6 +127,8 @@ function usePixelSnap(): (el: HTMLElement | null) => void {
     snap()
     const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(snap) : null
     ro?.observe(document.body)
+    const box = el.closest('.bpt-scroll')
+    if (box) ro?.observe(box)
     window.addEventListener('resize', snap)
     return () => { ro?.disconnect(); window.removeEventListener('resize', snap) }
   }, [el])
@@ -125,6 +138,7 @@ function usePixelSnap(): (el: HTMLElement | null) => void {
 function Compose(): JSX.Element {
   const st = useBlueprintTool()
   const cageRef = usePixelSnap()
+  const [big, setBig] = useState(false)
   const view = useMemo(() => {
     const blocks: Array<{ at: [number, number, number]; id: number }> = []
     st.cage.forEach((id, i) => { if (id) blocks.push({ at: [i % MAX_SIDE, Math.floor(i / 256), Math.floor(i / MAX_SIDE) % MAX_SIDE], id }) })
@@ -152,29 +166,36 @@ function Compose(): JSX.Element {
         <button className="bpt-mini" onClick={() => st.set({ layer: Math.max(0, st.layer - 1) })} aria-label="Layer down"><Minus size={14} aria-hidden /></button>
         <span>LAYER Y{st.layer}</span>
         <button className="bpt-mini" onClick={() => st.set({ layer: Math.min(MAX_SIDE - 1, st.layer + 1) })} aria-label="Layer up"><Plus size={14} aria-hidden /></button>
-        <span className="bpt-layer__brush">{st.brush ? blockName(st.brush) : 'Erase'}</span>
+        {/* USE THIS at the top, always in sight (owner, 2026-11-27: "use this button should be on top"). */}
+        <button className="bpt-go bpt-layer__go" disabled={!view.length} onClick={() => { const why = st.takeCage(cursorPlace()); if (why) st.set({ error: why }) }}>USE THIS <ArrowRight size={14} aria-hidden /></button>
       </div>
-      <div className="bpt-cage-wrap">
-        <span className="bpt-cage__axis bpt-cage__axis--x">+X →</span>
-        <span className="bpt-cage__axis bpt-cage__axis--z">↑<br />+Z</span>
-        <div ref={cageRef} className="bpt-cage" role="grid" aria-label={`Layer Y${st.layer}, seen from above`}>
-          {Array.from({ length: MAX_SIDE * MAX_SIDE }, (_, n) => {
-            // +Z up: the top row is z 15, the black sun past the top edge.
-            const x = n % MAX_SIDE, z = MAX_SIDE - 1 - Math.floor(n / MAX_SIDE)
-            const id = st.cage[x + MAX_SIDE * z + 256 * st.layer]
-            const below = st.layer > 0 ? st.cage[x + MAX_SIDE * z + 256 * (st.layer - 1)] : 0
-            return (
-              <button key={n} className={`bpt-cell${id ? ' is-full' : below ? ' is-below' : ''}`} onClick={() => st.paint(x, z)} aria-label={`x ${x}, z ${z}${id ? `: ${blockName(id)}` : ''}`}>
-                {id ? <Swatch id={id} size={14} /> : null}
-              </button>
-            )
-          })}
+      {/* The preview and the block in hand in a column left of the grid on wider screens, a row over it on a phone; the
+          grid takes the rest, its cells sized to fit (usePixelSnap), so nothing needs a scroll. */}
+      <div className="bpt-compose__main">
+        <div className="bpt-compose__side">
+          {preview
+            ? <button type="button" className={`bpt-compose__preview${big ? ' is-big' : ''}`} onClick={() => setBig((b) => !b)} aria-label={big ? 'Make the preview small' : 'Make the preview bigger'} aria-pressed={big}><BlueprintModel view={preview} size={200} /></button>
+            : <span className="bpt-compose__preview is-empty" aria-hidden />}
+          <span className="bpt-layer__brush">{st.brush ? blockName(st.brush) : 'Erase'}</span>
         </div>
-        <span className="bpt-cage__sun" aria-label="The black sun lies along +Z" />
-      </div>
-      <div className="bpt-compose__foot">
-        {preview && <BlueprintModel view={preview} size={96} />}
-        <button className="bpt-go" disabled={!view.length} onClick={() => { const why = st.takeCage(cursorPlace()); if (why) st.set({ error: why }) }}>USE THIS <ArrowRight size={14} aria-hidden /></button>
+        <div className="bpt-cage-wrap">
+          <span className="bpt-cage__axis bpt-cage__axis--x">+X →</span>
+          <span className="bpt-cage__axis bpt-cage__axis--z">↑<br />+Z</span>
+          <div ref={cageRef} className="bpt-cage" role="grid" aria-label={`Layer Y${st.layer}, seen from above`}>
+            {Array.from({ length: MAX_SIDE * MAX_SIDE }, (_, n) => {
+              // +Z up: the top row is z 15, the black sun past the top edge.
+              const x = n % MAX_SIDE, z = MAX_SIDE - 1 - Math.floor(n / MAX_SIDE)
+              const id = st.cage[x + MAX_SIDE * z + 256 * st.layer]
+              const below = st.layer > 0 ? st.cage[x + MAX_SIDE * z + 256 * (st.layer - 1)] : 0
+              return (
+                <button key={n} className={`bpt-cell${id ? ' is-full' : below ? ' is-below' : ''}`} onClick={() => st.paint(x, z)} aria-label={`x ${x}, z ${z}${id ? `: ${blockName(id)}` : ''}`}>
+                  {id ? <Swatch id={id} size={14} /> : null}
+                </button>
+              )
+            })}
+          </div>
+          <span className="bpt-cage__sun" aria-label="The black sun lies along +Z" />
+        </div>
       </div>
     </div>
   )
@@ -197,7 +218,7 @@ function ArrangementStep(): JSX.Element {
       </button>
       <button className="bpt-choice" onClick={() => st.set({ composing: true })}>
         <Boxes size={22} strokeWidth={1.75} aria-hidden />
-        <span><b>COMPOSE IN THE CAGE</b><small>Place blocks in a 16 by 16 by 16 cage. Designing is free; building it costs the blocks.</small></span>
+        <span><b>COMPOSE ON A GRID</b><small>Place blocks on a 16 by 16 by 16 grid, a layer at a time. Designing is free; building it costs the blocks.</small></span>
       </button>
       {st.arrangement && <button className="bpt-go" onClick={() => st.setStep(1)}>NEXT <ArrowRight size={14} aria-hidden /></button>}
     </div>
@@ -393,7 +414,6 @@ function SealStep(): JSX.Element {
   const st = useBlueprintTool()
   const a = st.arrangement!
   const parts = partsList(st)
-  const [done, setDone] = useState<string | null>(null)
   const seal = async (): Promise<void> => {
     if (!st.prize || st.sealing) return
     // Checked again as it is sealed: a kit piece never goes into a record, however it was picked.
@@ -414,22 +434,16 @@ function SealStep(): JSX.Element {
         reveal: st.reveal, text: st.text, views, lock: st.lock, height: st.height, regionKey, prizeName: st.showName ? st.prize.name : null,
       }, (t) => useCyberspace.getState().signEvent(t))
       if ('refused' in made) { st.set({ sealing: false, error: made.refused }); return }
-      useBlueprints.getState().addMade({ lookup: made.lookup, record: made.record as NostrEvent, secret: makerSecret(a, made.key) })
+      const card = useBlueprints.getState().addMade({ lookup: made.lookup, record: made.record as NostrEvent, secret: makerSecret(a, made.key), prizeKind: 'sno' })
+      // LIVE, the record goes to the relays too, so a smash anywhere finds it.
+      const went = await publishRecord(made.record, useCyberspace.getState().live)
       st.set({ sealing: false })
-      setDone(st.title.trim() || 'blueprint')
-      useToast.getState().show({ label: 'BLUEPRINT', meta: 'Sealed. It waits in ITEMS, BLUEPRINTS.', mark: 'build', ms: BRIEF_TOAST_MS })
+      useToast.getState().show({ label: 'BLUEPRINT', meta: SEALED_WORDS[went], mark: 'build', ms: BRIEF_TOAST_MS })
+      // Back to the list, the new one first and marked NEW, so DEPLOY is one tap away (owner, 2026-11-27).
+      useBlueprintTool.getState().sealed(card.rowKey)
     } catch {
       st.set({ sealing: false, error: 'The signer did not sign it. Try again.' })
     }
-  }
-  if (done) {
-    return (
-      <div className="bpt-body bpt-done">
-        <Stamp size={30} strokeWidth={1.5} aria-hidden />
-        <p><b>{done}</b> is sealed. It waits in ITEMS, BLUEPRINTS, MINE until you place it.</p>
-        <button className="bpt-go" onClick={() => { st.set({ arrangement: null, prize: null, step: 0, title: '', text: '' }); st.reset(); setDone(null) }}>MAKE ANOTHER</button>
-      </div>
-    )
   }
   return (
     <div className="bpt-body">
@@ -477,16 +491,17 @@ export function BlueprintTool(): JSX.Element | null {
           <div className="bpt-head">
             <DraftingCompass size={16} strokeWidth={2} aria-hidden />
             <h2>BLUEPRINT</h2>
-            {st.step > 0 && <button className="bpt-mini" onClick={() => st.setStep((st.step - 1) as ToolStep)} aria-label="Back"><ArrowLeft size={14} aria-hidden /></button>}
+            {st.view === 'make' && <button className="bpt-mini" onClick={() => (st.step > 0 ? st.setStep((st.step - 1) as ToolStep) : st.set({ view: 'list', error: null }))} aria-label="Back"><ArrowLeft size={14} aria-hidden /></button>}
             <ModalClose onClose={close} />
           </div>
-          <StepBar step={st.step} />
+          {st.view === 'make' && <StepBar step={st.step} />}
           <div className="bpt-error" role="status">{st.error ?? ''}</div>
           <div className="bpt-scroll">
-            {st.step === 0 && <ArrangementStep />}
-            {st.step === 1 && <PrizeStep />}
-            {st.step === 2 && a && <SettingsStep onExamine={() => setExamine(true)} />}
-            {st.step === 3 && a && <SealStep />}
+            {st.view === 'list' && <BlueprintLanding onCreate={st.createNew} freshRowKey={st.freshRowKey} />}
+            {st.view === 'make' && st.step === 0 && <ArrangementStep />}
+            {st.view === 'make' && st.step === 1 && <PrizeStep />}
+            {st.view === 'make' && st.step === 2 && a && <SettingsStep onExamine={() => setExamine(true)} />}
+            {st.view === 'make' && st.step === 3 && a && <SealStep />}
           </div>
         </div>
       </div>

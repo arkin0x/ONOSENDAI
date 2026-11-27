@@ -745,6 +745,27 @@ export function cardsStayLocal(pending: DeployPending | null): boolean {
 /** What the deploy bar says while a card stays on this device (cardsStayLocal). */
 export const CARDS_LOCAL_NOTE = 'Kept on this device until blueprints go live.'
 
+/** Why a card, or a chest holding one, cannot go where your things are already on the relays (until blueprints go live). */
+export const CARDS_LIVE_BAG = 'You already have things here on the relays, and blueprint cards stay on this device until blueprints go live. Leave this one somewhere else for now.'
+
+/** The same, in LOCAL once blueprints are live: the card would stay here while the bag it joins is on the relays. */
+export const CARDS_LOCAL_BAG = 'You already have things here on the relays, and in LOCAL this card would stay on this device only. Switch to LIVE to leave it here, or leave it somewhere else.'
+
+/** Whether a deploy places a blueprint card: a card, or a new chest holding one. */
+export function carriesCard(pending: DeployPending | null): boolean {
+  if (!pending) return false
+  if (pending.type === 'blueprint') return true
+  return pending.type === 'chest' && pending.contents.some((c) => c.kind === 'blueprint' || (c.kind === 'sealed' && c.type === 'blueprint'))
+}
+
+/**
+ * Whether a bag of yours is on the relays: any of its rows (other than
+ * `except`, one leaving it in this write) published and not gone.
+ */
+export function bagOnRelays(rows: readonly MyDeployment[], lookupId: string, except?: string): boolean {
+  return rows.some((d) => d.lookupId === lookupId && d.eventId !== except && d.goneFrom === undefined && d.published)
+}
+
 /** A card's name as a bar or a chest row says it: its record's title. */
 export function cardTitle(card: Pick<BlueprintCard, 'record'>): string {
   return readRecord(card.record)?.title ?? 'blueprint'
@@ -5464,6 +5485,15 @@ export const useShards = create<ShardsState>((set, get) => {
         // A chest moved with a card inside counts too: its sealed contents travel with it to the new place.
         const movingCards = !!movedChest && (cardsAmong(movedChest.sealed) > 0 || (!!movedChest.chest && cardPayloads.has(movedChest.chest.payload)))
         const live = !cardsStayLocal(pending) && !(movingCards && !BLUEPRINT_RELAY_READY) && !cardsKeepLocal(rowsOf(owner), rk.lookupId) && (cs.live || (was?.published ?? false) || (movedChest?.published ?? false) || (movedItem?.published ?? false))
+        // A card, or a chest holding one, written into a bag of yours that is already on the relays without going to
+        // the relays itself (LOCAL, or before blueprints went live) would leave that bag's relay copy behind for good:
+        // every row in it would read as never sent, and a later DELETE would send nothing (review of #943,
+        // 2026-11-27). Refused there, in words, before anything is signed.
+        const placesCard = carriesCard(pending) || movingCards
+        if (placesCard && !live && bagOnRelays(rowsOf(owner), rk.lookupId, movedChest?.eventId)) {
+          set({ deployStatus: 'error', deployNote: null, deployError: BLUEPRINT_RELAY_READY ? CARDS_LOCAL_BAG : CARDS_LIVE_BAG })
+          return
+        }
         // A chest's look over what a tag carries goes as a sealed look (DECK-0004
         // §3.6): its own hidden object, sealed with this bag's key, sent first
         // so no bag names what no relay has, and named by a wrapper in the tag.
@@ -5734,6 +5764,8 @@ export const useShards = create<ShardsState>((set, get) => {
           // A first seal: nothing has been recorded yet, so nothing claims to be hidden.
           // Its look rides in the bag every time, so the bag is what a relay may refuse for size.
           if (pending.type === 'chest' && live && !published) throw new Error(`No relay took the bag (${JSON.stringify(event).length.toLocaleString('en-US')} bytes). Nothing was hidden.`)
+          // A card no relay took is not left: kept here only, it would leave the bag's relay copy behind (placesCard above).
+          if (placesCard && live && !published) throw new Error('No relay took the bag with the blueprint card, so the card was not left here. Try again.')
           // The bag that names its sealed looks stands: they are its now, and never taken back for a later step.
           lookSent.length = 0
           // So does the bag naming the parent of its pieces.

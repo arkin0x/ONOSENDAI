@@ -158,6 +158,11 @@ const BUILD = process.env.VITEST ? 'test' : buildId()
 /** The app's simple version (src/lib/version.ts simpleVersion), from package.json: "2.1.0" is 2.1. Empty when it is not plain numbers. */
 const APP_VERSION = simpleVersion((JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')) as { version?: string }).version) ?? ''
 
+// Vercel's deployment environment ('preview', 'production', or unset off Vercel) as import.meta.env.VITE_VERCEL_ENV:
+// a preview grants a Compiler to test with, a production deployment never does, whatever its address
+// (src/lib/blueprint/devGrant.ts). Vite reads VITE_ variables from the environment once this config has loaded.
+if (process.env.VERCEL_ENV && !process.env.VITE_VERCEL_ENV) process.env.VITE_VERCEL_ENV = process.env.VERCEL_ENV
+
 export default defineConfig(async () => ({
   plugins: [react(), routeCards(), composerKnowsWebGL2(), versionFile(BUILD), v1HopListGuard(), bootPreload()],
   define: {

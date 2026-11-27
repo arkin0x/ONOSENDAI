@@ -3,29 +3,31 @@
  * lookup as everyone's blueprints (design page 3, "The starter recipes are
  * blueprints"); the game simply knows them, with every block revealed.
  *
- * The Compiler (owner, 2026-11-26): four Gridstone in a plus around a
- * Ferrovein, a Glowcore on top. The only recipe a bare hand can smash (a
- * longer hold, and only the 3 by 3 by 3 box round the hit, so it comes away
- * whole when hit in its middle column), and the only way to get a Compiler. The plus lies flat
- * (cyberspace X and Z) and the Glowcore stands on it (+Y, TERRAIN's up): a
- * box 3 wide, 3 deep and 2 high, 18 cells read with the empty ones.
+ * The Compiler (owner, 2026-11-27: "a 3x3 hammer", replacing the plus of
+ * 2026-11-26): an upright T hammer. A handle of two Ferrovein standing on
+ * each other, a Glowcore on top, and a Rustband either side of the Glowcore
+ * along X: the head. In world axes (+Y up, TERRAIN's up): a box 3 wide (X),
+ * 3 high (Y) and 1 deep (Z), 9 cells read with the empty ones. It is the only
+ * recipe a bare hand can smash (a longer hold, and a reach of 3 on every
+ * axis: it fits, so it compiles struck at any of its blocks), and the only
+ * way to get a Compiler.
  */
 
 import { arrangementFrom } from './arrangement'
 import type { Arrangement } from './format'
 
 export const GRIDSTONE = 1
+export const RUSTBAND = 5
 export const FERROVEIN = 40
 export const GLOWCORE = 42
 
-/** The Compiler's arrangement, in world axes. */
+/** The Compiler's arrangement, in world axes: the T hammer. */
 export const COMPILER_RECIPE: Arrangement = arrangementFrom([
-  { at: [1, 0, 0], id: GRIDSTONE },
-  { at: [0, 0, 1], id: GRIDSTONE },
-  { at: [1, 0, 1], id: FERROVEIN },
-  { at: [2, 0, 1], id: GRIDSTONE },
-  { at: [1, 0, 2], id: GRIDSTONE },
-  { at: [1, 1, 1], id: GLOWCORE },
+  { at: [1, 0, 0], id: FERROVEIN },
+  { at: [1, 1, 0], id: FERROVEIN },
+  { at: [0, 2, 0], id: RUSTBAND },
+  { at: [1, 2, 0], id: GLOWCORE },
+  { at: [2, 2, 0], id: RUSTBAND },
 ])!
 
 /** Whether two arrangements are the same build (same box, same blocks in the same cells). */

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useState, type ReactNode } from 'react'
 import { BlueprintTool } from './hud/blueprint/BlueprintTool'
 import { useBlueprints } from './store/useBlueprints'
+import { startCompilerGrant } from './lib/blueprint/gameBlueprint'
 import { useRevealClass, watchNewcomer } from './newcomer/useNewcomer'
 import { BitReadout } from './hud/BitReadout'
 import { CrashNote } from './hud/CrashNote'
@@ -154,7 +155,7 @@ export default function App(): JSX.Element {
   useProofListener()
   // The chain drains to the relay from here on, whenever Live is on, and the
   // targets' positions are kept current.
-  useEffect(() => { startVersionGate(); startPublisher(); startTracker(); startPresence(); startSelfSync(); startMutes(); startHidesSync(); watchBlockedSpectation(); startCalibration(); void useCyberspace.getState().initSigner(); useHyperspace.getState().startSync(); watchMyAvatar(); void useSecrets.getState().load(); void useInventory.getState().load(); void useBlueprints.getState().load(); void useShardFolders.getState().load(); void useFound.getState().load(); startPersonalLists(); watchFocus(); watchNearbyReturn(); watchDoorReturn(); watchNearbyOpen() }, [])
+  useEffect(() => { startVersionGate(); startPublisher(); startTracker(); startPresence(); startSelfSync(); startMutes(); startHidesSync(); watchBlockedSpectation(); startCalibration(); void useCyberspace.getState().initSigner(); useHyperspace.getState().startSync(); watchMyAvatar(); void useSecrets.getState().load(); void useInventory.getState().load(); void useBlueprints.getState().load(); startCompilerGrant(); void useShardFolders.getState().load(); void useFound.getState().load(); startPersonalLists(); watchFocus(); watchNearbyReturn(); watchDoorReturn(); watchNearbyOpen() }, [])
   // onosendai.tech/C/<hex>: a place or a region to open on, and Back and
   // Forward over the ones the View box opens (store/useCoordRoute.ts).
   useEffect(() => {

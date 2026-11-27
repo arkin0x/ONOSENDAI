@@ -35,8 +35,8 @@ export interface BlueprintCard {
   lookup: string
   /** The maker's signed record (lib/blueprint/format.ts recordTemplate). */
   record: NostrEvent
-  /** Made here, or found (in the world, a chest or a door). */
-  source: 'made' | 'found'
+  /** Made here, found (in the world, a chest or a door), or the game's own (the Compiler's, never placed: gameBlueprint.ts). */
+  source: 'made' | 'found' | 'game'
   /** Unix seconds when this identity came to hold it. */
   at: number
   /** Who left the card where it was found, when that was not its maker (a finder re-hiding it). */
@@ -47,6 +47,11 @@ export interface BlueprintCard {
   built?: number
   /** Archived out of the lists (never deleted by a tap). */
   archived?: number
+  /**
+   * What its prize is, where this device knows it: the maker knows (MINE), and the game knows its own. A found card's
+   * prize is sealed until it is built, so it is absent there. 'tool' or 'item' marks an item blueprint (itemMark.ts).
+   */
+  prizeKind?: 'sno' | 'tool' | 'item'
 }
 
 /** A record seen on this device, by lookup. */

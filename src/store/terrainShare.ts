@@ -686,21 +686,33 @@ export function explicitAfter(was: boolean, c: CellChange): boolean {
 
 /** A change was made to a chunk (a mine, a place, a survey). */
 export function noteChange(key: string, change?: CellChange): void {
+  noteChanges(key, [change])
+}
+
+/**
+ * Several changes in one chunk at once (a smash clears thousands): counted
+ * one by one as noteChange counts them, but kept with one row write and one
+ * update.
+ */
+export function noteChanges(key: string, changes: ReadonlyArray<CellChange | undefined>): void {
   const s = sessionFor()
-  if (!s) return
+  if (!s || !changes.length) return
   void rowOf(s, key).then(() => {
     if (s.closed) return
-    s.waiting.set(key, (s.waiting.get(key) ?? 0) + 1)
+    s.waiting.set(key, (s.waiting.get(key) ?? 0) + changes.length)
     const row = s.rows.get(key) ?? emptyRow()
-    let explicit = row.explicit
-    let carried = row.carried
-    if (change) {
-      const set = new Set(explicit)
+    const set = new Set(row.explicit)
+    const uncarried = new Set<number>()
+    let touched = false
+    for (const change of changes) {
+      if (!change) continue
+      touched = true
       if (explicitAfter(set.has(change.cell), change)) set.add(change.cell)
       else set.delete(change.cell)
-      explicit = [...set]
-      carried = carried.filter((c) => c !== change.cell)
+      uncarried.add(change.cell)
     }
+    const explicit = touched ? [...set] : row.explicit
+    const carried = touched ? row.carried.filter((c) => !uncarried.has(c)) : row.carried
     saveRow(s, key, { ...row, dirty: true, explicit, carried })
     if ((s.waiting.get(key) ?? 0) >= (near() ? BATCH_NEAR : BATCH_ALONE)) void flush('batch', [key])
     else arm(s)

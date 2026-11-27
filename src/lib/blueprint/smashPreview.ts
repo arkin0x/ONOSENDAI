@@ -23,8 +23,7 @@
 
 import { create } from 'zustand'
 import type { Cell } from './arrangement'
-import { COMPILER_RECIPE, sameArrangement } from './recipes'
-import { smashGroup } from './smash'
+import { compiles, smashGroup } from './smash'
 
 /** What the smash would do with the set: compile it (a construction), or only break it. */
 export type PreviewState = 'compiles' | 'breaks'
@@ -67,11 +66,11 @@ export function packCell(x: number, y: number, z: number): number {
 export function smashPreview(read: (x: number, y: number, z: number) => number, hit: Cell, bare: boolean): Preview | null {
   const g = smashGroup(read, hit, bare)
   if (!g.smash.length) return null
-  // A construction compiles with the Compiler; a bare hand compiles only the Compiler's own recipe (smash.ts compile).
-  const compiles = !!g.arrangement && (!bare || sameArrangement(g.arrangement, COMPILER_RECIPE))
+  // A construction compiles with the Compiler; a bare hand compiles only the Compiler's own recipe (smash.ts compiles).
+  const compiled = compiles(g.arrangement, bare)
   const keys = new Set<number>()
   for (const c of g.smash) keys.add(packCell(c[0], c[1], c[2]))
-  return { hit: [hit[0], hit[1], hit[2]], bare, cells: g.smash, state: compiles ? 'compiles' : 'breaks', keys }
+  return { hit: [hit[0], hit[1], hit[2]], bare, cells: g.smash, state: compiled ? 'compiles' : 'breaks', keys }
 }
 
 /** The colour of a state. */

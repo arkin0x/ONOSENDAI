@@ -7,7 +7,7 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { smashGroup, COMPILER_REACH, BARE_REACH } from '../smash'
+import { smashGroup, COMPILER_REACH, BARE_REACH, MISS_LINE, NO_MATCH_LINE, OFFLINE_LINE, UNKNOWN_LINE, missLine } from '../smash'
 import { FERROVEIN, GLOWCORE, GRIDSTONE, RUSTBAND } from '../recipes'
 import {
   PREVIEW_BREAKS, PREVIEW_COMPILES, PREVIEW_DEBOUNCE_MS, PULSE_FULL_MS, PULSE_HIGH, PULSE_LOW, PULSE_MS, PULSE_STEADY, PreviewTracker, advancePhase, packCell,
@@ -110,6 +110,25 @@ describe('colour and line', () => {
     expect(useSmashPreview.getState().state).toBeNull()
     expect(heard).toBe(2)
     stop()
+  })
+})
+
+describe('the line a smash with no prize leaves agrees with the preview', () => {
+  it('COMPILES and no blueprint matches: "Compiled. No blueprint matches."; BREAKS: "Nothing compiled."', () => {
+    const hammerRead = reader(hammer())
+    const valid = smashPreview(hammerRead, [1, 0, 0], false)!
+    expect(valid.state).toBe('compiles')
+    expect(missLine(valid.state === 'compiles', false, false)).toBe(NO_MATCH_LINE)
+    expect(NO_MATCH_LINE).toBe('Compiled. No blueprint matches. The blocks are spent.')
+    const broken = smashPreview(ground, [0, -1, 0], false)!
+    expect(missLine(broken.state === 'compiles', false, false)).toBe(MISS_LINE)
+    // Bare-handed, a build other than the recipe compiles nothing, whatever a relay says.
+    const pair = smashPreview(reader(new Map([['0,0,0', GRIDSTONE], ['1,0,0', GRIDSTONE]])), [0, 0, 0], true)!
+    expect(missLine(pair.state === 'compiles', true, false)).toBe(MISS_LINE)
+    // Compiled, with no relay answering or a prize this version cannot open: those say so.
+    expect(missLine(true, true, false)).toBe(OFFLINE_LINE)
+    expect(missLine(true, false, true)).toBe(UNKNOWN_LINE)
+    for (const l of [NO_MATCH_LINE, OFFLINE_LINE]) expect(l).not.toMatch(/Nothing compiled/)
   })
 })
 

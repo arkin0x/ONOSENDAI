@@ -25,7 +25,8 @@ import { Backpack, Box, Hammer, HandFist, Radar } from 'lucide-react'
 import { HINT_DONE, headNow, offsetOf, surveyTarget as targetNow, terrainSession, useTerrain } from '../store/useTerrain'
 import { useWalk } from '../store/useWalk'
 import { terrainCursor } from '../scene/TerrainLayer'
-import { cancelSurveyHold, startSurveyHold, useSurveyHold } from './surveyHold'
+import { SURVEY_HOLD_MS, cancelSurveyHold, startSurveyHold, useSurveyHold } from './surveyHold'
+import { HoldRing } from './HoldRing'
 import { walkLookBy } from '../lib/walkLook'
 import { topEscape } from '../hooks/useEscape'
 import { leaveTerrain } from '../store/padMode'
@@ -269,8 +270,9 @@ function useCompiling(): boolean {
 /**
  * What a smash at the cross would do, in one line just under the cross (scene/SmashPreview.tsx pulses the blocks):
  * COMPILES for a construction, BREAKS and the count for anything else, with a mark in the pulse's colour. Its slot is
- * always there, so nothing moves when it comes and goes; it sits under anything round the cross (the
- * --terrain-cross-clear offset), and the message slot sits under it.
+ * always there, so nothing moves when it comes and goes. It sits under the hold ring and its name plate
+ * (HoldRing.tsx; the --terrain-cross-clear offset), whether a ring is up or not, so a hold starting or ending never
+ * moves it; the message slot sits under it.
  */
 export function SmashPreviewLabel(): JSX.Element {
   const state = useSmashPreview((s) => s.state)
@@ -554,10 +556,14 @@ function TerrainScreen({ covered }: { covered: boolean }): JSX.Element {
   return (
     <div className={`terrainview${covered ? ' is-covered' : ''}${bag ? ' is-bag' : ''}${folded ? ' is-folded' : ''}`} role="group" aria-label="TERRAIN: block tools" aria-hidden={covered || undefined}>
       <span className="terrain-crosshair" aria-hidden />
+      {/* A SMASH or SURVEY hold's progress round the cross, where you look, not under your thumb (owner, 2026-11-27). */}
+      <HoldRing />
+      {/* What a smash at the cross would do, just under the ring's place (it stays put whether a ring is up or not). */}
       <SmashPreviewLabel />
 
-      {/* What just happened (a refusal, a survey), under the cross, in a slot of its own: up to two lines, nothing moves. */}
-      <div className="terrain-message" role="status" aria-live="polite">{message ? <span className="terrain-message__text">{message}</span> : compiling ? <span className="terrain-message__text terrain-message__text--compiling">COMPILING</span> : catching ? <span className="terrain-message__text">{standing}</span> : null}</div>
+      {/* What just happened (a refusal, a survey), under the cross, in a slot of its own: up to two lines, nothing moves.
+          While a hold's ring is up its name and seconds take this place, so the slot is hidden (kept) under them. */}
+      <div className={`terrain-message${holding || smashing ? ' is-under-hold' : ''}`} role="status" aria-live="polite">{message ? <span className="terrain-message__text">{message}</span> : compiling ? <span className="terrain-message__text terrain-message__text--compiling">COMPILING</span> : catching ? <span className="terrain-message__text">{standing}</span> : null}</div>
 
       {/* The first visit's three steps, just over the hotbar, in a slot of its own. */}
       <div className="terrain-hint" aria-live="polite">
@@ -602,6 +608,7 @@ function TerrainScreen({ covered }: { covered: boolean }): JSX.Element {
           {(target || surveying || holding) && (
             <button
               className={`terrain-act terrain-act--survey${holding ? ' is-holding' : ''}`}
+              style={{ ['--hold-ms' as string]: `${SURVEY_HOLD_MS}ms` }}
               disabled={surveying}
               {...noCallout}
               onPointerDown={(e) => {

@@ -136,7 +136,7 @@ describe('the box under TAKE', () => {
     const clear = { trueSide: 0.5, minPx: 0 }
     const label = { text: '⚷ Silver Key', color: '#fff', sub: 'by someone', subColor: '#fff' }
     const axes = { right: { axis: 'x', dir: 1 }, up: { axis: 'y', dir: 1 }, out: { axis: 'z', dir: -1 } } as const
-    const m = await mount(createElement(ItemVanish, { id: 'k', label, at, region: null, axes, minPx: 24, play: { at: 0, calm: true }, clear }))
+    const m = await mount(createElement(ItemVanish, { id: 'k', label, at, region: null, axes, play: { at: 0, calm: true }, clear }))
     const words = m.all().filter((h) => h.type === 'worldlabel')
     expect(words).toHaveLength(1)
     expect(words[0].props.clear).toBe(clear)

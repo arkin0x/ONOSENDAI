@@ -125,7 +125,7 @@ describe('which shards may dim', () => {
   it('a chest or door look registers under its own key and passes the dim to its model', async () => {
     const model = cube('chest')
     const look = { name: 'chest', kind: 'chest', closed: model } as unknown as Look
-    const m = await mount(createElement(LookMark, { look, model, at: [0, 0, 0], axes: AXES, minPx: 10, occluder: 'look:c1' }))
+    const m = await mount(createElement(LookMark, { look, model, at: [0, 0, 0], axes: AXES, occluder: 'look:c1' }))
     expect(registered()).toEqual(['look:c1'])
     setDimmed(new Set(['look:c1']))
     await settled()

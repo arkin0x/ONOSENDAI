@@ -317,19 +317,6 @@ export function trueScale(unit: number, scaleExp: number): number {
   return exp >= 0 ? Number(1n << BigInt(exp)) : 1 / Number(1n << BigInt(-exp))
 }
 
-/**
- * Render units per model unit: the model's true size (trueScale), unless
- * that would draw the box's longest side under `minPx` on screen, which is
- * the note's cube's size; then the whole thing is drawn that large instead,
- * so an item is never smaller than it was as a cube (lib/markerSize.ts, the
- * rule a stop's cube follows). `perPx` is the render units one CSS pixel
- * spans at the item's depth. Called every frame, so it allocates nothing.
- */
-export function modelScale(atTrueSize: number, longestSide: number, minPx: number, perPx: number): number {
-  if (!(longestSide > 0)) return atTrueSize
-  return Math.max(atTrueSize, (minPx * perPx) / longestSide)
-}
-
 /** A 0 to 1 phase from an item's id, so items bob out of step with each other. */
 export function phaseOf(key: string): number {
   let h = 2166136261

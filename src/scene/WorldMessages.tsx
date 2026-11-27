@@ -122,9 +122,7 @@ const SPENT = '#7f8891'
  * than the note: it is a whole object in itself, where the cube is a backing.
  * It was 51 until 2026-10-09; smaller reads less like a billboard (arkinox). */
 const MARK_PX = { coin: 40, spent: 40, note: 34 } as const
-/** The note's cube's edge (0.72 of its mark), CSS pixels: the smallest an item's model box is drawn (ItemModel). */
-export const NOTE_EDGE_PX = 0.72 * MARK_PX.note
-/** The note's cube in its own geometry: an edge of 0.72, so a screen-sized mark of MARK_PX.note draws NOTE_EDGE_PX. */
+/** The note's cube in its own geometry: an edge of 0.72, scaled to the side it is drawn at. */
 const NOTE_GEOMETRY_EDGE = 0.72
 
 /**
@@ -466,7 +464,7 @@ export function ItemMark({ id, text, sub, who, at, opacity = 1, wears, region = 
   // just above the token and its ring (`side`).
   const label = { text, color: NAME_WHITE, sub: by, subColor: NAME_WHITE }
   if (model && axes && itemMarkShape(model, axes) === 'model') {
-    return <ItemModelMark id={id ?? text} model={model} animation={wears?.animation ?? NO_MOTION} at={at} region={region} axes={axes} minPx={NOTE_EDGE_PX} opacity={opacity} onTap={onTap} label={FLOATING_NAME.item ? label : undefined} />
+    return <ItemModelMark id={id ?? text} model={model} animation={wears?.animation ?? NO_MOTION} at={at} region={region} axes={axes} dot={who ? authorColour(who.pubkey) : undefined} opacity={opacity} onTap={onTap} label={FLOATING_NAME.item ? label : undefined} />
   }
   return (
     <>
@@ -509,7 +507,7 @@ export function HeldItemMark({ id, own, at, wears, region = null, axes, appear }
   return (
     <>
       {box === 'placed' && <PlacedBox at={at} opacity={HELD_OPACITY} appear={appear} />}
-      {model && drawn && <ItemModelMark id={id} model={model} animation={wears?.animation ?? NO_MOTION} at={at} region={region} axes={axes} minPx={NOTE_EDGE_PX} held={HELD_OPACITY} encompass={box === 'model' ? (s) => <PlacedBox at={s.centre} size={s.size} opacity={HELD_OPACITY} appear={appear} /> : undefined} />}
+      {model && drawn && <ItemModelMark id={id} model={model} animation={wears?.animation ?? NO_MOTION} at={at} region={region} axes={axes} held={HELD_OPACITY} encompass={box === 'model' ? (s) => <PlacedBox at={s.centre} size={s.size} opacity={HELD_OPACITY} appear={appear} /> : undefined} />}
     </>
   )
 }
@@ -607,7 +605,7 @@ function TakenItem({ w, side, play, axes, scaleExp }: { w: { key: string; text: 
   return (
     <>
       {side !== undefined && <ItemToken id={w.key} at={w.centre} side={side} colour={authorColour(who.pubkey)} fadeOut={play.at} groupRef={token} />}
-      <NamedVanish id={w.key} who={who} label={{ text: w.text, color: NAME_WHITE, subColor: NAME_WHITE }} at={w.centre} wears={w.wears} region={w.region} axes={axes} minPx={NOTE_EDGE_PX} play={play} clear={side === undefined ? { trueSide: placedBoxSide(scaleExp), minPx: 0 } : { object: token, points: TOKEN_OUTLINE }} />
+      <NamedVanish id={w.key} who={who} label={{ text: w.text, color: NAME_WHITE, subColor: NAME_WHITE }} at={w.centre} wears={w.wears} region={w.region} axes={axes} play={play} clear={side === undefined ? { trueSide: placedBoxSide(scaleExp), minPx: 0 } : { object: token, points: TOKEN_OUTLINE }} />
     </>
   )
 }

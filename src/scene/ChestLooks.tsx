@@ -40,7 +40,7 @@ import { sameBox, samePose } from './WorldShards'
 import { placedPose } from '../lib/pose'
 import { trueScale } from '../lib/itemModel'
 import { followsVersion, onFollows, trustedPlacement } from '../lib/trust'
-import { FLOATING_NAME, NOTE, NOTE_EDGE_PX, author, itemMarkText } from './WorldMessages'
+import { FLOATING_NAME, NOTE, author, itemMarkText } from './WorldMessages'
 import { useDrawReach } from './buildZoom'
 
 const REACH = GRID_RADIUS * 8
@@ -168,7 +168,7 @@ export function ChestLooks({ axes }: { axes: ViewAxes }): JSX.Element | null {
             model={model}
             at={w.centre}
             axes={axes}
-            minPx={NOTE_EDGE_PX}
+            dot={NOTE}
             label={FLOATING_NAME[w.look.kind] ? { text: w.text, color: NOTE, sub: w.sub, subColor: ACCENT } : undefined}
             onTap={() => useShards.getState().selectSecret(w.key)}
             clearTop={loot ? LOOT_TOP : 0}

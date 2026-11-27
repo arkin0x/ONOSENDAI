@@ -258,7 +258,7 @@ describe('shards and looks hand their key to their tap target', () => {
   it('a chest or door look', async () => {
     const model = cube('chest')
     const look = { name: 'chest', kind: 'chest', closed: model } as unknown as Look
-    const m = await mount(createElement(LookMark, { look, model, at: [0, 0, 0], axes: AXES, minPx: 10, occluder: 'look:c1', onTap: () => undefined }))
+    const m = await mount(createElement(LookMark, { look, model, at: [0, 0, 0], axes: AXES, occluder: 'look:c1', onTap: () => undefined }))
     expect(host(m, 'taptarget').props.occluder).toBe('look:c1')
     await m.unmount()
   })

@@ -92,7 +92,7 @@ afterEach(async () => {
 
 describe('a chest up close in WALK (LookMark)', () => {
   const look = builtInLook('treasure')
-  const chest = (): Promise<void> => r.render(createElement(LookMark, { look, model: look.closed, at: AT, axes: AXES, minPx: 8, onTap }))
+  const chest = (): Promise<void> => r.render(createElement(LookMark, { look, model: look.closed, at: AT, axes: AXES, onTap }))
 
   it('the up-close limit holds a chest with its loot out, and the largest built-in door, under the cap', () => {
     const b = lookBounds(look.closed)

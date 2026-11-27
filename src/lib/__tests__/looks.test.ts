@@ -14,7 +14,7 @@ import { describe, expect, it } from 'vitest'
 import { flatten } from 'sno-core/shards'
 import { builtInLook, drawnLook, isDoor, keptInChest, lookOf, type Look } from '../looks'
 import { constrainOf } from '../walkConstrain'
-import { lookBounds, lookScale } from '../../scene/LookMark'
+import { lookBounds } from '../../scene/LookMark'
 
 describe('which look a thing wears', () => {
   it('a chest wears TREASURE, a chest with a door tag DOOR, and nothing else wears one', () => {
@@ -101,16 +101,6 @@ describe('what is drawn', () => {
   })
 })
 
-describe('how big a look is drawn', () => {
-  it('at its true size, or at the floor when that is larger on screen', () => {
-    // True size 2 render units a model unit, a 1-unit chest, a 24 px floor at 0.01 units a pixel: 0.24 < 2.
-    expect(lookScale(2, 1, 24, 0.01)).toBe(2)
-    // Zoomed out: the true size is a speck, so the floor wins.
-    expect(lookScale(1e-6, 1, 24, 0.01)).toBeCloseTo(0.24, 9)
-    // Nothing to measure: the true size.
-    expect(lookScale(3, 0, 24, 0.01)).toBe(3)
-  })
-})
 
 describe('what stays in a chest', () => {
   const here = { x: 8n, y: 9n, z: 10n }

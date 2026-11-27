@@ -3,12 +3,16 @@
  * (lib/looks.ts), closed, or open once this identity has opened it (R14).
  *
  * Placed like a shard (chest and door design, D2): the model's origin on the
- * item's place (itemCentre), at its true size, turned with the view. A chest
- * is one gibson, so zoomed out it is drawn no smaller on screen than the
- * note's cube was (NOTE_EDGE_PX), and that floor recedes past the headlamp's
- * reach as the cube's did (lib/markerSize.ts recedeShare), so a chest at the
- * far end of a hall is smaller than one at your feet. The size is always the
- * closed look's, so the open look swaps in without the chest changing size.
+ * item's place (itemCentre), at its true size, turned with the view. Always
+ * its true size, at every distance and zoom, as a shard is: a chest is one
+ * gibson, and beside a block it stays a block's size (arkinox, 2026-11-26:
+ * "doors and chests are not scaling with the view zoom? getting way too
+ * big"). It was held to the note's old cube on screen (24.5 pixels), which at
+ * BUILD's far orbit drew a chest some forty times its size. Once its true
+ * size is under a few pixels a small dot stands in its place (FarDot,
+ * lib/markerSize FAR_DOT_PX), never larger than that. When the dot takes
+ * over is judged by the closed look's bounds, so opening it never moves that
+ * moment.
  *
  * Not cut at its region: a built-in look carries nothing secret, and a chest
  * cut in half at a small bag's wall would read as broken. A custom look is
@@ -23,16 +27,16 @@
 
 import { useMemo, useRef, type ReactNode } from 'react'
 import { useFrame } from '@react-three/fiber'
-import { Matrix4, type Group, type PerspectiveCamera } from 'three'
+import { Matrix4, type Group, type PerspectiveCamera, type Points } from 'three'
 import { flatten, type ShardModel } from 'sno-core/shards'
 import { extentOf, trueScale } from '../lib/itemModel'
 import { renderPose, viewPose, type Pose } from '../lib/pose'
-import { CUBE_REACH, MARK_RECEDE_FLOOR, recedeShare } from '../lib/markerSize'
+import { CUBE_REACH, farDotShown, perPixelAt } from '../lib/markerSize'
 import type { ViewAxes } from '../lib/space'
 import type { Box } from '../lib/clip'
 import type { Look } from '../lib/looks'
 import { useCyberspace } from '../store/useCyberspace'
-import { headlampUniforms } from './headlamp'
+import { FarDot } from './FarDot'
 import { ShardMesh } from './ShardMesh'
 import { TapTarget } from './TapTarget'
 import { LABEL_PRIORITY, WorldLabel } from './WorldLabel'
@@ -77,16 +81,6 @@ export function lookBounds(shard: ShardModel): LookBounds {
 }
 
 /**
- * Render units per model unit for a look: its true size, or larger, so its
- * longest side is never under `floorPx` on screen. `perPx` is the render
- * units one CSS pixel spans at its depth. Called every frame.
- */
-export function lookScale(atTrue: number, longest: number, floorPx: number, perPx: number): number {
-  if (!(longest > 0)) return atTrue
-  return Math.max(atTrue, (floorPx * perPx) / longest)
-}
-
-/**
  * What every mesh of a look is drawn with (scene/ShardMesh). `clip` is in the
  * frame the mesh is drawn in. A standing look carries `pose`, and the frame
  * around it is left unturned, so the pose and the view-frame cut are ShardMesh's
@@ -106,8 +100,8 @@ interface Props {
   /** The item's place in the render frame (itemCentre). */
   at: [number, number, number]
   axes: ViewAxes
-  /** The edge of the note's cube on screen, CSS pixels: the smallest the look is ever drawn. */
-  minPx: number
+  /** The colour of the dot it is drawn as once too small on screen to be itself (FarDot). */
+  dot?: string
   /** A name to float just above it; absent, none (FLOATING_NAME). */
   label?: { text: string; color: string; sub: string; subColor: string }
   onTap?: () => void
@@ -125,7 +119,7 @@ interface Props {
 }
 
 /** A chest or a door as its look, sized, turned with the view, and tappable. */
-export function LookMark({ look, model, at, axes, minPx, label, onTap, clearTop = 0, children, frame, occluder }: Props): JSX.Element {
+export function LookMark({ look, model, at, axes, dot = '#ffd27d', label, onTap, clearTop = 0, children, frame, occluder }: Props): JSX.Element {
   const scaleExp = useCyberspace((s) => s.scaleExp)
   // A standing look's pose is ShardMesh's (LookFrame); any other turns with the view here.
   const standing = !!frame?.pose
@@ -134,19 +128,15 @@ export function LookMark({ look, model, at, axes, minPx, label, onTap, clearTop 
   // Sized by what is drawn: an open look may be of another unit than the closed one.
   const drawnUnit = (model ?? look.closed).unit
   const atTrue = useMemo(() => trueScale(drawnUnit, scaleExp), [drawnUnit, scaleExp])
-  // The label clears the look from any side at the scale it is drawn at
+  // The label clears the look from any side at the size it is drawn at
   // (WorldLabel `clear`, the rule ItemModel follows): the farthest corner of
-  // its bounds from the origin, at true size and at the floor alike.
-  const clear = useMemo(() => {
-    const reach = Math.max(bounds.reach, clearTop)
-    return {
-      trueSide: (reach * atTrue) / CUBE_REACH,
-      minPx: bounds.longest > 0 ? (reach * minPx) / bounds.longest / CUBE_REACH : minPx,
-    }
-  }, [bounds, atTrue, minPx, clearTop])
+  // its bounds from the origin, at true size.
+  const clear = useMemo(() => ({ trueSide: (Math.max(bounds.reach, clearTop) * atTrue) / CUBE_REACH, minPx: 0 }), [bounds, atTrue, clearTop])
   const gibson = trueScale(0, scaleExp)
   const upClose = Math.min(bounds.longest * atTrue + UP_CLOSE_GIBSONS * gibson, UP_CLOSE_CAP_GIBSONS * gibson)
   const outer = useRef<Group>(null)
+  const body = useRef<Group>(null)
+  const far = useRef<Points>(null)
   const drawn = useRef<Group | null>(null)
   // Dimmed while it stands between the camera and the build cursor.
   const dim = useBuildDimmed(occluder, drawn)
@@ -154,15 +144,16 @@ export function LookMark({ look, model, at, axes, minPx, label, onTap, clearTop 
     const g = outer.current
     if (!g) return
     const cam = state.camera as PerspectiveCamera
-    const depth = cam.position.distanceTo(g.position)
-    const perPx = (2 * Math.tan((cam.fov * Math.PI) / 360) * depth) / state.size.height
-    const floorPx = minPx * recedeShare(depth, headlampUniforms.uHeadlampReach.value, MARK_RECEDE_FLOOR)
-    g.scale.setScalar(Math.max(1e-9, lookScale(atTrue, bounds.longest, floorPx, perPx)))
+    // The look itself at its true size, or the dot once that is too small to be anything.
+    const shown = farDotShown(bounds.longest * atTrue, perPixelAt(cam.position.distanceTo(g.position), cam.fov, state.size.height))
+    if (body.current) body.current.visible = !shown
+    if (far.current) far.current.visible = shown
   }, LABEL_PRIORITY)
   return (
     <>
-      <group ref={outer} position={at}>
-        <group matrix={turn} matrixAutoUpdate={false}>
+      <group ref={outer} position={at} scale={Math.max(1e-9, atTrue)}>
+        <FarDot dotRef={far} color={dot} />
+        <group ref={body} matrix={turn} matrixAutoUpdate={false}>
           <group ref={drawn}>
             {children ? children({ model, dim, ...frame }) : model && <ShardMesh shard={model} world {...frame} dim={dim} />}
           </group>

@@ -76,7 +76,7 @@ function movesAfter(n: number, from: NostrEvent = S().events[S().events.length -
   return out
 }
 
-const { startSelfSync, catchUp, CATCH_UP_GAP_MS } = await import('../selfSync')
+const { startSelfSync, catchUp, forgetCatchUp, CATCH_UP_GAP_MS } = await import('../selfSync')
 let clock = Date.now()
 
 beforeEach(async () => {
@@ -86,6 +86,8 @@ beforeEach(async () => {
   net.fetches.length = 0
   net.fetchAnswer = []
   net.check = null
+  // A case that left a catch-up waiting on its retry (relays that answered nothing) does not hold the next one.
+  forgetCatchUp()
   vi.useFakeTimers({ toFake: ['Date'] })
   // Past any gap a catch-up before this case left, backed off or not.
   clock += CATCH_UP_GAP_MS * 17

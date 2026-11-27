@@ -84,8 +84,8 @@ export function keepAnswers(pubkey: string, genesisId: string, answers: RelayAns
     try { relay = normalizeURL(a.url) } catch { relay = undefined }
     for (const ev of a.events) {
       if (inHand.has(ev.id) || !onChain(ev, pubkey, genesisId)) continue
-      if (!m.has(ev.id)) {
-        if (m.size >= BACKLOG_KEPT_MAX) continue
+      // Past the cap this page holds no more, but the row is still written, so a reload resumes from it.
+      if (!m.has(ev.id) && m.size < BACKLOG_KEPT_MAX) {
         m.set(ev.id, ev)
         added++
       }
@@ -106,18 +106,22 @@ export function keepEvents(pubkey: string, genesisId: string, events: NostrEvent
 
 /**
  * Everything kept of `pubkey`'s chain `genesisId` from `since` on (the
- * second of the newest event of the chain in hand the relays hold): on this
- * page, and read back from the rows when there are any. Never rejects.
+ * second of the newest event of the chain in hand the relays hold) that is
+ * not in hand (`inHand`): on this page, and read back from the rows when
+ * there are any. Empty when nothing is behind: the rows of the chain in
+ * hand, the event `since` was taken from among them, are never a stretch.
+ * Never rejects.
  */
-export async function resumeBacklog(pubkey: string, genesisId: string, since: number | undefined): Promise<NostrEvent[]> {
+export async function resumeBacklog(pubkey: string, genesisId: string, since: number | undefined, inHand: ReadonlySet<string>): Promise<NostrEvent[]> {
   if (!genesisId) return []
+  settleBacklog(pubkey, inHand, genesisId)
   const m = keptFor(pubkey)
   if (since !== undefined && backlogDeps.rows()) {
     try {
       await writes
       const rows = await backlogDeps.seenSince(pubkey, since, BACKLOG_KEPT_MAX)
       for (const ev of rows) {
-        if (m.has(ev.id) || !onChain(ev, pubkey, genesisId)) continue
+        if (m.has(ev.id) || inHand.has(ev.id) || !onChain(ev, pubkey, genesisId)) continue
         let sound = false
         try { sound = getEventHash(ev) === ev.id } catch { sound = false }
         if (!sound) continue
@@ -129,7 +133,7 @@ export async function resumeBacklog(pubkey: string, genesisId: string, since: nu
     } catch { /* unreadable: what this page holds still counts */ }
   }
   const out: NostrEvent[] = []
-  for (const ev of m.values()) if (onChain(ev, pubkey, genesisId) && (since === undefined || ev.created_at >= since)) out.push(ev)
+  for (const ev of m.values()) if (!inHand.has(ev.id) && onChain(ev, pubkey, genesisId) && (since === undefined || ev.created_at >= since)) out.push(ev)
   return out
 }
 

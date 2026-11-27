@@ -309,7 +309,8 @@ export function byAuthorKind(db: IDBDatabase, pubkey: string, kind: number, limi
  * that some relay sent or took (`seen`): what a catch-up already fetched of
  * your own chain, read back after a reload (lib/ownBacklog.ts). A row only
  * this device ever had (an unpublished move a fold dropped) is left out:
- * read back beside the relays' moves it would look like a fork on them.
+ * read back beside the relays' moves it would look like a fork on them. So
+ * is one whose signature was never checked (NIP-01 flag 0 or 2).
  */
 export async function seenSince(db: IDBDatabase, pubkey: string, kind: number, since: number, limit = READ_LIMIT_DEFAULT, now = Date.now()): Promise<NostrEvent[]> {
   const seconds = Math.floor(now / 1000)
@@ -323,7 +324,7 @@ export async function seenSince(db: IDBDatabase, pubkey: string, kind: number, s
       const c = req.result
       if (!c) { resolve(out); return }
       const row = c.value as EventRow
-      if (alive(row, seconds) && Array.isArray(row.seen) && row.seen.length > 0) out.push(eventOf(row))
+      if (alive(row, seconds) && row.nip01 === 1 && Array.isArray(row.seen) && row.seen.length > 0) out.push(eventOf(row))
       if (out.length >= limit) { resolve(out); return }
       c.continue()
     }

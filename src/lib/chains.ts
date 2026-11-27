@@ -319,7 +319,10 @@ export async function fetchChainEvents(pubkey: string, knownSpawnId?: string, ha
   // What each relay said to the first question decides where the pages come from (pageRelays).
   let first: RelayAnswer[] | undefined
   const heard = (answers: RelayAnswer[]): void => { first = first ? combineAnswers(first, answers) : answers; opts.onAnswers?.(answers) }
-  const paging = {
+  // Only your own catch-up (it gives a deadline) pages as a catch-up; every
+  // other read of a chain (a neighbor's, a spectated one, a tracked one, the
+  // look before publishing) keeps the plain pages and MAX_CHAIN_PAGES.
+  const paging = opts.deadline === undefined ? undefined : {
     ask: (f: Filter) => query(f, { offThread: true, perRelay: true, stream: CHAIN_STREAM, only: pageRelays(pubkey, first), onAnswers: opts.onAnswers }),
     deadline: opts.deadline,
     maxPages: opts.maxPages ?? CATCH_UP_MAX_PAGES,

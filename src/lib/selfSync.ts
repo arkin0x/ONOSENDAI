@@ -105,7 +105,7 @@ async function check(pubkey: string): Promise<void> {
     // what is still missing is asked for.
     const genesis = knownGenesis(pubkey)
     const since = sinceFor(pubkey)
-    const resumed = genesis ? await resumeBacklog(pubkey, genesis, since) : []
+    const resumed = genesis ? await resumeBacklog(pubkey, genesis, since, idsOf(knownEvents(pubkey))) : []
     if (useCyberspace.getState().identity.pubkey !== pubkey) return
     if (resumed.length > 0) longBacklog(pubkey)
     const known = knownEvents(pubkey)
@@ -213,7 +213,7 @@ export function catchUp(reason: CatchUpReason = 'focus'): void {
   catching = true
   const since = newestOnRelays(s.events, s.published)
   const genesis = knownGenesis(pubkey)
-  void (genesis ? resumeBacklog(pubkey, genesis, since) : Promise.resolve([] as NostrEvent[]))
+  void (genesis ? resumeBacklog(pubkey, genesis, since, idsOf(s.events)) : Promise.resolve([] as NostrEvent[]))
     .then((resumed) => {
       if (resumed.length > 0) longBacklog(pubkey)
       const known = knownEvents(pubkey)
@@ -226,8 +226,14 @@ export function catchUp(reason: CatchUpReason = 'focus'): void {
     .then((events) => {
       // Nothing back at all is no answer: a relay holding this chain sends
       // at least the event `since` was taken from.
-      failures = events.length === 0 && since !== undefined ? failures + 1 : 0
+      const silent = events.length === 0 && since !== undefined
+      failures = silent ? failures + 1 : 0
       if (useCyberspace.getState().identity.pubkey !== pubkey) return
+      // Every relay silent is not "nothing behind": a stretch being caught up is tried again (cutShort).
+      if (silent) {
+        if (backlogFor(pubkey)) cutShort(pubkey, () => catchUp('retry'))
+        return
+      }
       // The stretch whole: adopted in one go, with what earlier attempts kept.
       const kept = genesis ? backlogEvents(pubkey, genesis) : []
       useCyberspace.getState().adoptChain(kept.length > 0 ? mergeEvents(events, kept) : events)
@@ -379,7 +385,11 @@ function cutShort(pubkey: string, retry: () => void): void {
   b.idle = b.added > 0 ? 0 : b.idle + 1
   b.added = 0
   showBacklog(b)
-  if (b.retry) clearTimeout(b.retry)
+  if (b.retry) { clearTimeout(b.retry); b.retry = null }
+  // CHAIN NOT CHECKED: no more retries on their own (each asks every relay
+  // for its newest page again, about 3.6 MB apiece on a long chain). The tab
+  // shown or focused, the network back, or CHECK AGAIN asks again.
+  if (b.idle >= STUCK_AFTER) return
   const wait = CATCH_UP_RETRY_MS[Math.min(b.idle, CATCH_UP_RETRY_MS.length - 1)]
   b.retry = setTimeout(() => {
     b.retry = null
@@ -482,6 +492,8 @@ export function recheckIfUnknown(now = false): void {
   const s = useCyberspace.getState()
   if (s.selfCheck.pubkey !== s.identity.pubkey || s.selfCheck.status !== 'unknown') return
   const b = backlogFor(s.identity.pubkey)
+  // Stuck, only a deliberate reason asks again, not every relay's EOSE.
+  if (b && !now && b.idle >= STUCK_AFTER) return
   if (b?.retry) {
     if (!now) return
     clearTimeout(b.retry)
@@ -567,6 +579,12 @@ function resync(pubkey: string): void {
   void check(pubkey)
 }
 
+/** For tests: forget any catch-up left open by the case before (its retry waiting). */
+export function forgetCatchUp(): void {
+  dropBacklog()
+  useCyberspace.getState().setChainCatchUp(null)
+}
+
 /** For tests: whether a self-check or a catch-up is out right now. */
 export function selfSyncBusy(): boolean {
   return checking !== null || catching
@@ -582,6 +600,8 @@ export function startSelfSync(): void {
     if (s.live && !prev.live) compareUnpublished()
     // A respawn, or a newer chain adopted: a stretch of the old one is nothing to wait for.
     if (s.genesisId !== prev.genesisId && backlog && backlog.pubkey === s.identity.pubkey && backlog.genesisId !== s.genesisId) closeBacklog(backlog.pubkey)
+    // Whatever adopted them (a catch-up, a live move, a head check), kept events now in hand are let go, so the kept stretch is only ever what is behind.
+    else if (s.events !== prev.events && backlogSize(s.identity.pubkey) > 0) settleBacklog(s.identity.pubkey, idsOf(s.events), s.genesisId)
   })
   // Not the window's own 'online' event: watchConnectivity answers that by
   // dropping every socket, and a check started first would be cut off by the

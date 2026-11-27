@@ -43,6 +43,8 @@ const net = vi.hoisted(() => ({
   asked: [] as Array<{ relays: string[]; filter: Filter | Filter[] }>,
   /** Page questions the canonical relay still answers; past it, it goes silent (a socket gone, a deadline). */
   pagesLeft: Infinity,
+  /** Every relay times out with nothing. */
+  silent: false,
   /** Run on every question, before it is answered. */
   onAsk: null as null | ((f: Filter | Filter[]) => void),
   count: null as number | null,
@@ -66,7 +68,7 @@ function matches(f: Filter, e: (typeof net.chain)[number]): boolean {
 }
 
 function answerOf(url: string, filter: Filter | Filter[]): { url: string; outcome: 'answered' | 'unreachable'; reason?: string; events: typeof net.chain } {
-  if (url === DEAD) return { url, outcome: 'unreachable', reason: 'no answer in time', events: [] }
+  if (url === DEAD || net.silent) return { url, outcome: 'unreachable', reason: 'no answer in time', events: [] }
   const fs = Array.isArray(filter) ? filter : [filter]
   const paging = fs.some((f) => f.until !== undefined || f.ids)
   if (url === CANON && paging) {
@@ -189,6 +191,7 @@ async function tabletBehind(held: number, behind: number): Promise<{ stretch: No
 beforeEach(() => {
   net.asked.length = 0
   net.pagesLeft = Infinity
+  net.silent = false
   net.onAsk = null
   net.count = null
   builds.chain = 0
@@ -383,6 +386,108 @@ describe('your position at once', () => {
     const forged = hopEvent({ pubkey: S().identity.pubkey, createdAt: Math.floor(Date.now() / 1000) + 99, genesisId: S().genesisId, previousId: 'ee'.repeat(32), c: '0'.repeat(64), to: { x: 5n, y: 5n, z: 5n } })
     expect(S().showCatchUpHead(forged)).toBe(false)
     expect(S().position).toEqual(where)
+  })
+})
+
+describe('the hold on moves goes up only for a stretch, and comes down only when it is in (review of #955)', () => {
+  /** Questions that were not pages: one per catch-up or self-check attempt, give or take the spawns. */
+  const firstQuestions = (): number => net.asked.filter((q) => !(Array.isArray(q.filter) ? q.filter : [q.filter]).some((f) => f.until !== undefined || f.ids)).length
+
+  it('a focus catch-up that brings 3 moves leaves nothing kept, and the next focus raises no hold (rows on, as on Android)', async () => {
+    backlogDeps.rows = () => true
+    const { head } = await tabletBehind(20, 3)
+    useCyberspace.setState({ chainSync: { pubkey: S().identity.pubkey, status: 'done' } })
+    catchUp('focus')
+    await until(() => S().prevEventId === head.id)
+    expect(S().prevEventId).toBe(head.id)
+    await backlogWritten()
+    await settle()
+    expect(backlogSize(S().identity.pubkey)).toBe(0)
+    expect(S().chainCatchUp).toBeNull()
+    // The next focus: nothing is behind, so no CATCHING UP and no hold.
+    for (let i = 0; i < 3; i++) {
+      clock += CATCH_UP_GAP_MS * 17
+      vi.setSystemTime(clock)
+      const before = net.asked.length
+      catchUp('focus')
+      await until(() => net.asked.length > before && !selfSyncBusy())
+      await settle()
+      expect(S().chainCatchUp).toBeNull()
+      expect(whyNoMove(S().actions())).not.toBe(CATCHING_UP_MESSAGE)
+    }
+  })
+
+  it('every relay silent is not "caught up": the hold and the head shown stay, and a retry lands the stretch', async () => {
+    const { stretch, head } = await tabletBehind(50, 1_500)
+    useCyberspace.setState({ chainSync: { pubkey: S().identity.pubkey, status: 'done' } })
+    net.silent = true
+    net.onEvent!(head, CANON)
+    for (const ev of stretch.slice(-20, -1)) net.onEvent!(ev, CANON)
+    await settle()
+    await until(() => !selfSyncBusy() && firstQuestions() > 0)
+    await settle()
+    expect(S().chainCatchUp?.headId).toBe(head.id)
+    expect(positionHex(S().position, S().plane)).toBe(head.tags.find((t) => t[0] === 'C')![1])
+    expect(whyNoMove(S().actions())).toBe(CATCHING_UP_MESSAGE)
+    // The relays answer again: the retry, on its own after its wait, lands it.
+    net.silent = false
+    await until(() => S().prevEventId === head.id)
+    expect(S().prevEventId).toBe(head.id)
+    expect(S().chainCatchUp).toBeNull()
+  })
+
+  it('retries stop at CHAIN NOT CHECKED, and the tab shown again asks once more', async () => {
+    const { stretch, head } = await tabletBehind(50, 1_500)
+    useCyberspace.setState({ chainSync: { pubkey: S().identity.pubkey, status: 'done' } })
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] })
+    const run = async (ms: number): Promise<void> => { for (let t = 0; t < ms; t += 500) await vi.advanceTimersByTimeAsync(500) }
+    try {
+      net.silent = true
+      net.onEvent!(head, CANON)
+      for (const ev of stretch.slice(-5, -1)) net.onEvent!(ev, CANON)
+      await run(1_000)
+      // Through every wait of the backoff, until CHAIN NOT CHECKED.
+      await run(2 * 60_000)
+      expect(S().chainCatchUp?.stuck).toBe(true)
+      expect(chainChipState(S())).toBe('unchecked')
+      const asked = net.asked.length
+      // An hour on its own asks nothing more.
+      await run(60 * 60_000)
+      expect(net.asked.length).toBe(asked)
+      // The tab shown again (focus) asks once more, and with the relays back it lands.
+      net.silent = false
+      catchUp('focus')
+      await run(2_000)
+      expect(net.asked.length).toBeGreaterThan(asked)
+      expect(S().prevEventId).toBe(head.id)
+      expect(S().chainCatchUp).toBeNull()
+    } finally {
+      vi.useFakeTimers({ toFake: ['Date'] })
+    }
+  })
+})
+
+describe('what stays as it was for everyone else', () => {
+  it('another chain read (a neighbor, a spectated chain, the look before publishing) pages from every read relay, as before', async () => {
+    await tabletBehind(10, 1_200)
+    const { fetchChainEvents } = await import('../chains')
+    const before = net.asked.length
+    await fetchChainEvents(S().identity.pubkey, S().genesisId, [])
+    const pages = net.asked.slice(before).filter((q) => (Array.isArray(q.filter) ? q.filter : [q.filter]).some((f) => f.until !== undefined))
+    expect(pages.length).toBeGreaterThan(0)
+    for (const p of pages) expect(p.relays).toEqual(ALL)
+  })
+
+  it('rows read back are only those whose signature was checked', async () => {
+    const { callEventDb } = await import('../eventDb/client')
+    const pk = 'cd'.repeat(32)
+    const base = actionEvent({ pubkey: pk, createdAt: 5_000, genesisId: 'aa'.repeat(32), previousId: 'bb'.repeat(32), name: 'hop' })
+    const signedOne = { ...base, id: getEventHash(base) }
+    const other = { ...base, created_at: 5_001 }
+    const unsignedOne = { ...other, id: getEventHash(other) }
+    await callEventDb('ingest', ['t', [{ event: signedOne, nip01: 1, pin: true, relay: CANON }, { event: unsignedOne, nip01: 2, pin: true, relay: CANON }]])
+    const back = await callEventDb('seenSince', [pk, 3333, 0, 10])
+    expect(back.map((e) => e.id)).toEqual([signedOne.id])
   })
 })
 

@@ -1272,7 +1272,10 @@ export interface CyberspaceState {
    * than the head here. Only the view moves (position, and the eye if you
    * were at your head); the chain in hand, its head and every move signed
    * from it stay as they are until the stretch before `ev` is adopted.
-   * False when it was not shown.
+   * Nothing saved takes it: the chain's save is its events, and the screens
+   * that read the position (the build bar, a chest's key note, the region
+   * picker, the presence sector) sign nothing from it. False when it was
+   * not shown.
    */
   showCatchUpHead: (ev: NostrEvent) => boolean
   /** Set or end the catch-up the HUD shows (chainCatchUp). Ending it puts the view back on the chain in hand if a head shown early never arrived in it. */

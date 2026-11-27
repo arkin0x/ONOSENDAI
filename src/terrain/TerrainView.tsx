@@ -577,8 +577,10 @@ function TerrainScreen({ covered }: { covered: boolean }): JSX.Element {
           on a screen on its side, beside the ring instead (styles.css). */}
       <div className="terrain-message" role="status" aria-live="polite">{message ? <span className="terrain-message__text">{message}</span> : compiling ? <span className="terrain-message__text terrain-message__text--compiling">COMPILING</span> : catching ? <span className="terrain-message__text">{standing}</span> : null}</div>
 
-      {/* The first visit's three steps, just over the hotbar, in a slot of its own. On a short phone that slot reaches the
-          cross, so while a hold's ring is up the steps give way to it (hidden, their slot kept). */}
+      {/* The first visit's three steps, the RECORD strip or the prize strip, just over the hotbar, in a slot of its own.
+          While a SMASH or SURVEY hold's ring is up, the whole slot is hidden, its place kept, on every screen (on a short
+          one it reaches the cross). Separately, in a short mouse window only, the steps' box also gives way while the
+          preview line or a message shows (styles.css). */}
       <div className={`terrain-hint${holding || smashing ? ' is-under-hold' : ''}`} aria-live="polite">
         {capturing ? (
           <span className="prize-strip prize-strip--record" role="group" aria-label="Record a blueprint">

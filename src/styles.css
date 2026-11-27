@@ -14740,9 +14740,10 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
 .hold-ring__secs { min-width: 2ch; text-align: right; font-variant-numeric: tabular-nums; letter-spacing: 0.04em; }
 /* On a short screen the first-visit steps reach the cross: they give way while the ring is up, their slot kept. */
 .terrain-hint.is-under-hold { visibility: hidden; }
-/* A short window (a desktop under about 520px high) puts the steps on the cross's line, where the preview line and a
-   message stand beside the ring: the steps' box gives way while either shows (its slot kept, so nothing moves). */
-@media (max-height: 520px) {
+/* A short desktop window (a mouse, under about 520px high) puts the steps on the cross's line, where the preview line
+   and a message stand beside the ring: the steps' box gives way while either shows (its slot kept, so nothing moves).
+   Only with a mouse: on a phone on its side the steps stand clear over the cross, and a new player's step must stay. */
+@media (hover: hover) and (pointer: fine) and (max-height: 520px) {
   .terrainview:has(.terrain-smash-preview__text, .terrain-message__text) .terrain-hint__box { visibility: hidden; }
 }
 @media (prefers-reduced-motion: reduce) {

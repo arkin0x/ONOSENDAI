@@ -33,7 +33,9 @@ import type { ShardModel } from 'sno-core/shards'
 import { sha256 } from '@noble/hashes/sha2.js'
 import { bytesToHex } from '@noble/hashes/utils.js'
 import { kvGet, kvSet } from '../kvStore'
-import { modelPrint } from '../inventory'
+import { ticksOf, toPayload } from 'sno-core/shards'
+import { turnDirection, turnShard, type Turns } from '../turn'
+import { CONSTRAIN_FIELD } from '../walkConstrain'
 import type { Ledger } from '../published'
 
 const KIT_KEY = 'onosendai:kit-pieces'
@@ -50,27 +52,80 @@ function writeSet(key: string, s: ReadonlySet<string>): void {
   try { kvSet(key, JSON.stringify([...s])) } catch { /* quota or private mode: the default (left out) still holds */ }
 }
 
+const prints = new WeakMap<ShardModel, string | null>()
+
 /**
- * A model's kit fingerprint: SHA-256 of its model as it publishes, with its
- * name and id set aside (lib/inventory.ts modelPrint, the one ITEMS and
- * chests use for "the same model"). Null for something that cannot be read
- * as a model.
+ * A model's kit fingerprint: its shape alone, whatever it is called, keyed,
+ * sized or turned (review of #943: a kit piece AIMed into a chest goes out
+ * resized and turned, and came back into ITEMS unrecognised). Name, id, size
+ * (unit), Earth up, spin and the WALK setting are set aside; of the 24
+ * quarter-turns (lib/turn.ts, as the deploy bar turns a copy) the one whose
+ * payload sorts first stands for all of them; SHA-256 of that. Null for
+ * something that cannot be read as a model.
  */
 export function kitPrint(shard: ShardModel): string | null {
-  try { return `model:${bytesToHex(sha256(new TextEncoder().encode(modelPrint(shard))))}` } catch { return null }
+  const known = prints.get(shard)
+  if (known !== undefined) return known
+  let out: string | null = null
+  try {
+    // The WALK setting lives in `extra` (lib/walkConstrain.ts CONSTRAIN_FIELD): set aside with the rest of the pose.
+    const extra = shard.extra ? Object.fromEntries(Object.entries(shard.extra).filter(([k]) => k !== CONSTRAIN_FIELD)) : undefined
+    const bare = { ...shard, id: '', name: '', unit: 0, up: false, spin: 0, extra: extra && Object.keys(extra).length ? extra : undefined } as ShardModel
+    // The turn: the one whose turned points sort first (cheap: points only); the points fix the rest of the payload.
+    const ticks = shard.vertices.map((v) => ticksOf(v))
+    let best: string | null = null
+    let turns: Turns = [0, 0, 0]
+    for (let a = 0; a < 4; a++) for (let b = 0; b < 4; b++) for (let c = 0; c < 4; c++) {
+      const t: Turns = [a, b, c]
+      const text = ticks.map((p) => turnDirection(p, t).join(',')).join(';')
+      if (best === null || text < best) { best = text; turns = t }
+    }
+    out = `shape:${bytesToHex(sha256(new TextEncoder().encode(JSON.stringify(toPayload(turnShard(bare, turns))))))}`
+  } catch { out = null }
+  prints.set(shard, out)
+  return out
 }
 
-/** Mark objects as kit pieces (a zip import with PUBLISH off): by id, and by model fingerprint when the model is given. Never unmarked. */
-export function markKitPieces(pieces: ReadonlyArray<string | ShardModel>): void {
+/**
+ * Mark objects as kit pieces (a zip import with PUBLISH off): by id at once, and by shape fingerprint when the model
+ * is given. Never unmarked. `later` (the import) leaves the fingerprints to a quiet moment just after, in small
+ * batches, so a big import never waits on them; the id mark bars the piece meanwhile.
+ */
+export function markKitPieces(pieces: ReadonlyArray<string | ShardModel>, { later = false }: { later?: boolean } = {}): void {
   if (!pieces.length) return
   const s = readSet(KIT_KEY)
+  const models: ShardModel[] = []
   for (const p of pieces) {
     if (typeof p === 'string') { s.add(p); continue }
     s.add(p.id)
-    const print = kitPrint(p)
-    if (print) s.add(print)
+    models.push(p)
   }
+  if (!later) for (const m of models) { const print = kitPrint(m); if (print) s.add(print) }
   writeSet(KIT_KEY, s)
+  if (later) { pending.push(...models); schedulePrints() }
+}
+
+/** Kit pieces whose fingerprints are still to be kept (markKitPieces `later`). */
+const pending: ShardModel[] = []
+let printing: ReturnType<typeof setTimeout> | null = null
+
+function schedulePrints(): void {
+  if (printing !== null) return
+  printing = setTimeout(() => {
+    printing = null
+    const batch = pending.splice(0, 8)
+    const add = batch.map((m) => kitPrint(m)).filter((p): p is string => !!p)
+    if (add.length) { const s = readSet(KIT_KEY); for (const p of add) s.add(p); writeSet(KIT_KEY, s) }
+    if (pending.length) schedulePrints()
+  }, 0)
+}
+
+/** Keep every fingerprint still waiting now (before a guard reads the marks, and in tests). */
+export function flushKitPrints(): void {
+  if (printing !== null) { clearTimeout(printing); printing = null }
+  const all = pending.splice(0)
+  const add = all.map((m) => kitPrint(m)).filter((p): p is string => !!p)
+  if (add.length) { const s = readSet(KIT_KEY); for (const p of add) s.add(p); writeSet(KIT_KEY, s) }
 }
 
 /**
@@ -96,6 +151,7 @@ export function carryKitMark(fromId: string, toId: string): void {
 
 /** The objects marked as kit pieces. */
 export function kitPieces(): ReadonlySet<string> {
+  if (pending.length) flushKitPrints()
   return readSet(KIT_KEY)
 }
 

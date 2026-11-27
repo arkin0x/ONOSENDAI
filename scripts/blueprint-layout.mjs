@@ -48,9 +48,18 @@ for (const size of SIZES) {
   const page = await ctx.newPage()
   await page.goto(URL)
   await page.waitForTimeout(9000)
-  // The landing list first: two blueprints held, CREATE NEW over them.
+  // The landing list first: two blueprints held (the game's Compiler, and one found, with DEPLOY), CREATE NEW over them.
   await page.evaluate(async () => {
     const T = (await import('/src/store/useBlueprintTool.ts')).useBlueprintTool
+    const { useBlueprints } = await import('/src/store/useBlueprints.ts')
+    const { compilerRecord, COMPILER_LOOKUP } = await import('/src/lib/blueprint/gameBlueprint.ts')
+    const record = await compilerRecord({})
+    const owner = useBlueprints.getState().owner || 'f'.repeat(64)
+    const found = { ...record, id: 'e'.repeat(64), pubkey: 'c'.repeat(64), tags: record.tags.map((t) => (t[0] === 'title' ? ['title', 'A Found Blueprint'] : t)) }
+    useBlueprints.setState({ owner, cards: [
+      { rowKey: `${owner}/game:compiler`, owner, lookup: COMPILER_LOOKUP, record, source: 'game', at: 2, prizeKind: 'tool' },
+      { rowKey: `${owner}/${found.id}`, owner, lookup: COMPILER_LOOKUP, record: found, source: 'found', at: 1 },
+    ] })
     T.getState().openTool()
   })
   // A cold dev server may still be bringing the app up: wait for the tool itself.
@@ -59,9 +68,13 @@ for (const size of SIZES) {
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/layout-${size.w}-dpr${size.dpr}-list.png` })
   const list = await page.evaluate(() => {
     const create = [...document.querySelectorAll('.bpt button')].find((b) => /CREATE NEW/i.test(b.textContent ?? ''))
-    return { create: !!create, scrollW: document.documentElement.scrollWidth, w: window.innerWidth }
+    const deploys = [...document.querySelectorAll('.bpt button')].filter((b) => /^\s*DEPLOY/i.test(b.textContent ?? '')).map((b) => b.getBoundingClientRect())
+    return { create: !!create, deploys: deploys.map((r) => [r.left, r.right, r.width]), scrollW: document.documentElement.scrollWidth, w: window.innerWidth }
   })
   if (!list.create) problems.push(`${size.name}: the list has no CREATE NEW`)
+  // The found blueprint has DEPLOY, fully on the page; the game's has none.
+  if (list.deploys.length !== 1) problems.push(`${size.name}: the list shows ${list.deploys.length} DEPLOY buttons, not 1`)
+  for (const [l, r, w] of list.deploys) if (l < 0 || r > list.w + 0.5 || w < 1) problems.push(`${size.name}: a DEPLOY is off the page`)
   if (list.scrollW > list.w + 0.5) problems.push(`${size.name}: the list scrolls sideways (${list.scrollW} > ${list.w})`)
   // The compose grid, with a few blocks on two layers.
   await page.evaluate(async () => {

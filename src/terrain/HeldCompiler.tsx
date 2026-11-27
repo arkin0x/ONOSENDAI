@@ -250,6 +250,7 @@ function Held({ shard, calm }: { shard: ShardModel; calm: boolean }): JSX.Elemen
     vel: new Float32Array(budget.pool * 3), left: new Float32Array(budget.pool), span: new Float32Array(budget.pool),
     next: 0, owed: 0, last: 0, phase: 'idle' as HammerPhase, steps: 0,
     pose: newPose(), head: new Vector3(), at: new Vector3(), dir: new Vector3(),
+    now: { phase: 'idle' as HammerPhase, t: 0, sinceImpact: null as number | null },
   }), [budget.pool])
 
   useFrame((state) => {
@@ -259,7 +260,7 @@ function Held({ shard, calm }: { shard: ShardModel; calm: boolean }): JSX.Elemen
     const now = w && typeof w.__hammerAt === 'number' ? w.__hammerAt : performance.now()
     const clock = hammerClock()
     const pose = hammerPose(now, clock, SWING_MS, calm, sim.pose)
-    const { phase } = phaseAt(now, clock, SWING_MS)
+    const { phase } = phaseAt(now, clock, SWING_MS, sim.now)
     const dt = sim.last ? Math.min(0.05, Math.max(0, (now - sim.last) / 1000)) : 0
     sim.last = now
     const cam = state.camera as PerspectiveCamera

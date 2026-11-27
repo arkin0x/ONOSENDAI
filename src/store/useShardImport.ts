@@ -554,7 +554,7 @@ export const useShardImport = create<ShardImportState>((set, get) => {
           }
           patch(key, { shardId: id, outcome: action.act === 'new' ? (action.copyName ? 'copy' : 'new') : action.act })
           // A zip brought in with PUBLISH off is a kit: its pieces never become a blueprint's prize (lib/blueprint/prizeGuard.ts).
-          if (get().noun === 'zip' && !publish) markKitPieces([{ ...model, id }])
+          if (get().noun === 'zip' && !publish) markKitPieces([{ ...model, id }], { later: true })
           const settled = track(key, saved, !publish)
           // PUBLISH off: on to the next shard while this one is written (the
           // loop's top lets the page paint every SLICE_MS, not every shard).

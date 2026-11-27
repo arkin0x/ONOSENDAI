@@ -214,6 +214,26 @@ describe('placing a card, blueprints live (cyberspace-relay #52, 2026-11-27)', (
     expect(lootOf(contents, () => false).map((o) => [o.kind, o.ids])).toEqual([['scroll', [contents[0].id]], ['scroll', [contents[1].id]]])
   })
 
+  it('LIVE: an EDIT of a chest holding a card goes LIVE too, never flipped to LOCAL, and a later DELETE still reaches the relay', async () => {
+    useCyberspace.setState({ live: true })
+    const lock = forgeKey('Edit Key')
+    const card = { kind: 'blueprint' as const, card: cardOf(signedRecord('In the chest')) }
+    S().startDeployChest({ name: 'Edited', lock: { pubkey: lock.itemPubkey, label: 'Edit Key' }, requires: 'the Edit Key', contents: [card] })
+    await S().deploy()
+    const d = S().mine.find((x) => x.type === 'chest')!
+    expect(d.published).toBe(true)
+    sent.length = 0
+    const why = await S().resealChest(d.eventId, { name: 'Edited', lock: { pubkey: lock.itemPubkey, label: 'Edit Key' }, requires: 'the Edit Key', contents: [card, { kind: 'message', text: 'and a note' }] })
+    expect(why).toBeNull()
+    expect(alone()).toContain(33330)
+    expect(alone()).not.toContain(BLUEPRINT_KIND)
+    const after = S().mine.find((x) => x.type === 'chest' && x.goneFrom === undefined)!
+    expect(after.published).toBe(true)
+    sent.length = 0
+    await S().deleteInstance(after.eventId)
+    expect(sent.length).toBeGreaterThan(0)
+  })
+
   it('BROADCAST of a bag holding a chest with a card sends the bag, never a card alone', async () => {
     useCyberspace.setState({ live: false })
     const lock = forgeKey('Crate Key')

@@ -3540,8 +3540,9 @@ export const useShards = create<ShardsState>((set, get) => {
       ? gathered.entries.map((e) => (standsFor(e, chest) ? inner : e))
       : [...gathered.entries, inner]
     const settings = gathered.settings ?? chest.bag ?? DEFAULT_BAG_SETTINGS
-    // A card sealed in it, or beside it, keeps the bag on this device until blueprints go live (cardsKeepLocal).
-    const sendLive = wasPublic && !cardPayloads.has(next.payload) && !cardsKeepLocal(rowsOf(me).filter((d) => d.eventId !== chest.eventId), chest.lookupId)
+    // A card sealed in it, or beside it, keeps the bag on this device until blueprints go live (cardsKeepLocal); once
+    // they are live, a chest with a card goes LIVE like any other (review of #943: an EDIT had flipped it to LOCAL).
+    const sendLive = wasPublic && !(cardPayloads.has(next.payload) && !BLUEPRINT_RELAY_READY) && !cardsKeepLocal(rowsOf(me).filter((d) => d.eventId !== chest.eventId), chest.lookupId)
     const { event, published } = await publishBag(entries, key, chest.lookupId, chest.height, sendLive, settings, { at, plane: chest.plane }, undefined, gathered.entries, me)
     // Before anything here changes: the relays still hold the chest as it was.
     if (sendLive && !published) throw new Error('No relay took the new bag. The chest stays as it was.')

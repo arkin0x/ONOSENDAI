@@ -143,33 +143,40 @@ export function chargeAt(elapsed: number, ms: number): number {
 }
 
 /** The phase at `now`, how far through it (0 to 1), and the ms since the impact (null before one). */
-export function phaseAt(now: number, c: HammerClock, swingMs: number): { phase: HammerPhase; t: number; sinceImpact: number | null } {
+export interface PhaseNow { phase: HammerPhase; t: number; sinceImpact: number | null }
+
+/** Written into `out` (one kept by the caller, so a frame allocates nothing) and returned. */
+export function phaseAt(now: number, c: HammerClock, swingMs: number, out: PhaseNow = { phase: 'idle', t: 0, sinceImpact: null }): PhaseNow {
+  const put = (phase: HammerPhase, t: number, sinceImpact: number | null): PhaseNow => { out.phase = phase; out.t = t; out.sinceImpact = sinceImpact; return out }
   if (c.since !== null) {
     const e = Math.max(0, now - c.since)
     const ready = readyMs(c.ms), wind = windupFromMs(c.ms)
-    if (e < ready) return { phase: 'ready', t: e / Math.max(1, ready), sinceImpact: null }
-    if (e < wind) return { phase: 'charge', t: (e - ready) / Math.max(1, wind - ready), sinceImpact: null }
-    return { phase: 'windup', t: clamp01((e - wind) / Math.max(1, c.ms - wind)), sinceImpact: null }
+    if (e < ready) return put('ready', e / Math.max(1, ready), null)
+    if (e < wind) return put('charge', (e - ready) / Math.max(1, wind - ready), null)
+    return put('windup', clamp01((e - wind) / Math.max(1, c.ms - wind)), null)
   }
   // A let-go after the last swing began is the newer of the two.
   if (c.cancelAt !== null && (c.swingAt === null || c.cancelAt >= c.swingAt)) {
     const e = now - c.cancelAt
-    if (e >= 0 && e < CANCEL_MS) return { phase: 'cancel', t: e / CANCEL_MS, sinceImpact: null }
-    return { phase: 'idle', t: 0, sinceImpact: null }
+    if (e >= 0 && e < CANCEL_MS) return put('cancel', e / CANCEL_MS, null)
+    return put('idle', 0, null)
   }
   if (c.swingAt !== null) {
     const e = now - c.swingAt
     const swing = Math.max(1, swingMs)
-    if (e >= 0 && e < swing) return { phase: 'swing', t: e / swing, sinceImpact: null }
-    if (e >= swing && e < swing + HITSTOP_MS) return { phase: 'impact', t: (e - swing) / HITSTOP_MS, sinceImpact: e - swing }
-    if (e >= swing && e < swing + HITSTOP_MS + RECOVER_MS) return { phase: 'recover', t: (e - swing - HITSTOP_MS) / RECOVER_MS, sinceImpact: e - swing }
+    if (e >= 0 && e < swing) return put('swing', e / swing, null)
+    if (e >= swing && e < swing + HITSTOP_MS) return put('impact', (e - swing) / HITSTOP_MS, e - swing)
+    if (e >= swing && e < swing + HITSTOP_MS + RECOVER_MS) return put('recover', (e - swing - HITSTOP_MS) / RECOVER_MS, e - swing)
   }
-  return { phase: 'idle', t: 0, sinceImpact: null }
+  return put('idle', 0, null)
 }
+
+/** The one PhaseNow the frame loops below write into. */
+const NOW: PhaseNow = { phase: 'idle', t: 0, sinceImpact: null }
 
 /** Whether anything is still moving at `now`: the frames must keep coming while it is. */
 export function hammerBusy(now: number, c: HammerClock, swingMs: number): boolean {
-  return phaseAt(now, c, swingMs).phase !== 'idle'
+  return phaseAt(now, c, swingMs, NOW).phase !== 'idle'
 }
 
 const POSE_KEYS = ['x', 'wide', 'y', 'depth', 'pitch', 'yaw', 'roll', 'charge', 'sparks', 'tremble', 'trail', 'flash', 'camPitch', 'camRoll', 'shake'] as const
@@ -233,7 +240,7 @@ const scratch: HammerPose = newPose()
  * (lib/blueprint/smash.ts SWING_MS); `calm` is reduced motion.
  */
 export function hammerPose(now: number, c: HammerClock, swingMs: number, calm: boolean, out: HammerPose = newPose()): HammerPose {
-  const { phase, t, sinceImpact } = phaseAt(now, c, swingMs)
+  const { phase, t, sinceImpact } = phaseAt(now, c, swingMs, NOW)
   switch (phase) {
     case 'ready': case 'charge': case 'windup':
       return holdPose(Math.max(0, now - (c.since as number)), c.ms, calm, out)

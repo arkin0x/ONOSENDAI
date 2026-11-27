@@ -69,7 +69,7 @@ describe('which objects may be prizes', () => {
   it('a zip import with PUBLISH off marks what it brings in as kit pieces', () => {
     const src = readFileSync(join(__dirname, '..', '..', '..', 'store', 'useShardImport.ts'), 'utf8')
     // By id and by the model's fingerprint (the whole model goes in, under its new id).
-    expect(src).toMatch(/if \(get\(\)\.noun === 'zip' && !publish\) markKitPieces\(\[\{ \.\.\.model, id \}\]\)/)
+    expect(src).toMatch(/if \(get\(\)\.noun === 'zip' && !publish\) markKitPieces\(\[\{ \.\.\.model, id \}\], \{ later: true \}\)/)
   })
 })
 
@@ -109,6 +109,26 @@ describe('the kit mark follows the model (review of #943, 2026-11-27)', () => {
     const edited: ShardModel = { ...copy, faces: copy.faces.slice(0, 3) }
     expect(kitPrint(edited)).not.toBe(kitPrint(copy))
     expect(prizeBar(edited, kitG(kitPieces()))).toBe('kit')
+  })
+
+  it.each([
+    ['resized', { deployUnit: 3, deployTurn: [0, 0, 0] }],
+    ['turned', { deployUnit: 0, deployTurn: [1, 2, 0] }],
+    ['resized and turned, with up, spin and the WALK setting', { deployUnit: -2, deployTurn: [3, 1, 1], deployUp: true, deploySpin: 90, deployConstrain: 'all' }],
+  ] as const)('a kit piece AIMed into a chest %s, then taken back into ITEMS, is never a prize', async (_name, bar) => {
+    const { posedForDeploy } = await import('../../../store/useShards')
+    const src = piece('kit-f/one', 'Piece', 7)
+    markKitPieces([src])
+    const posed = posedForDeploy(src, false, { deployUp: false, deploySpin: 0, deployConstrain: undefined, ...bar } as never, 0 as never, 0)
+    expect(posed).not.toBe(src)
+    // Back from a chest: the posed copy, under the bag item's event id.
+    const taken = { ...posed, id: 'd'.repeat(64), name: 'Piece' }
+    expect(kitPrint(taken)).toBe(kitPrint(src))
+    expect(prizeAllowed(taken, 'items', kitG(kitPieces()))).toBe(false)
+  })
+
+  it('a different shape is not caught by the turn-free print', () => {
+    expect(kitPrint(piece('a1', 'A', 2))).not.toBe(kitPrint(piece('a2', 'A', 3)))
   })
 
   it('kit pieces marked by id before fingerprints were kept get theirs from the workshop', () => {

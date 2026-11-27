@@ -5,14 +5,19 @@
  * and the wheel. The scene (scene/TerrainLayer.tsx) sets `ghost` only when it
  * changes, so nothing re-renders a frame at a time.
  *
- * The distance lasts the page's visit, AIR_DEFAULT at first.
+ * The distance lasts the page's visit, AIR_DEFAULT at first. Whether air
+ * placing is on at all is kept per identity (store/airSwitch.ts).
  */
 
 import { create } from 'zustand'
 import { AIR_DEFAULT, clampAirDistance } from '../lib/terrain/airPlace'
 
-/** off: the look meets a block, or nothing is in hand; ok: a block can go there; bad: it cannot (dim red). */
-export type GhostState = 'off' | 'ok' | 'bad'
+/**
+ * off: no ghost belongs here (the look meets a block, or nothing is in hand); ok: a block can go there; bad: it cannot
+ * (dim red); hidden: one would stand here but air placing is switched off (store/airSwitch.ts), so none is drawn and
+ * the stepper shows its off state, where a tap turns it back on.
+ */
+export type GhostState = 'off' | 'ok' | 'bad' | 'hidden'
 
 interface AirPlaceState {
   /** Blocks along the look, AIR_MIN to AIR_MAX. */

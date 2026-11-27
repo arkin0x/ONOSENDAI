@@ -34,6 +34,7 @@
 import type { PadMode } from './padMode'
 import { create } from 'zustand'
 import { useCyberspace } from './useCyberspace'
+import { airPlacing, hintAirOff } from './airSwitch'
 import { useShards } from './useShards'
 import { useWalk } from './useWalk'
 import { walkLookDirection } from './walkFluid'
@@ -362,9 +363,14 @@ export const useTerrain = create<TerrainState>((set, get) => ({
     if (!s) return false
     // A hit always comes first; with none, the ghost's cell in open air.
     const target = placeTarget(hit, hit ? null : air?.cell ?? null)
-    if (!target) return false
     const inv = get().inventory
     const id = inv.hotbar[inv.slot]
+    if (!target) {
+      // Nothing at the cross with air placing switched off (store/airSwitch.ts): nothing happens, and the first time a
+      // page, one quiet word on turning it back on, never a message at every press.
+      if (!hit && !airPlacing() && id && !isCompiler(id) && inv.counts[id] > 0) hintAirOff(get().say)
+      return false
+    }
     if (isCompiler(id)) { get().say('The Compiler is in your hand: choose a block to place.'); return false }
     if (!id || !(inv.counts[id] > 0)) { get().say(id ? `No ${blockName(id)} left: mine some first.` : 'Nothing to place: mine a block first.'); return false }
     const cell = target.cell

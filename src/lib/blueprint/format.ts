@@ -169,6 +169,11 @@ export interface SheetPrize {
   reveal: PrizeReveal
   text?: string
   views?: Partial<Record<PrizeView, string>>
+  /**
+   * The prize's own name, present only when its maker chose to show it (not in DECK-0010 yet: a reader ignores a
+   * field it does not know, §5.3, so this is safe to write and is proposed to the spec as prize.name).
+   */
+  name?: string
 }
 
 /** A record's content (§5.3). */
@@ -334,6 +339,7 @@ export function recordRefusal(ev: RecordEvent): string | null {
   const p = sheet.prize
   if (!p || !PRIZE_REVEALS.includes(p.reveal)) return 'prize reveal'
   if ('text' in p && (typeof p.text !== 'string' || [...p.text].length > TEXT_MAX)) return 'prize text'
+  if ('name' in p && (typeof p.name !== 'string' || [...p.name].length > TITLE_MAX)) return 'prize name'
   if (p.reveal === 'hidden' && ('text' in p || 'views' in p)) return 'hidden prize shows something'
   if (p.reveal === 'description' && (typeof p.text !== 'string' || !p.text.trim() || 'views' in p)) return 'description'
   if ((p.reveal === 'silhouette' || p.reveal === 'render') && (!p.views || typeof p.views !== 'object' || !Object.keys(p.views).length || Object.keys(p.views).some((k) => !PRIZE_VIEWS.includes(k as PrizeView)))) return 'views'
@@ -351,6 +357,8 @@ export interface RecordView {
   sealed: string
   /** The prize's views that keep the rules (a broken one reads as absent). */
   views: Partial<Record<PrizeView, string>>
+  /** The prize's name, only when its maker chose to show it. */
+  prizeName: string | null
 }
 
 /** A record read, or null when it fails §5.4. */
@@ -361,7 +369,8 @@ export function readRecord(ev: RecordEvent): RecordView | null {
   const views: Partial<Record<PrizeView, string>> = {}
   for (const [k, uri] of Object.entries(sheet.prize.views ?? {})) if (typeof uri === 'string' && uri.length <= VIEW_MAX_CHARS && DATA_URI.test(uri)) views[k as PrizeView] = uri
   const title = ev.tags.find((t) => t[0] === 'title')?.[1]?.trim()
-  return { lookup: ev.tags.find((t) => t[0] === 'd')![1], title: title || 'blueprint', sheet, cells, sealed: ev.tags.find((t) => t[0] === 'encrypted')![2], views }
+  const prizeName = typeof sheet.prize.name === 'string' && sheet.prize.name.trim() ? sheet.prize.name.trim() : null
+  return { lookup: ev.tags.find((t) => t[0] === 'd')![1], title: title || 'blueprint', sheet, cells, sealed: ev.tags.find((t) => t[0] === 'encrypted')![2], views, prizeName }
 }
 
 /** The lookup a record answers to, or null. */

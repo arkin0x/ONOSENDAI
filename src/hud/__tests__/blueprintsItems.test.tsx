@@ -5,9 +5,11 @@
  * with NEW on unseen cards. Its modal lists MINE (made) and HELD (found)
  * from the store with each row's three settings in a line, who made it and
  * who left it there; BUILT has the prizes waiting with TAKE and the
- * blueprints built; ARCHIVED holds what was filed away. ACTIONS opens
- * EXAMINE, SEE AS A FINDER (the maker's own), PLACE HERE, PUT IN A CHEST and
- * ARCHIVE. Mounted with no DOM; the canvas model and the sheet are stand-ins.
+ * blueprints built; ARCHIVED holds what was filed away. A row's actions,
+ * EXAMINE, PLACE HERE, PUT IN A CHEST and ARCHIVE, sit on the row on a wide
+ * screen and behind one ACTIONS button on a phone, never both; ARCHIVE
+ * leaves UNDO in the row's place. Mounted with no DOM; the canvas model and
+ * the sheet are stand-ins.
  */
 import 'fake-indexeddb/auto'
 import { IDBFactory } from 'fake-indexeddb'
@@ -43,11 +45,13 @@ vi.mock('../blueprint/BlueprintModel', async () => {
       createElement('i', { 'data-model': label ?? '', 'data-shown': view.revealed.size }),
   }
 })
-vi.mock('../blueprint/ExamineSheet', async () => {
+vi.mock('../blueprint/ExamineSheet', async (importOriginal) => {
   const { createElement } = await import('react')
+  // The words it shares with the list stay real; the sheet is a stand-in.
   return {
-    ExamineSheet: ({ bp }: { bp: { name: string; maker: string; view: { revealed: Map<number, number> } } }) =>
-      createElement('div', { role: 'dialog', 'aria-label': `Examine blueprint ${bp.name}`, 'data-shown': bp.view.revealed.size }, `by ${bp.maker}`),
+    ...(await importOriginal<typeof import('../blueprint/ExamineSheet')>()),
+    ExamineSheet: ({ bp, maker }: { bp: { name: string; maker: string; view: { revealed: Map<number, number> }; prize: { name?: string | null } }; maker?: { view: { revealed: Map<number, number> }; prizeName: string | null } }) =>
+      createElement('div', { role: 'dialog', 'aria-label': `Examine blueprint ${bp.name}`, 'data-shown': bp.view.revealed.size, 'data-maker-shown': maker ? maker.view.revealed.size : -1, 'data-prize-name': bp.prize.name ?? null }, `by ${bp.maker}`),
   }
 })
 const placed = vi.hoisted(() => [] as Array<[string, string]>)
@@ -140,7 +144,13 @@ afterEach(() => {
   useOpenActions.setState({ open: null })
   useBlueprints.setState({ cards: [], toys: [] })
   useCyberspace.setState({ identity: was })
+  delete (globalThis as { matchMedia?: unknown }).matchMedia
 })
+
+/** A phone's width (under 520px) for what mounts next. */
+function onAPhone(): void {
+  ;(globalThis as { matchMedia?: unknown }).matchMedia = (q: string) => ({ matches: q.includes('max-width'), media: q, addEventListener: () => {}, removeEventListener: () => {} })
+}
 
 describe('the ITEMS panel with BLUEPRINTS', () => {
   it('has three kinds side by side, BLUEPRINTS on the right with its count and a well of six smoke-model tiles, newest first, NEW on unseen ones', async () => {
@@ -192,7 +202,7 @@ describe('the BLUEPRINTS modal', () => {
     const mine = rowOf(m, shrine.rowKey)
     expect(textOf(mine)).toContain('Sky Shrine')
     expect(textOf(mine)).toContain('by you')
-    expect(textOf(mine)).toContain('1 of 2 blocks shown · prize as a silhouette · works anywhere')
+    expect(textOf(mine)).toContain('MATERIALS 1 known / 1 unknown · CONSTRUCTION May be built anywhere. · PRIZE Hints only')
     expect(textOf(mine)).toContain(NEW_MARK)
     expect(isNewBlueprint(useItemsSeen.getState().seen, shrine)).toBe(false)
     expect(isNewBlueprint(useItemsSeen.getState().seen, cipher)).toBe(false)
@@ -201,7 +211,7 @@ describe('the BLUEPRINTS modal', () => {
     const held = rowOf(m, cipher.rowKey)
     expect(textOf(held)).toMatch(/^Pocket Cipherby npub1/)
     expect(textOf(held)).toContain('left here by npub1')
-    expect(textOf(held)).toContain('1 of 2 blocks shown · prize as a silhouette · only in its region')
+    expect(textOf(held)).toContain('MATERIALS 1 known / 1 unknown · CONSTRUCTION Must be built in a specific h4 region. · PRIZE Hints only')
     await m.press(/^✕$/)
     expect(useBlueprintsModal.getState().open).toBe(false)
     await m.unmount()
@@ -217,8 +227,9 @@ describe('the BLUEPRINTS modal', () => {
     const row = rowOf(m, cipher.rowKey)
     expect(String(row.props.className)).toContain('held__row--focus')
     const acts = under(row, (n) => n.props.role === 'group').map((g) => under(g, (n) => n.type === 'button').map(textOf))[0]
-    // A found card has no SEE AS A FINDER: it is already what a finder sees.
     expect(acts).toEqual(['EXAMINE', 'PLACE HERE', 'PUT IN A CHEST', 'ARCHIVE'])
+    // On a wide screen the actions are on the row: no ACTIONS button over them.
+    expect(under(row, (n) => n.type === 'button' && textOf(n) === 'ACTIONS')).toHaveLength(0)
     await press(buttonIn(row, 'PLACE HERE'))
     await press(buttonIn(rowOf(m, cipher.rowKey), 'PUT IN A CHEST'))
     expect(placed).toEqual([[cipher.rowKey, 'here'], [cipher.rowKey, 'chest']])
@@ -227,20 +238,66 @@ describe('the BLUEPRINTS modal', () => {
     await m.unmount()
   })
 
-  it('MINE shows every block until SEE AS A FINDER, and EXAMINE follows it', async () => {
+  it('on a phone one ACTIONS button opens the actions under the row, and the row alone does not show them', async () => {
+    onAPhone()
+    const shrine = made('Sky Shrine', SEEN_SINCE + 5)
+    holdBlueprints([shrine])
+    useBlueprintsModal.setState({ open: true, focus: null })
+    const m = await mount(createElement(InventoryPanel))
+    const groups = (): Host[] => under(rowOf(m, shrine.rowKey), (n) => n.props.role === 'group')
+    expect(groups()).toHaveLength(0)
+    await press(buttonIn(rowOf(m, shrine.rowKey), 'ACTIONS'))
+    expect(groups().map((g) => under(g, (n) => n.type === 'button').map(textOf))).toEqual([['EXAMINE', 'PLACE HERE', 'PUT IN A CHEST', 'ARCHIVE']])
+    await m.unmount()
+  })
+
+  it('MINE shows every block; there is no SEE AS A FINDER, and EXAMINE opens on the finder view with the maker view to switch to', async () => {
     const shrine = made('Sky Shrine', SEEN_SINCE + 5)
     holdBlueprints([shrine])
     useBlueprintsModal.setState({ open: true, focus: shrine.rowKey })
     const m = await mount(createElement(InventoryPanel))
     const model = (): Host => under(rowOf(m, shrine.rowKey), (n) => n.type === 'i')[0]!
     expect(model().props['data-shown']).toBe(2)
-    await press(buttonIn(rowOf(m, shrine.rowKey), 'SEE AS A FINDER'))
-    expect(model().props['data-shown']).toBe(1)
-    expect(textOf(rowOf(m, shrine.rowKey))).toContain('AS A FINDER')
+    expect(m.buttons(/SEE AS A FINDER/)).toHaveLength(0)
+    expect(m.says('AS A FINDER')).toBe(false)
     await press(buttonIn(rowOf(m, shrine.rowKey), 'EXAMINE'))
     const sheet = m.all().find((h) => h.props['aria-label'] === 'Examine blueprint Sky Shrine')!
     expect(sheet.props['data-shown']).toBe(1)
+    expect(sheet.props['data-maker-shown']).toBe(2)
+    // No prize name was chosen to be shown, and the blueprint's title does not stand in for one.
+    expect(sheet.props['data-prize-name']).toBeNull()
     expect(textOf(sheet)).toBe('by you')
+    await m.unmount()
+  })
+
+  it('a found card examines as a finder only: no maker view to switch to', async () => {
+    const cipher = found('Pocket Cipher', SEEN_SINCE + 9, generateSecretKey())
+    holdBlueprints([cipher])
+    useBlueprintsModal.setState({ open: true, focus: cipher.rowKey })
+    const m = await mount(createElement(InventoryPanel))
+    await press(buttonIn(rowOf(m, cipher.rowKey), 'EXAMINE'))
+    const sheet = m.all().find((h) => h.props['aria-label'] === 'Examine blueprint Pocket Cipher')!
+    expect(sheet.props['data-maker-shown']).toBe(-1)
+    await m.unmount()
+  })
+
+  it('ARCHIVE is never final on one tap: UNDO stands in the row\'s place and brings it straight back', async () => {
+    const shrine = made('Sky Shrine', SEEN_SINCE + 5)
+    const other = made('Low Gate', SEEN_SINCE + 4)
+    holdBlueprints([shrine, other])
+    useBlueprintsModal.setState({ open: true, focus: null })
+    const m = await mount(createElement(InventoryPanel))
+    const list = (): string[] => m.all().filter((h) => h.type === 'li' && (h.props['data-blueprint'] !== undefined || h.props['data-undo'] !== undefined)).map((h) => (h.props['data-undo'] ? `undo:${String(h.props['data-undo'])}` : String(h.props['data-blueprint'])))
+    expect(list()).toEqual([shrine.rowKey, other.rowKey])
+    await press(buttonIn(rowOf(m, shrine.rowKey), 'ARCHIVE'))
+    expect(useBlueprints.getState().cards.find((c) => c.rowKey === shrine.rowKey)!.archived).toBeTypeOf('number')
+    // The line takes the row's place, above the row that was under it.
+    expect(list()).toEqual([`undo:${shrine.rowKey}`, other.rowKey])
+    expect(m.says('Sky Shrine is filed under ARCHIVED.')).toBe(true)
+    await m.press(/^UNDO$/)
+    expect(useBlueprints.getState().cards.find((c) => c.rowKey === shrine.rowKey)!.archived).toBeUndefined()
+    expect(list()).toEqual([shrine.rowKey, other.rowKey])
+    expect(m.buttons(/^UNDO$/)).toHaveLength(0)
     await m.unmount()
   })
 
@@ -253,11 +310,10 @@ describe('the BLUEPRINTS modal', () => {
     expect(useBlueprints.getState().cards[0]!.archived).toBeTypeOf('number')
     expect(m.buttons(/^(MINE|HELD|BUILT|ARCHIVED) \d+$/).map(textOf)).toEqual(['MINE 0', 'HELD 0', 'BUILT 0', 'ARCHIVED 1'])
     expect(rows(m)).toHaveLength(0)
+    expect(m.buttons(/^UNDO$/)).toHaveLength(1)
     expect(m.buttons(/^BLUEPRINTS · 0$/)).toHaveLength(1)
     await m.press(/^ARCHIVED 1$/)
     expect(textOf(rowOf(m, shrine.rowKey))).toContain('ARCHIVED')
-    useOpenActions.setState({ open: shrine.rowKey })
-    await settled()
     expect(m.buttons(/^DELETE/)).toHaveLength(0)
     await press(buttonIn(rowOf(m, shrine.rowKey), 'UNARCHIVE'))
     expect(useBlueprints.getState().cards[0]!.archived).toBeUndefined()
@@ -295,7 +351,7 @@ describe('a card\'s words', () => {
   it('reads its three settings in one short line, as a finder sees it', () => {
     const v = cardViews(made('Sky Shrine', SEEN_SINCE + 5))!
     expect(v.full?.revealed.size).toBe(2)
-    expect(settingsLine(v)).toBe('1 of 2 blocks shown · prize as a silhouette · works anywhere')
+    expect(settingsLine(v)).toBe('MATERIALS 1 known / 1 unknown · CONSTRUCTION May be built anywhere. · PRIZE Hints only')
     expect(cardViews(found('Pocket Cipher', SEEN_SINCE, generateSecretKey()))!.full).toBeNull()
   })
 })

@@ -58,10 +58,10 @@ import { findCashuToken, textWithoutToken } from '../lib/cashu'
 import { hasNftLink, textWithoutNftLinks } from '../lib/nftLink'
 import { deleteWords, removeWords } from '../lib/deleteWords'
 import { BlueprintLine, ChestBlock, KeyLine, TakeCopy } from './ItemRows'
-import { BLUEPRINT_RELAY_READY, finderView, readRecord, type PrizeReveal } from '../lib/blueprint/format'
+import { BLUEPRINT_RELAY_READY, finderView, readRecord } from '../lib/blueprint/format'
 import { blockCount, hiddenCount } from '../lib/blueprint/draw'
 import { BlueprintModel } from './blueprint/BlueprintModel'
-import { ExamineSheet } from './blueprint/ExamineSheet'
+import { ExamineSheet, constructionWords, materialsWords, prizeShort } from './blueprint/ExamineSheet'
 import { Chamfer } from './ui/Chamfer'
 import { ConfirmModal } from './ConfirmModal'
 import { ItemFace } from './ItemIcon'
@@ -84,16 +84,6 @@ import { CopyValue } from './ui/CopyValue'
 
 const ICON = 12
 
-/** A card's prize as far as its maker revealed it, in plain words. */
-export function cardPrizeWords(reveal: PrizeReveal): string {
-  switch (reveal) {
-    case 'hidden': return 'Kept secret until it is built'
-    case 'description': return 'Described by its maker'
-    case 'silhouette': return 'Shown as an outline'
-    case 'render': return 'Shown in pictures'
-  }
-}
-
 /** The card's main picture: its shape as smoke with the revealed blocks, in world axes. */
 const CARD_MODEL_PX = 176
 
@@ -114,7 +104,6 @@ export function BlueprintCardBody({ item, placer }: { item: WorldItem; placer: s
   const shown = total - hiddenCount(view)
   const prize = read.sheet.prize
   const pictures = Object.entries(read.views)
-  const lock = read.sheet.lock === 'location' ? 'Only inside its region' : 'Anywhere'
   const makerName = profileLabel(maker, nip19.npubEncode(card.record.pubkey))
   return (
     <div className="bp-place__card">
@@ -126,9 +115,9 @@ export function BlueprintCardBody({ item, placer }: { item: WorldItem; placer: s
       </div>
       <div className="bp-place__who"><BlueprintLine maker={card.record.pubkey} placer={placer} /></div>
       <dl className="secret__facts bp-place__facts">
-        <div><dt>Recipe</dt><dd>{shown} of {total} blocks shown</dd></div>
-        <div><dt>Prize</dt><dd>{cardPrizeWords(prize.reveal)}</dd></div>
-        <div><dt>Builds</dt><dd>{lock}</dd></div>
+        <div><dt>Materials</dt><dd>{materialsWords(shown, total - shown)}</dd></div>
+        <div><dt>Construction</dt><dd>{constructionWords(read.sheet.lock, read.sheet.height)}</dd></div>
+        <div><dt>Prize</dt><dd>{prizeShort(prize.reveal, !!read.prizeName)}</dd></div>
       </dl>
       {prize.text && <p className="bp-place__note">{prize.text}</p>}
       {pictures.length > 0 && (
@@ -142,7 +131,7 @@ export function BlueprintCardBody({ item, placer }: { item: WorldItem; placer: s
       </div>
       {examining && (
         <ExamineSheet
-          bp={{ name: card.title, maker: makerName, description: prize.text ?? '', view, prize: { reveal: prize.reveal, text: prize.text, views: read.views, title: card.title }, lock: read.sheet.lock, height: read.sheet.height, drawnAt: card.record.created_at }}
+          bp={{ name: card.title, maker: makerName, description: prize.text ?? '', view, prize: { reveal: prize.reveal, text: prize.text, views: read.views, name: read.prizeName }, lock: read.sheet.lock, height: read.sheet.height, drawnAt: card.record.created_at }}
           onClose={() => setExamining(false)}
         />
       )}

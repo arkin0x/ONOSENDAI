@@ -4,30 +4,44 @@
  * a fine grid, cyan and white ink. The sheet is a strip of panels that scrolls
  * sideways, as long as the build needs:
  *
- * 1. title and settings: the name, the three settings in plain words, how
- *    many blocks are shown with a bar, how many are still hidden and how many
- *    a miss burns (all of them), the compass with the black sun and the
- *    maker's note in the margin;
- * 2. isometric: the build opening as an exploded view whose layers settle
- *    together (on first sight and on REPLAY; assembled under reduced motion),
- *    a compass in the corner and a +Z arrow on the floor to the black sun;
- * 3. three views: from above, from the sun and from +X, each with its compass;
+ * 1. title and summary: the name, then MATERIALS (known and unknown blocks),
+ *    CONSTRUCTION (anywhere, or a specific region) and PRIZE (a mystery,
+ *    hints only or public information), how many blocks are shown with a
+ *    bar, how many are still hidden and how many a miss burns (all of them),
+ *    the compass and the maker's note in the margin;
+ * 2. isometric: seen from the (+X, +Y, -Z) corner, behind and to the right
+ *    of a player facing the sun: +X runs down to the right, +Z up to the
+ *    right, the black sun beyond the build. The build opens as an exploded
+ *    view whose layers settle together (on first sight and on REPLAY;
+ *    assembled under reduced motion), with a compass in the corner. Beside
+ *    it on a wide screen, under it on a phone, the three views in one
+ *    compact column, each row the view, its compass and its label: facing
+ *    the sun (looking along +Z from the -Z side, X right, Y up, the sun
+ *    behind the build), from above (+Z up, the sun at the top edge) and
+ *    from +X (+Z on the right);
  * 4. cutaway, only when the build has an inside: a section through every
  *    layer and the isometric with the front quarter cut away;
- * 5. the blocks shown, by kind, and the prize as far as it is revealed;
+ * 5. the blocks shown, by kind, and the prize as far as it is revealed:
+ *    its name only when its maker chose to show it, never the blueprint's;
  * 6. the title block: a scale bar in gibsons, the name, maker, date, sheet,
- *    lock and revision.
+ *    construction and revision.
  *
  * Nothing on it is a stored picture of the answer: every canvas draws fresh
  * from the finder's view (lib/blueprint/draw.ts). One animation loop serves
  * every canvas and draws only those on screen; it stops once nothing moves
  * (no smoke and the layers settled), and never runs under reduced motion.
  *
+ * A maker examining their own blueprint gets a two-way switch over the
+ * sheet: FINDER (what others see, the default) and MAKER (every block, as
+ * they made it). The sheet is redrawn in place: both prize boxes are laid
+ * out and the one not shown is hidden, and the parts list keeps as many
+ * slots as the longer of the two, so nothing on the sheet moves.
+ *
  * Closed by the shared ✕, a tap outside or Escape (modalStack).
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronRight, DraftingCompass, RotateCcw } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { ChevronRight, DraftingCompass, Eye, PencilRuler, RotateCcw } from 'lucide-react'
 import { useReducedMotion } from '../../hooks/useReducedMotion'
 import {
   TILE_IMAGES,
@@ -58,8 +72,12 @@ export interface ExamineBlueprint {
   /** The maker's note, written in the margin. */
   description: string
   view: FinderView
-  /** The prize as far as it is revealed: `views` holds the pictures of the views the maker chose. */
-  prize: { reveal: PrizeReveal; text?: string; views: Partial<Record<PrizeView, string>>; title: string }
+  /**
+   * The prize as far as it is revealed: `views` holds the pictures of the
+   * views the maker chose, `name` the prize's own name only when the maker
+   * chose to show it (absent or null otherwise; never the blueprint's title).
+   */
+  prize: { reveal: PrizeReveal; text?: string; views: Partial<Record<PrizeView, string>>; name?: string | null }
   lock: LockKind
   /** A location lock's region height. */
   height?: number
@@ -69,6 +87,12 @@ export interface ExamineBlueprint {
   revision?: number
 }
 
+/** For a maker examining their own blueprint: the whole arrangement and the prize's real name, if it has one to give. */
+export interface ExamineMaker {
+  view: FinderView
+  prizeName: string | null
+}
+
 /** The layers settle over this long, after a short pause, from when the isometric panel is first seen. */
 const EXPLODE_DELAY_S = 0.45
 const EXPLODE_S = 1.7
@@ -76,8 +100,10 @@ const EXPLODE_S = 1.7
 const ISO_PX = 320
 const CUT_PX = 220
 const COMPASS_PX = 54
+/** A view's compass in the three views' column. */
+const VIEW_COMPASS_PX = 40
 
-const VIEW_LABEL: Record<PrizeView, string> = { x: 'along X', y: 'along Y', z: 'along Z', iso: 'isometric' }
+const VIEW_LABEL: Record<PrizeView, string> = { x: 'from +X', y: 'from above', z: 'facing the sun', iso: 'isometric' }
 
 /** A frame of the sheet's one clock. */
 interface Frame {
@@ -122,35 +148,84 @@ function dateOf(s: number | undefined): string {
   try { return new Date(s * 1000).toISOString().slice(0, 10) } catch { return 'Draft' }
 }
 
-function prizeWords(reveal: PrizeReveal, n: number): string {
-  const views = `${n} view${n === 1 ? '' : 's'}`
+/** The prize setting in plain words; the number of views only when there are pictures to count. */
+export function prizeWords(reveal: PrizeReveal, n: number): string {
+  const views = n > 0 ? ` in ${n} view${n === 1 ? '' : 's'}` : ''
   switch (reveal) {
     case 'hidden': return 'kept secret until it is built'
     case 'description': return 'described by the maker'
-    case 'silhouette': return `shown as an outline in ${views}`
-    case 'render': return `shown as pictures in ${views}`
+    case 'silhouette': return `shown as an outline${views}`
+    case 'render': return `shown as pictures${views}`
   }
 }
 
-const REVEAL_LABEL: Record<PrizeReveal, string> = { hidden: 'SECRET', description: 'DESCRIBED', silhouette: 'OUTLINE', render: 'PICTURES' }
+/** MATERIALS, in the summary, the BLUEPRINTS list and the card: "5 known / 0 unknown". */
+export function materialsWords(known: number, unknown: number): string {
+  return `${known} known / ${unknown} unknown`
+}
 
-export function ExamineSheet({ bp, onClose }: { bp: ExamineBlueprint; onClose: () => void }): JSX.Element {
+/** CONSTRUCTION, in the summary, the title block, the BLUEPRINTS list and the card. */
+export function constructionWords(lock: LockKind, height?: number): string {
+  if (lock !== 'location') return 'May be built anywhere.'
+  return height !== undefined && Number.isFinite(height) ? `Must be built in a specific h${height} region.` : 'Must be built in a specific region.'
+}
+
+/** CONSTRUCTION in the title block, short: "Anywhere" or "h5 region" ("region" with no height). */
+export function constructionShort(lock: LockKind, height?: number): string {
+  if (lock !== 'location') return 'Anywhere'
+  return height !== undefined && Number.isFinite(height) ? `h${height} region` : 'region'
+}
+
+/**
+ * PRIZE in one of three short values, in the summary, the BLUEPRINTS list
+ * and the card: public information when it is shown in pictures or its
+ * name is shown, a mystery when it is kept secret, hints only otherwise.
+ */
+export function prizeShort(reveal: PrizeReveal, nameShown: boolean): string {
+  if (nameShown || reveal === 'render') return 'Public information'
+  return reveal === 'hidden' ? 'A mystery' : 'Hints only'
+}
+
+/** The heading of PRIZE when its maker did not choose to show its name. */
+export const MYSTERY_PRIZE = 'A mystery prize'
+/** What PRIZE says when it should show pictures and none came. */
+export const NO_PICTURES = 'The pictures did not come with this copy.'
+
+/** The blocks shown, by kind, most first. */
+function partsOf(view: FinderView): Array<[number, number]> {
+  const byId = new Map<number, number>()
+  for (const id of view.revealed.values()) byId.set(id, (byId.get(id) ?? 0) + 1)
+  return [...byId.entries()].sort((a, b) => b[1] - a[1] || a[0] - b[0])
+}
+
+
+export function ExamineSheet({ bp, maker, onClose }: { bp: ExamineBlueprint; maker?: ExamineMaker; onClose: () => void }): JSX.Element {
   useModalStack(true, onClose)
   const reduced = useReducedMotion()
-  const view = bp.view
+  const [as, setAs] = useState<'finder' | 'maker'>('finder')
+  const asMaker = !!maker && as === 'maker'
+  // What a finder gets, whichever view is drawn: the settings and the meter always speak of it.
+  const finder = bp.view
+  const view = maker && asMaker ? maker.view : finder
   const [sx, sy, sz] = view.size
   const total = useMemo(() => blockCount(view), [view])
   const hidden = useMemo(() => hiddenCount(view), [view])
   const shown = total - hidden
+  const finderHidden = useMemo(() => hiddenCount(finder), [finder])
+  const finderShown = total - finderHidden
+  // The inside is the shape's, the same in both views.
   const hollow = useMemo(() => enclosedEmpty(view), [view])
   const inside = useMemo(() => hollow.size > 0 || buriedCells(view).size > 0, [view, hollow])
-  const parts = useMemo(() => {
-    const byId = new Map<number, number>()
-    for (const id of view.revealed.values()) byId.set(id, (byId.get(id) ?? 0) + 1)
-    return [...byId.entries()].sort((a, b) => b[1] - a[1] || a[0] - b[0])
-  }, [view])
+  const parts = useMemo(() => partsOf(view), [view])
+  // As many part slots as the longer list of the two views, so switching never moves the sheet.
+  const slots = useMemo(() => {
+    const f = partsOf(finder).length + (finderHidden > 0 ? 1 : 0)
+    return maker ? Math.max(f, partsOf(maker.view).length + (hiddenCount(maker.view) > 0 ? 1 : 0)) : f
+  }, [finder, finderHidden, maker])
+  const pad = Math.max(0, slots - parts.length - (hidden > 0 ? 1 : 0))
   const prizeViews = PRIZE_VIEWS.filter((v) => bp.prize.views[v])
   const pictures = bp.prize.reveal === 'silhouette' || bp.prize.reveal === 'render'
+  const prizeName = bp.prize.name?.trim() || null
 
   /* ---------- the one clock ---------- */
   const entries = useRef(new Map<HTMLCanvasElement, Entry>())
@@ -168,7 +243,7 @@ export function ExamineSheet({ bp, onClose }: { bp: ExamineBlueprint; onClose: (
     return { phase: now / 1000, exploded: 1 - easeInOutCubic(p) }
   }
   const paintOne = (cv: HTMLCanvasElement, e: Entry, f: Frame): void => {
-    const ctx = cv.getContext('2d')
+    const ctx = typeof cv.getContext === 'function' ? cv.getContext('2d') : null
     if (!ctx) return
     const dpr = cv.width / e.w
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
@@ -254,88 +329,134 @@ export function ExamineSheet({ bp, onClose }: { bp: ExamineBlueprint; onClose: (
   /* ---------- the drawings ---------- */
   const paintIso = useCallback<Paint>((ctx, f) => {
     drawIso(ctx, view, { x: 0, y: 0, size: ISO_PX, smokePhase: f.phase, exploded: f.exploded, floor: true })
-    drawCompass(ctx, ISO_PX - 30, 30, 26, 'iso')
+    // The compass in its own corner, bottom left, away from the black sun (which stands beyond the build's +Z face, up and to the right).
+    drawCompass(ctx, 30, ISO_PX - 30, 26, 'iso')
   }, [view])
   const paintCut = useCallback<Paint>((ctx, f) => drawIso(ctx, view, { x: 0, y: 0, size: CUT_PX, smokePhase: f.phase, cutaway: true, floor: true }), [view])
 
   const longest = Math.max(sx, sy, sz)
-  const viewCell = Math.max(8, Math.min(26, Math.floor(150 / longest)))
+  // The three views share one cell size, kept small so the column stays compact.
+  const viewCell = Math.max(6, Math.min(22, Math.floor(120 / longest)))
   const sliceCell = Math.max(6, Math.min(17, Math.floor(110 / Math.max(sx, sz))))
 
-  const axisCanvas = (axis: AxisView): JSX.Element => {
+  // The views' sizes come from the shape alone, the same in FINDER and MAKER, so switching moves nothing.
+  const axisSize = (axis: AxisView): { w: number; h: number } => {
     const g = axisGrid(view, axis)
-    const w = g.cols * viewCell, h = g.rows * viewCell
-    return <AxisCanvas view={view} axis={axis} w={w} h={h} reg={reg} />
+    return { w: g.cols * viewCell, h: g.rows * viewCell }
   }
+  const viewsCol = Math.max(...(['z', 'y', 'x'] as const).map((a) => axisSize(a).w))
+  const axisRows: Array<{ axis: AxisView; name: string; dims: string; caption: string }> = [
+    { axis: 'z', name: 'FACING THE SUN', dims: `${sx} X × ${sy} Y`, caption: 'X right · Y up · the sun behind the build' },
+    { axis: 'y', name: 'FROM ABOVE', dims: `${sx} X × ${sz} Z`, caption: '+Z up · the sun at the top edge' },
+    { axis: 'x', name: 'FROM +X', dims: `${sz} Z × ${sy} Y`, caption: '+Z on the right · Y up' },
+  ]
 
-  const lockWords = bp.lock === 'location' ? 'only inside its region' : 'works anywhere'
-  const lockShort = bp.lock === 'location' ? `IN ITS REGION${bp.height ? ` · HEIGHT ${bp.height}` : ''}` : 'ANYWHERE'
+  const construction = constructionWords(bp.lock, bp.height)
   const rev = revisionMark(bp.revision)
   const date = dateOf(bp.drawnAt)
   const note = bp.description.trim() || (bp.prize.reveal === 'hidden' ? 'No word about the prize. Build it and see.' : '')
 
+  const frames = (
+    <div className="bp-ex__frames">
+      {prizeViews.map((v) => (
+        <figure className="bp-ex__frame" key={v}>
+          <Chamfer decorative={false}><img className="bp-ex__pic" src={bp.prize.views[v]} alt={`The prize ${VIEW_LABEL[v]}`} /></Chamfer>
+          <figcaption>{VIEW_LABEL[v]}</figcaption>
+        </figure>
+      ))}
+    </div>
+  )
+  // PRIZE as a finder gets it: its name only when the maker chose to show it.
+  const finderPrize = bp.prize.reveal === 'hidden' ? (
+    <>
+      {prizeName && <div className="bp-ex__ptitle">{prizeName}</div>}
+      <div className="bp-ex__redact" aria-hidden><i style={{ width: '86%' }} /><i style={{ width: '58%' }} /></div>
+      <p className="bp-ex__ptext bp-ex__ptext--dim">Nothing more is shown. Build it and see.</p>
+    </>
+  ) : (
+    <>
+      <div className="bp-ex__ptitle">{prizeName ?? MYSTERY_PRIZE}</div>
+      {bp.prize.text && <p className="bp-ex__ptext">{bp.prize.text}</p>}
+      {pictures && (prizeViews.length > 0 ? frames : <p className="bp-ex__ptext bp-ex__ptext--dim">{NO_PICTURES}</p>)}
+    </>
+  )
+  // PRIZE as its maker knows it.
+  const makerPrize = maker && (
+    <>
+      <div className="bp-ex__ptitle">{maker.prizeName?.trim() || 'Your prize'}</div>
+      <p className="bp-ex__ptext bp-ex__ptext--dim">Finders see it {prizeWords(bp.prize.reveal, prizeViews.length)}.</p>
+      {bp.prize.text && <p className="bp-ex__ptext">{bp.prize.text}</p>}
+      {prizeViews.length > 0 && frames}
+    </>
+  )
+
   return (
     <Stacked>
-      <div className="modal modal--top bp-ex" role="dialog" aria-modal="true" aria-label={`Examine blueprint ${bp.name}`} onPointerDown={(e) => { e.stopPropagation(); onClose() }} onClick={(e) => e.stopPropagation()}>
+      <div className="modal modal--top bp-ex" role="dialog" aria-modal="true" aria-label={`Examine blueprint ${bp.name}`} data-as={asMaker ? 'maker' : 'finder'} data-shown={shown} onPointerDown={(e) => { e.stopPropagation(); onClose() }} onClick={(e) => e.stopPropagation()}>
         <div className="bp-ex__card" onPointerDown={(e) => e.stopPropagation()}>
           <div className="bp-ex__head">
             <span className="bp-ex__badge"><DraftingCompass size={12} strokeWidth={2.25} aria-hidden />EXAMINE</span>
             <span className="bp-ex__headname">{bp.name}</span>
             <ModalClose onClose={onClose} />
           </div>
+          {maker && (
+            <div className="bp-ex__as" role="radiogroup" aria-label="Whose view the sheet shows">
+              <button type="button" role="radio" aria-checked={!asMaker} className={`bp-ex__asbtn${asMaker ? '' : ' is-on'}`} onClick={() => setAs('finder')} title="The sheet exactly as a finder gets it"><Eye size={13} strokeWidth={2.25} aria-hidden /><b>FINDER:</b> what others see</button>
+              <button type="button" role="radio" aria-checked={asMaker} className={`bp-ex__asbtn${asMaker ? ' is-on' : ''}`} onClick={() => setAs('maker')} title="Every block and the prize, as you made it"><PencilRuler size={13} strokeWidth={2.25} aria-hidden /><b>MAKER:</b> everything</button>
+            </div>
+          )}
           <div className="bp-ex__wrap" ref={wrap} onScroll={onScroll}>
-            <div className="bp-ex__sheet">
+            <div className={`bp-ex__sheet${asMaker ? ' bp-ex__sheet--maker' : ''}`} data-mark={asMaker ? "MAKER'S VIEW · EVERY BLOCK" : undefined}>
               {/* 1. Title and settings */}
               <section className="bp-ex__panel bp-ex__panel--title">
-                <div className="bp-ex__kicker">ONOSENDAI · BLUEPRINT</div>
+                <div className="bp-ex__kicker">{asMaker ? "ONOSENDAI · MAKER'S VIEW" : 'ONOSENDAI · BLUEPRINT'}</div>
                 <h2 className="bp-ex__name">{bp.name}</h2>
                 <dl className="bp-ex__settings">
-                  <div><dt>1 · RECIPE</dt><dd>{shown} of {total} blocks shown</dd></div>
-                  <div><dt>2 · PRIZE</dt><dd>{prizeWords(bp.prize.reveal, prizeViews.length)}</dd></div>
-                  <div><dt>3 · LOCK</dt><dd>{lockWords}</dd></div>
+                  <div><dt>MATERIALS</dt><dd>{materialsWords(finderShown, finderHidden)}</dd></div>
+                  <div><dt>CONSTRUCTION</dt><dd>{construction}</dd></div>
+                  <div><dt>PRIZE</dt><dd>{prizeShort(bp.prize.reveal, !!prizeName)}</dd></div>
                 </dl>
                 <div className="bp-ex__meter">
-                  <div className="bp-ex__meter-l">BLOCKS SHOWN <b>{shown} / {total}</b></div>
-                  <div className="bp-ex__bar"><i style={{ width: `${total ? (100 * shown) / total : 0}%` }} /></div>
-                  <div className="bp-ex__meter-n">Smoke marks a block not shown yet.</div>
-                  <div className="bp-ex__cost"><span>STILL HIDDEN <b>{hidden}</b></span><span>A MISS BURNS ALL <b>{total}</b></span></div>
+                  <div className="bp-ex__meter-l">{maker ? 'FINDERS SEE' : 'KNOWN MATERIALS'} <b>{finderShown} / {total}</b></div>
+                  <div className="bp-ex__bar"><i style={{ width: `${total ? (100 * finderShown) / total : 0}%` }} /></div>
+                  <div className="bp-ex__meter-n">{asMaker ? 'You see every block, as you made it.' : 'Smoke marks a block not shown yet.'}</div>
+                  <div className="bp-ex__cost"><span>STILL HIDDEN <b>{finderHidden}</b></span><span>A MISS BURNS ALL <b>{total}</b></span></div>
                 </div>
                 <div className="bp-ex__sunrow">
                   <Compass reg={reg} orientation="iso" px={88} />
-                  <p>Every view on this sheet is in world axes, each with its own compass. The black sun is +Z. The puzzle is which blocks go where, never which way the build faces.</p>
                 </div>
                 {note && <p className="bp-ex__note">{note}<span>~ {bp.maker}</span></p>}
                 <div className="bp-ex__stamps"><div className="bp-ex__stamp"><b>REV {rev}</b><span>{bp.drawnAt ? `DRAWN ${date}` : 'DRAFT'}</span></div></div>
               </section>
 
-              {/* 2. Isometric */}
+              {/* 2. Isometric, and the three views in a column beside it (under it on a phone) */}
               <section className="bp-ex__panel bp-ex__panel--iso">
-                <div className="bp-ex__ph">
-                  <span>ISOMETRIC</span>
-                  <button type="button" className="bp-ex__replay" onClick={replay} title="Watch the layers come together again"><RotateCcw size={12} strokeWidth={2.25} aria-hidden />REPLAY</button>
+                <div className="bp-ex__isocol">
+                  <div className="bp-ex__ph">
+                    <span>ISOMETRIC</span>
+                    <button type="button" className="bp-ex__replay" onClick={replay} title="Watch the layers come together again"><RotateCcw size={12} strokeWidth={2.25} aria-hidden />REPLAY</button>
+                  </div>
+                  <SheetCanvas w={ISO_PX} h={ISO_PX} paint={paintIso} reg={reg} explodes className="bp-ex__isocv" label={`${asMaker ? `Isometric model: all ${total} blocks, as you made it` : `Isometric model: ${shown} of ${total} blocks shown, the rest as smoke`}. Seen from behind and to the right of a player facing the sun: +X runs down to the right, +Z up to the right, the black sun beyond the build`} />
+                  <div className="bp-ex__foot">1 block = 1 gibson · box {sx} × {sy} × {sz}</div>
                 </div>
-                <SheetCanvas w={ISO_PX} h={ISO_PX} paint={paintIso} reg={reg} explodes label={`Isometric model: ${shown} of ${total} blocks shown, the rest as smoke`} />
-                <div className="bp-ex__foot">Y0 at the bottom · 1 block = 1 gibson · box {sx} × {sy} × {sz}</div>
-              </section>
-
-              {/* 3. Three views */}
-              <section className="bp-ex__panel bp-ex__panel--ortho">
-                <div className="bp-ex__ph"><span>THREE VIEWS · ONE ALONG EACH AXIS</span></div>
-                <div className="bp-ex__ortho">
-                  <div className="bp-ex__ov bp-ex__ov--above">
-                    <div className="bp-ex__ol">FROM ABOVE <span>{sx} X × {sz} Z</span></div>
-                    <div className="bp-ex__ovrow">{axisCanvas('y')}<Compass reg={reg} orientation="y" /></div>
-                  </div>
-                  <div className="bp-ex__ov bp-ex__ov--sun">
-                    <div className="bp-ex__ol">FROM THE SUN <span>{sx} X × {sy} Y</span></div>
-                    <div className="bp-ex__ovrow">{axisCanvas('z')}<Compass reg={reg} orientation="z" /></div>
-                  </div>
-                  <div className="bp-ex__ov bp-ex__ov--side">
-                    <div className="bp-ex__ol">FROM +X <span>{sz} Z × {sy} Y</span></div>
-                    <div className="bp-ex__ovrow">{axisCanvas('x')}<Compass reg={reg} orientation="x" /></div>
-                  </div>
+                <div className="bp-ex__views" style={{ '--bp-vw': `${viewsCol}px` } as CSSProperties}>
+                  <div className="bp-ex__ph"><span>THREE VIEWS · ONE ALONG EACH AXIS</span></div>
+                  {axisRows.map((r) => {
+                    const { w, h } = axisSize(r.axis)
+                    return (
+                      <div className={`bp-ex__vrow bp-ex__vrow--${r.axis}`} key={r.axis}>
+                        <div className="bp-ex__vpic"><AxisCanvas view={view} axis={r.axis} w={w} h={h} reg={reg} /></div>
+                        <Compass reg={reg} orientation={r.axis} px={VIEW_COMPASS_PX} />
+                        <div className="bp-ex__vl">
+                          <b>{r.name}</b>
+                          <span className="bp-ex__vdims">{r.dims}</span>
+                          <span className="bp-ex__oh">{r.caption}</span>
+                        </div>
+                      </div>
+                    )
+                  })}
+                  <div className="bp-ex__foot">Each square shows the first block met looking in: darker the deeper it sits.</div>
                 </div>
-                <div className="bp-ex__foot">Each square shows the first block met looking in: darker the deeper it sits.</div>
               </section>
 
               {/* 4. Cutaway, only when there is an inside */}
@@ -362,7 +483,7 @@ export function ExamineSheet({ bp, onClose }: { bp: ExamineBlueprint; onClose: (
               {/* 5. The blocks shown, and the prize */}
               <section className="bp-ex__panel bp-ex__panel--bom">
                 <div className="bp-ex__box">
-                  <div className="bp-ex__bh"><span>BLOCKS SHOWN</span><b>{shown} OF {total}</b></div>
+                  <div className="bp-ex__bh"><span>{asMaker ? 'EVERY BLOCK' : 'KNOWN MATERIALS'}</span><b>{shown} OF {total}</b></div>
                   <div className="bp-ex__parts">
                     {parts.map(([id, n]) => {
                       const kind = blockKind(id)
@@ -382,34 +503,25 @@ export function ExamineSheet({ bp, onClose }: { bp: ExamineBlueprint; onClose: (
                         <span className="bp-ex__pcount">× {hidden}</span>
                       </div>
                     )}
+                    {Array.from({ length: pad }, (_, i) => (
+                      <div className="bp-ex__part bp-ex__part--pad" key={`pad-${i}`} aria-hidden>
+                        <Chamfer><span className="bp-ex__smoke" /></Chamfer>
+                        <span className="bp-ex__pname">&nbsp;</span>
+                        <span className="bp-ex__pcount">&nbsp;</span>
+                      </div>
+                    ))}
                   </div>
                   <div className="bp-ex__btot">{total} BLOCKS IN ALL · BOX {sx} × {sy} × {sz}</div>
                 </div>
                 <div className="bp-ex__box">
-                  <div className="bp-ex__bh"><span>THE PRIZE</span><b>{REVEAL_LABEL[bp.prize.reveal]}</b></div>
-                  {bp.prize.reveal === 'hidden' ? (
-                    <>
-                      <div className="bp-ex__ptitle">{bp.name}</div>
-                      <div className="bp-ex__redact" aria-hidden><i style={{ width: '86%' }} /><i style={{ width: '58%' }} /></div>
-                      <p className="bp-ex__ptext bp-ex__ptext--dim">Nothing more is shown. Build it and see.</p>
-                    </>
-                  ) : (
-                    <>
-                      <div className="bp-ex__ptitle">{bp.prize.title || bp.name}</div>
-                      {bp.prize.text && <p className="bp-ex__ptext">{bp.prize.text}</p>}
-                      {pictures && (
-                        <div className="bp-ex__frames">
-                          {prizeViews.map((v) => (
-                            <figure className="bp-ex__frame" key={v}>
-                              <Chamfer decorative={false}><img className="bp-ex__pic" src={bp.prize.views[v]} alt={`The prize ${VIEW_LABEL[v]}`} /></Chamfer>
-                              <figcaption>{VIEW_LABEL[v]}</figcaption>
-                            </figure>
-                          ))}
-                          {prizeViews.length === 0 && <p className="bp-ex__ptext bp-ex__ptext--dim">No pictures came with this blueprint.</p>}
-                        </div>
-                      )}
-                    </>
-                  )}
+                  <div className="bp-ex__bh"><span>PRIZE</span><b>{prizeShort(bp.prize.reveal, !!prizeName)}</b></div>
+                  {makerPrize ? (
+                    // Both laid out in one cell, the one not shown hidden, so the box keeps its height.
+                    <div className="bp-ex__pstack">
+                      <div className={asMaker ? 'is-off' : undefined} aria-hidden={asMaker || undefined}>{finderPrize}</div>
+                      <div className={asMaker ? undefined : 'is-off'} aria-hidden={!asMaker || undefined}>{makerPrize}</div>
+                    </div>
+                  ) : finderPrize}
                 </div>
               </section>
 
@@ -429,8 +541,8 @@ export function ExamineSheet({ bp, onClose }: { bp: ExamineBlueprint; onClose: (
                     <div><span>DRAWN BY</span>{bp.maker}</div>
                     <div><span>DATE</span>{date}</div>
                     <div><span>SHEET</span>1 OF 1</div>
-                    <div><span>LOCK</span>{lockShort}</div>
-                    <div><span>BOX</span>{sx} × {sy} × {sz}</div>
+                    <div><span>CONSTRUCTION</span>{constructionShort(bp.lock, bp.height)}</div>
+                    <div><span>VOLUME</span>{sx} × {sy} × {sz}</div>
                     <div><span>REVISION</span>{rev}</div>
                   </div>
                 </div>
@@ -447,7 +559,7 @@ export function ExamineSheet({ bp, onClose }: { bp: ExamineBlueprint; onClose: (
 /** A view along an axis, on its own canvas. */
 function AxisCanvas({ view, axis, w, h, reg }: { view: FinderView; axis: AxisView; w: number; h: number; reg: Register }): JSX.Element {
   const paint = useCallback<Paint>((ctx, f) => drawAxisView(ctx, view, axis, { x: 0, y: 0, size: w, height: h, smokePhase: f.phase }), [view, axis, w, h])
-  const words = axis === 'y' ? 'from above' : axis === 'z' ? 'from the sun' : 'from +X'
+  const words = axis === 'y' ? 'from above, +Z up and the sun at the top edge' : axis === 'z' ? 'facing the sun, X right and Y up, the sun behind the build' : 'from +X, +Z on the right and Y up'
   return <SheetCanvas w={w} h={h} paint={paint} reg={reg} label={`The build seen ${words}`} />
 }
 

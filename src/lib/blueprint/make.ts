@@ -37,6 +37,8 @@ export interface MakeInput {
   regionKey?: Uint8Array | null
   /** Ask feeds not to list it. */
   noBroadcast?: boolean
+  /** The prize's own name, written only when the maker chose to show it. */
+  prizeName?: string | null
 }
 
 /** Why a blueprint cannot be sealed as it is, in plain words, or null. */
@@ -58,6 +60,7 @@ export async function makeBlueprint(m: MakeInput, sign: (t: ReturnType<typeof re
   const prize: Sheet['prize'] = { reveal: m.reveal }
   if (m.reveal !== 'hidden' && m.text?.trim()) prize.text = [...m.text.trim()].slice(0, 280).join('')
   if (m.reveal === 'silhouette' || m.reveal === 'render') prize.views = m.views
+  if (m.prizeName?.trim()) prize.name = [...m.prizeName.trim()].slice(0, 64).join('')
   const sheet: Sheet = { ...sheetShape(m.arrangement, m.shown), lock: m.lock, ...(m.lock === 'location' ? { height: m.height } : {}), prize }
   const template = recordTemplate({ lookup, sheet, sealed, title: m.title, createdAt: Math.floor(Date.now() / 1000), noBroadcast: m.noBroadcast })
   // The size limit (§5.2), measured before asking the signer: pictures are what usually push it over.

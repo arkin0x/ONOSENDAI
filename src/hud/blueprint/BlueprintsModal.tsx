@@ -6,19 +6,21 @@
  * (modalStack), and closed by the shared ✕, a tap outside or Escape.
  *
  * Tabs, as the design page has them (FEED comes later):
- * - MINE: the blueprints you made. You see the whole arrangement; SEE AS A
- *   FINDER flips the picture and EXAMINE to what a finder is shown.
+ * - MINE: the blueprints you made. The picture shows the whole arrangement;
+ *   EXAMINE opens on what a finder gets, with a switch to every block.
  * - HELD: the blueprints you found, in the world, a chest or behind a door.
  * - BUILT: prizes from your smashes still waiting to be taken, each with
  *   TAKE, then the blueprints you have built and how many times.
  * - ARCHIVED, once something is filed away: UNARCHIVE brings it back. A
- *   blueprint is never deleted by a tap here.
+ *   blueprint is never deleted by a tap here. ARCHIVE leaves a line in the
+ *   row's place for a few seconds with UNDO, so a stray tap costs nothing.
  *
  * Each row: the 80px chamfered smoke model, the title, who made it and who
- * left it there, its three settings in one short line, and one ACTIONS
- * button opening EXAMINE, PLACE HERE, PUT IN A CHEST and ARCHIVE under the
- * row (InventoryPanel useRowActions: one row's actions open at a time across
- * ITEMS).
+ * left it there, its three settings in one short line, and its actions:
+ * EXAMINE, PLACE HERE, PUT IN A CHEST and ARCHIVE. On a wide screen they sit
+ * on the row itself; on a phone (under 520px) one ACTIONS button opens them
+ * under the row (InventoryPanel useRowActions: one row's actions open at a
+ * time across ITEMS). Never both.
  *
  * Opening the list is looking at it: every card in it is seen (NEW, kept per
  * identity by store/useItemsSeen). The rows that were NEW when it opened
@@ -26,7 +28,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
-import { Hammer, PackageCheck, DraftingCompass } from 'lucide-react'
+import { Archive, Hammer, PackageCheck, DraftingCompass, Undo2 } from 'lucide-react'
 import { create } from 'zustand'
 import { fromPayload } from 'sno-core/shards'
 import { useProfile } from '../../hooks/useProfile'
@@ -37,7 +39,7 @@ import { blueprintSeenAs, isNewBlueprint } from '../../lib/itemsSeen'
 import type { BlueprintCard, ToyRow } from '../../lib/blueprint/blueprintDb'
 import {
   cellsFromBytes, finderView, fromBase64, fullView, readRecord,
-  type FinderView, type LockKind, type PrizeReveal, type RecordView,
+  type FinderView, type RecordView,
 } from '../../lib/blueprint/format'
 import { takeToy } from '../../lib/blueprint/smashRun'
 import { startPlaceBlueprint } from '../../lib/blueprint/place'
@@ -50,7 +52,7 @@ import { Chamfer, THUMB_PX } from '../ui/Chamfer'
 import { ModalClose } from '../ui/ModalClose'
 import { Stacked, useModalStack } from '../modalStack'
 import { BlueprintModel } from './BlueprintModel'
-import { ExamineSheet } from './ExamineSheet'
+import { ExamineSheet, constructionWords, materialsWords, prizeShort } from './ExamineSheet'
 
 /** The panel's third button and the modal's title. */
 export const BLUEPRINTS_LABEL = 'BLUEPRINTS'
@@ -91,19 +93,23 @@ export function cardViews(card: BlueprintCard): CardViews | null {
   return { record, finder: finderView(record), full: card.source === 'made' ? makerView(card.secret) : null }
 }
 
-const PRIZE_SHORT: Record<PrizeReveal, string> = {
-  hidden: 'prize kept secret',
-  description: 'prize described',
-  silhouette: 'prize as a silhouette',
-  render: 'prize in pictures',
-}
-const LOCK_SHORT: Record<LockKind, string> = { standard: 'works anywhere', location: 'only in its region' }
-
-/** The three settings in one short line, as a finder sees them: "45 of 47 blocks shown · prize as a silhouette · works anywhere". */
-export function settingsLine(v: Pick<CardViews, 'record' | 'finder'>): string {
+/**
+ * A card's summary as a finder sees it, in the sheet's words and order:
+ * MATERIALS, CONSTRUCTION, PRIZE.
+ */
+export function settingsParts(v: Pick<CardViews, 'record' | 'finder'>): Array<[string, string]> {
   const total = v.finder.occupied.reduce((n, o) => n + (o ? 1 : 0), 0)
-  const shown = v.finder.revealed.size
-  return `${shown} of ${total} blocks shown · ${PRIZE_SHORT[v.record.sheet.prize.reveal]} · ${LOCK_SHORT[v.record.sheet.lock]}`
+  const known = v.finder.revealed.size
+  return [
+    ['MATERIALS', materialsWords(known, total - known)],
+    ['CONSTRUCTION', constructionWords(v.record.sheet.lock, v.record.sheet.height)],
+    ['PRIZE', prizeShort(v.record.sheet.prize.reveal, !!v.record.prizeName)],
+  ]
+}
+
+/** The summary in one line: "MATERIALS 45 known / 2 unknown · CONSTRUCTION May be built anywhere. · PRIZE Hints only". */
+export function settingsLine(v: Pick<CardViews, 'record' | 'finder'>): string {
+  return settingsParts(v).map(([k, w]) => `${k} ${w}`).join(' · ')
 }
 
 /** Which tab a card is listed under. */
@@ -119,6 +125,30 @@ function Who({ pubkey }: { pubkey: string }): JSX.Element {
   return <>{nameLabel(pubkey, me, profile?.name)}</>
 }
 
+/** Below this width a row's actions fold behind one ACTIONS button. */
+export const NARROW_QUERY = '(max-width: 519.98px)'
+/** How long ARCHIVE's UNDO stays, in the row's place. */
+export const UNDO_MS = 6000
+
+function narrowNow(): boolean {
+  try { return typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia(NARROW_QUERY).matches } catch { return false }
+}
+
+/** Whether the screen is a phone's width, following it as it turns. */
+export function useNarrow(): boolean {
+  const [narrow, setNarrow] = useState(narrowNow)
+  useEffect(() => {
+    let mq: MediaQueryList | null = null
+    try { mq = typeof window !== 'undefined' && typeof window.matchMedia === 'function' ? window.matchMedia(NARROW_QUERY) : null } catch { mq = null }
+    if (!mq) return
+    const on = (): void => setNarrow(mq?.matches ?? false)
+    on()
+    mq.addEventListener?.('change', on)
+    return () => mq?.removeEventListener?.('change', on)
+  }, [])
+  return narrow
+}
+
 /** A row a tile was tapped for: scrolled to the middle of the list, so the eye lands on it. */
 function useFocused(focused: boolean): RefObject<HTMLLIElement> {
   const ref = useRef<HTMLLIElement>(null)
@@ -126,17 +156,20 @@ function useFocused(focused: boolean): RefObject<HTMLLIElement> {
   return ref
 }
 
-/** One blueprint: its smoke model, its words and settings, and its ACTIONS. */
-export function BlueprintRow({ card, views, fresh = false, focused = false }: { card: BlueprintCard; views: CardViews; fresh?: boolean; focused?: boolean }): JSX.Element {
-  const actions = useRowActions(card.rowKey, views.record.title)
+/**
+ * One blueprint: its smoke model, its words and settings, and its actions.
+ * `onArchive` is told after ARCHIVE files it away, so the list can offer UNDO.
+ */
+export function BlueprintRow({ card, views, fresh = false, focused = false, onArchive }: { card: BlueprintCard; views: CardViews; fresh?: boolean; focused?: boolean; onArchive?: () => void }): JSX.Element {
+  const narrow = useNarrow()
+  const actions = useRowActions(card.rowKey, views.record.title, narrow)
   const ref = useFocused(focused)
-  const [asFinder, setAsFinder] = useState(false)
   const [examining, setExamining] = useState(false)
   const [refusal, setRefusal] = useState<string | null>(null)
   const makerName = useProfile(card.record.pubkey)?.name
   const me = useCyberspace((s) => s.identity.pubkey)
-  // The maker sees the whole arrangement until SEE AS A FINDER is on.
-  const view = views.full && !asFinder ? views.full : views.finder
+  // Your own shows the whole arrangement; a found one what a finder sees.
+  const view = views.full ?? views.finder
   const name = views.record.title
   const place = (where: 'here' | 'chest'): void => {
     setRefusal(null)
@@ -146,12 +179,23 @@ export function BlueprintRow({ card, views, fresh = false, focused = false }: { 
   const archive = (on: boolean): void => {
     actions.close()
     useBlueprints.getState().archive(card.rowKey, on)
+    if (on) onArchive?.()
   }
   const prize = views.record.sheet.prize
+  const acts = (
+    <>
+      <button className="chest__act" onClick={() => setExamining(true)} title="Every clue on one drafting sheet">EXAMINE</button>
+      {!card.archived && <button className="chest__act" onClick={() => place('here')} title="Leave it where you stand, for others to find. They each take a copy">PLACE HERE</button>}
+      {!card.archived && <button className="chest__act" onClick={() => place('chest')} title="Put a copy in one of your chests">PUT IN A CHEST</button>}
+      {card.archived
+        ? <button className="chest__act" onClick={() => archive(false)} title="Back to its list">UNARCHIVE</button>
+        : <button className="chest__act" onClick={() => archive(true)} title="File it away under ARCHIVED. UNDO brings it straight back">ARCHIVE</button>}
+    </>
+  )
   return (
     <li ref={ref} className={`secrets__row held__row held__row--loot bp-items__row${focused ? ' held__row--focus' : ''}`} data-actions-row={card.rowKey} data-blueprint={card.rowKey}>
       <Chamfer className="bp-items__thumb" decorative={false}>
-        <BlueprintModel view={view} size={THUMB_PX} label={views.full && !asFinder ? `${name}: every block, as you made it` : `${name}: as a finder sees it`} />
+        <BlueprintModel view={view} size={THUMB_PX} label={views.full ? `${name}: every block, as you made it` : `${name}: as a finder sees it`} />
       </Chamfer>
       <span className="item__line held__line">
         <span className="item__name" title={name}>{name}</span>
@@ -161,38 +205,36 @@ export function BlueprintRow({ card, views, fresh = false, focused = false }: { 
         </span>
         {/* On a line of its own, so neither name is cut to make room for the other. */}
         {card.leftBy && <span className="item__meta held__meta"><span className="held__src">left here by <Who pubkey={card.leftBy} /></span></span>}
-        <span className="bp-items__settings">{settingsLine(views)}</span>
+        <span className="bp-items__settings">
+          {settingsParts(views).map(([k, w], i) => (
+            <span className="bp-items__set" key={k}>{i > 0 && ' · '}<b>{k}</b> {w}</span>
+          ))}
+        </span>
         <span className="held__chips">
           {fresh && <NewChip />}
           {!!card.built && <span className="item__chip secrets__found" title="Times you have built it">BUILT {card.built === 1 ? 'ONCE' : `${card.built} TIMES`}</span>}
-          {views.full && asFinder && <span className="item__chip" title="Shown as a finder sees it">AS A FINDER</span>}
           {card.archived && <span className="item__chip item__chip--dim" title="Filed away under ARCHIVED">ARCHIVED</span>}
         </span>
       </span>
-      <span className="held__acts">{actions.button}</span>
-      {actions.group(
+      {narrow ? (
         <>
-          <button className="chest__act" onClick={() => setExamining(true)} title="Every clue on one drafting sheet">EXAMINE</button>
-          {views.full && (
-            <button className={`chest__act ${asFinder ? 'is-on' : ''}`} onClick={() => setAsFinder((f) => !f)} aria-pressed={asFinder} title="Show it as a finder sees it, or every block as you made it">SEE AS A FINDER</button>
-          )}
-          {!card.archived && <button className="chest__act" onClick={() => place('here')} title="Leave it where you stand, for others to find. They each take a copy">PLACE HERE</button>}
-          {!card.archived && <button className="chest__act" onClick={() => place('chest')} title="Put a copy in one of your chests">PUT IN A CHEST</button>}
-          {card.archived
-            ? <button className="chest__act" onClick={() => archive(false)} title="Back to its list">UNARCHIVE</button>
-            : <button className="chest__act" onClick={() => archive(true)} title="File it away under ARCHIVED">ARCHIVE</button>}
-        </>,
+          <span className="held__acts">{actions.button}</span>
+          {actions.group(acts)}
+        </>
+      ) : (
+        <span className="held__acts bp-items__acts" role="group" aria-label={`Actions for ${name}`}>{acts}</span>
       )}
       {refusal && <span className="held__refusal" role="status">{refusal}</span>}
       {examining && (
         <ExamineSheet
           onClose={() => setExamining(false)}
+          maker={views.full ? { view: views.full, prizeName: views.record.prizeName } : undefined}
           bp={{
             name,
             maker: nameLabel(card.record.pubkey, me, makerName),
             description: prize.text ?? '',
-            view,
-            prize: { reveal: prize.reveal, text: prize.text, views: views.record.views, title: name },
+            view: views.finder,
+            prize: { reveal: prize.reveal, text: prize.text, views: views.record.views, name: views.record.prizeName },
             lock: views.record.sheet.lock,
             height: views.record.sheet.height,
             drawnAt: card.record.created_at,
@@ -235,6 +277,20 @@ export function PrizeRow({ toy }: { toy: ToyRow }): JSX.Element {
         </button>
       </span>
       {refusal && <span className="held__refusal" role="status">{refusal}</span>}
+    </li>
+  )
+}
+
+/** A card just archived: where its row was, so UNDO can stand in its place. */
+interface Undo { rowKey: string; name: string; list: BlueprintsTab; index: number }
+
+/** The line a card leaves when it is archived: what happened, and UNDO. */
+function UndoLine({ undo, onUndo }: { undo: Undo; onUndo: (u: Undo) => void }): JSX.Element {
+  return (
+    <li className="secrets__row bp-items__undo" data-undo={undo.rowKey} role="status">
+      <Archive className="bp-items__undo-icon" size={16} strokeWidth={2} aria-hidden />
+      <span className="bp-items__undo-words"><b title={undo.name}>{undo.name}</b> is filed under ARCHIVED.</span>
+      <button className="chest__act bp-items__undo-go" onClick={() => onUndo(undo)} title="Bring it straight back"><Undo2 size={12} strokeWidth={2.25} aria-hidden />UNDO</button>
     </li>
   )
 }
@@ -300,9 +356,35 @@ export function BlueprintsModal(): JSX.Element {
     if (typeof document !== 'undefined') document.getElementById?.(`held-actions-${focus}-toggle`)?.focus?.()
   }, [focus])
 
-  const row = (l: Listed): JSX.Element => (
-    <BlueprintRow key={l.card.rowKey} card={l.card} views={l.views} fresh={fresh.current?.has(l.card.rowKey) ?? false} focused={l.card.rowKey === focus} />
+  // ARCHIVE's UNDO: a line where the row was, for a few seconds.
+  const [undo, setUndo] = useState<Undo | null>(null)
+  useEffect(() => {
+    if (!undo) return
+    const t = setTimeout(() => setUndo((u) => (u === undo ? null : u)), UNDO_MS)
+    return () => clearTimeout(t)
+  }, [undo])
+  const undoArchive = (u: Undo): void => {
+    useBlueprints.getState().archive(u.rowKey, false)
+    setUndo(null)
+  }
+  const row = (l: Listed, index: number, list: BlueprintsTab): JSX.Element => (
+    <BlueprintRow
+      key={l.card.rowKey}
+      card={l.card}
+      views={l.views}
+      fresh={fresh.current?.has(l.card.rowKey) ?? false}
+      focused={l.card.rowKey === focus}
+      onArchive={() => setUndo({ rowKey: l.card.rowKey, name: l.views.record.title, list, index })}
+    />
   )
+  /** A tab's rows, with ARCHIVE's UNDO line in the place of the row just filed away. */
+  const rowsOf = (list: BlueprintsTab): JSX.Element[] => {
+    const out = by[list].map((l, i) => row(l, i, list))
+    if (undo && undo.list === list && by.archived.some((l) => l.card.rowKey === undo.rowKey)) {
+      out.splice(Math.min(undo.index, out.length), 0, <UndoLine key={`undo-${undo.rowKey}`} undo={undo} onUndo={undoArchive} />)
+    }
+    return out
+  }
   const tabButton = (id: BlueprintsTab, label: string): JSX.Element => (
     <button className={`tag tag--tap ${showing === id ? 'is-on' : ''}`} role="tab" aria-selected={showing === id} onClick={() => setTab(id)}>{label}</button>
   )
@@ -330,14 +412,14 @@ export function BlueprintsModal(): JSX.Element {
                 {toys.length > 0 && <ul className="secrets__list held__list">{toys.map((t) => <PrizeRow key={t.rowKey} toy={t} />)}</ul>}
                 {by.built.length > 0 && <span className="legend__label">YOU HAVE BUILT</span>}
                 <ul className="secrets__list held__list">
-                  {toys.length === 0 && by.built.length === 0 && <li className="secrets__empty">{NO_BUILT}</li>}
-                  {by.built.map(row)}
+                  {toys.length === 0 && by.built.length === 0 && !(undo && undo.list === 'built') && <li className="secrets__empty">{NO_BUILT}</li>}
+                  {rowsOf('built')}
                 </ul>
               </>
             ) : (
               <ul className="secrets__list held__list">
-                {by[showing].length === 0 && <li className="secrets__empty">{showing === 'held' ? NO_HELD : NO_MINE}</li>}
-                {by[showing].map(row)}
+                {by[showing].length === 0 && !(undo && undo.list === showing) && <li className="secrets__empty">{showing === 'held' ? NO_HELD : NO_MINE}</li>}
+                {rowsOf(showing)}
               </ul>
             )}
           </div>

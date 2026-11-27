@@ -13,30 +13,30 @@ vi.mock('../../../scene/ShardMesh', () => ({ shardGeometry: () => ({ positions: 
 import { faceLight, fitView, prizeImages, projectGeometry, projectPrizePoint, renderToWorld } from '../prizeViews'
 
 describe('projectPrizePoint', () => {
-  it('along X: +Z on the left, +Y up, +X nearest', () => {
-    expect(projectPrizePoint([0, 0, 1], 'x')[0]).toBeLessThan(0)
+  it('along X: +Z on the right, +Y up, +X nearest', () => {
+    expect(projectPrizePoint([0, 0, 1], 'x')[0]).toBeGreaterThan(0)
     expect(projectPrizePoint([0, 1, 0], 'x')[1]).toBeLessThan(0)
     expect(projectPrizePoint([1, 0, 0], 'x')[2]).toBeGreaterThan(projectPrizePoint([-1, 0, 0], 'x')[2])
   })
 
-  it('along Y: X across, +Z at the bottom, the top nearest', () => {
+  it('along Y: X across, +Z up (the sun at the top), the top nearest', () => {
     expect(projectPrizePoint([1, 0, 0], 'y')[0]).toBe(1)
-    expect(projectPrizePoint([0, 0, 1], 'y')[1]).toBe(1)
+    expect(projectPrizePoint([0, 0, 1], 'y')[1]).toBe(-1)
     expect(projectPrizePoint([0, 1, 0], 'y')[2]).toBe(1)
   })
 
-  it('along Z: X across, +Y up, the sun side nearest', () => {
+  it('along Z, facing the sun: X across, +Y up, -Z nearest', () => {
     expect(projectPrizePoint([1, 0, 0], 'z')[0]).toBe(1)
     expect(projectPrizePoint([0, 1, 0], 'z')[1]).toBe(-1)
-    expect(projectPrizePoint([0, 0, 1], 'z')[2]).toBe(1)
+    expect(projectPrizePoint([0, 0, -1], 'z')[2]).toBe(1)
   })
 
-  it('isometric: +X right and down, +Z left and down, +Y up', () => {
+  it('isometric from the (+X, +Y, -Z) corner: +X right and down, +Z right and up, +Y up', () => {
     const [ux, vx] = projectPrizePoint([1, 0, 0], 'iso')
     const [uz, vz] = projectPrizePoint([0, 0, 1], 'iso')
     const [uy, vy] = projectPrizePoint([0, 1, 0], 'iso')
     expect(ux).toBeGreaterThan(0); expect(vx).toBeGreaterThan(0)
-    expect(uz).toBeLessThan(0); expect(vz).toBeGreaterThan(0)
+    expect(uz).toBeGreaterThan(0); expect(vz).toBeLessThan(0)
     expect(uy).toBe(0); expect(vy).toBe(-1)
   })
 
@@ -53,11 +53,11 @@ describe('projectGeometry', () => {
     index: [3, 4, 5, 0, 1, 2],
   }
 
-  it('sorts back to front: from the sun, the face toward the sun is drawn last', () => {
+  it('sorts back to front: facing the sun, the face nearer the viewer (-Z) is drawn last', () => {
     const p = projectGeometry(g, 'z')
     expect(p.tris).toHaveLength(2)
-    expect(p.tris[0].color).toEqual([1, 0, 0])
-    expect(p.tris[1].color).toEqual([0, 0, 1])
+    expect(p.tris[0].color).toEqual([0, 0, 1])
+    expect(p.tris[1].color).toEqual([1, 0, 0])
     expect(p.tris[0].depth).toBeCloseTo(-1)
     expect(p.tris[1].depth).toBeCloseTo(1)
   })

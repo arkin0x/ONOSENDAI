@@ -5,20 +5,20 @@
  * 1. ARRANGEMENT: CAPTURE FROM TERRAIN (aim at a build that stands alone,
  *    RECORD; the blocks stay where they are) or COMPOSE in a 16 by 16 by 16
  *    cage, a layer at a time, placing kinds without spending them. The cage
- *    is drawn from above: +X to the right, +Z down, the black sun past the
- *    bottom edge, as the EXAMINE sheet's view from above.
+ *    is drawn from above as the game's top-down view shows it: +X to the
+ *    right, +Z up, the black sun past the top edge (CYBERSPACE_V2 §11.1).
  * 2. PRIZE: a shard from the workshop or from ITEMS, and the blueprint's name.
  * 3. SETTINGS: the recipe reveal (an eye per block type, a tap on a block in
  *    the finder's preview to flip it, the random shortcut; everything starts
  *    revealed; a one-line summary), the prize reveal (hidden, description,
- *    silhouette or render, with the views along X, Y, Z or isometric, drawn
+ *    silhouette or render, with the views facing the sun, from above, from +X or isometric, drawn
  *    now), and the lock (standard or location). SEE AS A FINDER opens EXAMINE.
  * 4. SEAL: the key, the sealed prize and the record, kept in ITEMS ›
  *    BLUEPRINTS › MINE until it is placed.
  */
 
-import { useMemo, useState, type CSSProperties } from 'react'
-import { ArrowLeft, ArrowRight, Boxes, DraftingCompass, Eye, EyeOff, Lock, MapPin, Minus, Plus, Radar, RotateCcw, ScanSearch, Stamp } from 'lucide-react'
+import { useEffect, useLayoutEffect, useMemo, useState, type CSSProperties } from 'react'
+import { ArrowLeft, ArrowRight, Boxes, Check, DraftingCompass, Eye, EyeOff, Lock, MapPin, Minus, Plus, Radar, RotateCcw, ScanSearch, Stamp } from 'lucide-react'
 import { toPayload, type ShardModel } from 'sno-core/shards'
 import { useBlueprintTool, partsList, revealSummary, shownCell, type ToolStep } from '../../store/useBlueprintTool'
 import { useBlueprints } from '../../store/useBlueprints'
@@ -32,7 +32,8 @@ import { tileUrl } from '../../lib/terrain/tiles'
 import { MAX_SIDE, PRIZE_VIEWS, fullView, type PrizeReveal, type PrizeView } from '../../lib/blueprint/format'
 import { blockCount } from '../../lib/blueprint/arrangement'
 import { makeBlueprint, makeRefusal, makerSecret } from '../../lib/blueprint/make'
-import { prizeImages } from '../../lib/blueprint/prizeViews'
+import { prizeImagesWhole } from '../../lib/blueprint/prizeViews'
+import { Switch } from '../ui/Switch'
 import { LOCK_HEIGHT_MAX } from '../../lib/blueprint/smashRun'
 import { regionKeyAt } from '../../lib/shardCrypto'
 import { withAuthoredConstrain } from '../../lib/walkConstrain'
@@ -41,15 +42,17 @@ import { ModalClose } from '../ui/ModalClose'
 import { ItemThumb } from '../ItemThumb'
 import { BAR_WORDS, includedPrizes, kitPieces, prizeBar, setIncluded, type GuardInput } from '../../lib/blueprint/prizeGuard'
 import { usePublished } from '../../store/usePublished'
-import { ShardFolders, modelEditedAt, modelName, modelRef, useNewestFirst } from '../ShardFolders'
+import { modelEditedAt, modelRef, useNewestFirst } from '../ShardFolders'
+import { useShardFolders } from '../../store/useShardFolders'
+import { flatFolders, folderOf, isWithin, pathOf } from '../../lib/shardFolders'
 import { Stacked, useModalStack } from '../modalStack'
 import { BlueprintModel } from './BlueprintModel'
-import { ExamineSheet } from './ExamineSheet'
+import { ExamineSheet, constructionWords, materialsWords, prizeShort } from './ExamineSheet'
 import type { Position } from '../../lib/space'
 import type { NostrEvent } from '../../lib/events'
 
 const STEPS = ['ARRANGEMENT', 'PRIZE', 'SETTINGS', 'SEAL'] as const
-const VIEW_WORDS: Record<PrizeView, string> = { x: 'ALONG X', y: 'ALONG Y', z: 'ALONG Z', iso: 'ISOMETRIC' }
+const VIEW_WORDS: Record<PrizeView, string> = { x: 'FROM +X', y: 'FROM ABOVE', z: 'FACING THE SUN', iso: 'ISOMETRIC' }
 const REVEAL_WORDS: Record<PrizeReveal, string> = { hidden: 'HIDDEN', description: 'DESCRIPTION', silhouette: 'SILHOUETTE', render: 'RENDER' }
 
 function Swatch({ id, size = 20 }: { id: number; size?: number }): JSX.Element {
@@ -93,8 +96,35 @@ function StepBar({ step }: { step: ToolStep }): JSX.Element {
   )
 }
 
+/**
+ * Keeps an element on whole device pixels: its 1px grid lines then fall on
+ * pixels at any screen density (1, 2 or 3), never across two. A centred box
+ * can land half a pixel off; this moves it by that fraction.
+ */
+function usePixelSnap(): (el: HTMLElement | null) => void {
+  const [el, setEl] = useState<HTMLElement | null>(null)
+  useLayoutEffect(() => {
+    if (!el) return
+    const snap = (): void => {
+      el.style.transform = ''
+      const r = el.getBoundingClientRect()
+      const dpr = window.devicePixelRatio || 1
+      const dx = Math.round(r.left * dpr) / dpr - r.left
+      const dy = Math.round(r.top * dpr) / dpr - r.top
+      if (Math.abs(dx) > 0.001 || Math.abs(dy) > 0.001) el.style.transform = `translate(${dx}px, ${dy}px)`
+    }
+    snap()
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(snap) : null
+    ro?.observe(document.body)
+    window.addEventListener('resize', snap)
+    return () => { ro?.disconnect(); window.removeEventListener('resize', snap) }
+  }, [el])
+  return setEl
+}
+
 function Compose(): JSX.Element {
   const st = useBlueprintTool()
+  const cageRef = usePixelSnap()
   const view = useMemo(() => {
     const blocks: Array<{ at: [number, number, number]; id: number }> = []
     st.cage.forEach((id, i) => { if (id) blocks.push({ at: [i % MAX_SIDE, Math.floor(i / 256), Math.floor(i / MAX_SIDE) % MAX_SIDE], id }) })
@@ -126,10 +156,11 @@ function Compose(): JSX.Element {
       </div>
       <div className="bpt-cage-wrap">
         <span className="bpt-cage__axis bpt-cage__axis--x">+X →</span>
-        <span className="bpt-cage__axis bpt-cage__axis--z">+Z<br />↓</span>
-        <div className="bpt-cage" role="grid" aria-label={`Layer Y${st.layer}, seen from above`}>
+        <span className="bpt-cage__axis bpt-cage__axis--z">↑<br />+Z</span>
+        <div ref={cageRef} className="bpt-cage" role="grid" aria-label={`Layer Y${st.layer}, seen from above`}>
           {Array.from({ length: MAX_SIDE * MAX_SIDE }, (_, n) => {
-            const x = n % MAX_SIDE, z = Math.floor(n / MAX_SIDE)
+            // +Z up: the top row is z 15, the black sun past the top edge.
+            const x = n % MAX_SIDE, z = MAX_SIDE - 1 - Math.floor(n / MAX_SIDE)
             const id = st.cage[x + MAX_SIDE * z + 256 * st.layer]
             const below = st.layer > 0 ? st.cage[x + MAX_SIDE * z + 256 * (st.layer - 1)] : 0
             return (
@@ -188,58 +219,87 @@ export function prizeAllowed(shard: ShardModel, from: 'workshop' | 'items', g: G
   return from === 'workshop' ? bar === null : bar !== 'kit' && bar !== 'carries'
 }
 
+/**
+ * One prize tile: an 80px chamfered thumbnail, its name and status under it,
+ * and one action in a slot of fixed height, so every tile lines up. A tile
+ * you can choose is itself the button (`choose`): one tap makes it the prize.
+ */
+function PrizeTile({ shard, chosen, barred, status, action, choose }: { shard: ShardModel; chosen: boolean; barred: boolean; status: string; action?: { label: string; run: () => void } | null; choose?: () => void }): JSX.Element {
+  const body = (
+    <>
+      <ItemThumb type="shard" shard={shard} size={80} lazy />
+      <span className="bpt-tile__name">{shard.name || 'object'}</span>
+      <span className="bpt-tile__status">{chosen ? <><Check size={11} strokeWidth={2.5} aria-hidden />Prize</> : status}</span>
+    </>
+  )
+  return (
+    <li className={`bpt-tile${chosen ? ' is-on' : ''}${barred ? ' is-barred' : ''}`}>
+      {choose
+        ? <button className="bpt-tile__hit" onClick={choose} aria-pressed={chosen} aria-label={`${shard.name || 'object'}: use as prize`}>{body}</button>
+        : <div className="bpt-tile__hit">{body}</div>}
+      <span className="bpt-tile__act">{action && <button className="bpt-mini" onClick={action.run}>{action.label}</button>}</span>
+    </li>
+  )
+}
+
 function PrizeStep(): JSX.Element {
   const st = useBlueprintTool()
   const workshop = useWorkshop((s) => s.shards)
   const newest: ShardModel[] = useNewestFirst(workshop, modelRef, modelEditedAt)
   const items = useInventory((s) => s.items)
   const ledger = usePublished((s) => s.ledger)
+  const tree = useShardFolders((s) => s.tree)
+  const [folder, setFolder] = useState<string | null>(null)
   const [included, setIncludedState] = useState(() => includedPrizes())
+  useEffect(() => { if (useShardFolders.getState().storage === 'loading') void useShardFolders.getState().load() }, [])
   const loot = useMemo(() => Object.values(items).filter((i) => i.type === 'shard' && i.shard && !i.cleared && !i.archived && !isKeyItem(i)), [items])
   const g: GuardInput = { me: useCyberspace.getState().identity.pubkey, ledger, kit: kitPieces(), included }
-  const pick = (shard: ShardModel, from: 'workshop' | 'items'): void => { if (prizeAllowed(shard, from, g)) st.set({ prize: { name: shard.name || 'object', shard, from }, title: st.title || '' }) }
-  const include = (id: string, on: boolean): void => { setIncluded(id, on); setIncludedState(includedPrizes()) }
+  // A read-only filter by the workshop's folders: no folder is made, renamed, moved or deleted here.
+  const folders = useMemo(() => flatFolders(tree), [tree])
+  const shown = folder ? newest.filter((s) => isWithin(tree, folderOf(tree, modelRef(s)), folder)) : newest
+  const choose = (shard: ShardModel, from: 'workshop' | 'items'): void => st.set({ prize: { name: shard.name || 'object', shard, from }, title: st.title || '' })
+  const setInc = (id: string, on: boolean): void => { setIncluded(id, on); setIncludedState(includedPrizes()) }
   return (
     <div className="bpt-body">
-      <label className="bpt-field">
-        <span>NAME</span>
-        <input value={st.title} maxLength={64} placeholder="blueprint" onChange={(e) => st.set({ title: e.target.value })} />
-      </label>
       <h3 className="bpt-h">FROM THE WORKSHOP</h3>
-      <p className="bpt-note">Your published objects. Kit pieces are never prizes; one you never published can be included by hand.</p>
-      {/* Through the folders, as every list of your shards (hud/ShardFolders). */}
-      {newest.length ? (
-        <ul className="bpt-prizes">
-          <ShardFolders items={newest} refOf={modelRef} nameOf={modelName} row={(s, f) => {
+      {folders.length > 0 && (
+        <div className="bpt-chips" role="tablist" aria-label="Folders">
+          <button role="tab" aria-selected={folder === null} className={`bpt-chip${folder === null ? ' is-on' : ''}`} onClick={() => setFolder(null)}>ALL</button>
+          {folders.map(({ folder: f }) => (
+            <button key={f.id} role="tab" aria-selected={folder === f.id} className={`bpt-chip${folder === f.id ? ' is-on' : ''}`} onClick={() => setFolder(f.id)}>{pathOf(tree, f.id).join(' / ')}</button>
+          ))}
+        </div>
+      )}
+      {shown.length ? (
+        <ul className="bpt-tiles">
+          {shown.map((s) => {
             const bar = prizeBar(s, g)
-            const unpublished = bar === 'unpublished' || (bar === null && g.ledger[s.id]?.pubkey !== g.me)
+            const chosen = st.prize?.shard === s
+            const published = g.ledger[s.id]?.pubkey === g.me
+            // One tap chooses: a published object by its tile, an unpublished one by USE AS PRIZE (included and chosen at once).
+            if (bar === 'kit' || bar === 'carries') return <PrizeTile key={s.id} shard={s} chosen={false} barred status={BAR_WORDS[bar]} action={null} />
+            if (published) return <PrizeTile key={s.id} shard={s} chosen={chosen} barred={false} status="Published" choose={() => choose(s, 'workshop')} />
             return (
-              <li key={s.id}>
-                <button className={`bpt-prize${st.prize?.shard === s ? ' is-on' : ''}${bar ? ' is-barred' : ''}`} disabled={!!bar} onClick={() => pick(s, 'workshop')} title={bar ? BAR_WORDS[bar] : undefined}>
-                  <ItemThumb type="shard" shard={s} size={80} lazy />
-                  <span>{f.mark(s.name || 'object')}</span>
-                  <small className="bpt-prize__bar">{bar ? BAR_WORDS[bar] : unpublished ? 'Included by hand' : ''}</small>
-                </button>
-                {unpublished && <button className="bpt-mini bpt-prize__include" onClick={() => include(s.id, bar === 'unpublished')}>{bar === 'unpublished' ? 'INCLUDE' : 'LEAVE OUT'}</button>}
-              </li>
+              <PrizeTile
+                key={s.id}
+                shard={s}
+                chosen={chosen}
+                barred={false}
+                status="Not published: sealing puts it in the blueprint"
+                action={chosen ? { label: 'LEAVE OUT', run: () => { setInc(s.id, false); st.set({ prize: null }) } } : { label: 'USE AS PRIZE', run: () => { setInc(s.id, true); choose(s, 'workshop') } }}
+              />
             )
-          }} />
+          })}
         </ul>
-      ) : <p className="bpt-empty">No models yet. Make one in the workshop.</p>}
+      ) : <p className="bpt-empty">{newest.length ? 'Nothing in this folder.' : 'No models yet. Make one in the workshop.'}</p>}
       <h3 className="bpt-h">FROM ITEMS</h3>
       {loot.length ? (
-        <ul className="bpt-prizes">
+        <ul className="bpt-tiles">
           {loot.map((i) => {
             const ok = prizeAllowed(i.shard!, 'items', g)
-            return (
-              <li key={i.rowKey}>
-                <button className={`bpt-prize${st.prize?.shard === i.shard ? ' is-on' : ''}${ok ? '' : ' is-barred'}`} disabled={!ok} onClick={() => pick(i.shard!, 'items')}>
-                  <ItemThumb type="shard" shard={i.shard!} size={80} lazy />
-                  <span>{i.shard!.name || 'object'}</span>
-                  <small className="bpt-prize__bar">{ok ? '' : BAR_WORDS.kit}</small>
-                </button>
-              </li>
-            )
+            const chosen = st.prize?.shard === i.shard
+            if (!ok) return <PrizeTile key={i.rowKey} shard={i.shard!} chosen={false} barred status={BAR_WORDS.kit} action={null} />
+            return <PrizeTile key={i.rowKey} shard={i.shard!} chosen={chosen} barred={false} status="From ITEMS" choose={() => choose(i.shard!, 'items')} />
           })}
         </ul>
       ) : <p className="bpt-empty">No shards in ITEMS yet.</p>}
@@ -287,19 +347,24 @@ function SettingsStep({ onExamine }: { onExamine: () => void }): JSX.Element {
       <h3 className="bpt-h">2 · HOW MUCH OF THE PRIZE SHOWS</h3>
       <div className="bpt-seg" role="radiogroup">
         {(Object.keys(REVEAL_WORDS) as PrizeReveal[]).map((r) => (
-          <button key={r} role="radio" aria-checked={st.reveal === r} className={st.reveal === r ? 'is-on' : ''} onClick={() => st.set({ reveal: r })}>{REVEAL_WORDS[r]}</button>
+          <button key={r} role="radio" aria-checked={st.reveal === r} className={st.reveal === r ? 'is-on' : ''} onClick={() => st.set({ reveal: r, ...((r === 'silhouette' || r === 'render') && st.views.size === 0 ? { views: new Set<PrizeView>(['iso']) } : {}) })}>{REVEAL_WORDS[r]}</button>
         ))}
       </div>
       {(st.reveal === 'silhouette' || st.reveal === 'render') && (
         <div className="bpt-seg bpt-seg--views">
           {PRIZE_VIEWS.map((v) => (
-            <button key={v} aria-pressed={st.views.has(v)} className={st.views.has(v) ? 'is-on' : ''} onClick={() => { const n = new Set(st.views); if (n.has(v)) n.delete(v); else n.add(v); st.set({ views: n }) }}>{VIEW_WORDS[v]}</button>
+            <button key={v} aria-pressed={st.views.has(v)} className={st.views.has(v) ? 'is-on' : ''} onClick={() => { const n = new Set(st.views); if (n.has(v)) { if (n.size > 1) n.delete(v) } else n.add(v); st.set({ views: n }) }} title={st.views.has(v) && st.views.size === 1 ? 'At least one view is shown' : undefined}>{VIEW_WORDS[v]}</button>
           ))}
         </div>
       )}
       {st.reveal !== 'hidden' && (
         <textarea className="bpt-text" value={st.text} maxLength={280} rows={2} placeholder={st.reveal === 'description' ? 'A line or two about the prize' : 'A hint about the prize (optional)'} onChange={(e) => st.set({ text: e.target.value })} />
       )}
+      {/* The prize's own name is part of what the maker reveals: off unless chosen. */}
+      <label className="bpt-switch">
+        <span><b>Show the prize's name</b><small>{st.showName && st.prize ? `Finders see "${st.prize.name}".` : 'Finders see only what the choice above shows.'}</small></span>
+        <Switch checked={st.showName} onCheckedChange={(on) => st.set({ showName: on })} aria-label="Show the prize's name" />
+      </label>
 
       <h3 className="bpt-h">3 · WHAT LOCKS IT</h3>
       <div className="bpt-seg" role="radiogroup">
@@ -331,7 +396,12 @@ function SealStep(): JSX.Element {
     if (!st.prize || st.sealing) return
     // Checked again as it is sealed: a kit piece never goes into a record, however it was picked.
     if (!prizeAllowed(st.prize.shard, st.prize.from)) { st.set({ error: 'That object cannot be a prize: kit pieces and pieces never published stay with you.' }); return }
-    const views = (st.reveal === 'silhouette' || st.reveal === 'render') ? prizeImages(st.prize.shard, st.reveal, [...st.views]) : undefined
+    st.set({ sealing: true, error: null })
+    // The pictures are drawn now, with every piece the prize places, and kept in the record (DECK-0010 §5.3).
+    const flat = st.reveal === 'silhouette' || st.reveal === 'render'
+    const views = flat ? await prizeImagesWhole(st.prize.shard, st.reveal as 'silhouette' | 'render', [...st.views]) : undefined
+    st.set({ sealing: false })
+    if (flat && !Object.keys(views ?? {}).length) { st.set({ error: 'The prize pictures could not be drawn. Try again, or choose another view.' }); return }
     const regionKey = st.lock === 'location' && st.place ? lockRegionKey(st.place.lo, a.size, st.height) : null
     const why = makeRefusal({ arrangement: a, reveal: st.reveal, text: st.text, views, lock: st.lock, height: st.height, regionKey })
     if (why) { st.set({ error: why }); return }
@@ -339,7 +409,7 @@ function SealStep(): JSX.Element {
     try {
       const made = await makeBlueprint({
         arrangement: a, shown: (i) => shownCell(st, i), title: st.title, prize: { type: 'sno', payload: toPayload(withAuthoredConstrain(st.prize.shard)) as unknown as Record<string, unknown> },
-        reveal: st.reveal, text: st.text, views, lock: st.lock, height: st.height, regionKey,
+        reveal: st.reveal, text: st.text, views, lock: st.lock, height: st.height, regionKey, prizeName: st.showName ? st.prize.name : null,
       }, (t) => useCyberspace.getState().signEvent(t))
       if ('refused' in made) { st.set({ sealing: false, error: made.refused }); return }
       useBlueprints.getState().addMade({ lookup: made.lookup, record: made.record as NostrEvent, secret: makerSecret(a, made.key) })
@@ -361,13 +431,18 @@ function SealStep(): JSX.Element {
   }
   return (
     <div className="bpt-body">
+      {/* The blueprint's own name: what cards, rows and the sheet's title show. The prize's name is a separate choice (SETTINGS). */}
+      <label className="bpt-field">
+        <span>BLUEPRINT NAME</span>
+        <input value={st.title} maxLength={64} placeholder="blueprint" onChange={(e) => st.set({ title: e.target.value })} />
+      </label>
       <div className="bpt-have">
         <BlueprintModel view={fullView(a, (i) => shownCell(st, i))} size={120} />
         <span>
           <b>{st.title.trim() || 'blueprint'}</b><br />
-          {revealSummary(parts)}<br />
-          Prize: {st.prize?.name}, shown as {REVEAL_WORDS[st.reveal].toLowerCase()}.<br />
-          {st.lock === 'standard' ? 'Works anywhere.' : `Built inside a region ${regionWords(st.height)}.`}
+          <span className="bpt-sum__k">MATERIALS</span> {materialsWords(parts.reduce((n, p) => n + p.shown, 0), parts.reduce((n, p) => n + p.count - p.shown, 0))}<br />
+          <span className="bpt-sum__k">CONSTRUCTION</span> {constructionWords(st.lock, st.lock === 'location' ? st.height : undefined)}<br />
+          <span className="bpt-sum__k">PRIZE</span> {prizeShort(st.reveal, st.showName)} ({st.prize?.name ?? 'no prize yet'}, seen only by you here)
         </span>
       </div>
       <p className="bpt-note">Sealing makes the key from the blocks, seals the prize with it and adds your signature. Only the shape and the blocks you show go into it.</p>
@@ -380,6 +455,15 @@ function SealStep(): JSX.Element {
 export function BlueprintTool(): JSX.Element | null {
   const st = useBlueprintTool()
   const [examine, setExamine] = useState(false)
+  // SEE AS A FINDER draws the chosen views now, from the chosen prize, exactly as SEAL will keep them.
+  const [preview, setPreview] = useState<Partial<Record<PrizeView, string>>>({})
+  useEffect(() => {
+    let live = true
+    setPreview({})
+    const flat = st.reveal === 'silhouette' || st.reveal === 'render'
+    if (examine && flat && st.prize) void prizeImagesWhole(st.prize.shard, st.reveal as 'silhouette' | 'render', [...st.views]).then((v) => { if (live) setPreview(v) })
+    return () => { live = false }
+  }, [examine, st.reveal, st.views, st.prize])
   const close = (): void => st.close()
   useModalStack(st.open, close)
   if (!st.open) return null
@@ -406,7 +490,7 @@ export function BlueprintTool(): JSX.Element | null {
       </div>
       {examine && a && (
         <ExamineSheet
-          bp={{ name: st.title.trim() || 'blueprint', maker: 'you', description: st.text, view: fullView(a, (i) => shownCell(st, i)), prize: { reveal: st.reveal, text: st.text || undefined, views: {}, title: st.prize?.name ?? '' }, lock: st.lock, height: st.lock === 'location' ? st.height : undefined }}
+          bp={{ name: st.title.trim() || 'blueprint', maker: 'you', description: st.text, view: fullView(a, (i) => shownCell(st, i)), prize: { reveal: st.reveal, text: st.text || undefined, views: preview, name: st.showName ? st.prize?.name ?? null : null }, lock: st.lock, height: st.lock === 'location' ? st.height : undefined }}
           onClose={() => setExamine(false)}
         />
       )}

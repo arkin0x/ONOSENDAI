@@ -15600,10 +15600,9 @@ body:has(.terrainview.is-folded) .terrain-held { visibility: hidden; }
   width: min(1180px, 100%);
   max-height: calc(100vh - 32px);
   max-height: calc(100dvh - 32px);
-  background: #050c18;
-  border: 1px solid rgba(127, 240, 255, 0.4);
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6), 0 0 40px rgba(0, 229, 255, 0.12), 0 18px 60px rgba(0, 0, 0, 0.7);
-  clip-path: polygon(16px 0, 100% 0, 100% calc(100% - 16px), calc(100% - 16px) 100%, 0 100%, 0 16px);
+  --bp-cut: 16px;
+  --bp-line: rgba(127, 240, 255, 0.4);
+  --bp-fill: #050c18;
   color: var(--bp-ink);
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.65);
 }
@@ -15611,9 +15610,27 @@ body:has(.terrainview.is-folded) .terrain-held { visibility: hidden; }
 .bp-ex__badge { display: inline-flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 11px; font-weight: 700; letter-spacing: 0.12em; color: var(--bp-cyan); }
 .bp-ex__headname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em; color: var(--bp-dim); }
 .bp-ex__head > .modal-close { margin-left: auto; }
-.bp-ex__wrap { overflow: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; flex: 1 1 auto; min-height: 0; }
-.bp-ex__sheet {
+/* The card is a flex item of the centred modal: without min-width 0 it grows to the whole strip's
+   width and is centred past both edges of a phone, cutting off the first panel and the scale bar. */
+.bp-ex__card { min-width: 0; }
+/* The strip: it starts at the left edge with a gutter at both ends, the end one a spacer so every
+   browser scrolls to it, and the last panel's right edge clears the card's cut corner. */
+.bp-ex__wrap {
   display: flex;
+  align-items: flex-start;
+  overflow: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  padding: 10px 0 12px 10px;
+}
+.bp-ex__wrap::after { content: ''; flex: none; width: 12px; height: 1px; }
+.bp-ex__sheet {
+  position: relative;
+  display: flex;
+  flex: none;
   width: max-content;
   min-height: 560px;
   background:
@@ -15625,17 +15642,67 @@ body:has(.terrainview.is-folded) .terrain-held { visibility: hidden; }
   outline: 1.5px solid rgba(234, 246, 255, 0.55);
   outline-offset: -10px;
 }
+/* The maker's view: the same sheet in amber ink at its border, labelled where the border breaks. */
+.bp-ex__sheet--maker { outline-color: rgba(247, 198, 107, 0.8); }
+.bp-ex__sheet--maker::before {
+  content: attr(data-mark);
+  position: absolute;
+  top: 4px;
+  left: 26px;
+  padding: 0 7px;
+  font-family: var(--mono);
+  font-size: 9px;
+  line-height: 12px;
+  letter-spacing: 0.14em;
+  color: #f7c66b;
+  background: #0b3566;
+  pointer-events: none;
+}
+/* FINDER or MAKER, over the sheet when it is your own: always there, so switching moves nothing. */
+.bp-ex__as { display: flex; gap: 8px; padding: 10px 10px 0; flex: none; }
+.bp-ex__asbtn {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 10px;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  line-height: 1.25;
+  text-align: left;
+  color: var(--bp-dim);
+  text-shadow: inherit;
+  background: rgba(2, 10, 24, 0.55);
+  border: 1px solid rgba(127, 240, 255, 0.28);
+  border-radius: 3px;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: color 0.15s, border-color 0.15s, background 0.15s, box-shadow 0.15s;
+}
+.bp-ex__asbtn > svg { flex: none; }
+.bp-ex__asbtn b { font-weight: 700; letter-spacing: 0.12em; }
+.bp-ex__asbtn:hover, .bp-ex__asbtn:focus-visible { color: var(--bp-ink); border-color: rgba(127, 240, 255, 0.55); }
+.bp-ex__asbtn.is-on { color: var(--bp-cyan); border-color: var(--bp-cyan); background: rgba(127, 240, 255, 0.12); box-shadow: 0 0 12px rgba(0, 229, 255, 0.25), inset 0 0 0 1px rgba(127, 240, 255, 0.2); }
+.bp-ex__asbtn:last-child.is-on { color: #f7c66b; border-color: #f7c66b; background: rgba(247, 198, 107, 0.1); box-shadow: 0 0 12px rgba(247, 198, 107, 0.22), inset 0 0 0 1px rgba(247, 198, 107, 0.2); }
 .bp-ex__panel { flex: none; display: flex; flex-direction: column; gap: 12px; padding: 26px 24px 28px; border-right: 1px dashed rgba(234, 246, 255, 0.2); }
 .bp-ex__panel:last-child { border-right: 0; }
 .bp-ex__panel canvas { display: block; max-width: none; }
 .bp-ex__panel--title { width: 292px; }
 .bp-ex__panel--bom { width: 340px; }
 .bp-ex__panel--tb { width: 300px; justify-content: flex-end; }
-.bp-ex__panel--iso, .bp-ex__panel--cut { align-items: center; }
+.bp-ex__panel--cut { align-items: center; }
+/* The isometric with the three views in a column beside it; under it on a phone (below). */
+.bp-ex__panel--iso { flex-direction: row; align-items: flex-start; gap: 28px; }
+.bp-ex__isocol { flex: none; width: 320px; display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.bp-ex__views { flex: none; width: calc(var(--bp-vw, 120px) + 40px + 16px + 160px); display: flex; flex-direction: column; gap: 10px; }
 .bp-ex__kicker { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.14em; color: var(--bp-cyan); }
 .bp-ex__name { margin: 0; font-family: var(--mono); font-weight: 700; font-size: 26px; line-height: 1.05; letter-spacing: 0.08em; text-transform: uppercase; overflow-wrap: anywhere; }
 .bp-ex__settings { margin: 0; display: grid; gap: 6px; }
-.bp-ex__settings div { display: grid; grid-template-columns: 78px 1fr; gap: 8px; align-items: baseline; }
+.bp-ex__settings div { display: grid; grid-template-columns: 92px 1fr; gap: 8px; align-items: baseline; }
 .bp-ex__settings dt { font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.08em; color: var(--bp-cyan); }
 .bp-ex__settings dd { margin: 0; font-size: 12.5px; line-height: 1.35; }
 .bp-ex__meter { border: 1px solid var(--bp-line); padding: 8px 10px; background: rgba(2, 10, 24, 0.25); }
@@ -15659,14 +15726,16 @@ body:has(.terrainview.is-folded) .terrain-held { visibility: hidden; }
 .bp-ex__replay { display: inline-flex; align-items: center; gap: 5px; font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em; color: var(--bp-cyan); background: rgba(2, 10, 24, 0.4); border: 1px solid var(--bp-cyan); padding: 5px 9px; min-height: 28px; cursor: pointer; text-shadow: inherit; }
 .bp-ex__replay:hover, .bp-ex__replay:focus-visible { background: rgba(127, 240, 255, 0.14); }
 .bp-ex__foot { font-family: var(--mono); font-size: 9.5px; color: rgba(234, 246, 255, 0.6); align-self: stretch; }
-.bp-ex__ortho { display: grid; grid-template-columns: auto auto; gap: 18px 26px; align-items: start; }
-.bp-ex__ov { display: flex; flex-direction: column; gap: 6px; }
-.bp-ex__ov--above { grid-column: 1; grid-row: 1; }
-.bp-ex__ov--sun { grid-column: 1; grid-row: 2; }
-.bp-ex__ov--side { grid-column: 2; grid-row: 2; }
-.bp-ex__ol { font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.06em; }
-.bp-ex__ol span { color: var(--bp-cyan); margin-left: 6px; }
-.bp-ex__ovrow { display: flex; align-items: flex-start; gap: 8px; }
+/* One row of the three views: the view (in a column as wide as the widest of the three, so the
+   compasses line up), its compass, then its name, size and which way it looks. */
+.bp-ex__vrow { display: grid; grid-template-columns: var(--bp-vw, 120px) 40px minmax(0, 1fr); gap: 8px; align-items: center; padding: 6px 0; border-top: 1px dashed rgba(234, 246, 255, 0.16); }
+.bp-ex__ph + .bp-ex__vrow { border-top: 0; }
+.bp-ex__vpic { display: flex; justify-content: center; }
+.bp-ex__vl { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.bp-ex__vl b { font-family: var(--mono); font-weight: 700; font-size: 10px; letter-spacing: 0.08em; }
+.bp-ex__vdims { font-family: var(--mono); font-size: 9.5px; color: var(--bp-cyan); }
+/* Which way a view looks: where +Z and the sun are. */
+.bp-ex__oh { font-family: var(--mono); font-size: 9px; line-height: 1.35; letter-spacing: 0.04em; color: rgba(234, 246, 255, 0.72); overflow-wrap: anywhere; }
 .bp-ex__slices { display: flex; flex-wrap: nowrap; gap: 14px; align-items: flex-start; }
 .bp-ex__slices > .bp-ex__compass { align-self: center; }
 .bp-ex__slice { display: flex; flex-direction: column; align-items: center; gap: 4px; }
@@ -15678,6 +15747,12 @@ body:has(.terrainview.is-folded) .terrain-held { visibility: hidden; }
 .bp-ex__bh b { color: var(--bp-cyan); font-weight: 400; }
 .bp-ex__parts { display: grid; grid-template-columns: repeat(3, 80px); justify-content: space-between; gap: 12px 8px; padding: 10px; }
 .bp-ex__part { display: flex; flex-direction: column; align-items: center; gap: 3px; min-width: 0; text-align: center; }
+/* A slot kept for the other view's longer list, so switching views keeps the box's height. */
+.bp-ex__part--pad { visibility: hidden; }
+/* Both prize boxes in one cell, the one not shown hidden: the box is as tall as the taller. */
+.bp-ex__pstack { display: grid; }
+.bp-ex__pstack > * { grid-area: 1 / 1; min-width: 0; }
+.bp-ex__pstack > .is-off { visibility: hidden; }
 .bp-ex__tile { display: block; width: 100%; height: 100%; object-fit: cover; image-rendering: pixelated; }
 .bp-ex__smoke {
   display: block; width: 100%; height: 100%;
@@ -15725,7 +15800,13 @@ body:has(.terrainview.is-folded) .terrain-held { visibility: hidden; }
   .bp-ex { padding: 8px; }
   .bp-ex__card { max-height: calc(100vh - 16px); max-height: calc(100dvh - 16px); }
   .bp-ex__panel { padding: 22px 18px 24px; }
-  .bp-ex__panel--title { width: min(292px, calc(100vw - 52px)); }
+  .bp-ex__panel--title { width: min(292px, calc(100vw - 56px)); }
+  /* On a phone the views stack under the isometric, both as wide as the screen allows. */
+  .bp-ex__panel--iso { flex-direction: column; align-items: stretch; gap: 16px; width: calc(100vw - 56px); }
+  .bp-ex__isocol, .bp-ex__views { width: 100%; }
+  .bp-ex__isocv { width: 100% !important; max-width: 320px; height: auto !important; aspect-ratio: 1; }
+  .bp-ex__as { gap: 6px; padding: 8px 8px 0; }
+  .bp-ex__asbtn { padding: 6px 8px; font-size: 9.5px; letter-spacing: 0.05em; }
 }
 /* ===== end blueprints: drawing and EXAMINE (bp-draw) ===== */
 
@@ -15827,9 +15908,8 @@ body:has(.terrainview.is-folded) .terrain-held { visibility: hidden; }
   flex-direction: column;
   gap: 8px;
   padding: 14px 16px 16px;
-  background: rgba(4, 10, 14, 0.96);
-  border: 1px solid rgba(255, 194, 122, 0.45);
-  clip-path: polygon(14px 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%, 0 14px);
+  --bp-line: rgba(255, 194, 122, 0.45);
+  --bp-fill: rgba(4, 10, 14, 0.96);
   color: #fff;
   font-family: var(--mono);
 }
@@ -15890,6 +15970,36 @@ body:has(.terrainview.is-folded) .terrain-held { visibility: hidden; }
 .items-kinds__name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .items-kinds__count { font-size: 0.85em; opacity: 0.75; }
 .items-kinds__dot { display: none; }
+/* The blueprint cards' chamfer, drawn the house way (ui/Chamfer.tsx .chamfer): the outer box is the line, a layer
+   inset by the line's width is the fill, its cut moved in by (2 - sqrt 2) of that width, so the two cut corners
+   (top left, bottom right) are outlined as thick as the straight sides. A border under a clip-path loses its
+   diagonals (owner, 2026-11-27: "top left and bottom right corners are missing the outline"). */
+.bpt .bpt-card,
+.prize-modal .prize-card,
+.bp-ex__card {
+  --bp-cut: 14px;
+  --bp-line-w: 1px;
+  position: relative;
+  isolation: isolate;
+  background: var(--bp-line);
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  clip-path: polygon(var(--bp-cut) 0, 100% 0, 100% calc(100% - var(--bp-cut)), calc(100% - var(--bp-cut)) 100%, 0 100%, 0 var(--bp-cut));
+}
+.bp-ex__card { --bp-cut: 16px; }
+.bpt .bpt-card::before,
+.prize-modal .prize-card::before,
+.bp-ex__card::before {
+  --bp-in-cut: calc(var(--bp-cut) - var(--bp-line-w) * 0.5858);
+  content: '';
+  position: absolute;
+  inset: var(--bp-line-w);
+  z-index: -1;
+  background: var(--bp-fill);
+  clip-path: polygon(var(--bp-in-cut) 0, 100% 0, 100% calc(100% - var(--bp-in-cut)), calc(100% - var(--bp-in-cut)) 100%, 0 100%, 0 var(--bp-in-cut));
+  pointer-events: none;
+}
 /* ===== end blueprints (bp-core) ===== */
 /* ===== blueprints: ITEMS column (bp-items) ===== */
 /* ITEMS' third button and well, BLUEPRINTS (blueprint/BlueprintsGrid.tsx,
@@ -15926,100 +16036,213 @@ body:has(.terrainview.is-folded) .terrain-held { visibility: hidden; }
   overflow-wrap: anywhere;
 }
 .bp-items__take { display: inline-flex; align-items: center; gap: 4px; }
+/* Each part of the summary keeps its label with its words when the line wraps. */
+.bp-items__set b { font-weight: 400; font-size: 8.5px; letter-spacing: 0.1em; color: rgba(127, 240, 255, 0.9); }
+/* A row's actions on a wide screen: on the row itself, under the words, no ACTIONS button. */
+.bp-items__acts { gap: 6px; }
+.bp-items__acts > .chest__act { min-height: 26px; }
+/* ARCHIVE's UNDO: a line as tall as the row it stands in for, with a bar that runs down to when it goes. */
+.items-modal .held__list > .bp-items__undo,
+.bp-items__undo {
+  position: relative;
+  box-sizing: border-box;
+  min-height: 96px;
+  padding: 8px 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #eaf6ff;
+  text-shadow: 0 1px 2px #000;
+  list-style: none;
+}
+.bp-items__undo-icon { flex: none; margin: 0 32px; color: rgba(234, 246, 255, 0.7); }
+.bp-items__undo-words { flex: 1 1 auto; min-width: 0; font-size: 11px; line-height: 1.4; overflow-wrap: anywhere; }
+.bp-items__undo-words b { font-weight: 700; }
+.bp-items__undo-go { display: inline-flex; align-items: center; gap: 5px; min-height: 30px; padding: 4px 12px; font-size: 9px; }
+.bp-items__undo::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: linear-gradient(90deg, rgba(0, 229, 255, 0.85), rgba(0, 229, 255, 0.25));
+  box-shadow: 0 0 6px rgba(0, 229, 255, 0.5);
+  transform-origin: left center;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .bp-items__undo { animation: bp-items-undo-in 0.18s ease-out; }
+  .bp-items__undo::after { animation: bp-items-undo-run 6s linear forwards; }
+}
+@keyframes bp-items-undo-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes bp-items-undo-run { from { transform: scaleX(1); } to { transform: scaleX(0); } }
+@media (max-width: 520px) {
+  .bp-items__undo-icon { margin: 0 12px 0 6px; }
+}
 /* ===== end blueprints: ITEMS column (bp-items) ===== */
 
 /* ===== blueprints: the BLUEPRINT tool in BUILD (bp-tool) ===== */
+/* The sheet: drafting paper, its fine grid dim and on whole pixels, showing only in the open areas. Every control
+   on it is opaque (owner, 2026-11-27: "the grid background ... really messy ... buttons have grid problems too"),
+   so no grid runs behind a word, a tile or a cell. Outlines follow the house chamfer (the shared rule above). */
 .bpt .bpt-card {
   --bp-ink: #8fe9ff;
-  --bp-paper: rgba(6, 22, 48, 0.97);
+  --bp-paper: #061630;
+  --bp-line: rgba(143, 233, 255, 0.45);
+  --bp-fill:
+    linear-gradient(rgba(143, 233, 255, 0.045) 1px, transparent 1px) 0 0 / 16px 16px,
+    linear-gradient(90deg, rgba(143, 233, 255, 0.045) 1px, transparent 1px) 0 0 / 16px 16px,
+    var(--bp-paper);
   width: min(560px, 100%);
   height: min(760px, calc(100% - 16px));
   display: flex;
   flex-direction: column;
   padding: 14px 14px 12px;
-  background:
-    linear-gradient(rgba(143, 233, 255, 0.06) 1px, transparent 1px) 0 0 / 16px 16px,
-    linear-gradient(90deg, rgba(143, 233, 255, 0.06) 1px, transparent 1px) 0 0 / 16px 16px,
-    var(--bp-paper);
-  border: 1px solid rgba(143, 233, 255, 0.45);
-  clip-path: polygon(14px 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%, 0 14px);
   color: #fff;
   font-family: var(--mono);
 }
 .bpt-head { display: flex; align-items: center; gap: 8px; color: var(--bp-ink); flex: none; }
 .bpt-head h2 { flex: 1; margin: 0; font-size: 13px; letter-spacing: 0.16em; color: #fff; }
-.bpt-steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin: 10px 0 4px; padding: 0; list-style: none; flex: none; }
-.bpt-step { width: 100%; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 2px; border: 1px solid rgba(143, 233, 255, 0.3); background: transparent; color: rgba(255, 255, 255, 0.7); font: inherit; font-size: 9px; letter-spacing: 0.1em; cursor: pointer; }
-.bpt-step.is-on { border-color: var(--bp-ink); color: #fff; background: rgba(143, 233, 255, 0.12); }
-.bpt-step:disabled { opacity: 0.35; cursor: default; }
-.bpt-step__n { font-size: 12px; color: var(--bp-ink); }
 .bpt-error { min-height: 16px; font-size: 11px; color: #ffb27a; flex: none; }
 .bpt-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; margin-right: -8px; padding-right: 8px; }
 .bpt-body { display: flex; flex-direction: column; gap: 10px; padding-bottom: 6px; }
-.bpt-choice { display: flex; align-items: center; gap: 12px; padding: 12px; border: 1px solid rgba(143, 233, 255, 0.4); background: rgba(143, 233, 255, 0.05); color: #fff; font: inherit; text-align: left; cursor: pointer; }
+
+/* Controls: opaque, outlined with the house chamfer (the outer box is the line, an inset layer the fill). */
+.bpt-step, .bpt-choice, .bpt-pal, .bpt-mini, .bpt-go, .bpt-eye, .bpt-seg button, .bpt-chip, .bpt-tile {
+  --c-cut: 6px;
+  --c-line: rgba(143, 233, 255, 0.35);
+  --c-fill: #071a33;
+  position: relative;
+  isolation: isolate;
+  border: 0;
+  border-radius: 0;
+  background: var(--c-line);
+  clip-path: polygon(var(--c-cut) 0, 100% 0, 100% calc(100% - var(--c-cut)), calc(100% - var(--c-cut)) 100%, 0 100%, 0 var(--c-cut));
+  color: #fff;
+  font: inherit;
+}
+.bpt-step::before, .bpt-choice::before, .bpt-pal::before, .bpt-mini::before, .bpt-go::before, .bpt-eye::before, .bpt-seg button::before, .bpt-chip::before, .bpt-tile::before {
+  --c-in: calc(var(--c-cut) - 0.5858px);
+  content: '';
+  position: absolute;
+  inset: 1px;
+  z-index: -1;
+  background: var(--c-fill);
+  clip-path: polygon(var(--c-in) 0, 100% 0, 100% calc(100% - var(--c-in)), calc(100% - var(--c-in)) 100%, 0 100%, 0 var(--c-in));
+  pointer-events: none;
+}
+.bpt-step.is-on, .bpt-pal.is-on, .bpt-seg button.is-on, .bpt-chip.is-on { --c-line: var(--bp-ink); --c-fill: #0c2c4c; }
+.bpt-pal.is-on { --c-line: #ffc27a; }
+.bpt-step:disabled, .bpt-go:disabled { --c-line: rgba(143, 233, 255, 0.14); color: rgba(255, 255, 255, 0.35); cursor: default; }
+
+.bpt-steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin: 10px 0 4px; padding: 0; list-style: none; flex: none; }
+.bpt-step { width: 100%; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 2px; color: rgba(255, 255, 255, 0.75); font-size: 9px; letter-spacing: 0.1em; cursor: pointer; }
+.bpt-step.is-on { color: #fff; }
+.bpt-step__n { font-size: 12px; color: var(--bp-ink); }
+.bpt-choice { --c-cut: 10px; display: flex; align-items: center; gap: 12px; padding: 12px; text-align: left; cursor: pointer; }
 .bpt-choice svg { color: var(--bp-ink); flex: none; }
 .bpt-choice b { display: block; font-size: 12px; letter-spacing: 0.12em; }
-.bpt-choice small { display: block; margin-top: 3px; font-size: 11px; color: rgba(255, 255, 255, 0.7); line-height: 1.35; }
+.bpt-choice small { display: block; margin-top: 3px; font-size: 11px; color: rgba(255, 255, 255, 0.72); line-height: 1.35; }
 .bpt-have { display: flex; align-items: center; gap: 12px; font-size: 11px; line-height: 1.5; color: rgba(255, 255, 255, 0.85); }
-.bpt-go { align-self: flex-end; display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-width: 120px; height: 38px; padding: 0 14px; border: 1px solid var(--bp-ink); background: rgba(143, 233, 255, 0.14); color: #fff; font: inherit; font-size: 11px; font-weight: 700; letter-spacing: 0.14em; cursor: pointer; }
-.bpt-go:disabled { opacity: 0.4; cursor: default; }
-.bpt-go--seal { align-self: center; min-width: 180px; height: 44px; border-color: #ffc27a; background: rgba(255, 154, 60, 0.16); color: #ffe0b8; }
-.bpt-mini { display: inline-flex; align-items: center; gap: 4px; height: 30px; padding: 0 8px; border: 1px solid rgba(255, 255, 255, 0.3); background: rgba(255, 255, 255, 0.04); color: #fff; font: inherit; font-size: 10px; letter-spacing: 0.1em; cursor: pointer; }
+.bpt-go { --c-line: var(--bp-ink); --c-fill: #0b2a46; align-self: flex-end; display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-width: 120px; height: 38px; padding: 0 14px; font-size: 11px; font-weight: 700; letter-spacing: 0.14em; cursor: pointer; }
+.bpt-go--seal { --c-line: #ffc27a; --c-fill: #2a1806; align-self: center; min-width: 180px; height: 44px; color: #ffe0b8; }
+.bpt-mini { display: inline-flex; align-items: center; justify-content: center; gap: 4px; height: 30px; padding: 0 10px; font-size: 10px; letter-spacing: 0.1em; cursor: pointer; }
 .bpt-reset { align-self: flex-start; }
 .bpt-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 .bpt-h { margin: 6px 0 0; font-size: 10px; letter-spacing: 0.16em; color: var(--bp-ink); font-weight: 700; }
-.bpt-note, .bpt-summary { margin: 0; font-size: 11px; line-height: 1.4; color: rgba(255, 255, 255, 0.78); }
+.bpt-note, .bpt-summary { margin: 0; font-size: 11px; line-height: 1.4; color: rgba(255, 255, 255, 0.8); }
 .bpt-summary { color: #fff; min-height: 2.8em; }
-.bpt-empty { margin: 0; font-size: 11px; color: rgba(255, 255, 255, 0.55); }
+.bpt-empty { margin: 0; font-size: 11px; color: rgba(255, 255, 255, 0.6); }
 .bpt-field { display: flex; flex-direction: column; gap: 4px; font-size: 10px; letter-spacing: 0.14em; color: var(--bp-ink); }
-.bpt-field input, .bpt-text { width: 100%; box-sizing: border-box; padding: 8px; border: 1px solid rgba(143, 233, 255, 0.35); background: rgba(0, 0, 0, 0.35); color: #fff; font: inherit; font-size: 12px; letter-spacing: 0; color-scheme: dark; }
-.bpt-prizes { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; }
-.bpt-prize { width: 100%; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px 2px; border: 1px solid transparent; background: transparent; color: #fff; font: inherit; font-size: 10px; cursor: pointer; }
-.bpt-prize span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.bpt-prize.is-on { border-color: #ffc27a; background: rgba(255, 154, 60, 0.12); }
+.bpt-field input, .bpt-text { width: 100%; box-sizing: border-box; padding: 8px; border: 1px solid rgba(143, 233, 255, 0.35); border-radius: 0; background: #030a16; color: #fff; font: inherit; font-size: 12px; letter-spacing: 0; color-scheme: dark; }
 .bpt-swatch { display: inline-block; flex: none; background-size: 100% 100%; image-rendering: pixelated; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.4); }
 .bpt-swatch.is-glow { box-shadow: 0 0 6px rgba(143, 233, 255, 0.6); }
+/* Model previews stand on their own dark plate, so the paper's grid never runs through a drawing. */
+.bpt .bp-model { background: #02050b; outline: 1px solid rgba(143, 233, 255, 0.22); }
+
+/* The prize picker: a read-only folder filter, then tiles of one size. */
+.bpt-chips { display: flex; gap: 4px; overflow-x: auto; padding-bottom: 2px; scrollbar-width: none; }
+.bpt-chip { flex: none; height: 28px; padding: 0 10px; font-size: 10px; letter-spacing: 0.08em; white-space: nowrap; cursor: pointer; }
+.bpt-tiles { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 8px; }
+.bpt-tile { --c-cut: 8px; display: flex; flex-direction: column; align-items: stretch; padding: 8px 6px 6px; min-width: 0; }
+.bpt-tile.is-on { --c-line: #7cffc4; --c-fill: #082a24; }
+.bpt-tile__hit { display: flex; flex-direction: column; align-items: center; gap: 4px; width: 100%; padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
+div.bpt-tile__hit { cursor: default; }
+.bpt-tile__name { max-width: 100%; font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bpt-tile__status { display: flex; align-items: flex-start; justify-content: center; gap: 3px; min-height: 3.9em; max-width: 100%; font-size: 9px; line-height: 1.3; color: rgba(255, 255, 255, 0.62); text-align: center; overflow: hidden; }
+.bpt-tile.is-on .bpt-tile__status { color: #7cffc4; letter-spacing: 0.1em; }
+.bpt-tile__act { display: flex; justify-content: center; height: 28px; margin-top: 4px; }
+.bpt-tile__act .bpt-mini { width: 100%; height: 28px; padding: 0 4px; font-size: 9px; }
+.bpt-tile.is-barred .bpt-tile__hit { opacity: 0.45; }
+
+/* The recipe reveal. */
 .bpt-reveal { display: flex; gap: 12px; align-items: flex-start; }
 .bpt-reveal__preview { display: flex; flex-direction: column; align-items: center; gap: 4px; flex: none; }
-.bpt-reveal__preview small { font-size: 10px; color: rgba(255, 255, 255, 0.6); }
+.bpt-reveal__preview small { font-size: 10px; color: rgba(255, 255, 255, 0.65); }
 .bpt-parts { flex: 1; min-width: 0; list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .bpt-part { display: flex; align-items: center; gap: 8px; min-height: 34px; font-size: 11px; }
 .bpt-part__name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.bpt-part__n { color: rgba(255, 255, 255, 0.7); font-size: 10px; white-space: nowrap; }
-.bpt-eye { flex: none; width: 34px; height: 30px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid rgba(143, 233, 255, 0.45); background: rgba(143, 233, 255, 0.1); color: var(--bp-ink); cursor: pointer; }
-.bpt-eye.is-off { border-color: rgba(255, 255, 255, 0.25); background: transparent; color: rgba(255, 255, 255, 0.5); }
-.bpt-slider { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: rgba(255, 255, 255, 0.8); }
+.bpt-part__n { color: rgba(255, 255, 255, 0.72); font-size: 10px; white-space: nowrap; }
+.bpt-eye { --c-line: var(--bp-ink); --c-fill: #0b2a46; flex: none; width: 34px; height: 30px; display: inline-flex; align-items: center; justify-content: center; color: var(--bp-ink); cursor: pointer; }
+.bpt-eye.is-off { --c-line: rgba(255, 255, 255, 0.25); --c-fill: #050c18; color: rgba(255, 255, 255, 0.5); }
+.bpt-slider { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: rgba(255, 255, 255, 0.85); }
 .bpt-slider input { width: 100%; accent-color: #8fe9ff; }
 .bpt-seg { display: flex; flex-wrap: wrap; gap: 4px; }
-.bpt-seg button { flex: 1 1 auto; display: inline-flex; align-items: center; justify-content: center; gap: 4px; height: 32px; padding: 0 8px; border: 1px solid rgba(143, 233, 255, 0.3); background: transparent; color: rgba(255, 255, 255, 0.75); font: inherit; font-size: 10px; letter-spacing: 0.1em; cursor: pointer; }
-.bpt-seg button.is-on { border-color: var(--bp-ink); background: rgba(143, 233, 255, 0.14); color: #fff; }
+.bpt-seg button { flex: 1 1 auto; display: inline-flex; align-items: center; justify-content: center; gap: 4px; height: 32px; padding: 0 8px; color: rgba(255, 255, 255, 0.8); font-size: 10px; letter-spacing: 0.1em; cursor: pointer; }
+.bpt-seg button.is-on { color: #fff; }
 .bpt-done { align-items: center; text-align: center; padding-top: 24px; font-size: 12px; line-height: 1.5; }
 .bpt-done svg { color: #ffc27a; }
-/* The compose cage: a layer seen from above, +X right, +Z down, the black sun past the bottom edge. */
+
+/* The compose cage: its own black plate and its own violet grid, so it never meets the paper's blue one. Cells are
+   whole pixels: each is --cell wide with a 1px line between, the plate exactly 16 cells and 17 lines across, and the
+   lines are the plate showing through the gaps, so cells and lines always align. Every 4th line (the 4-gibson
+   module) is brighter. */
 .bpt-compose { display: flex; flex-direction: column; gap: 8px; }
 .bpt-palette { display: flex; gap: 4px; overflow-x: auto; padding-bottom: 4px; }
-.bpt-pal { flex: none; width: 34px; height: 34px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid rgba(255, 255, 255, 0.2); background: rgba(0, 0, 0, 0.3); color: #fff; font: inherit; font-size: 7px; cursor: pointer; }
-.bpt-pal.is-on { border-color: #ffc27a; box-shadow: 0 0 0 1px #ffc27a; }
+.bpt-pal { --c-cut: 5px; --c-fill: #050c18; flex: none; width: 36px; height: 36px; display: inline-flex; align-items: center; justify-content: center; font-size: 7px; cursor: pointer; }
 .bpt-layer { display: flex; align-items: center; gap: 8px; font-size: 11px; letter-spacing: 0.1em; }
-.bpt-layer__brush { margin-left: auto; color: rgba(255, 255, 255, 0.7); letter-spacing: 0; }
-.bpt-cage-wrap { position: relative; align-self: center; padding: 16px 0 22px 26px; }
-.bpt-cage { display: grid; grid-template-columns: repeat(16, 1fr); width: min(320px, calc(100vw - 96px)); aspect-ratio: 1; border: 1px solid rgba(143, 233, 255, 0.55); }
-.bpt-cell { padding: 0; border: 0; border-right: 1px solid rgba(143, 233, 255, 0.12); border-bottom: 1px solid rgba(143, 233, 255, 0.12); background: transparent; display: flex; align-items: center; justify-content: center; cursor: pointer; }
-.bpt-cell.is-below { background: rgba(143, 233, 255, 0.08); }
-.bpt-cell .bpt-swatch { width: 100% !important; height: 100% !important; }
-.bpt-cage__axis { position: absolute; font-size: 9px; letter-spacing: 0.1em; }
-.bpt-cage__axis--x { top: 0; left: 26px; color: #ff6b6b; }
-.bpt-cage__axis--z { left: 0; top: 18px; line-height: 1.2; text-align: center; color: #6ba8ff; }
-.bpt-cage__sun { position: absolute; bottom: 2px; left: calc(50% + 13px); width: 14px; height: 14px; margin-left: -7px; border-radius: 50%; background: #000; box-shadow: 0 0 0 2px #e8acff, 0 0 8px 2px #d48cff; }
+.bpt-layer__brush { margin-left: auto; color: rgba(255, 255, 255, 0.75); letter-spacing: 0; }
+.bpt-cage-wrap { position: relative; align-self: center; padding: 26px 0 18px 28px; }
+.bpt-cage {
+  --cell: 16px;
+  --pitch: calc(var(--cell) + 1px);
+  --cage-minor: rgba(176, 150, 255, 0.2);
+  --cage-major: rgba(196, 172, 255, 0.55);
+  display: grid;
+  grid-template-columns: repeat(16, var(--cell));
+  grid-auto-rows: var(--cell);
+  gap: 1px;
+  padding: 1px;
+  box-sizing: border-box;
+  width: calc(16 * var(--pitch) + 1px);
+  height: calc(16 * var(--pitch) + 1px);
+  background-color: #020306;
+  background-image:
+    linear-gradient(to right, var(--cage-major) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--cage-major) 1px, transparent 1px),
+    linear-gradient(to right, var(--cage-minor) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--cage-minor) 1px, transparent 1px);
+  background-size: calc(4 * var(--pitch)) calc(4 * var(--pitch)), calc(4 * var(--pitch)) calc(4 * var(--pitch)), var(--pitch) var(--pitch), var(--pitch) var(--pitch);
+  outline: 1px solid rgba(214, 196, 255, 0.85);
+  outline-offset: 0;
+}
+@media (min-width: 520px) { .bpt-cage { --cell: 20px; } }
+.bpt-cell { width: var(--cell); height: var(--cell); padding: 0; border: 0; border-radius: 0; background: #020306; display: block; cursor: pointer; }
+.bpt-cell.is-below { background: rgba(176, 150, 255, 0.16); }
+.bpt-cell .bpt-swatch { display: block; width: 100% !important; height: 100% !important; box-shadow: none; }
+.bpt-cage__axis { position: absolute; font-size: 9px; letter-spacing: 0.1em; text-shadow: 0 1px 2px #000; }
+.bpt-cage__axis--x { bottom: 0; left: 28px; color: #ff6b6b; }
+.bpt-cage__axis--z { left: 0; top: 26px; line-height: 1.2; text-align: center; color: #6ba8ff; }
+.bpt-cage__sun { position: absolute; top: 4px; left: calc(50% + 14px); width: 14px; height: 14px; margin-left: -7px; border-radius: 50%; background: #000; box-shadow: 0 0 0 2px #e8acff, 0 0 8px 2px #d48cff; }
 .bpt-compose__foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 @media (max-width: 420px) {
   .bpt-reveal { flex-direction: column; align-items: stretch; }
   .bpt-reveal__preview { align-self: center; }
 }
-.bpt-prizes > li { display: flex; flex-direction: column; align-items: center; gap: 4px; }
-.bpt-prize.is-barred { opacity: 0.45; cursor: default; }
-.bpt-prize__bar { min-height: 1.3em; font-size: 9px; line-height: 1.3; color: rgba(255, 255, 255, 0.6); text-align: center; }
-.bpt-prize__include { height: 26px; font-size: 9px; }
+.bpt-switch { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 4px 0; cursor: pointer; }
+.bpt-switch b { display: block; font-size: 11px; font-weight: 700; letter-spacing: 0.06em; }
+.bpt-switch small { display: block; margin-top: 2px; min-height: 1.3em; font-size: 10px; color: rgba(255, 255, 255, 0.62); }
+.bpt-sum__k { font-size: 9px; letter-spacing: 0.12em; color: var(--bp-ink); }
 /* ===== end blueprints (bp-tool) ===== */
 /* ===== blueprints: cards in the world (bp-place) ===== */
 /* DISCOVERED NEARBY gains BLUEPRINTS: eight tabs, two rows of four on a phone. */

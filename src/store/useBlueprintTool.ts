@@ -51,6 +51,8 @@ export interface BlueprintToolState {
   seed: number
   reveal: PrizeReveal
   views: ReadonlySet<PrizeView>
+  /** Show the prize's own name to finders (off by default: the name is part of what the maker chooses to reveal). */
+  showName: boolean
   text: string
   lock: LockKind
   height: number
@@ -88,6 +90,7 @@ export const useBlueprintTool = create<BlueprintToolState>((set, get) => ({
   ...fresh(),
   reveal: 'hidden',
   views: new Set<PrizeView>(['iso']),
+  showName: false,
   text: '',
   lock: 'standard',
   height: 8,

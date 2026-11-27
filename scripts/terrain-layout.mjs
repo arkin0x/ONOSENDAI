@@ -33,6 +33,7 @@ const BOXES = {
   hotbar: '.terrain-hotbar',
   survey: '.terrain-act--survey',
   place: '.terrain-act--place',
+  smash: '.terrain-act--smash',
   chat: '.chatdock__chip',
   pad: '.touchpad',
   menu: '.hamburger-menu',

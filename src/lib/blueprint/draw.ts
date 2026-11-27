@@ -9,13 +9,19 @@
  * page, except the tile picture cache at the end (TILE_IMAGES), which does
  * nothing where there is no Image.
  *
- * World axes, always (4.1): +X right, +Y up (TERRAIN's ground up), +Z toward
- * the black sun. The isometric view looks from the +X, +Y, +Z corner, so +X
- * runs right and down the screen, +Z left and down, +Y straight up, and the
- * faces seen are a block's top, its +Z face (left) and its +X face (right).
- * The views along an axis follow the sheet's drafting layout (4.6): from
- * above (looking down Y, the sun side at the bottom), from the sun (looking
- * along -Z) and from +X (looking along -X, the sun side on the left).
+ * World axes, always (4.1), and drawn as the game shows them (CYBERSPACE_V2
+ * §11.1, left-handed): facing the black sun (+Z) with +Y up, +X is on the
+ * right. Every picture here is a view a player could really see, so a chiral
+ * build is never drawn as its mirror image (axis audit, 2026-11-27):
+ * - isometric: from the (+X, +Y, -Z) corner, behind and to the right of a
+ *   player facing the sun. +X runs right and down the screen, +Z right and
+ *   up (the sun beyond the build), +Y straight up; the faces seen are a
+ *   block's top, its -Z face (left) and its +X face (right);
+ * - from above: looking down -Y, +X right, +Z up, the sun at the top edge (the
+ *   game's own top-down view, lib/space.ts topDownQuaternion);
+ * - facing the sun ('z'): from the -Z side looking along +Z, +X right, +Y up,
+ *   the sun behind the build;
+ * - from +X ('x'): looking along -X, +Y up, +Z on the right.
  *
  * A revealed block draws with its real tile on each face it shows; a hidden
  * one as dark grey smoke drifting inside its cell, so the volume reads but
@@ -31,7 +37,7 @@ export const ISO_C = Math.cos(Math.PI / 6)
 /** How far apart the layers float when fully exploded, in blocks between one layer and the next. */
 export const EXPLODE_GAP = 0.75
 /** How far past the box's +Z side the floor arrow reaches to the black sun, in blocks. */
-const FLOOR_SUN = 2.2
+const FLOOR_SUN = 1.6
 
 /** The compass's colours: the app's 3D compass (scene/Compass3D.tsx). */
 export const AXIS_COLOR = { X: '#ff4444', Y: '#44ff44', Z: '#4488ff' } as const
@@ -62,31 +68,42 @@ export interface IsoOpts {
    * never rescales it.
    */
   exploded?: number
-  /** The front quarter removed (the +X, +Z quarter, nearest the viewer). */
+  /** The front quarter removed (the +X, -Z quarter, nearest the viewer). */
   cutaway?: boolean
   /** A floor grid under the box and a +Z arrow on it to the black sun. */
   floor?: boolean
   tiles?: TileImages
 }
 
-/** Where the isometric drawing sits: `u` pixels to a block's edge, the origin's screen point, the gap per layer. */
+/** Where the isometric drawing sits: `u` pixels to a block's edge, the origin's screen point, the gap per layer, and the box's depth along Z. */
 export interface IsoLayout {
   u: number
   ox: number
   oy: number
   gap: number
+  sz: number
 }
 
 type Size = readonly [number, number, number]
 type Pt = [number, number]
 
+/** A world point's screen offset in blocks, before scale: +X right and down, +Z right and up, +Y up (from the (+X, +Y, -Z) corner). */
+function isoRaw(X: number, Y: number, Z: number): Pt {
+  return [(X + Z) * ISO_C, (X - Z) / 2 - Y]
+}
+
 /** The scale and placement that fit the box (and its floor and exploded room) into the square. */
 export function isoLayout(size: Size, opts: Pick<IsoOpts, 'x' | 'y' | 'size' | 'exploded' | 'floor'>): IsoLayout {
   const [sx, sy, sz] = size
-  const zr = sz + (opts.floor ? FLOOR_SUN : 0)
   const gap = opts.exploded === undefined ? 0 : EXPLODE_GAP
-  const minX = -zr * ISO_C, maxX = sx * ISO_C
-  const minY = -(sy + Math.max(0, sy - 1) * gap), maxY = (sx + zr) / 2 + (opts.floor ? 0.4 : 0)
+  const top = sy + Math.max(0, sy - 1) * gap
+  const zr = sz + (opts.floor ? FLOOR_SUN : 0)
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
+  for (const X of [0, sx]) for (const Y of [0, top]) for (const Z of [0, zr]) {
+    const [px, py] = isoRaw(X, Y, Z)
+    minX = Math.min(minX, px); maxX = Math.max(maxX, px); minY = Math.min(minY, py); maxY = Math.max(maxY, py)
+  }
+  if (opts.floor) { minY -= 0.4; maxX += 0.6 }
   const w = maxX - minX, h = maxY - minY
   const pad = Math.max(1, opts.size * 0.05)
   const u = Math.max(0.01, Math.min((opts.size - 2 * pad) / w, (opts.size - 2 * pad) / h))
@@ -95,22 +112,24 @@ export function isoLayout(size: Size, opts: Pick<IsoOpts, 'x' | 'y' | 'size' | '
     ox: opts.x + (opts.size - w * u) / 2 - minX * u,
     oy: opts.y + (opts.size - h * u) / 2 - minY * u,
     gap,
+    sz,
   }
 }
 
 /** A world point (in blocks, the box's own frame) on the screen; `lift` raises it along +Y without moving it in depth. */
 export function isoPoint(L: IsoLayout, X: number, Y: number, Z: number, lift = 0): Pt {
-  return [L.ox + (X - Z) * ISO_C * L.u, L.oy + ((X + Z) / 2 - Y - lift) * L.u]
+  const [px, py] = isoRaw(X, Y + lift, Z)
+  return [L.ox + px * L.u, L.oy + py * L.u]
 }
 
-/** Whether a cell is in the front quarter a cutaway removes. */
+/** Whether a cell is in the front quarter a cutaway removes: the (+X, -Z) quarter, nearest the viewer. */
 function inCut(size: Size, x: number, z: number): boolean {
-  return x >= size[0] / 2 && z >= size[2] / 2
+  return x >= size[0] / 2 && z < size[2] / 2
 }
 
 /**
  * The occupied cells the isometric view draws, back to front (painter's
- * order): by x + y + z, then lower layers first. On the block grid two cells
+ * order): by x + y - z (nearer the (+X, +Y, -Z) corner is nearer), then lower layers first. On the block grid two cells
  * with the same sum never overlap on screen; an exploded view only lifts the
  * higher layers further from the ones in front of them.
  */
@@ -123,7 +142,7 @@ export function isoOrder(view: FinderView, cutaway = false): number[] {
     const [x, y, z] = cellAt(view.size, i)
     if (cutaway && inCut(view.size, x, z)) return
     out.push(i)
-    sum[i] = x + y + z
+    sum[i] = x + y + (view.size[2] - 1 - z)
     ys[i] = y
   })
   return out.sort((a, b) => sum[a] - sum[b] || ys[a] - ys[b] || a - b)
@@ -203,7 +222,7 @@ function tileFace(ctx: CanvasRenderingContext2D, img: CanvasImageSource | null, 
   ctx.restore()
 }
 
-/** The shades of a block's top, its +Z face (left) and its +X face (right). */
+/** The shades of a block's top, its -Z face (left) and its +X face (right). */
 const SHADE = { top: 0, z: 0.22, x: 0.4 }
 
 /**
@@ -233,10 +252,14 @@ export function drawIso(ctx: CanvasRenderingContext2D, view: FinderView, opts: I
     ctx.lineWidth = lw
     for (let i = 0; i <= sx; i++) line(isoPoint(L, i, 0, 0), isoPoint(L, i, 0, sz))
     for (let j = 0; j <= sz; j++) line(isoPoint(L, 0, 0, j), isoPoint(L, sx, 0, j))
-    const a = isoPoint(L, sx / 2, 0, sz + 0.15), b = isoPoint(L, sx / 2, 0, sz + 1.45)
-    ctx.strokeStyle = 'rgba(212, 140, 255, 0.8)'
+    // From the build's +Z face, a short dotted line along +Z to the black sun just beyond it (owner, 2026-11-27: the
+    // line and the sun belong to the build, not far off from it).
+    const a = isoPoint(L, sx / 2, 0, sz), b = isoPoint(L, sx / 2, 0, sz + 0.75)
+    ctx.strokeStyle = 'rgba(212, 140, 255, 0.85)'
     ctx.lineWidth = Math.max(1, L.u * 0.06)
+    ctx.setLineDash([Math.max(2, L.u * 0.12), Math.max(2, L.u * 0.1)])
     line(a, b)
+    ctx.setLineDash([])
     const d: Pt = [b[0] - a[0], b[1] - a[1]]
     const len = Math.hypot(d[0], d[1]) || 1
     const ux = d[0] / len, uy = d[1] / len, hs = Math.max(3, L.u * 0.2)
@@ -247,7 +270,7 @@ export function drawIso(ctx: CanvasRenderingContext2D, view: FinderView, opts: I
     ctx.lineTo(b[0] + uy * hs * 0.6, b[1] - ux * hs * 0.6)
     ctx.closePath()
     ctx.fill()
-    const s = isoPoint(L, sx / 2, 0, sz + 1.95)
+    const s = isoPoint(L, sx / 2, 0, sz + 1.2)
     const r = Math.max(3, L.u * 0.28)
     drawBlackSun(ctx, s[0], s[1], r)
     ctx.font = `600 ${Math.max(9, Math.round(L.u * 0.34))}px ui-monospace, monospace`
@@ -261,8 +284,8 @@ export function drawIso(ctx: CanvasRenderingContext2D, view: FinderView, opts: I
   ctx.strokeStyle = 'rgba(160, 220, 255, 0.22)'
   ctx.lineWidth = lw
   ctx.setLineDash([lw * 3, lw * 3])
-  const O = isoPoint(L, 0, 0, 0)
-  line(O, isoPoint(L, sx, 0, 0)); line(O, isoPoint(L, 0, sy, 0)); line(O, isoPoint(L, 0, 0, sz))
+  const O = isoPoint(L, 0, 0, sz)
+  line(O, isoPoint(L, sx, 0, sz)); line(O, isoPoint(L, 0, sy, sz)); line(O, isoPoint(L, 0, 0, 0))
   ctx.setLineDash([])
 
   const covers = (j: number): boolean => {
@@ -273,39 +296,49 @@ export function drawIso(ctx: CanvasRenderingContext2D, view: FinderView, opts: I
   for (const i of order) {
     const [X, Y, Z] = cellAt(size, i)
     const lift = e * Y * L.gap
+    // The faces a viewer at the (+X, +Y, -Z) corner sees: the top, the -Z face (left) and the +X face (right).
     const top = Y + 1 >= sy || !covers(cellIndex(size, X, Y + 1, Z)) || e > 0
-    const zf = Z + 1 >= sz || !covers(cellIndex(size, X, Y, Z + 1))
+    const zf = Z === 0 || !covers(cellIndex(size, X, Y, Z - 1))
     const xf = X + 1 >= sx || !covers(cellIndex(size, X + 1, Y, Z))
     const p = (a: number, b: number, c: number): Pt => isoPoint(L, a, b, c, lift)
-    const T = p(X, Y + 1, Z), TX = p(X + 1, Y + 1, Z), TZ = p(X, Y + 1, Z + 1), TXZ = p(X + 1, Y + 1, Z + 1)
+    const T = p(X, Y + 1, Z), TX = p(X + 1, Y + 1, Z), TZ = p(X, Y + 1, Z + 1)
     const dX: Pt = [TX[0] - T[0], TX[1] - T[1]]
     const dZ: Pt = [TZ[0] - T[0], TZ[1] - T[1]]
     const down: Pt = [0, L.u]
-    const negZ: Pt = [-dZ[0], -dZ[1]]
     const id = view.revealed.get(i)
     if (id === undefined) {
       const seed = X * 7 + Y * 131 + Z * 29
       if (top) smokeFace(ctx, T, dX, dZ, SHADE.top, phase, seed)
-      if (zf) smokeFace(ctx, TZ, dX, down, SHADE.z, phase + 3, seed + 1)
-      if (xf) smokeFace(ctx, TXZ, negZ, down, SHADE.x, phase + 6, seed + 2)
+      if (zf) smokeFace(ctx, T, dX, down, SHADE.z, phase + 3, seed + 1)
+      if (xf) smokeFace(ctx, TX, dZ, down, SHADE.x, phase + 6, seed + 2)
     } else {
       const kind = blockKind(id)
       if (!kind) continue
       if (top) tileFace(ctx, tiles.get(id, 0), kind, T, dX, dZ, SHADE.top)
-      if (zf) tileFace(ctx, tiles.get(id, 1), kind, TZ, dX, down, SHADE.z)
-      if (xf) tileFace(ctx, tiles.get(id, 1), kind, TXZ, negZ, down, SHADE.x)
+      if (zf) tileFace(ctx, tiles.get(id, 1), kind, T, dX, down, SHADE.z)
+      if (xf) tileFace(ctx, tiles.get(id, 1), kind, TX, dZ, down, SHADE.x)
     }
   }
 
-  // The nine edges in front, faint, over the build: the cage it sits in.
+  // The nine edges in front, faint, over the build: the cage it sits in (every edge but the three at the far corner, (0, 0, sz)).
   ctx.strokeStyle = 'rgba(160, 220, 255, 0.26)'
   ctx.lineWidth = lw
   const P = (a: number, b: number, c: number): Pt => isoPoint(L, a, b, c)
-  line(P(sx, 0, 0), P(sx, sy, 0)); line(P(sx, 0, 0), P(sx, 0, sz))
-  line(P(0, sy, 0), P(sx, sy, 0)); line(P(0, sy, 0), P(0, sy, sz))
-  line(P(0, 0, sz), P(sx, 0, sz)); line(P(0, 0, sz), P(0, sy, sz))
-  line(P(sx, sy, sz), P(0, sy, sz)); line(P(sx, sy, sz), P(sx, 0, sz)); line(P(sx, sy, sz), P(sx, sy, 0))
+  line(P(sx, 0, sz), P(sx, sy, sz)); line(P(sx, 0, sz), P(sx, 0, 0))
+  line(P(0, sy, sz), P(sx, sy, sz)); line(P(0, sy, sz), P(0, sy, 0))
+  line(P(0, 0, 0), P(sx, 0, 0)); line(P(0, 0, 0), P(0, sy, 0))
+  line(P(sx, sy, 0), P(0, sy, 0)); line(P(sx, sy, 0), P(sx, 0, 0)); line(P(sx, sy, 0), P(sx, sy, sz))
   ctx.restore()
+}
+
+/** The convex hull of points (monotone chain), counter-clockwise on screen. */
+function hull(pts: Pt[]): Pt[] {
+  const s = pts.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1])
+  const cross = (o: Pt, a: Pt, b: Pt): number => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+  const lower: Pt[] = [], upper: Pt[] = []
+  for (const p of s) { while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 1e-9) lower.pop(); lower.push(p) }
+  for (const p of s.reverse()) { while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 1e-9) upper.pop(); upper.push(p) }
+  return lower.slice(0, -1).concat(upper.slice(0, -1))
 }
 
 /** Point in a convex polygon (either winding). */
@@ -335,8 +368,10 @@ export function isoHit(view: FinderView, opts: IsoOpts, px: number, py: number):
     const [X, Y, Z] = cellAt(view.size, i)
     const lift = e * Y * L.gap
     const p = (a: number, b: number, c: number): Pt => isoPoint(L, a, b, c, lift)
-    const hex = [p(X, Y + 1, Z), p(X + 1, Y + 1, Z), p(X + 1, Y, Z), p(X + 1, Y, Z + 1), p(X, Y, Z + 1), p(X, Y + 1, Z + 1)]
-    if (inConvex(hex, px, py)) hit = i
+    // The cube's outline on screen: the hull of its eight corners.
+    const corners: Pt[] = []
+    for (const a of [X, X + 1]) for (const b of [Y, Y + 1]) for (const c of [Z, Z + 1]) corners.push(p(a, b, c))
+    if (inConvex(hull(corners), px, py)) hit = i
   }
   return hit
 }
@@ -351,10 +386,11 @@ export interface AxisCell {
 
 /**
  * A view along an axis as a grid: for each cell of the picture, the first
- * occupied cell met looking in, or null. From above ('y'): columns are X,
- * rows Z (the sun side at the bottom). From the sun ('z', looking along -Z):
- * columns X, rows Y from the top. From +X ('x', looking along -X): columns Z
- * from +Z (the sun side on the left), rows Y from the top.
+ * occupied cell met looking in, or null. From above ('y', looking down -Y):
+ * columns X, rows Z from +Z at the top (the sun at the top edge). Facing the
+ * sun ('z', from the -Z side looking along +Z): columns X, rows Y from the
+ * top, the first block met counting from z = 0. From +X ('x', looking along
+ * -X): columns Z with +Z on the right, rows Y from the top.
  */
 export function axisGrid(view: FinderView, axis: AxisView): { cols: number; rows: number; cells: Array<AxisCell | null> } {
   const [sx, sy, sz] = view.size
@@ -365,12 +401,13 @@ export function axisGrid(view: FinderView, axis: AxisView): { cols: number; rows
     for (let col = 0; col < cols; col++) {
       let found: AxisCell | null = null
       if (axis === 'y') {
-        for (let y = sy - 1; y >= 0 && !found; y--) { const i = cellIndex(view.size, col, y, row); if (view.occupied[i]) found = { col, row, index: i, depth: sy - 1 - y } }
+        const z = sz - 1 - row
+        for (let y = sy - 1; y >= 0 && !found; y--) { const i = cellIndex(view.size, col, y, z); if (view.occupied[i]) found = { col, row, index: i, depth: sy - 1 - y } }
       } else if (axis === 'z') {
         const y = sy - 1 - row
-        for (let z = sz - 1; z >= 0 && !found; z--) { const i = cellIndex(view.size, col, y, z); if (view.occupied[i]) found = { col, row, index: i, depth: sz - 1 - z } }
+        for (let z = 0; z < sz && !found; z++) { const i = cellIndex(view.size, col, y, z); if (view.occupied[i]) found = { col, row, index: i, depth: z } }
       } else {
-        const y = sy - 1 - row, z = sz - 1 - col
+        const y = sy - 1 - row, z = col
         for (let x = sx - 1; x >= 0 && !found; x--) { const i = cellIndex(view.size, x, y, z); if (view.occupied[i]) found = { col, row, index: i, depth: sx - 1 - x } }
       }
       cells.push(found)
@@ -428,8 +465,8 @@ export function drawAxisView(ctx: CanvasRenderingContext2D, view: FinderView, ax
 }
 
 /**
- * A section through one layer, seen from above (as 'y': X across, the sun
- * side at the bottom): its blocks, and any sealed hollow (enclosedEmpty)
+ * A section through one layer, seen from above (as 'y': X across, +Z up, the
+ * sun at the top edge): its blocks, and any sealed hollow (enclosedEmpty)
  * marked with a dashed red square.
  */
 export function drawSection(ctx: CanvasRenderingContext2D, view: FinderView, layer: number, opts: FlatOpts & { hollow?: ReadonlySet<number> }): void {
@@ -441,7 +478,7 @@ export function drawSection(ctx: CanvasRenderingContext2D, view: FinderView, lay
   for (let z = 0; z < sz; z++) {
     for (let x = 0; x < sx; x++) {
       const i = cellIndex(view.size, x, layer, z)
-      const px = ox + x * c, py = oy + z * c
+      const px = ox + x * c, py = oy + (sz - 1 - z) * c
       if (view.occupied[i]) flatCell(ctx, view, i, 0, px, py, c, (opts.smokePhase ?? 0) + x + z, tiles, x * 3 + z * 7 + layer * 13)
       else if (opts.hollow?.has(i)) {
         ctx.strokeStyle = 'rgba(255, 90, 126, 0.75)'
@@ -480,14 +517,15 @@ export function drawBlackSun(ctx: CanvasRenderingContext2D, cx: number, cy: numb
 }
 
 /**
- * Each axis's direction on screen in each view; null where it points at the
- * viewer. These match the drawings: the isometric one and the three views.
+ * Each axis's direction on screen in each view; null where it runs straight
+ * in or out of the picture: +X toward the viewer in 'x' (a ring round a dot),
+ * +Z away from the viewer in 'z' (the black sun, straight ahead). These match the drawings: the isometric one and the three views.
  */
 export const COMPASS_DIRS: Readonly<Record<CompassOrientation, Readonly<Record<'X' | 'Y' | 'Z', Pt | null>>>> = {
-  iso: { X: [ISO_C, 0.5], Y: [0, -1], Z: [-ISO_C, 0.5] },
+  iso: { X: [ISO_C, 0.5], Y: [0, -1], Z: [ISO_C, -0.5] },
   z: { X: [1, 0], Y: [0, -1], Z: null },
-  y: { X: [1, 0], Y: null, Z: [0, 1] },
-  x: { X: null, Y: [0, -1], Z: [-1, 0] },
+  y: { X: [1, 0], Y: null, Z: [0, -1] },
+  x: { X: null, Y: [0, -1], Z: [1, 0] },
 }
 
 /**

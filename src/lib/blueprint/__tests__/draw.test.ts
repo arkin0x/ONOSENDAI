@@ -56,13 +56,15 @@ describe('isometric painter order', () => {
     const v = solid([3, 3, 3])
     const order = isoOrder(v)
     expect(order).toHaveLength(27)
-    expect(order[0]).toBe(cellIndex(v.size, 0, 0, 0))
-    expect(order[26]).toBe(cellIndex(v.size, 2, 2, 2))
+    // Seen from the (+X, +Y, -Z) corner: (0, 0, 2) is furthest, (2, 2, 0) nearest.
+    expect(order[0]).toBe(cellIndex(v.size, 0, 0, 2))
+    expect(order[26]).toBe(cellIndex(v.size, 2, 2, 0))
     const pos = new Map(order.map((i, k) => [i, k]))
     for (const i of order) {
       const [x, y, z] = cellAt(v.size, i)
-      for (const [dx, dy, dz] of [[1, 0, 0], [0, 1, 0], [0, 0, 1]]) {
-        if (x + dx < 3 && y + dy < 3 && z + dz < 3) expect(pos.get(i)!).toBeLessThan(pos.get(cellIndex(v.size, x + dx, y + dy, z + dz))!)
+      for (const [dx, dy, dz] of [[1, 0, 0], [0, 1, 0], [0, 0, -1]]) {
+        const nx = x + dx, ny = y + dy, nz = z + dz
+        if (nx < 3 && ny < 3 && nz >= 0) expect(pos.get(i)!).toBeLessThan(pos.get(cellIndex(v.size, nx, ny, nz))!)
       }
     }
   })
@@ -75,16 +77,17 @@ describe('isometric painter order', () => {
     drawIso(ctx, v, { x: 0, y: 0, size: 200, tiles })
     const seen = calls.filter((c) => c.fn === 'drawImage').map((c) => (c.args[0] as { id: number }).id)
     const firstOf = (id: number): number => seen.indexOf(id)
-    expect(firstOf(2)).toBe(0) // (0,0,0) is furthest back
-    expect(firstOf(1)).toBeGreaterThan(firstOf(3))
-    expect(firstOf(1)).toBeGreaterThan(firstOf(4))
+    // (0,0,1) is furthest back from the (+X, +Y, -Z) corner; (1,0,0) nearest.
+    expect(firstOf(4)).toBe(0)
+    expect(firstOf(3)).toBeGreaterThan(firstOf(1))
+    expect(firstOf(3)).toBeGreaterThan(firstOf(2))
   })
 
   it('a cutaway leaves out the front quarter', () => {
     const v = solid([4, 2, 4])
     const cut = isoOrder(v, true)
     expect(cut).toHaveLength(32 - 8)
-    for (const i of cut) { const [x, , z] = cellAt(v.size, i); expect(x >= 2 && z >= 2).toBe(false) }
+    for (const i of cut) { const [x, , z] = cellAt(v.size, i); expect(x >= 2 && z < 2).toBe(false) }
   })
 
   it('hidden blocks are smoke: no tile is drawn for them', () => {
@@ -106,32 +109,31 @@ describe('views along an axis', () => {
   // A column of two at (0, *, 0) and one block at (1, 0, 1), in a 2 by 2 by 2 box.
   const v = viewOf([2, 2, 2], [[0, 0, 0, 1], [0, 1, 0, 2], [1, 0, 1, 3]])
 
-  it('from above: the top block of each column, X across and Z down', () => {
+  it('from above: the top block of each column, X across and +Z up (the sun at the top edge)', () => {
     const g = axisGrid(v, 'y')
     expect([g.cols, g.rows]).toEqual([2, 2])
-    expect(g.cells[0]).toMatchObject({ index: cellIndex(v.size, 0, 1, 0), depth: 0 })
-    // (1, 0, 1) sits one layer down: row 1 is +Z, the sun side, at the bottom.
-    expect(g.cells[3]).toMatchObject({ index: cellIndex(v.size, 1, 0, 1), depth: 1 })
-    expect(g.cells[1]).toBeNull()
-    expect(g.cells[2]).toBeNull()
+    // Row 0 is +Z (z = 1), row 1 is z = 0.
+    expect(g.cells[2]).toMatchObject({ index: cellIndex(v.size, 0, 1, 0), depth: 0 })
+    expect(g.cells[1]).toMatchObject({ index: cellIndex(v.size, 1, 0, 1), depth: 1 })
+    expect(g.cells[0]).toBeNull()
+    expect(g.cells[3]).toBeNull()
   })
 
-  it('from the sun: X across, Y up, the nearest block along -Z', () => {
+  it('facing the sun: X across, Y up, the first block met from z = 0', () => {
     const g = axisGrid(v, 'z')
-    // Top row is the highest layer.
+    expect(g.cells[0]).toMatchObject({ index: cellIndex(v.size, 0, 1, 0), depth: 0 })
+    expect(g.cells[1]).toBeNull()
+    expect(g.cells[2]).toMatchObject({ index: cellIndex(v.size, 0, 0, 0), depth: 0 })
+    expect(g.cells[3]).toMatchObject({ index: cellIndex(v.size, 1, 0, 1), depth: 1 })
+  })
+
+  it('from +X: +Z on the right, the nearest block along -X', () => {
+    const g = axisGrid(v, 'x')
+    // Column 1 is +Z (z = 1), bottom row is Y0.
+    expect(g.cells[3]).toMatchObject({ index: cellIndex(v.size, 1, 0, 1), depth: 0 })
+    expect(g.cells[2]).toMatchObject({ index: cellIndex(v.size, 0, 0, 0), depth: 1 })
     expect(g.cells[0]).toMatchObject({ index: cellIndex(v.size, 0, 1, 0), depth: 1 })
     expect(g.cells[1]).toBeNull()
-    expect(g.cells[2]).toMatchObject({ index: cellIndex(v.size, 0, 0, 0), depth: 1 })
-    expect(g.cells[3]).toMatchObject({ index: cellIndex(v.size, 1, 0, 1), depth: 0 })
-  })
-
-  it('from +X: the sun side on the left, the nearest block along -X', () => {
-    const g = axisGrid(v, 'x')
-    // Column 0 is +Z (the sun side), bottom row is Y0.
-    expect(g.cells[2]).toMatchObject({ index: cellIndex(v.size, 1, 0, 1), depth: 0 })
-    expect(g.cells[3]).toMatchObject({ index: cellIndex(v.size, 0, 0, 0), depth: 1 })
-    expect(g.cells[1]).toMatchObject({ index: cellIndex(v.size, 0, 1, 0), depth: 1 })
-    expect(g.cells[0]).toBeNull()
   })
 })
 
@@ -175,7 +177,7 @@ describe('isoHit', () => {
     const L = isoLayout(v.size, opts)
     const shared = isoPoint(L, 1, 0.5, 0.5)
     expect(isoHit(v, opts, shared[0], shared[1])).toBe(cellIndex(v.size, 1, 0, 0))
-    const back = isoPoint(L, 0, 0.5, 0.2)
+    const back = isoPoint(L, 0, 0.5, 0.8)
     expect(isoHit(v, opts, back[0], back[1])).toBe(cellIndex(v.size, 0, 0, 0))
   })
 
@@ -204,8 +206,8 @@ describe('drawCompass', () => {
     const { ctx, calls } = fakeCtx()
     drawCompass(ctx, 50, 50, 40, 'iso')
     expect(calls.filter((c) => c.fn === 'lineTo' && c.args[0] !== undefined).length).toBeGreaterThanOrEqual(3)
-    // The sun sits down and to the left of centre (+Z in the isometric view).
-    const sun = calls.find((c) => c.fn === 'arc' && (c.args[0] as number) < 50 && (c.args[1] as number) > 50)
+    // The sun sits up and to the right of centre (+Z in the isometric view, seen from the (+X, +Y, -Z) corner).
+    const sun = calls.find((c) => c.fn === 'arc' && (c.args[0] as number) > 50 && (c.args[1] as number) < 50)
     expect(sun).toBeTruthy()
   })
 })

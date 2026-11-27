@@ -21,7 +21,7 @@ import { ringSpot } from '../../../scene/PrizeToys'
 import { startSmashHold, cancelSmashHold, useSmashHold } from '../../../terrain/smashHold'
 import { makeBlueprint, makeRefusal } from '../make'
 import { keyOf } from '../keyClient'
-import type { RecordEvent } from '../format'
+import { readRecord, type RecordEvent } from '../format'
 
 describe('the Compiler in slot 1', () => {
   it('joins slot 1 and shifts the block slots one along, keeping the chosen block chosen', () => {
@@ -158,5 +158,30 @@ describe('the hold, the swing and the ring', () => {
     expect(a).toEqual([a[0], a[1], a[2]])
     expect(a[0]).toBeCloseTo(b[0])
     expect(Math.hypot(ringSpot(1, 3, 2, false)[0], ringSpot(1, 3, 2, false)[2])).toBeCloseTo(0.9 + 0.36)
+  })
+})
+
+describe('the prize reveal at sealing', () => {
+  const arrangement = arrangementFrom([{ at: [0, 0, 0], id: GRIDSTONE }, { at: [1, 0, 0], id: FERROVEIN }])!
+  const sign = async (t: { kind: number; created_at: number; tags: string[][]; content: string }): Promise<RecordEvent> => ({ ...t, id: 'e'.repeat(64), pubkey: 'b'.repeat(64), sig: 'c'.repeat(128) })
+  const payload = { v: 2, name: 'Torch' }
+
+  it('a silhouette keeps its pictures in the record, and a finder reads them back', async () => {
+    const pic = 'data:image/png;base64,iVBORw0KGgo='
+    const made = await makeBlueprint({ arrangement, shown: () => true, title: 'test', prize: { type: 'sno', payload }, reveal: 'silhouette', views: { iso: pic }, lock: 'standard' }, sign)
+    if ('refused' in made) throw new Error(made.refused)
+    expect(readRecord(made.record)!.views.iso).toBe(pic)
+    expect(makeRefusal({ arrangement, reveal: 'silhouette', views: {}, lock: 'standard' })).toMatch(/view/)
+  })
+
+  it('the prize\'s own name is never written unless the maker shows it', async () => {
+    const quiet = await makeBlueprint({ arrangement, shown: () => true, title: 'test', prize: { type: 'sno', payload }, reveal: 'description', text: 'A light.', lock: 'standard' }, sign)
+    if ('refused' in quiet) throw new Error(quiet.refused)
+    expect(quiet.record.content).not.toContain('Torch')
+    expect(readRecord(quiet.record)!.prizeName).toBeNull()
+    expect(readRecord(quiet.record)!.title).toBe('test')
+    const shown = await makeBlueprint({ arrangement, shown: () => true, title: 'test', prize: { type: 'sno', payload }, reveal: 'hidden', lock: 'standard', prizeName: 'Torch' }, sign)
+    if ('refused' in shown) throw new Error(shown.refused)
+    expect(readRecord(shown.record)!.prizeName).toBe('Torch')
   })
 })

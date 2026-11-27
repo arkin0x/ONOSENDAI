@@ -65,5 +65,7 @@ describe('the ghost block\'s distance', () => {
     expect(css).toContain('.terrain-tools > .terrain-tools__slot--air { grid-column: 2; grid-row: 2; height: 38px; }')
     expect(css).toContain('.terrain-tools__slot--air.is-off { visibility: hidden; }')
     expect(css).toContain('.terrain-tools > .terrain-tools__slot--air { position: absolute; grid-area: auto; top: 0; right: calc(100% + 8px); height: 28px; }')
+    // A phone on its side: over SMASH, above the cross's line, clear of the ring's plate and the message slot under the cross.
+    expect(css).toContain('.terrain-tools > .terrain-tools__slot--air { position: absolute; grid-area: auto; bottom: calc(100% + 4px); right: 0; height: 28px; }')
   })
 })

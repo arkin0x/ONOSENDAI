@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
-  FREE_MS, SHATTER_CAPS, TRIS_PER_BLOCK, buildDust, buildRadius, buildShatter, linearRgb, shareOut, shatterCap, smashBusy,
+  DUST_MS, ENDING_FROM_MS, FREE_MS, SHATTER_CAPS, SMOKE_CLEAR_MS, SMOKE_RISE_MS, TRIS_PER_BLOCK, buildRadius, buildShatter, buildSmoke, linearRgb, shareOut, shatterCap,
+  smashBusy, smokeLevel,
 } from '../shatter'
 
 /** A solid box of Gridstone, w by h by d, from the origin. */
@@ -110,11 +111,59 @@ describe('buildShatter', () => {
   })
 })
 
-describe('buildDust', () => {
-  it('makes the motes asked for, sinking', () => {
-    const d = buildDust([0, 0, 0], 2, 100, 5)
-    expect(d.at.length).toBe(300)
-    for (let i = 0; i < 100; i++) expect(d.drift[i * 3 + 1]).toBeLessThan(0)
+describe('buildSmoke', () => {
+  const blocks = box(3, 3, 3)
+  const centre = [1.5, 1.5, 1.5] as const
+
+  it('is born inside the smashed blocks, shared among them, and sinks', () => {
+    const d = buildSmoke(blocks, centre, 270, 5)
+    expect(d.at.length).toBe(810)
+    const per = new Map<string, number>()
+    for (let i = 0; i < 270; i++) {
+      const x = d.at[i * 3], y = d.at[i * 3 + 1], z = d.at[i * 3 + 2]
+      // Inside the build's own cells, never round it.
+      for (const v of [x, y, z]) { expect(v).toBeGreaterThanOrEqual(0); expect(v).toBeLessThanOrEqual(3) }
+      const key = `${Math.min(2, Math.floor(x))},${Math.min(2, Math.floor(y))},${Math.min(2, Math.floor(z))}`
+      per.set(key, (per.get(key) ?? 0) + 1)
+      expect(d.drift[i * 3 + 1]).toBeLessThan(0.2)
+    }
+    // Every block gives some.
+    expect(per.size).toBe(27)
+    // On the whole it falls.
+    let fall = 0
+    for (let i = 0; i < 270; i++) fall += d.drift[i * 3 + 1]
+    expect(fall / 270).toBeLessThan(-0.5)
+  })
+
+  it('is the same for the same smash, and nothing for no blocks', () => {
+    expect(buildSmoke(blocks, centre, 50, 9).at).toEqual(buildSmoke(blocks, centre, 50, 9).at)
+    expect(Array.from(buildSmoke([], centre, 4, 9).at)).toEqual(new Array(12).fill(0))
+  })
+})
+
+describe('smokeLevel', () => {
+  const struck = 10_000
+  it('is there from the impact itself, not from the ending', () => {
+    expect(smokeLevel({ struck, outcome: 'pending', resolvedAt: null }, struck - 1)).toBe(0)
+    expect(smokeLevel({ struck, outcome: 'pending', resolvedAt: null }, struck + SMOKE_RISE_MS / 2)).toBeCloseTo(0.5, 5)
+    expect(smokeLevel({ struck, outcome: 'pending', resolvedAt: null }, struck + SMOKE_RISE_MS)).toBe(1)
+    // Long before the ending could start.
+    expect(SMOKE_RISE_MS).toBeLessThan(ENDING_FROM_MS / 4)
+  })
+
+  it('hangs while the compile works, settles away over a miss, and clears quickly for a match', () => {
+    expect(smokeLevel({ struck, outcome: 'pending', resolvedAt: null }, struck + 30_000)).toBe(1)
+    const miss = { struck, outcome: 'miss' as const, resolvedAt: struck + 300 }
+    const from = struck + ENDING_FROM_MS
+    expect(smokeLevel(miss, from - 1)).toBe(1)
+    expect(smokeLevel(miss, from + DUST_MS / 2)).toBeCloseTo(0.75, 5)
+    expect(smokeLevel(miss, from + DUST_MS)).toBe(0)
+    const match = { struck, outcome: 'match' as const, resolvedAt: struck + 300 }
+    expect(smokeLevel(match, from + SMOKE_CLEAR_MS / 2)).toBeCloseTo(0.5, 5)
+    expect(smokeLevel(match, from + SMOKE_CLEAR_MS)).toBe(0)
+    // While it still shows, the frames keep coming.
+    expect(smashBusy(miss, from + DUST_MS - 1)).toBe(true)
+    expect(smashBusy(match, from + SMOKE_CLEAR_MS - 1)).toBe(true)
   })
 })
 

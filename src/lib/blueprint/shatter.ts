@@ -39,6 +39,12 @@ export const FREE_MS = 1_600
 export const ENDING_FROM_MS = 1_200
 /** How long the grey dust of a miss takes to settle and fade. */
 export const DUST_MS = 1_200
+/** The smoke is born at the impact, inside the smashed blocks, and is fully there this soon (under the flash). */
+export const SMOKE_RISE_MS = 140
+/** How long the smoke takes to puff out of the blocks and sink: from the impact to the end of a miss's settling. */
+export const SMOKE_MS = ENDING_FROM_MS + DUST_MS
+/** How fast the smoke clears when the smash made something. */
+export const SMOKE_CLEAR_MS = 350
 /** How long a match's burst lasts. */
 export const BURST_MS = 480
 /** How long the ember takes to fade in and out. */
@@ -164,23 +170,48 @@ export function buildShatter(blocks: ReadonlyArray<ShatterBlock>, centre: readon
 }
 
 /**
- * Grey dust where a build stood, for a miss: a loose cloud round the centre
- * (three floats each) and how far each mote sinks while it settles.
+ * The smoke of a smash, born from the blocks themselves at the moment of
+ * impact (owner, 2026-11-27: "the smoke falling effect currently triggers
+ * late and it looks weird because it appears out of nowhere"): each mote
+ * starts inside one of the smashed blocks, shared evenly among them, and
+ * `drift` is how far it is pushed out from the build's centre and sinks
+ * while it settles (three floats each).
  */
-export function buildDust(centre: readonly [number, number, number], radius: number, count: number, seed: number): { at: Float32Array; drift: Float32Array } {
+export function buildSmoke(blocks: ReadonlyArray<ShatterBlock>, centre: readonly [number, number, number], count: number, seed: number): { at: Float32Array; drift: Float32Array } {
   const rand = seeded(seed ^ 0x5f3759df)
   const at = new Float32Array(count * 3), drift = new Float32Array(count * 3)
+  if (blocks.length === 0) return { at, drift }
   const u = [0, 0, 0]
-  const spread = Math.max(0.6, radius * 0.6)
   for (let i = 0; i < count; i++) {
-    unit(rand, u)
-    const r = spread * Math.cbrt(rand())
-    at[i * 3] = centre[0] + u[0] * r; at[i * 3 + 1] = centre[1] + u[1] * r * 0.7; at[i * 3 + 2] = centre[2] + u[2] * r
-    drift[i * 3] = (rand() - 0.5) * 0.5
-    drift[i * 3 + 1] = -(0.5 + rand() * 0.9)
-    drift[i * 3 + 2] = (rand() - 0.5) * 0.5
+    const b = blocks[Math.min(blocks.length - 1, Math.floor(((i + rand()) * blocks.length) / count))]
+    const x = b.at[0] + rand(), y = b.at[1] + rand(), z = b.at[2] + rand()
+    at[i * 3] = x; at[i * 3 + 1] = y; at[i * 3 + 2] = z
+    let dx = x - centre[0], dy = y - centre[1], dz = z - centre[2]
+    const dist = Math.hypot(dx, dy, dz)
+    if (dist > 1e-4) { dx /= dist; dy /= dist; dz /= dist } else { unit(rand, u); [dx, dy, dz] = u }
+    // Pushed out by the blow, then falling.
+    const out = 0.25 + 0.75 * rand()
+    drift[i * 3] = dx * out + (rand() - 0.5) * 0.4
+    drift[i * 3 + 1] = dy * out * 0.4 - (0.6 + rand() * 1.1)
+    drift[i * 3 + 2] = dz * out + (rand() - 0.5) * 0.4
   }
   return { at, drift }
+}
+
+/**
+ * How thick the smoke is at `now`, 0 to 1: there from the impact, hanging
+ * while the compile works, settling away over a miss's ending, cleared
+ * quickly when the smash made something (the burst takes its place).
+ */
+export function smokeLevel(show: { struck: number; outcome: 'pending' | 'match' | 'miss'; resolvedAt: number | null }, now: number): number {
+  const t = now - show.struck
+  if (t < 0) return 0
+  const rise = Math.min(1, t / SMOKE_RISE_MS)
+  const from = endingFrom(show)
+  if (show.outcome === 'pending' || from === null || now < from) return rise
+  const e = (now - from) / (show.outcome === 'miss' ? DUST_MS : SMOKE_CLEAR_MS)
+  if (e >= 1) return 0
+  return rise * (show.outcome === 'miss' ? 1 - e * e : 1 - e)
 }
 
 /** When a show's ending (dust or burst) starts: once its outcome is known, never before the shatter thins out. */

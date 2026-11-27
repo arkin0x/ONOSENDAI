@@ -64,6 +64,7 @@ import { committedAnchor, committedScale } from '../lib/renderFrame'
 import { TapOccluder } from './TapOccluder'
 import { tapClaimNearer } from './TapTarget'
 import { SmashFx } from './SmashFx'
+import { SmashKick } from './SmashKick'
 import { pickToy } from './toySpots'
 import { usePrizePick } from '../store/usePrizePick'
 
@@ -557,6 +558,7 @@ export function TerrainLayer({ axes }: { axes: ViewAxes }): JSX.Element {
       <Chunks axes={axes} />
       <Marks axes={axes} />
       <SmashFx axes={axes} />
+      <SmashKick />
       {/* What the blocks hide takes no tap, in every mode; in TERRAIN a tap on them mines (TapOccluder.tsx). */}
       <TapOccluder distance={(r) => (terrainInput.swallowTap ? 0 : blockOcclusion(terrainSession, axes, r))} claims={terrainClaims} />
     </>

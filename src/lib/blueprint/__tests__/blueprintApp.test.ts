@@ -16,7 +16,7 @@ import { shownCell, partsList, revealSummary, useBlueprintTool } from '../../../
 import { arrangementFrom } from '../arrangement'
 import { COMPILER_RECIPE, FERROVEIN, GLOWCORE, GRIDSTONE, RUSTBAND, sameArrangement } from '../recipes'
 import { compile, relayAsker, smashGroup, type SmashDeps } from '../smash'
-import { heldPose } from '../../../terrain/HeldCompiler'
+import { hammerPose, IDLE_CLOCK, POSE_IDLE } from '../hammerAnim'
 import { ringSpot } from '../../../scene/PrizeToys'
 import { startSmashHold, cancelSmashHold, useSmashHold } from '../../../terrain/smashHold'
 import { makeBlueprint, makeRefusal, publishRecord } from '../make'
@@ -157,11 +157,11 @@ describe('the hold, the swing and the ring', () => {
     vi.useRealTimers()
   })
 
-  it('the hammer draws back across the hold and swings past rest', () => {
-    expect(heldPose(1500, { since: 0, ms: 3000, swingAt: null }).back).toBeCloseTo(0.5, 1)
-    expect(heldPose(2900, { since: 0, ms: 3000, swingAt: null }).charge).toBeGreaterThan(0.6)
-    expect(heldPose(150, { since: null, ms: 3000, swingAt: 0 }).trail).toBeGreaterThan(0)
-    expect(heldPose(5000, { since: null, ms: 3000, swingAt: 0 })).toEqual({ back: 0, swing: 0, charge: 0, trail: 0 })
+  it('the hammer charges across the hold, streaks in the swing and comes back to rest', () => {
+    // The phases and the poses have their own tests (hammerAnim.test.ts).
+    expect(hammerPose(2900, { ...IDLE_CLOCK, since: 0, ms: 3000 }, 180, false).charge).toBeGreaterThan(0.6)
+    expect(hammerPose(150, { ...IDLE_CLOCK, ms: 3000, swingAt: 0 }, 180, false).trail).toBeGreaterThan(0)
+    expect(hammerPose(5000, { ...IDLE_CLOCK, ms: 3000, swingAt: 0 }, 180, false)).toEqual(POSE_IDLE)
   })
 
   it('one prize floats alone; several share a ring; reduced motion holds still', () => {

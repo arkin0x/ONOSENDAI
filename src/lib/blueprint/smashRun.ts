@@ -51,7 +51,7 @@ export function holdSmash(): void {
   // (a switch of identity mid-swing would otherwise clear the new identity's layer: review of #943).
   const field = s
   const me = useCyberspace.getState().identity.pubkey
-  humStart(ms)
+  humStart(ms, bare)
   startSmashHold(hit.cell, ms, bare, (target, b) => {
     humStop()
     whoosh()
@@ -62,7 +62,7 @@ export function holdSmash(): void {
 /** Let go before the end: nothing is spent. */
 export function cancelSmashHold(): void {
   if (useSmashHold.getState().since === null) return
-  humStop()
+  humStop(true)
   cancelHold()
 }
 
@@ -122,7 +122,7 @@ export async function strike(target: readonly [number, number, number], bare: bo
   for (let a = 0; a < 3; a++) centre[a] /= g.cells.length
   const struck = performance.now()
   const id = useSmashFx.getState().start({ blocks: g.blocks, centre, struck })
-  impact()
+  impact(g.blocks.length)
   try { navigator.vibrate?.([24, 30, 40]) } catch { /* no buzz here */ }
   // Later: an upgraded Compiler's drops (lib/blueprint/smash.ts dropStep).
   dropStep(g.blocks)

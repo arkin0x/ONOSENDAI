@@ -9,9 +9,8 @@
  * 2026-11-27). It is isolated when every other cell of its box grown by one
  * is empty: a block that touches it, one that sits in a notch, or ground it
  * stands on all leave it not isolated. Only an isolated group of at most n on
- * every axis is an arrangement, with a key and a lookup; anything else
- * smashes the connected blocks in the n-cell window round the hit, and
- * compiles nothing (gather).
+ * every axis is an arrangement, with a key and a lookup; any other group is
+ * smashed with nothing compiled (gather).
  *
  * Cells are cyberspace offsets (any integer frame whose axes are
  * cyberspace's); `read` gives the block id at one, 0 for open space.
@@ -52,22 +51,18 @@ function boxOf(cells: ReadonlyArray<Cell>): { lo: [number, number, number]; size
  *    centred on the hit, so a group at most n on every axis is found whole wherever it is hit.
  * 2. Isolated (its box grown by one otherwise empty) and at most n on every axis: a construction, with an arrangement,
  *    as if struck in its middle.
- * 3. Otherwise: the connected group within an n-cell window round the hit (hit - floor(n/2) to the rest above, the
- *    spec's hit - 8 to + 7 for 16), smashed with no compile.
+ * 3. Otherwise the group is smashed all the same, with nothing compiled: too long (isolated, but more than n on an
+ *    axis), or touching something (not isolated). DECK-0010 §4 (9e806b1) and its gather vectors.
  */
 export function gather(read: (x: number, y: number, z: number) => number, hit: Cell, n: number = WINDOW_BELOW + WINDOW_ABOVE + 1): Gathered {
   if (read(hit[0], hit[1], hit[2]) === 0) return { cells: [], lo: [hit[0], hit[1], hit[2]], size: [0, 0, 0], isolated: false, arrangement: null }
   const far = n - 1
   const group = flood(read, hit, far, far)
   const { lo, size } = boxOf(group.cells)
-  if (size.every((v) => v <= n) && isolatedIn(read, group.set, lo, size)) {
-    return { cells: group.cells, lo, size, isolated: true, arrangement: arrangementOf(read, group.cells, lo, size) }
-  }
-  // Not a construction: the old window round the hit, nothing compiled.
-  const below = Math.floor(n / 2), above = n - 1 - below
-  const part = flood(read, hit, below, above)
-  const box = boxOf(part.cells)
-  return { cells: part.cells, lo: box.lo, size: box.size, isolated: false, arrangement: null }
+  const isolated = isolatedIn(read, group.set, lo, size)
+  // An arrangement only when it stands alone and fits the reach on every axis.
+  const arrangement = isolated && size.every((v) => v <= n) ? arrangementOf(read, group.cells, lo, size) : null
+  return { cells: group.cells, lo, size, isolated, arrangement }
 }
 
 /** The occupied cells reachable from `hit` through faces, edges and corners, never more than `below` under or `above` over it on any axis. */

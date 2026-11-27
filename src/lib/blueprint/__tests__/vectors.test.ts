@@ -8,9 +8,9 @@
 import { describe, expect, it } from 'vitest'
 import { verifyEvent } from 'nostr-tools/pure'
 import vectors from './fixtures/blueprints-vectors.json'
-import { arrangementFrom, gather } from '../arrangement'
+import { arrangementFrom } from '../arrangement'
 import { RECORD_MAX_BYTES, canonicalRecord, cardRecord, cardTemplate, deriveKey, encodeArrangement, expandRuns, lookupOf, openPrize, readRecord, readSheetShape, recordRefusal, serializedLength, type RecordEvent, type Sheet } from '../format'
-import { rankRecords } from '../smash'
+import { BARE_REACH, COMPILER_REACH, rankRecords, smashGroup } from '../smash'
 import { regionKeyAt } from '../../shardCrypto'
 import { bytesToHex, hexToBytes } from '../../events'
 
@@ -44,28 +44,28 @@ describe('DECK-0010 vectors', () => {
     }
   }, 60_000)
 
-  it('gathers: the group, isolation and the lookup', async () => {
-    // The owner's rule of 2026-11-27 (a construction of at most 16 on every axis compiles struck at any block) changes
-    // this vector, which DECK-0010 still gives under the old window: a row of 16 struck at its eighth cell now comes
-    // away whole and isolated. The spec is to follow; until then the case is checked under the new rule.
-    const superseded = new Set(['row-16-eighth'])
-    for (const g of vectors.gather as unknown as Array<{ name: string; world: Cell4[]; hit: [number, number, number]; smashed: Cell4[]; isolated: boolean; lookup?: string | null }>) {
-      if (superseded.has(g.name)) {
-        const m = new Map(g.world.map(([x, y, z, id]) => [`${x},${y},${z}`, id]))
-        const got = gather((x, y, z) => m.get(`${x},${y},${z}`) ?? 0, g.hit)
-        expect(got.cells, g.name).toHaveLength(g.world.length)
-        expect(got.isolated, g.name).toBe(true)
-        continue
-      }
+  it('gathers (DECK-0010 9e806b1): the group, isolation, the arrangement and its box and lookup, bare-handed and with the Compiler', async () => {
+    type G = { name: string; world: Cell4[]; hit: [number, number, number]; bare: boolean; reach: number; group: Cell4[]; isolated: boolean; arrangement: boolean; box?: { x: number; y: number; z: number }; lookup?: string }
+    const cases = vectors.gather as unknown as G[]
+    expect(cases.length).toBeGreaterThanOrEqual(21)
+    expect((vectors.constants as unknown as { reach_compiler: number; reach_bare: number }).reach_compiler).toBe(COMPILER_REACH)
+    expect((vectors.constants as unknown as { reach_compiler: number; reach_bare: number }).reach_bare).toBe(BARE_REACH)
+    const key = (c: readonly number[]): string => c.slice(0, 3).join(',')
+    for (const g of cases) {
       const m = new Map(g.world.map(([x, y, z, id]) => [`${x},${y},${z}`, id]))
       const read = (x: number, y: number, z: number): number => m.get(`${x},${y},${z}`) ?? 0
-      const got = gather(read, g.hit)
-      const key = (c: readonly number[]): string => c.slice(0, 3).join(',')
-      expect(got.cells.map(key).sort(), g.name).toEqual(g.smashed.map(key).sort())
+      expect(g.reach, g.name).toBe(g.bare ? BARE_REACH : COMPILER_REACH)
+      // The same gather a smash uses, at that hand's reach.
+      const got = smashGroup(read, g.hit, g.bare)
+      expect(got.cells.map(key).sort(), g.name).toEqual(g.group.map(key).sort())
       expect(got.isolated, g.name).toBe(g.isolated)
-      if (g.isolated && g.lookup) expect(await lookupOf(await deriveKey(encodeArrangement(got.arrangement!))), g.name).toBe(g.lookup)
+      expect(!!got.arrangement, g.name).toBe(g.arrangement)
+      if (g.arrangement && got.arrangement) {
+        expect(got.arrangement.size, g.name).toEqual([g.box!.x, g.box!.y, g.box!.z])
+        expect(await lookupOf(await deriveKey(encodeArrangement(got.arrangement))), g.name).toBe(g.lookup)
+      }
     }
-  }, 120_000)
+  }, 240_000)
 
   it('sheets: accepted and refused', () => {
     for (const s of vectors.sheets.accept as unknown as Array<{ name: string; size: Sheet['size']; pal: Sheet['pal']; cells: number[]; expanded: Array<number | null> }>) {

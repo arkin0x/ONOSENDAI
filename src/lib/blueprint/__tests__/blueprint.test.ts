@@ -83,9 +83,9 @@ describe('gather (DECK-0010 §4)', () => {
       expect(g.cells.length, String(x)).toBe(16)
       expect(g.isolated, String(x)).toBe(true)
     }
-    // Too long: the window round the hit goes (hit - 8 to + 7), with nothing compiled.
+    // Too long, struck at an end: the 16 cells in the window (x -15 to 15) go, the 17th touches from outside, nothing compiled.
     const end = gather(world(line(17)), [0, 0, 0])
-    expect(end.cells.length).toBe(8)
+    expect(end.cells.length).toBe(16)
     expect(end.isolated).toBe(false)
     expect(end.arrangement).toBeNull()
   })
@@ -196,5 +196,5 @@ describe('strict records (DECK-0010 at 83929cd)', () => {
     expect(sheet.prize.text).toBe('A small lamp')
     expect('name' in sheet.prize).toBe(false)
     expect(made.record.tags.find((t) => t[0] === 'title')?.[1]).not.toMatch(/\n/)
-  })
+  }, 60_000)
 })

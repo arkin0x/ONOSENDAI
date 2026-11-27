@@ -14590,14 +14590,75 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
 }
 .terrain-survey__btn:disabled { opacity: 0.6; cursor: default; }
 
+/* Round the cross (owner's taste: nothing moves, nothing over the controls; review of #948): the hold ring and, under
+   it, its name plate while a hold is up (.hold-ring); just over the ring, what a smash there would do (one 11px line, its
+   slot always kept); over that, the message slot, growing upward. Under the cross belongs to the plate and, on a phone,
+   to the first-visit steps, SMASH and LOOK. On a screen on its side (short) there is no room over the cross either (the
+   steps and the instruments are there), so the line and the message stand beside the ring, to its right, clear of
+   LOOK. Every place is fixed: a hold starting or ending, or a line coming and going, moves nothing. */
+.terrainview {
+  --hold-ring-size: 48px;
+  /* From the centre to the bottom of the preview line: half the ring and a gap. */
+  --terrain-over-cross: calc(var(--hold-ring-size) / 2 + 6px);
+}
+.terrain-smash-preview {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: calc(50% + var(--terrain-over-cross));
+  height: 16px;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+@media (max-height: 520px) {
+  .terrain-smash-preview {
+    bottom: auto;
+    top: calc(50% - 8px);
+    left: calc(50% + var(--terrain-over-cross));
+    justify-content: flex-start;
+  }
+}
+.terrain-smash-preview__text {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #fff;
+  font-size: 11px;
+  line-height: 16px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-shadow: 0 1px 3px #000, 0 0 2px #000;
+  white-space: nowrap;
+}
+.terrain-smash-preview__mark {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  clip-path: polygon(2px 0, 100% 0, 100% calc(100% - 2px), calc(100% - 2px) 100%, 0 100%, 0 2px);
+  box-shadow: 0 0 3px #000;
+}
 .terrain-message {
   position: absolute;
   left: 16px;
   right: 16px;
-  top: calc(50% + 22px);
+  bottom: calc(50% + var(--terrain-over-cross) + 16px + 6px);
   display: flex;
+  align-items: flex-end;
   justify-content: center;
   pointer-events: none;
+}
+/* On its side: right of the ring and its plate, under the preview line, short of LOOK and JUMP at the right edge. */
+@media (max-height: 520px) {
+  .terrain-message {
+    bottom: auto;
+    top: calc(50% + 14px);
+    left: calc(50% + 44px);
+    right: 144px;
+    align-items: flex-start;
+    justify-content: flex-start;
+  }
+  .terrainview .terrain-message__text { text-align: left; }
 }
 .terrain-message__text {
   max-width: 420px;
@@ -14631,14 +14692,14 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
 
 /* A hold's progress at the cross (terrain/HoldRing.tsx; owner, 2026-11-27: "my thumb covers the bar"): a thin ring round
    the cross, filling clockwise from the top over the hold in the action's colour (--hold-colour), four short ticks
-   outside it, and the action's name and the seconds left under it in white on a small chamfered plate, in the message
-   slot's place (hidden while the ring is up, so nothing moves). A plain linear fill: nothing pulses. */
+   outside it, and the action's name and the seconds left under it in white on a small chamfered plate. The message
+   stands over the cross, clear of them (.terrain-message). A plain linear fill: nothing pulses. */
 .hold-ring {
   position: absolute;
   left: 50%;
   top: 50%;
-  width: 48px;
-  height: 48px;
+  width: var(--hold-ring-size, 48px);
+  height: var(--hold-ring-size, 48px);
   transform: translate(-50%, -50%);
   pointer-events: none;
   animation: hold-ring-in 120ms ease-out;
@@ -14677,7 +14738,14 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
 }
 /* The seconds keep one width as they count down, so the plate never changes size. */
 .hold-ring__secs { min-width: 2ch; text-align: right; font-variant-numeric: tabular-nums; letter-spacing: 0.04em; }
-.terrain-message.is-under-hold { visibility: hidden; }
+/* On a short screen the first-visit steps reach the cross: they give way while the ring is up, their slot kept. */
+.terrain-hint.is-under-hold { visibility: hidden; }
+/* A short desktop window (a mouse, under about 520px high) puts the steps on the cross's line, where the preview line
+   and a message stand beside the ring: the steps' box gives way while either shows (its slot kept, so nothing moves).
+   Only with a mouse: on a phone on its side the steps stand clear over the cross, and a new player's step must stay. */
+@media (hover: hover) and (pointer: fine) and (max-height: 520px) {
+  .terrainview:has(.terrain-smash-preview__text, .terrain-message__text) .terrain-hint__box { visibility: hidden; }
+}
 @media (prefers-reduced-motion: reduce) {
   .hold-ring { animation: none; }
 }
@@ -16520,10 +16588,12 @@ div.bpt-tile__hit { cursor: default; }
 @media (max-width: 699px) and (min-height: 521px) {
   .terrain-tools > .terrain-tools__slot--air { position: absolute; grid-area: auto; top: 0; right: calc(100% + 8px); height: 28px; }
 }
-/* A short screen (a phone on its side): the tools stand level with the cross, so the cell under SMASH reaches into the
-   message slot under the cross (--terrain-cross-clear); the stepper stands over SMASH instead, above the cross's line. */
+/* A short screen (a phone on its side): the tools stand level with the cross, so the cell under SMASH reaches toward
+   the hold ring's name plate under the cross; the stepper stands over PLACE instead, above the cross's line. The
+   preview line and the message stand right of the ring there, clear of it (.terrain-smash-preview, .terrain-message). */
 @media (max-height: 520px) {
-  .terrain-tools > .terrain-tools__slot--air { position: absolute; grid-area: auto; bottom: calc(100% + 4px); right: 0; height: 28px; }
+  /* Over PLACE, the tool it serves: over SMASH it reached the hold ring's name plate in a short window (review of #949). */
+  .terrain-tools > .terrain-tools__slot--air { position: absolute; grid-area: auto; bottom: calc(100% + 4px); left: 0; height: 28px; }
 }
 /* The frame: TERRAIN's chamfer, the line and fill of every tool, in three cells: nearer, the distance, farther. */
 .terrain-air {
@@ -16600,6 +16670,10 @@ div.bpt-tile__hit { cursor: default; }
 }
 /* A narrow window held upright: SMASH stands right beside the stepper, so the hint stays in the tooltip. */
 @media (hover: hover) and (pointer: fine) and (max-width: 699px) and (min-height: 521px) {
+  .terrain-air__hint { display: none; }
+}
+/* A short window: the hint would reach toward the cross and the hold ring's plate, so it stays in the tooltip too. */
+@media (hover: hover) and (pointer: fine) and (max-height: 520px) {
   .terrain-air__hint { display: none; }
 }
 /* ===== end TERRAIN: the ghost block's distance (air-place) ===== */

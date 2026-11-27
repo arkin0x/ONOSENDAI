@@ -50,6 +50,7 @@ import { BARE_HOLD_MS, COMPILER_HOLD_MS, RESOLVE_AFTER_MS } from '../lib/bluepri
 import { PrizeCard, PrizeFlights, PrizePicker, PrizeStrip, usePrizesHere } from './PrizePanel'
 import { useBlueprintTool } from '../store/useBlueprintTool'
 import { recordAtCursor } from '../lib/blueprint/capture'
+import { previewColor, previewLine, useSmashPreview } from '../lib/blueprint/smashPreview'
 import { useAirPlace } from '../store/useAirPlace'
 import { AirStepper } from './AirStepper'
 
@@ -275,6 +276,28 @@ function useCompiling(): boolean {
     return () => clearTimeout(t)
   }, [show])
   return late && show?.outcome === 'pending'
+}
+
+/**
+ * What a smash at the cross would do, in one line just over the hold ring's place (scene/SmashPreview.tsx pulses the
+ * blocks): COMPILES for a construction, BREAKS and the count for anything else, with a mark in the pulse's colour. Its
+ * slot is always there, whether a ring is up or not, so nothing moves when it or a hold comes and goes (styles.css
+ * --terrain-over-cross). Over the cross (beside the ring on a screen on its side) it never covers the first-visit
+ * steps, SMASH or LOOK.
+ */
+export function SmashPreviewLabel(): JSX.Element {
+  const state = useSmashPreview((s) => s.state)
+  const count = useSmashPreview((s) => s.count)
+  return (
+    <div className="terrain-smash-preview" aria-live="off">
+      {state && (
+        <span className={`terrain-smash-preview__text terrain-smash-preview__text--${state}`}>
+          <span className="terrain-smash-preview__mark" style={{ background: previewColor(state) }} aria-hidden />
+          {previewLine(state, count)}
+        </span>
+      )}
+    </div>
+  )
 }
 
 /** The survey target, looked at a few times a second (it follows the body and the look). */
@@ -546,13 +569,19 @@ function TerrainScreen({ covered }: { covered: boolean }): JSX.Element {
       <span className="terrain-crosshair" aria-hidden />
       {/* A SMASH or SURVEY hold's progress round the cross, where you look, not under your thumb (owner, 2026-11-27). */}
       <HoldRing />
+      {/* What a smash at the cross would do, just over the ring's place, or beside it on a screen on its side (it stays put whether a ring is up or not). */}
+      <SmashPreviewLabel />
 
-      {/* What just happened (a refusal, a survey), under the cross, in a slot of its own: up to two lines, nothing moves.
-          While a hold's ring is up its name and seconds take this place, so the slot is hidden (kept) under them. */}
-      <div className={`terrain-message${holding || smashing ? ' is-under-hold' : ''}`} role="status" aria-live="polite">{message ? <span className="terrain-message__text">{message}</span> : compiling ? <span className="terrain-message__text terrain-message__text--compiling">COMPILING</span> : catching ? <span className="terrain-message__text">{standing}</span> : null}</div>
+      {/* What just happened (a refusal, a survey), in a slot of its own, nothing moves: over the preview line, growing
+          upward, clear of the hold ring and its plate under the cross and of the controls under it (review of #948);
+          on a screen on its side, beside the ring instead (styles.css). */}
+      <div className="terrain-message" role="status" aria-live="polite">{message ? <span className="terrain-message__text">{message}</span> : compiling ? <span className="terrain-message__text terrain-message__text--compiling">COMPILING</span> : catching ? <span className="terrain-message__text">{standing}</span> : null}</div>
 
-      {/* The first visit's three steps, just over the hotbar, in a slot of its own. */}
-      <div className="terrain-hint" aria-live="polite">
+      {/* The first visit's three steps, the RECORD strip or the prize strip, just over the hotbar, in a slot of its own.
+          While a SMASH or SURVEY hold's ring is up, the whole slot is hidden, its place kept, on every screen (on a short
+          one it reaches the cross). Separately, in a short mouse window only, the steps' box also gives way while the
+          preview line or a message shows (styles.css). */}
+      <div className={`terrain-hint${holding || smashing ? ' is-under-hold' : ''}`} aria-live="polite">
         {capturing ? (
           <span className="prize-strip prize-strip--record" role="group" aria-label="Record a blueprint">
             <span className="prize-strip__count">Aim at a build that stands alone</span>

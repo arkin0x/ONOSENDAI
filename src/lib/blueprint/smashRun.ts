@@ -12,7 +12,7 @@
  */
 
 import { sha256 } from '@noble/hashes/sha2.js'
-import { useTerrain, terrainSession, cellInReach, OUT_OF_REACH } from '../../store/useTerrain'
+import { useTerrain, terrainSession, cellInReach, compilerInHand, OUT_OF_REACH } from '../../store/useTerrain'
 import { useSmashFx } from '../../store/useSmashFx'
 import { useBlueprints } from '../../store/useBlueprints'
 import { useCyberspace } from '../../store/useCyberspace'
@@ -22,21 +22,17 @@ import { followsKnown } from '../../store/terrainShare'
 import { cancelSmashHold as cancelHold, startSmashHold, useSmashHold } from '../../terrain/smashHold'
 import { humStart, humStop, impact, whoosh } from './smashSound'
 import { terrainCursor } from '../../scene/TerrainLayer'
-import { isCompiler } from '../terrain/terrainDb'
 import { query } from '../relay'
 import { regionKeyAt } from '../shardCrypto'
 import { bytesToHex, type NostrEvent } from '../events'
 import { readItem, SHARD_KIND } from '../hidden'
 import { heldFromEntry } from '../inventory'
-import { BARE_HOLD_MS, COMPILER_HOLD_MS, MISS_LINE, RESOLVE_AFTER_MS, SWING_MS, compile, dropStep, relayAsker, smashGroup, type Found, type SmashDeps } from './smash'
+import { BARE_HOLD_MS, COMPILER_HOLD_MS, RESOLVE_AFTER_MS, SWING_MS, compile, compiles, dropStep, missLine, relayAsker, smashGroup, type Found, type SmashDeps } from './smash'
 import { readRecord, type Prize, type RecordEvent } from './format'
 import type { ToyRow } from './blueprintDb'
 
-/** Whether the Compiler is the chosen slot (otherwise the hand is bare). */
-export function compilerInHand(): boolean {
-  const inv = useTerrain.getState().inventory
-  return isCompiler(inv.hotbar[inv.slot])
-}
+// Whether the Compiler is the chosen slot (otherwise the hand is bare): with the terrain store, where the preview asks it too.
+export { compilerInHand } from '../../store/useTerrain'
 
 /** Start the smash hold at the block under the cross: COMPILER_HOLD_MS with the Compiler, BARE_HOLD_MS bare (lib/blueprint/smash.ts). */
 export function holdSmash(): void {
@@ -141,7 +137,7 @@ export async function strike(target: readonly [number, number, number], bare: bo
   if (!found.length) {
     useSmashFx.getState().resolve(id, 'miss')
     // Only what this code does: no recheck happens later, and a prize of an unknown type is not opened (review of #943).
-    useTerrain.getState().say(offline ? OFFLINE_LINE : unknown ? UNKNOWN_LINE : MISS_LINE)
+    useTerrain.getState().say(missLine(compiles(g.arrangement, bare), offline, unknown > 0))
     return
   }
   useSmashFx.getState().resolve(id, 'match')
@@ -160,10 +156,8 @@ export async function strike(target: readonly [number, number, number], bare: bo
   if (more) useTerrain.getState().say(MORE_LINE)
 }
 
-/** What a smash says when no relay answered and nothing on this device matched. */
-export const OFFLINE_LINE = 'No relay answered, so only blueprints on this device were checked. Nothing compiled. The blocks are spent.'
-/** When it compiled into a prize this version cannot open. */
-export const UNKNOWN_LINE = 'It compiled into something this version cannot open yet.'
+// The lines a smash with no prize leaves live with the rules (smash.ts missLine).
+export { OFFLINE_LINE, UNKNOWN_LINE } from './smash'
 /** When more matched than one smash opens. */
 export const MORE_LINE = 'More may be waiting: this smash opened the first ones it found.'
 

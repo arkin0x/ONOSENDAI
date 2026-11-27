@@ -174,6 +174,12 @@ function keep(p: Promise<void> | undefined): void {
   void p?.catch(() => { /* kept in memory for this session */ })
 }
 
+/** Whether the Compiler is the chosen slot (otherwise the hand is bare: lib/blueprint/smash.ts). */
+export function compilerInHand(): boolean {
+  const inv = useTerrain.getState().inventory
+  return isCompiler(inv.hotbar[inv.slot])
+}
+
 /** Where you are, as the field loads round it and reach is measured from it: the walk's gibson (the cursor) while walking, your head otherwise. */
 export function headNow(): Position {
   const cs = useCyberspace.getState()

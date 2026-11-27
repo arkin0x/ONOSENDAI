@@ -165,6 +165,24 @@ describe('tapRaycast: a target is placed when a ray asks (2026-10-20)', () => {
     // MIN_TARGET_PX across at 10 units: its world size is that many pixels' worth.
     expect(w.target.scale.x * pxPerUnit(FOV, 800, 10)).toBeCloseTo(MIN_TARGET_PX)
   })
+
+  it('a coin at its true size (`side`, `minVisible`) takes no taps under MIN_VISIBLE_PX, a fingertip over it above that, and the coin itself once larger', () => {
+    // 10 units off on an 800 px view: one render unit is pxPerUnit(FOV, 800, 10) pixels.
+    const perUnit = pxPerUnit(FOV, 800, 10)
+    const at = (side: number) => world(() => ({ px: MIN_TARGET_PX, side, at: [0, 0, 0], minVisible: true }))
+    const speck = at((MIN_VISIBLE_PX - 0.5) / perUnit)
+    expect(speck.hits(0, 0)).toBe(0)
+    const small = at((MIN_VISIBLE_PX + 0.5) / perUnit)
+    expect(small.hits(0, 0)).toBeGreaterThan(0)
+    expect(small.target.scale.x * perUnit).toBeCloseTo(MIN_TARGET_PX)
+    expect(small.target.userData.tapPriority).toBe('mark')
+    const large = at(3 * MIN_TARGET_PX / perUnit)
+    expect(large.hits(0, 0)).toBeGreaterThan(0)
+    expect(large.target.scale.x * perUnit).toBeCloseTo(3 * MIN_TARGET_PX)
+    expect(large.target.userData.tapPriority).toBe('box')
+    // Without `minVisible` a mark keeps its fingertip however small its side: a message's box, as before.
+    expect(world(() => ({ px: MIN_TARGET_PX, side: 1e-9, at: [0, 0, 0] })).hits(0, 0)).toBeGreaterThan(0)
+  })
 })
 
 describe('a dimmed occluder is tapped through (arkinox, 2026-11-09)', () => {

@@ -1,8 +1,9 @@
 /**
  * keyCube.test.tsx: a key with no model of its own is a real 1-gibson cube
  * in the world, exactly like a message's box (owner, 2026-11-22, after
- * #870). A key that wears a model draws as before; coins and Cyberspace TV's
- * finds keep their screen-sized marks; a held key keeps its half box.
+ * #870). A key that wears a model draws as before; a coin is one gibson too
+ * (owner, 2026-11-27, CoinMark); Cyberspace TV's finds keep their
+ * screen-sized marks; a held key keeps its half box.
  *
  * Mounted as the scene mounts it (WorldMessages, items from the store) in a
  * real R3F root (test/r3fRoot.ts): real three objects, frames, camera and
@@ -49,7 +50,7 @@ import { r3fRoot, type R3fRoot } from '../../test/r3fRoot'
 import { useCyberspace } from '../../store/useCyberspace'
 import { useInventory } from '../../store/useInventory'
 import { useShards, type WorldItem } from '../../store/useShards'
-import { ItemMark, keyBoxSide, markFadeLeft, MARK_FADE_MS, noteBoxSide, WorldMessages } from '../WorldMessages'
+import { coinSide, ItemMark, keyBoxSide, markFadeLeft, MARK_FADE_MS, noteBoxSide, WorldMessages } from '../WorldMessages'
 import { lettersDrawn, LETTER_GIBSONS } from '../LetterField'
 import { ItemToken, TOKEN_CORE, TOKEN_OUTLINE } from '../ItemToken'
 import { SEE_THROUGH_BLEND } from '../shardFaces'
@@ -414,12 +415,16 @@ describe('what keeps its look', () => {
     expect(m.depthWrite).toBe(false)
   })
 
-  it('a coin keeps its screen-sized diamond', async () => {
+  it('a coin is one gibson tip to tip in the world, no longer a screen-sized diamond (owner, 2026-11-27)', async () => {
     r = await scene([worldMessage('3'.repeat(64), TOKEN)])
-    const { edges, widths } = await measure(r, BACKS.slice(0, 2), false)
-    // It turns, so its outline's width wobbles a little frame to frame; its size on screen holds while it stands three times as far.
-    expect(Math.abs(widths[1] - widths[0]) / widths[0]).toBeLessThan(0.05)
-    expect(edges[1]).toBeGreaterThan(edges[0] * 2)
+    const { widths } = await measure(r, BACKS.slice(0, 2), false)
+    let diamond: Object3D | undefined
+    r.state().scene.traverse((o) => { if (o.name === 'coin-mark') diamond = o })
+    expect(diamond).toBeDefined()
+    // Its diamond (1 tip to tip in its own geometry) is drawn at coinSide, whatever the distance.
+    expect(diamond!.getWorldScale(new Vector3()).x).toBeCloseTo(coinSide(0), 9)
+    // So three times as far it is about a third as wide on screen (it turns, so its outline's width wobbles a little).
+    expect(widths[1]).toBeLessThan(widths[0] / 2)
   })
 
   it('a Cyberspace TV find (ItemMark, as TvFinds draws it, no side) keeps its screen-sized cube', async () => {

@@ -158,14 +158,21 @@ interface Props {
    * headlamp's reach (lib/markerSize.ts recedeShare):
    *   - 'name': the item's name, held at its size and faded out far off
    *     (NAME_FADE), its `sub` credit line faded first (CREDIT_FADE);
-   *   - 'credit': a label that is only a credit line, faded as one;
-   *   - 'mark': a glyph that is part of the mark (the coin's ₿), shrunk at
-   *     the mark's own rate so it stays inside it.
+   *   - 'credit': a label that is only a credit line, faded as one.
    * Either way its pixel offset from the anchor and a `clear` marker's floor
    * recede with the mark, so the label keeps its place by the mark. Absent,
    * the label holds its pixel height at any depth, as every other label does.
    */
-  recede?: 'name' | 'credit' | 'mark'
+  recede?: 'name' | 'credit'
+  /**
+   * A size in the world instead of on screen: one local unit, the text's
+   * height, is `side` units of its parent's frame at any distance, so it
+   * grows and shrinks with what it is part of. The coin's ₿, drawn at the
+   * coin's true size (WorldMessages CoinMark; it was a 'mark' that recede
+   * shrank, until coins took their true size). It still faces the camera.
+   * `px` is not read with it, and it takes no `clear` or `recede`.
+   */
+  side?: number
 }
 
 /** How far under the name's middle its credit line's middle is, in the name's line heights. */
@@ -180,7 +187,7 @@ export function subBottom(subScale: number): number {
 
 export function WorldLabel({
   text, color, at, follow, offset = [0, 0, 0], offsetPx = [0, 0], px = 14, opacity = 1, fade, align = 'left',
-  small, smallScale = 0.68, sub, subScale = 0.72, subColor, subOpacity = 0.7, clear, fromCamera, recede,
+  small, smallScale = 0.68, sub, subScale = 0.72, subColor, subOpacity = 0.7, clear, fromCamera, recede, side,
 }: Props): JSX.Element {
   const group = useRef<Group>(null)
   const inner = useRef<Group>(null)
@@ -206,11 +213,11 @@ export function WorldLabel({
     const projScale = projScaleOf(state.size.height, cam.fov)
     const reach = headlampUniforms.uHeadlampReach.value
     const mark = recede ? recedeShare(depth, reach, MARK_RECEDE_FLOOR) : 1
-    const unitPx = px * labelShrink(state.size.width) * (recede === 'mark' ? mark : 1)
-    g.scale.setScalar((unitPx * depth) / projScale)
-    // A pixel offset is a place by the mark, so it recedes with the mark. A
-    // 'mark' label's units already shrink at that rate.
-    const near = recede && recede !== 'mark' ? mark : 1
+    const unitPx = px * labelShrink(state.size.width)
+    // A size in the world is the parent's frame's units, at any depth (`side`).
+    g.scale.setScalar(side ?? (unitPx * depth) / projScale)
+    // A pixel offset is a place by the mark, so it recedes with the mark.
+    const near = recede ? mark : 1
     // Lifted clear of its marker: one local unit is `unitPx` pixels.
     if (inner.current && clear) {
       // A box by its reach; a shape or the thing itself by its top on screen, the gap and half the name.

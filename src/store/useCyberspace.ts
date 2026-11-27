@@ -117,8 +117,10 @@ import {
   type SelfCheck,
 } from '../lib/chainHold'
 import { findDivergence, foldBranchConflict, relayVersion, type BranchConflict } from '../lib/branchConflict'
+import { idsOf, sortIncoming } from '../lib/chainOrphans'
 import {
   ACTION_KIND,
+  actionLink,
   buildChain,
   chainHead,
   extendChain,
@@ -379,8 +381,26 @@ function stoppedChainMessage(chain: ActionEvent[]): string | null {
   return broken ? brokenChainMessage(broken) : null
 }
 
+/** What catching up with your other device is, as the HUD and a store action read it (lib/selfSync.ts). */
+export interface ChainCatchUp { pubkey: string; got: number; total: number | null; stuck: boolean; headId: string | null }
+
+/** Why a move waits while the stretch your other device published is fetched (chainCatchUp). */
+export const CATCHING_UP_MESSAGE = 'Catching up with your other device…'
+/** The same, once retries have brought nothing for a while (chainCatchUp `stuck`). */
+export const CATCH_UP_STUCK_MESSAGE = "Your other device's newest moves could not all be fetched yet, so nothing is signed until they are. This device keeps trying."
+
+/** Why no move is signed now because the catch-up is out for the identity in use, or null. */
+function catchUpMessage(): string | null {
+  const s = useCyberspace.getState()
+  const c = s.chainCatchUp
+  if (!c || c.pubkey !== s.identity.pubkey) return null
+  return c.stuck ? CATCH_UP_STUCK_MESSAGE : CATCHING_UP_MESSAGE
+}
+
 export function whyNoMove(chain: ActionEvent[]): string | null {
   if (movementBlocked()) return VERSION_BLOCKED_MESSAGE
+  const catching = catchUpMessage()
+  if (catching) return catching
   const stopped = REFUSE_MOVES_ON_BROKEN_CHAIN ? stoppedChainMessage(chain) : null
   if (stopped) return stopped
   const open = openBracket(chain)
@@ -855,6 +875,18 @@ export interface CyberspaceState {
    */
   chainSync: { pubkey: string; status: 'checking' | 'done' | 'unreachable' } | null
   /**
+   * Catching up with your other device (lib/selfSync.ts): the relays hold a
+   * stretch of your chain newer than the one here, and it is being fetched
+   * a page at a time, kept as it comes (lib/ownBacklog.ts), and adopted in
+   * one go once it is whole. `got` of `total` (null when the canonical
+   * relay could not count them) is the chip's CATCHING UP; `stuck` is
+   * retries that brought nothing (CHAIN NOT CHECKED); `headId` the newest
+   * move from the other device, already shown (showCatchUpHead). No move is
+   * signed while it is set (whyNoMove, confirmHead): the owner's ruling of
+   * 2026-11-27, "show the position at once, keep signing until it's caught up".
+   */
+  chainCatchUp: ChainCatchUp | null
+  /**
    * The chain is HELD: it was started by a first move the relays could not
    * vouch for, so it stays on this device whatever LIVE says (arkinox,
    * 2026-10-01). Lifted silently when the relays answer that there is no
@@ -1234,6 +1266,17 @@ export interface CyberspaceState {
   /** Fold relay events for THIS identity into the live chain, adopting a newer
    * one from another machine. The self-sync loop and login both feed this. */
   adoptChain: (events: NostrEvent[]) => void
+  /**
+   * Show you at once where another device of yours has got to: `ev`, its
+   * newest move, of this chain (the same spawn), signature checked, newer
+   * than the head here. Only the view moves (position, and the eye if you
+   * were at your head); the chain in hand, its head and every move signed
+   * from it stay as they are until the stretch before `ev` is adopted.
+   * False when it was not shown.
+   */
+  showCatchUpHead: (ev: NostrEvent) => boolean
+  /** Set or end the catch-up the HUD shows (chainCatchUp). Ending it puts the view back on the chain in hand if a head shown early never arrived in it. */
+  setChainCatchUp: (next: ChainCatchUp | null) => void
   /** The tracked targets as things the HUD can point at. */
   targetList: () => CyberTarget[]
   /** Sign a template with this identity's active signer. Async because an
@@ -3208,6 +3251,11 @@ export function standingHead(pubkey: string): 'holds' | 'quiet' | 'ask' {
 async function confirmHead(retrying: () => void): Promise<string | null | typeof STALE_CONFIRMATION> {
   const pubkey = useCyberspace.getState().identity.pubkey
   const epoch = chainEpoch
+  // A stretch of the chain another device published is still being fetched:
+  // nothing is signed until it is whole and adopted (chainCatchUp). Said at
+  // once, before any wait, and again after one.
+  const catching = catchUpMessage()
+  if (catching) return catching
   // The page's own look at the relays is still out (CHECKING YOUR CHAIN):
   // this move waits for it, so it starts from what it brings rather than
   // racing it, and then checks here and asks the relays as always below.
@@ -3217,6 +3265,8 @@ async function confirmHead(retrying: () => void): Promise<string | null | typeof
   if (chainSyncOut(pubkey)) {
     await chainSyncSettled(pubkey)
     if (chainEpoch !== epoch) return STALE_CONFIRMATION
+    const caught = catchUpMessage()
+    if (caught) return caught
   }
   const here = await headCheckedHere()
   if (here) return here
@@ -3292,7 +3342,8 @@ function chainSyncOut(pubkey: string): boolean {
 }
 
 async function chainSyncSettled(pubkey: string): Promise<void> {
-  const out = (): boolean => chainSyncOut(pubkey)
+  // A catch-up opening ends the wait too: it says why the move waits (confirmHead).
+  const out = (): boolean => chainSyncOut(pubkey) && catchUpMessage() === null
   if (!out()) return
   const said = useCyberspace.getState().proof
   const speak = said.message === null || said.message === CHECKING_RELAYS_MESSAGE
@@ -5815,6 +5866,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       // say nothing about this one (selfSync.ts asks again on the switch).
       selfCheck: { pubkey: signer.pubkey, status: 'checking' },
       chainSync: null,
+      chainCatchUp: null,
       chainConflict: null,
       forkNotice: null,
       // LIVE or LOCAL is the identity's own: a new one is LIVE, never LOCAL
@@ -6474,6 +6526,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
   forkNotice: null,
   selfCheck: { pubkey: pubkeyHex, status: 'checking' },
   chainSync: null,
+  chainCatchUp: null,
   chainConflict: null,
   publishRequest: 0,
   signerKind: currentSigner.kind,
@@ -7733,7 +7786,7 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     if (adoptMayReadMarks(get(), incoming)) flushPublishMarksNow()
     const cur = get()
     const me = cur.identity.pubkey
-    const mine = incoming.filter((e) => e.pubkey === me)
+    let mine = incoming.filter((e) => e.pubkey === me)
     if (mine.length === 0) return
     // The relay pool checked these signatures on receipt (relay.ts); remember
     // them, so the chain they are saved into is not checked again when it is
@@ -7773,11 +7826,13 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // refused (arkinox, 2026-10-08: the live feed is the early warning).
     if (cur.proof.status === 'computing' && !folding) {
       deferred = deferred.concat(mine)
-      const have = new Set(cur.events.map((e) => e.id))
+      const have = idsOf(cur.events)
       const fresh = mine.filter((e) => !have.has(e.id))
       // A HOSAKA job has its own flow and its own cancel (cancelCloud); its
       // result is refused at signing like any other (finishProof).
       if (fresh.length === 0 || cur.cloud.status !== 'idle') return
+      // Events that link to nothing in hand cannot move its head: no build (lib/chainOrphans.ts).
+      if (cur.genesisId && sortIncoming(fresh, have, cur.genesisId).linked.length === 0) return
       const order = buildChain(cur.events.concat(fresh), me)
       const head = order[order.length - 1]
       if (order.length > 0 && head.id === cur.prevEventId && order[0].fork === undefined) return
@@ -7792,7 +7847,21 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
     // 1,300-action chain, twice per move (arkinox, 2026-10-30: a WALK step
     // took 2 to 6 seconds). Only when the chain in hand reads the way a fold
     // would leave it, which parsedChain answers from its memo.
-    const inHand = new Set(cur.events.map((e) => e.id))
+    const inHand = idsOf(cur.events)
+    // Events whose previous event is not here, or of no chain here, cannot
+    // change the chain in hand, and are set aside after a lookup each,
+    // before anything builds the chain (lib/chainOrphans.ts; the owner's
+    // tablet, 2026-11-27: 500 of them took two whole builds of an
+    // 11,000-event chain apiece). The stretch they hang from is fetched
+    // whole and adopted in one go (lib/selfSync.ts catch-up).
+    if (cur.genesisId) {
+      const fresh = mine.filter((e) => !inHand.has(e.id))
+      if (fresh.length > 0) {
+        const sorted = sortIncoming(fresh, inHand, cur.genesisId)
+        if (sorted.linked.length < fresh.length) mine = mine.filter((e) => inHand.has(e.id)).concat(sorted.linked)
+        if (mine.length === 0) return
+      }
+    }
     if (mine.every((e) => inHand.has(e.id)) && settledChain(cur.events, cur.prevEventId, me)) return
     // This device's unpublished moves fork against moves the relays already
     // hold (another device of yours moved on while this one was LOCAL or
@@ -7883,6 +7952,48 @@ export const useCyberspace = create<CyberspaceState>((set, get, api) => {
       ...(notice ? { forkNotice: notice } : {}),
     })
     saveChain(d.events, d.published, saved.stats)
+  },
+
+  showCatchUpHead: (ev) => {
+    const cur = get()
+    if (ev.pubkey !== cur.identity.pubkey || cur.events.length === 0 || cur.held || cur.chainConflict || cur.proof.status === 'computing') return false
+    const link = actionLink(ev)
+    if (!link || link.genesisId !== cur.genesisId || idsOf(cur.events).has(ev.id)) return false
+    const head = cur.events.find((e) => e.id === cur.prevEventId)
+    if (head && ev.created_at < head.created_at) return false
+    // Shown before anything else checks it: its own signature, once.
+    if (!authentic(ev)) return false
+    const a = parseAction(ev)
+    if (!a) return false
+    const following = cur.atHead()
+    set({
+      position: a.position,
+      plane: a.plane,
+      headPlane: a.plane,
+      ...(following ? { anchor: a.position, anchorPlane: a.plane, ...(cur.walking ? {} : { cursor: a.position }), exploreIndex: null } : {}),
+    })
+    return true
+  },
+
+  setChainCatchUp: (next) => {
+    const cur = get()
+    const prev = cur.chainCatchUp
+    if (next === null) {
+      if (prev === null) return
+      set({ chainCatchUp: null })
+      // A head shown early that the chain in hand did not take (a break in
+      // the stretch, a fork, another chain): the view goes back to where the
+      // chain in hand stands.
+      if (prev.headId && prev.pubkey === cur.identity.pubkey && cur.prevEventId !== prev.headId && cur.events.length > 0) {
+        const actions = parsedChain(cur.events)
+        if (actions.length === 0) return
+        const { position, plane } = standingOf(actions)
+        set({ position, plane, headPlane: plane, ...(cur.atHead() ? { anchor: position, anchorPlane: plane, ...(cur.walking ? {} : { cursor: position }), exploreIndex: null } : {}) })
+      }
+      return
+    }
+    if (prev && prev.pubkey === next.pubkey && prev.got === next.got && prev.total === next.total && prev.stuck === next.stuck && prev.headId === next.headId) return
+    set({ chainCatchUp: next })
   },
 
   setTargetChain: (pubkey, events, status) => {

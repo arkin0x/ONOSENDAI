@@ -59,7 +59,11 @@ import { newestOnRelays } from '../../store/useCyberspace'
 import type { NostrEvent } from '../events'
 
 const S = () => useCyberspace.getState()
-const settle = async (): Promise<void> => { for (let i = 0; i < 8; i++) await new Promise((r) => setTimeout(r, 0)) }
+// Live events are folded together after LIVE_BATCH_MS (lib/selfSync.ts): a settle waits that out first.
+const settle = async (): Promise<void> => {
+  await new Promise((r) => setTimeout(r, 60))
+  for (let i = 0; i < 8; i++) await new Promise((r) => setTimeout(r, 0))
+}
 
 /** `n` actions after the head, as another device of yours would sign them. */
 function movesAfter(n: number, from: NostrEvent = S().events[S().events.length - 1]): NostrEvent[] {
@@ -176,6 +180,8 @@ describe('the page\'s first look at the relays, as the HUD reads it', () => {
     useCyberspace.setState({ chainSync: null })
     recheckNow()
     expect(S().chainSync).toEqual({ pubkey: S().identity.pubkey, status: 'checking' })
+    // The check first reads back what an earlier catch-up kept (lib/ownBacklog.ts), then asks.
+    await settle()
     answer([{ url: DEFAULT_RELAY, outcome: 'answered', events: S().events }])
     await settle()
     expect(S().chainSync).toEqual({ pubkey: S().identity.pubkey, status: 'done' })
@@ -192,6 +198,7 @@ describe('the page\'s first look at the relays, as the HUD reads it', () => {
     net.check = () => new Promise((r) => { answer = r })
     recheckNow()
     expect(S().chainSync).toEqual({ pubkey: S().identity.pubkey, status: 'unreachable' })
+    await settle()
     answer([{ url: DEFAULT_RELAY, outcome: 'unreachable', reason: 'no answer in time', events: [] }])
     await settle()
     // A catch-up that hears nothing leaves it up: silence is not an answer.

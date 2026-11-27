@@ -305,6 +305,32 @@ export function byAuthorKind(db: IDBDatabase, pubkey: string, kind: number, limi
 }
 
 /**
+ * One author's events of one kind from `since` on (inclusive), newest first,
+ * that some relay sent or took (`seen`): what a catch-up already fetched of
+ * your own chain, read back after a reload (lib/ownBacklog.ts). A row only
+ * this device ever had (an unpublished move a fold dropped) is left out:
+ * read back beside the relays' moves it would look like a fork on them.
+ */
+export async function seenSince(db: IDBDatabase, pubkey: string, kind: number, since: number, limit = READ_LIMIT_DEFAULT, now = Date.now()): Promise<NostrEvent[]> {
+  const seconds = Math.floor(now / 1000)
+  const os = db.transaction(EVENTS, 'readonly').objectStore(EVENTS).index('byAuthorKind')
+  return new Promise((resolve, reject) => {
+    const out: NostrEvent[] = []
+    if (limit <= 0) { resolve(out); return }
+    const req = os.openCursor(IDBKeyRange.bound([pubkey, kind, since], [pubkey, kind, Infinity]), 'prev')
+    req.onerror = () => reject(req.error ?? new Error('IndexedDB read failed'))
+    req.onsuccess = () => {
+      const c = req.result
+      if (!c) { resolve(out); return }
+      const row = c.value as EventRow
+      if (alive(row, seconds) && Array.isArray(row.seen) && row.seen.length > 0) out.push(eventOf(row))
+      if (out.length >= limit) { resolve(out); return }
+      c.continue()
+    }
+  })
+}
+
+/**
  * The newest second a read of everyone's events looks at. A movement action may
  * claim any time (a chain has its own clock), so one dated far ahead by a
  * throwaway key would otherwise sit on top of every limited read forever.

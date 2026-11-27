@@ -31,7 +31,7 @@
 import type { Filter } from 'nostr-tools/filter'
 import { RECOGNIZED_ACTIONS, actionLink, buildChain, chainGap, newestSpawn, parseAction, type ActionEvent, type NostrEvent } from './events'
 import { nip19 } from 'nostr-tools'
-import { CYBERSPACE_RELAY, signInOwed, authPending, dropRelays, query, queryEach, queryEachSettled, readRelaySet, subscribe } from './relay'
+import { CYBERSPACE_RELAY, signInOwed, authPending, dropRelays, query, queryEach, queryEachSettled, readRelaySet, subscribe, type ReadOptions } from './relay'
 import { normalizeURL } from 'nostr-tools/utils'
 import { PARTIAL_CHAIN_REASON, mergeAnswers, type RelayAnswer, AUTH_STALLED } from './relayOutcome'
 import { chainHolders, noteHoldersFrom } from './chainHolders'
@@ -118,6 +118,64 @@ export function newestSpawnId(events: NostrEvent[], pubkey?: string): string | n
 /** The most extra questions one chain fetch asks to fill holes (chainGap). */
 export const MAX_CHAIN_PAGES = 60
 
+/**
+ * Past the first answer, a long stretch of your own chain (another device's
+ * moves) is paged as a catch-up, not as a head check (owner's tablet,
+ * 2026-11-27: 3,760 moves behind, 28 MB, the self-check gave up at its
+ * 60-question cap with nothing kept):
+ *
+ * | | Head check | Catch-up pages (chainPages) |
+ * |---|---|---|
+ * | relays | every read relay, each to its deadline | the canonical relay and the relays known to hold the chain that answered the first question (pageRelays): never a hung one, a dead one, or the read-only old relay, a mirror nothing takes a head from |
+ * | a relay still sending | cut off at the deadline | given CHAIN_STREAM: each event buys quietMs more, up to capMs |
+ * | signatures | as each event lands | in the worker (offThread) |
+ * | bound | MAX_CHAIN_PAGES questions | CATCH_UP_MAX_PAGES questions, and one deadline over the whole attempt (`deadline`) |
+ * | what each page brought | in memory, lost with a hole | handed to `onAnswers` as it lands, so it is kept (lib/ownBacklog.ts) and the next attempt starts from it |
+ */
+export interface ChainPageOptions {
+  /** Each relay's checked answer, as it lands, the first question's included. */
+  onAnswers?: (answers: RelayAnswer[]) => void
+  /** When this attempt stops asking for more pages (ms since the epoch); a hole left then is a hole. */
+  deadline?: number
+  maxPages?: number
+  /** Called once, when the first answer left a hole and the pages begin: the stretch is longer than one answer. */
+  onPaging?: () => void
+}
+
+/** How long a catch-up page waits for a relay before its first event; CHAIN_STREAM stretches it while events keep coming. */
+export const CHAIN_PAGE_MS = 6000
+/** A relay still sending a page is not cut off: each event buys this much more, up to the cap. */
+export const CHAIN_STREAM = { quietMs: 3000, capMs: 30_000 }
+/**
+ * The first question of the self-check streams too, with a shorter cap:
+ * every relay is asked it, and its answer waits for the slowest, so a slow
+ * one holds CHECKING YOUR CHAIN up to capMs rather than CHAIN_CHECK_MS. Its
+ * newest page is about 3.6 MB on a long chain (7 KB a hop), which a slow link
+ * did not finish in 6 s.
+ */
+export const FIRST_STREAM = { quietMs: 1500, capMs: 12_000 }
+/** The most pages one catch-up attempt asks: 3,760 moves is 8 pages, a whole 11,000-move chain 23. The deadline usually ends one first. */
+export const CATCH_UP_MAX_PAGES = 200
+
+/**
+ * The relays a catch-up pages from after the first question: the canonical
+ * relay and every relay known to hold this chain (chainHolders), or that
+ * sent some of it just now, among those that answered the first question
+ * (`first`). Never the read-only old relay. The canonical relay alone when
+ * none is left.
+ */
+export function pageRelays(pubkey: string, first: RelayAnswer[] | undefined): string[] {
+  const canonical = normalizeURL(CYBERSPACE_RELAY)
+  const want = new Set<string>([canonical, ...[...chainHolders(pubkey)].map((u) => normalizeURL(u))])
+  if (first) for (const a of first) if (a.events.length > 0) want.add(normalizeURL(a.url))
+  let out = [...want].filter((u) => !isReadFallbackRelay(u))
+  if (first) {
+    const answered = new Set(first.filter((a) => a.outcome === 'answered').map((a) => normalizeURL(a.url)))
+    out = out.filter((u) => answered.has(u))
+  }
+  return out.length > 0 ? out : [canonical]
+}
+
 
 /**
  * A chain fetch that could not fill a hole: some event of the chain is on no
@@ -178,6 +236,7 @@ async function gatherChain<T>(
   byAuthor: (t: T, pubkey: string) => T,
   since?: number,
   askBoth?: (fs: Filter[]) => Promise<T>,
+  paging?: { ask: (f: Filter) => Promise<T>; deadline?: number; maxPages?: number; onPaging?: () => void },
 ): Promise<{ got: T; whole: boolean }> {
   // Whatever a relay sends back, only the identity's own events are kept:
   // the filter asks for that author, but a relay that ignores it must not be
@@ -224,14 +283,19 @@ async function gatherChain<T>(
   if (!spawnId) return { got, whole: true }
   const genesis = spawnId
   const hole = (): ReturnType<typeof chainGap> => chainGap([...have, ...eventsOf(got)], genesis)
-  for (let asked = 0; asked < MAX_CHAIN_PAGES; asked++) {
+  // The pages after the first answer: a catch-up's own way of asking when given (ChainPageOptions).
+  const page = paging ? async (f: Filter): Promise<T> => byAuthor(await paging.ask(f), pubkey) : ask
+  const maxPages = paging?.maxPages ?? MAX_CHAIN_PAGES
+  for (let asked = 0; asked < maxPages; asked++) {
     const gap = hole()
     if (!gap) return { got, whole: true }
+    if (paging?.deadline !== undefined && Date.now() >= paging.deadline) break
+    if (asked === 0) paging?.onPaging?.()
     const before = eventsOf(got).length
-    got = combine(got, await ask(chainFilter(pubkey, genesis, gap.until)))
+    got = combine(got, await page(chainFilter(pubkey, genesis, gap.until)))
     if (eventsOf(got).length > before) continue
     asked++
-    got = combine(got, await ask({ kinds: [KIND], authors: [pubkey], ids: [gap.missingId] }))
+    got = combine(got, await page({ kinds: [KIND], authors: [pubkey], ids: [gap.missingId] }))
     if (eventsOf(got).length === before) break
   }
   return { got, whole: hole() === null }
@@ -251,10 +315,43 @@ const CHAIN_READ = { evenHung: true, perRelay: true }
  * hole loop. Only events `pubkey` signed are returned.
  * Rejects with ChainGapError when a hole could not be filled.
  */
-export async function fetchChainEvents(pubkey: string, knownSpawnId?: string, have: NostrEvent[] = [], since?: number): Promise<NostrEvent[]> {
-  const { got, whole } = await gatherChain((f) => query(f, { ...CHAIN_READ, offThread: true }), (e) => e, mergeEvents, pubkey, knownSpawnId, have, ownEvents, since)
+export async function fetchChainEvents(pubkey: string, knownSpawnId?: string, have: NostrEvent[] = [], since?: number, opts: ChainPageOptions = {}): Promise<NostrEvent[]> {
+  // What each relay said to the first question decides where the pages come from (pageRelays).
+  let first: RelayAnswer[] | undefined
+  const heard = (answers: RelayAnswer[]): void => { first = first ? combineAnswers(first, answers) : answers; opts.onAnswers?.(answers) }
+  const paging = {
+    ask: (f: Filter) => query(f, { offThread: true, perRelay: true, stream: CHAIN_STREAM, only: pageRelays(pubkey, first), onAnswers: opts.onAnswers }),
+    deadline: opts.deadline,
+    maxPages: opts.maxPages ?? CATCH_UP_MAX_PAGES,
+    onPaging: opts.onPaging,
+  }
+  const { got, whole } = await gatherChain((f) => query(f, { ...CHAIN_READ, offThread: true, onAnswers: heard }), (e) => e, mergeEvents, pubkey, knownSpawnId, have, ownEvents, since, undefined, paging)
   if (!whole) throw new ChainGapError(got)
   return got
+}
+
+/**
+ * The self-check's questions, as a catch-up asks them (ChainPageOptions).
+ * The first (the spawns, the newest page) goes to every read relay, each
+ * answer its own, streamed (FIRST_STREAM) and checked in the worker. A page
+ * after it (a filter with `until`, or the missing event by id) goes only to
+ * the relays that answered the first and hold the chain (pageRelays),
+ * streamed (CHAIN_STREAM); past the attempt's deadline nothing more is asked,
+ * and the hole left is a hole. Every answer goes to `onAnswers` as it lands.
+ */
+function catchUpAsk(pubkey: string, opts: ChainPageOptions): (f: Filter, maxWait: number, read: ReadOptions) => Promise<RelayAnswer[]> {
+  let first: RelayAnswer[] | undefined
+  let paging = false
+  return async (f, maxWait, read) => {
+    if (f.until === undefined && !f.ids) {
+      const answers = await queryEach(f, maxWait, { ...read, offThread: true, stream: FIRST_STREAM, onAnswers: opts.onAnswers })
+      first = first ? combineAnswers(first, answers) : answers
+      return answers
+    }
+    if (opts.deadline !== undefined && Date.now() >= opts.deadline) return []
+    if (!paging) { paging = true; opts.onPaging?.() }
+    return queryEach(f, CHAIN_PAGE_MS, { perRelay: true, offThread: true, stream: CHAIN_STREAM, only: pageRelays(pubkey, first), onAnswers: opts.onAnswers })
+  }
 }
 
 /** How long the own-chain check waits for each relay's real answer, per question. */
@@ -268,7 +365,10 @@ const LATE_CHALLENGE_MS = 1000
  * chain came back with a hole (markPartial). The self-check decides from these whether
  * this identity has a chain, has none, or cannot be told (chainHold.ts).
  */
-export async function askChainEvents(pubkey: string, knownSpawnId?: string, have: NostrEvent[] = []): Promise<RelayAnswer[]> {
+export async function askChainEvents(pubkey: string, knownSpawnId?: string, have: NostrEvent[] = [], opts: ChainPageOptions = {}): Promise<RelayAnswer[]> {
+  // Every question below asked as a catch-up asks it (catchUpAsk), under the
+  // name of the read it stands in for.
+  const queryEach = catchUpAsk(pubkey, opts)
   const read = (): ReturnType<typeof gatherChain<RelayAnswer[]>> => gatherChain((f) => queryEach(f, CHAIN_CHECK_MS, CHAIN_READ), mergeAnswers, combineAnswers, pubkey, knownSpawnId, have,
     (answers, author) => answers.map((a) => ({ ...a, events: ownEvents(a.events, author) })))
   let { got, whole } = await read()

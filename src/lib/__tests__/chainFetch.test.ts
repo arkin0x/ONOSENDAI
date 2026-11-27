@@ -139,7 +139,7 @@ describe('fetching a chain by its genesis', () => {
   it('a chain longer than the paging budget is reported as partial too', async () => {
     const chain = chainOf(3 * (MAX_CHAIN_PAGES + 4))
     relays = one(chain)
-    await expect(fetchChainEvents(pk)).rejects.toBeInstanceOf(ChainGapError)
+    await expect(fetchChainEvents(pk, undefined, [], undefined, { maxPages: MAX_CHAIN_PAGES })).rejects.toBeInstanceOf(ChainGapError)
   })
 
   it('with the genesis known, asks for the spawns and the chain at once', async () => {

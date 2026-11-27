@@ -130,6 +130,8 @@ function keptHere(events: CyberspaceState['events'], published: CyberspaceState[
  *
  * | State | Chip |
  * |---|---|
+ * | a stretch another device of yours published is being fetched (store chainCatchUp) | CATCHING UP got / total (got alone when the relay could not count) |
+ * | the same, after retries that brought nothing | CHAIN NOT CHECKED |
  * | the page's first look at the relays is out | CHECKING YOUR CHAIN |
  * | the relays could not be asked | CHAIN NOT CHECKED |
  * | LOCAL, moves kept on this device | LOCAL: n KEPT HERE |
@@ -140,8 +142,10 @@ function keptHere(events: CyberspaceState['events'], published: CyberspaceState[
  * (ChainStatus.tsx), and is not repeated here. With the gate open, unsent
  * moves are on their way, and a failed send says so there too.
  */
-export function chainChipState(s: Pick<CyberspaceState, 'identity' | 'chainSync' | 'events' | 'published' | 'live' | 'held' | 'chainConflict'>, gateOpen = false): string {
+export function chainChipState(s: Pick<CyberspaceState, 'identity' | 'chainSync' | 'events' | 'published' | 'live' | 'held' | 'chainConflict'> & Partial<Pick<CyberspaceState, 'chainCatchUp'>>, gateOpen = false): string {
   if (s.events.length === 0 || s.held || s.chainConflict) return ''
+  const catching = s.chainCatchUp?.pubkey === s.identity.pubkey ? s.chainCatchUp : null
+  if (catching) return catching.stuck ? 'unchecked' : `catching:${catching.got}:${catching.total ?? ''}`
   const sync = s.chainSync?.pubkey === s.identity.pubkey ? s.chainSync.status : null
   if (sync === 'checking') return 'checking'
   if (sync === 'unreachable') return 'unchecked'
@@ -149,6 +153,13 @@ export function chainChipState(s: Pick<CyberspaceState, 'identity' | 'chainSync'
   const kept = keptHere(s.events, s.published)
   if (kept > 0) return s.live ? `kept:${kept}` : `local:${kept}`
   return ''
+}
+
+/** "1,500 / 3,760" from the chip state `catching:1500:3760`, or "1,500" when the relay could not count. */
+export function catchingUpWords(state: string): string {
+  const [, got, total] = state.split(':')
+  const n = (v: string): string => Number(v).toLocaleString('en-US')
+  return total ? `${n(got)} / ${n(total)}` : n(got)
 }
 
 function ChainExplorerChip(): JSX.Element {
@@ -306,6 +317,15 @@ function ChainExplorerChip(): JSX.Element {
           onPointerDown={pressForkChip}
           label={`Caught up: ${fork.adopted} ${fork.adopted === 1 ? 'move' : 'moves'} from another device. Tap to read why.`}
           words={['CAUGHT UP: ', fork.adopted, fork.adopted === 1 ? ' MOVE' : ' MOVES', ' FROM ANOTHER DEVICE']}
+        />
+      ) : own && chipState.startsWith('catching:') ? (
+        <AheadChip
+          own={own}
+          className="chip explorer__toggle explorer__toggle--syncing"
+          {...noCallout}
+          onPointerDown={pressChip}
+          label={`Catching up with your other device: ${catchingUpWords(chipState)} of its moves fetched. A move waits until this is done.`}
+          words={['CATCHING UP ', catchingUpWords(chipState)]}
         />
       ) : own && chipState === 'checking' ? (
         <AheadChip

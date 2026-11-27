@@ -83,6 +83,10 @@ export const COUNTERS = [
   'bpFound',
   /** Seconds in TERRAIN with the tab on screen. */
   'terrainSec',
+  /** Quarry Charges placed (DECK-0010 §8.6). */
+  'charges',
+  /** Blocks a Quarry Charge's blast cleared. */
+  'quarried',
 ] as const
 export type Counter = (typeof COUNTERS)[number]
 

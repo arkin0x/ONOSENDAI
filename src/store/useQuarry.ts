@@ -20,8 +20,8 @@
  *   within the ten minutes finds them with the time they had left; a switch
  *   of identity reads that identity's own and deletes nothing.
  *
- * `tally` counts charges placed and blocks quarried on this page, for a
- * MINING panel to read once there is one.
+ * MINING counts charges placed and blocks quarried (store/miningStats.ts,
+ * never during a tutorial run); `tally` keeps this page's own.
  */
 
 import { create } from 'zustand'
@@ -32,6 +32,7 @@ import { useSmashFx } from './useSmashFx'
 import { readDrops, writeDrops } from '../lib/terrain/terrainDb'
 import { BLAST_HALF, FUSE_BEEPS, FUSE_MS, bodyAt, blastCells, cellKey, makeDrop, stepCells, tidyDrops, type Drop } from '../lib/terrain/quarry'
 import { blastSound, fuseBeeps, pickupSound } from '../lib/blueprint/smashSound'
+import { noteMining } from './miningStats'
 
 /** One charge burning: where it stands in cyberspace, whose it is, and when it was placed. */
 export interface ArmedCharge {
@@ -102,6 +103,8 @@ export const useQuarry = create<QuarryState>((set, get) => ({
     const o = s.world.origin
     const charge: ArmedCharge = { id: ++nextId, owner: s.owner, plane: s.plane, x: o.x + BigInt(cell[0]), y: o.y + BigInt(cell[1]), z: o.z + BigInt(cell[2]), armedAt: performance.now() }
     set({ charges: [...get().charges, charge], tally: { ...get().tally, placed: get().tally.placed + 1 } })
+    // MINING (store/miningStats.ts; never during a tutorial run), for the identity that placed it.
+    noteMining({ type: 'charge' }, s.owner)
     fuses.set(charge.id, { timer: setTimeout(() => get().detonate(charge.id), FUSE_MS), stop: fuseBeeps(FUSE_BEEPS) })
     return true
   },
@@ -135,6 +138,8 @@ export const useQuarry = create<QuarryState>((set, get) => ({
     const st = get()
     const drops = st.owner === s.owner ? [...st.drops, ...made] : made
     set({ owner: s.owner, drops, version: st.version + 1, tally: { ...st.tally, quarried: st.tally.quarried + taken.length } })
+    // As a smash counts the blocks it cleared: the blocks this blast took, for the identity whose layer it wrote.
+    if (taken.length) noteMining({ type: 'blast', blocks: taken.length }, s.owner)
     persist(s.owner, drops)
     schedulePrune()
     // Standing in the blast: what is round you now is collected at once.

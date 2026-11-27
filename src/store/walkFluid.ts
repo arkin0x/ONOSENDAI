@@ -8,7 +8,7 @@
  *
  * | Part | What happens |
  * |---|---|
- * | input | what is held (store/walkHold.ts heldNow), or a tap's short nudge, is the way to go: forward and the sides along the way you face, laid flat across gravity; with gravity off, JUMP and DOWN push up and down |
+ * | input | what is held (store/walkHold.ts heldNow), or a tap's short nudge, is the way to go: forward and the sides along the way you face, laid flat across gravity; with gravity off, forward and back go along the whole look (pitch included), the sides stay level, and JUMP and DOWN push up and down |
  * | speed | it picks up toward FLUID_MAX_SPEED, and slows to a stop when let go; the parked slowdown (store/walkLimits.ts SYNC_SLOWDOWN_ON, off since 2026-11-22) would ease the cap from 15 events ahead of the chain (store/walkAhead.ts eventsAhead, lib/fluidWalk.ts syncSpeedFactor) |
  * | the fluid pause | 21 events ahead of the chain fluid WALK switches itself off and the walk goes on as the step WALK; at 15 or fewer it comes back on (store/fluidSwitch.ts fluidPauseCheck, checked here whenever the count can change) |
  * | the anchor | when the smooth position passes half a step from its gibson's middle, the walk takes one legal step there (store/useWalk.ts fluidCross): a straight step, or a diagonal near a corner; the step goes to the chain as a press's would, so the chain only ever sees whole gibsons |
@@ -875,7 +875,8 @@ function wishNow(now: number, gravity: boolean, g: AxisDirection): Vec {
   // With no facing to go by (the first frame), the screen's axes, as a press took.
   const forward: Vec = walkFacing.valid ? walkFacing.forward : axisVec(moveDirection(axes, 'away'))
   const right: Vec = walkFacing.valid ? walkFacing.right : axisVec(moveDirection(axes, 'right'))
-  return wishOf(forward, right, up, d.fwd, d.strafe, vertical, gravity ? 0 : d.vert)
+  // Gravity off, forward and back follow the whole look, pitch and all (arkinox, 2026-11-27); under gravity they stay on the ground.
+  return wishOf(forward, right, up, d.fwd, d.strafe, vertical, gravity ? 0 : d.vert, !gravity)
 }
 
 const sgn = (n: number): -1 | 0 | 1 => (n > 0 ? 1 : n < 0 ? -1 : 0)

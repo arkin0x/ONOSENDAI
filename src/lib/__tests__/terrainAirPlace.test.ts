@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from 'vitest'
 import {
-  AIR_DEFAULT, AIR_MAX, AIR_MIN, AIR_OCCUPIED, AIR_TOO_CLOSE, airCell, airProblem, bodyCells, clampAirDistance, placeTarget,
+  AIR_DEFAULT, AIR_MAX, AIR_MIN, AIR_OCCUPIED, AIR_TOO_CLOSE, airCell, airCellInto, airProblem, bodyCells, clampAirDistance, placeTarget,
 } from '../terrain/airPlace'
 import { CURSOR_REACH } from '../terrain/world'
 import { raycast } from '../terrain/raycast'
@@ -41,6 +41,13 @@ describe('the ghost\'s cell', () => {
   it('clamps the distance it is given', () => {
     expect(airCell([0, 0, 0], [0, 0, -1], 40)).toEqual([0, 0, -AIR_MAX])
     expect(airCell([0, 0, 0], [0, 0, -1], 0)).toEqual([0, 0, -1])
+  })
+
+  it('written into a kept cell from plain numbers, the same answer, and nothing for a ray with no direction', () => {
+    const out: [number, number, number] = [9, 9, 9]
+    expect(airCellInto(out, 0.4, -0.4, 0, 1, 1, 0, 3)).toBe(true)
+    expect(out).toEqual(airCell([0.4, -0.4, 0], [1, 1, 0], 3))
+    expect(airCellInto(out, 0, 0, 0, 0, 0, 0, 3)).toBe(false)
   })
 
   it('a ray with no direction has no ghost', () => {

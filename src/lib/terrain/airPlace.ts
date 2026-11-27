@@ -49,11 +49,23 @@ export function clampAirDistance(n: number): number {
  * The distance is clamped first (clampAirDistance).
  */
 export function airCell(origin: readonly [number, number, number], dir: readonly [number, number, number], distance: number): Cell | null {
-  const len = Math.hypot(dir[0], dir[1], dir[2])
-  if (!(len > 0)) return null
+  const out: Cell = [0, 0, 0]
+  return airCellInto(out, origin[0], origin[1], origin[2], dir[0], dir[1], dir[2], distance) ? out : null
+}
+
+/**
+ * airCell written into `out`, from plain numbers, for a frame loop that
+ * allocates nothing: true when there is a cell (the ray has a direction).
+ */
+export function airCellInto(out: Cell, ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, distance: number): boolean {
+  const len = Math.hypot(dx, dy, dz)
+  if (!(len > 0)) return false
   const d = clampAirDistance(distance) / len
   // A cell is [n - 0.5, n + 0.5): shifted half a block, its index is a floor (as raycast.ts walks them).
-  return [Math.floor(origin[0] + dir[0] * d + 0.5), Math.floor(origin[1] + dir[1] * d + 0.5), Math.floor(origin[2] + dir[2] * d + 0.5)]
+  out[0] = Math.floor(ox + dx * d + 0.5)
+  out[1] = Math.floor(oy + dy * d + 0.5)
+  out[2] = Math.floor(oz + dz * d + 0.5)
+  return true
 }
 
 /**

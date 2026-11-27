@@ -8,7 +8,8 @@
  *
  * On a desktop the wheel sets the distance while the ghost shows
  * (TerrainView.tsx terrainWheel); the stepper shows there too, with the
- * wheel's hint, so the distance is always in sight while it matters.
+ * wheel's hint beside it (never in the number's cell, where a mouse read as
+ * a zero: review of #949), so the distance is always in sight while it matters.
  */
 
 import { Minus, Mouse, Plus } from 'lucide-react'
@@ -29,12 +30,11 @@ export function AirStepper(): JSX.Element {
     <span className={`terrain-tools__slot terrain-tools__slot--air${shown ? '' : ' is-off'}`} aria-hidden={!shown || undefined}>
       <span className={`terrain-air${ghost === 'bad' ? ' is-bad' : ''}`} role="group" aria-label={`Ghost block distance: ${distance} blocks`} title="How far the ghost block stands: scroll the wheel, or tap − and +">
         <button className="terrain-air__btn" {...noCallout} disabled={!shown || distance <= AIR_MIN} tabIndex={shown ? 0 : -1} onPointerDown={press(-1)} aria-label="Nearer"><Minus size={13} strokeWidth={2.5} aria-hidden /></button>
-        <span className="terrain-air__value" aria-live="polite">
-          <span className="terrain-air__num">{distance}</span>
-          <Mouse className="terrain-air__wheel" size={10} strokeWidth={2.25} aria-hidden />
-        </span>
+        <span className="terrain-air__value" aria-live="polite">{distance}</span>
         <button className="terrain-air__btn" {...noCallout} disabled={!shown || distance >= AIR_MAX} tabIndex={shown ? 0 : -1} onPointerDown={press(1)} aria-label="Farther"><Plus size={13} strokeWidth={2.5} aria-hidden /></button>
       </span>
+      {/* The wheel's hint, where there is a wheel (styles.css), outside the frame with a clear gap. */}
+      <span className="terrain-air__hint" aria-hidden><Mouse size={11} strokeWidth={2} />WHEEL</span>
     </span>
   )
 }

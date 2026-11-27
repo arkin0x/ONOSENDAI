@@ -16576,10 +16576,30 @@ div.bpt-tile__hit { cursor: default; }
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
-.terrain-air.is-bad .terrain-air__value { color: #ffb4b4; }
-/* The wheel's hint, where there is a wheel. */
-.terrain-air__wheel { display: none; opacity: 0.75; }
+.terrain-air.is-bad .terrain-air__value { color: #ffb4b4; border-color: rgba(200, 100, 100, 0.45); }
+/* The wheel's hint, where there is a wheel: beside the frame with a clear gap, dimmer than the number, never in its cell. */
+.terrain-tools__slot--air { position: relative; }
+.terrain-air__hint {
+  position: absolute;
+  left: calc(100% + 8px);
+  top: 50%;
+  transform: translateY(-50%);
+  display: none;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-shadow: 0 1px 2px #000;
+  pointer-events: none;
+}
 @media (hover: hover) and (pointer: fine) {
-  .terrain-air__wheel { display: inline-block; }
+  .terrain-air__hint { display: inline-flex; }
+}
+/* A narrow window held upright: SMASH stands right beside the stepper, so the hint stays in the tooltip. */
+@media (hover: hover) and (pointer: fine) and (max-width: 699px) and (min-height: 521px) {
+  .terrain-air__hint { display: none; }
 }
 /* ===== end TERRAIN: the ghost block's distance (air-place) ===== */

@@ -42,7 +42,7 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import {
-  BoxGeometry, BufferAttribute, BufferGeometry, DoubleSide, EdgesGeometry, Group, InterleavedBuffer, InterleavedBufferAttribute, LineBasicMaterial, Matrix4, Mesh,
+  BoxGeometry, BufferAttribute, BufferGeometry, Color, DoubleSide, EdgesGeometry, Group, InterleavedBuffer, InterleavedBufferAttribute, LineBasicMaterial, Matrix4, Mesh,
   MeshBasicMaterial, Raycaster, Vector2, Vector3, type Data3DTexture, type LineSegments, type Object3D, type Ray, type ShaderMaterial,
 } from 'three'
 import { airRefusal, cellInReach, slotInReach, surveyTarget, terrainSession, useTerrain, type AirAim, type TerrainSession } from '../store/useTerrain'
@@ -68,7 +68,7 @@ import { SmashKick } from './SmashKick'
 import { pickToy } from './toySpots'
 import { usePrizePick } from '../store/usePrizePick'
 import { useAirPlace } from '../store/useAirPlace'
-import { airCell } from '../lib/terrain/airPlace'
+import { airCellInto, type Cell } from '../lib/terrain/airPlace'
 import { isCompiler } from '../lib/terrain/terrainDb'
 import { edgeSegments, outlineLines, outlineMaterial as sharedOutline, sizeOutline } from './hiddenParts'
 
@@ -445,11 +445,31 @@ const GHOST_EDGES = edgeSegments(new BoxGeometry(1.004, 1.004, 1.004))
 const GHOST_LINE = '#ffffff'
 const GHOST_FILL = 0.32
 const GHOST_BAD_FILL = 0.12
+const GHOST_LINE_COLOUR = new Color(GHOST_LINE)
+const GHOST_BAD_COLOUR = new Color(OUTLINE_FAR)
+/** How often a ghost that stays in one cell asks again whether a block can go there (a chunk surveyed meanwhile), in milliseconds. */
+const GHOST_RECHECK_MS = 250
 /** The block in hand that PLACE would put down, or null (an empty slot, none left, the Compiler). */
 function heldPlaceable(): number | null {
   const inv = useTerrain.getState().inventory
   const id = inv.hotbar[inv.slot]
   return id && !isCompiler(id) && (inv.counts[id] ?? 0) > 0 ? id : null
+}
+
+/** A ghost's cell and eye, kept and written over, so a frame allocates nothing: one for the cursor, one for a press at a point. */
+interface AirScratch { cell: Cell; eye: [number, number, number] }
+const hoverAir: AirScratch = { cell: [0, 0, 0], eye: [0, 0, 0] }
+const pressAir: AirScratch = { cell: [0, 0, 0], eye: [0, 0, 0] }
+
+/**
+ * The ghost along a ray in the field's frame (`from`, `toward`, as Marks
+ * casts them), written into `out`: none when a block was hit or none is in
+ * hand (lib/terrain/airPlace.ts).
+ */
+function airAimInto(out: AirScratch, hit: RayHit | null, origin: Vector3, dir: Vector3, distance: number): AirAim | null {
+  if (hit || heldPlaceable() === null) return null
+  out.eye[0] = origin.x - 0.5; out.eye[1] = origin.y - 0.5; out.eye[2] = origin.z - 0.5
+  return airCellInto(out.cell, out.eye[0], out.eye[1], out.eye[2], dir.x, dir.y, dir.z, distance) ? out : null
 }
 
 const ray = new Raycaster()
@@ -479,6 +499,8 @@ function Marks({ axes }: { axes: ViewAxes }): JSX.Element {
   const outlineMaterial = useMemo(() => makeOutlineMaterial(OUTLINE), [])
   useEffect(() => () => outlineMaterial.dispose(), [outlineMaterial])
   const ghostGroup = useRef<Group>(null)
+  /** The ghost's last answer (can a block go there?), asked again only when what it depends on changes, or every GHOST_RECHECK_MS; and the colours last set. */
+  const ghostSeen = useRef({ cx: NaN, cy: NaN, cz: NaN, ex: NaN, ey: NaN, ez: NaN, head: null as unknown, version: -1, at: -Infinity, bad: false, drawnId: -1, drawnBad: false })
   const ghost = useMemo(() => {
     const fill = new MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: GHOST_FILL, depthWrite: false, ...NO_BLOOM_BLEND })
     fill.toneMapped = false
@@ -516,26 +538,21 @@ function Marks({ axes }: { axes: ViewAxes }): JSX.Element {
     }
     // With no block in reach along the ray `aim` just cast, the ghost at arm's length, while a block is in hand (lib/terrain/airPlace.ts).
     const airDistance = useAirPlace.getState().distance
-    const airAim = (hit: RayHit | null): AirAim | null => {
-      if (hit || heldPlaceable() === null) return null
-      const eye: [number, number, number] = [from.x - 0.5, from.y - 0.5, from.z - 0.5]
-      const cell = airCell(eye, [toward.x, toward.y, toward.z], airDistance)
-      return cell ? { cell, eye } : null
-    }
     terrainCursor.hit = aim(terrainInput.hover)
-    terrainCursor.air = airAim(terrainCursor.hit)
+    terrainCursor.air = airAimInto(hoverAir, terrainCursor.hit, from, toward, airDistance)
     const act = terrainInput.action
     const now = performance.now()
     if (act) {
       terrainInput.action = null
       let hit = act.at ? aim(act.at) : terrainCursor.hit
-      let air = act.at ? airAim(hit) : terrainCursor.air
+      let air = act.at ? airAimInto(pressAir, hit, from, toward, airDistance) : terrainCursor.air
       // One ray for the press: a shard in front takes the tap (R3F's click) and the block behind stays, or the ghost's cell stays open.
       if (hit && shardInFront(hit.distance)) hit = null
       if (air && shardInFront(airDistance)) air = null
       // A prize toy in front takes the tap: its card opens (scene/PrizeToys.tsx), and the block behind stays.
       if (act.at === null) aim(null)
-      const toy = pickToy(from, toward, hit ? hit.distance + 0.5 : CURSOR_REACH + 1)
+      // As far as the block hit, or the ghost: the nearest thing takes the press.
+      const toy = pickToy(from, toward, hit ? hit.distance + 0.5 : air ? airDistance + 0.5 : CURSOR_REACH + 1)
       if (toy) { usePrizePick.getState().select(toy); hidden.current = false; return }
       if (act.kind === 'mine') st.mine(hit)
       else st.place(hit, air)
@@ -555,11 +572,24 @@ function Marks({ axes }: { axes: ViewAxes }): JSX.Element {
     gg.visible = !!air
     if (air) {
       gg.position.set(air.cell[0] + 0.5, air.cell[1] + 0.5, air.cell[2] + 0.5)
-      const bad = airRefusal(s, air) !== null
-      const kind = blockKind(heldPlaceable() ?? 0)
-      ghost.fill.color.set(bad ? OUTLINE_FAR : kind?.color ?? GHOST_LINE)
-      ghost.fill.opacity = bad ? GHOST_BAD_FILL : GHOST_FILL
-      ghost.line.color.set(bad ? OUTLINE_FAR : GHOST_LINE)
+      // Asked again only when the cell, the eye's cell, where you stand or the blocks change (or every GHOST_RECHECK_MS).
+      const g = ghostSeen.current
+      const ex = Math.floor(air.eye![0] + 0.5), ey = Math.floor(air.eye![1] + 0.5), ez = Math.floor(air.eye![2] + 0.5)
+      const head = cs.walking ? cs.cursor : cs.position
+      if (air.cell[0] !== g.cx || air.cell[1] !== g.cy || air.cell[2] !== g.cz || ex !== g.ex || ey !== g.ey || ez !== g.ez || head !== g.head || s.version !== g.version || now - g.at >= GHOST_RECHECK_MS) {
+        g.cx = air.cell[0]; g.cy = air.cell[1]; g.cz = air.cell[2]; g.ex = ex; g.ey = ey; g.ez = ez; g.head = head; g.version = s.version; g.at = now
+        g.bad = airRefusal(s, air) !== null
+      }
+      const bad = g.bad
+      // The colours change only with the block in hand or the answer.
+      const id = heldPlaceable() ?? 0
+      if (id !== g.drawnId || bad !== g.drawnBad) {
+        g.drawnId = id; g.drawnBad = bad
+        if (bad) ghost.fill.color.copy(GHOST_BAD_COLOUR)
+        else ghost.fill.color.set(blockKind(id)?.color ?? GHOST_LINE)
+        ghost.fill.opacity = bad ? GHOST_BAD_FILL : GHOST_FILL
+        ghost.line.color.copy(bad ? GHOST_BAD_COLOUR : GHOST_LINE_COLOUR)
+      }
       sizeOutline(ghost.line, state.size)
       useAirPlace.getState().setGhost(bad ? 'bad' : 'ok')
     } else useAirPlace.getState().setGhost('off')

@@ -43,6 +43,7 @@ const BOXES = {
   commit: '.touchops',
   hint: '.terrain-hint__box',
   air: '.terrain-air',
+  airhint: '.terrain-air__hint',
 }
 /** TERRAIN's own HUD: with the menu open none may stand over its columns (hidden under it on a phone, as WALK's pad is). */
 const TERRAIN = { hotbar: '.terrain-hotbar', survey: '.terrain-act--survey', place: '.terrain-act--place', hint: '.terrain-hint__box', cross: '.terrain-crosshair', air: '.terrain-air' }

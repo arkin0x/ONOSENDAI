@@ -10,7 +10,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { createElement } from 'react'
-import { mount, settled, type Host } from '../../test/elementRoot'
+import { mount, settled, textOf, type Host } from '../../test/elementRoot'
 import { AirStepper } from '../AirStepper'
 import { useAirPlace } from '../../store/useAirPlace'
 import { AIR_DEFAULT, AIR_MAX, AIR_MIN } from '../../lib/terrain/airPlace'
@@ -53,7 +53,27 @@ describe('the ghost block\'s distance', () => {
     await m.unmount()
   })
 
-  it('goes dim red with the ghost where a block cannot go', async () => {
+  it('keeps the wheel\'s hint out of the number\'s cell (a mouse there read as a zero: review of #949)', async () => {
+    useAirPlace.setState({ ghost: 'ok', distance: 3 })
+    const m = await mount(createElement(AirStepper))
+    const value = m.all().find((h) => h.props.className === 'terrain-air__value')!
+    expect(textOf(value)).toBe('3')
+    expect(value.children.every((c) => typeof c === 'string' || c.type === '#text')).toBe(true)
+    const hint = m.all().find((h) => h.props.className === 'terrain-air__hint')!
+    const frame = m.all().find((h) => String(h.props.className).startsWith('terrain-air '))
+      ?? m.all().find((h) => h.props.className === 'terrain-air')!
+    // Beside the frame, not inside it.
+    expect(m.all().filter((h) => h === hint).length).toBe(1)
+    const inFrame = (h: Host): boolean => h.children.some((c) => c === hint || (typeof c !== 'string' && inFrame(c)))
+    expect(inFrame(frame)).toBe(false)
+    const css = readFileSync(resolve(__dirname, '../../styles.css'), 'utf8')
+    expect(css).toMatch(/\.terrain-air__hint \{\n  position: absolute;\n  left: calc\(100% \+ 8px\);/)
+    expect(css).toContain('color: rgba(255, 255, 255, 0.6);')
+    await m.unmount()
+  })
+
+  it('goes dim red with the ghost where a block cannot go, its hairlines too', async () => {
+    expect(readFileSync(resolve(__dirname, '../../styles.css'), 'utf8')).toContain('.terrain-air.is-bad .terrain-air__value { color: #ffb4b4; border-color: rgba(200, 100, 100, 0.45); }')
     useAirPlace.setState({ ghost: 'bad' })
     const m = await mount(createElement(AirStepper))
     expect(m.all().some((h) => String(h.props.className ?? '').includes('terrain-air is-bad'))).toBe(true)

@@ -1,0 +1,225 @@
+/**
+ * smashPreview.ts - what a smash would take, shown before it happens (owner,
+ * 2026-11-27: "while you hold the compiler, the blocks that will be
+ * destroyed/included should pulse a highlight of some color to show whats
+ * being included in the smash").
+ *
+ * The set is exactly what the smash deletes (smash.ts smashGroup: a
+ * construction whole, anything else the connected blocks in the reach's box
+ * round the hit), worked out by the same function, so the preview never
+ * shows one thing and the smash takes another. Its colour tells the outcome:
+ * mint when the set is a construction the smash compiles, the Compiler's
+ * orange when it only breaks. A bare hand compiles the Compiler's recipe and
+ * nothing else (smash.ts compile), so bare-handed any other build only
+ * breaks, even one taken whole.
+ *
+ * The scene draws it (scene/SmashPreview.tsx) and the HUD prints its line
+ * (terrain/TerrainView.tsx SmashPreviewLabel). Here are the rules, without
+ * three or React: the set and its state, the colours, the pulse, the outer
+ * faces of the set as one mesh, and the tracker that works the set out
+ * again only when the aimed cell, the hand or the blocks change, after the
+ * aim has rested PREVIEW_DEBOUNCE_MS.
+ */
+
+import { create } from 'zustand'
+import type { Cell } from './arrangement'
+import { COMPILER_RECIPE, sameArrangement } from './recipes'
+import { smashGroup } from './smash'
+
+/** What the smash would do with the set: compile it (a construction), or only break it. */
+export type PreviewState = 'compiles' | 'breaks'
+
+/** TERRAIN's mint: the set is a construction, and the smash compiles it. */
+export const PREVIEW_COMPILES = '#7cffc4'
+/** The Compiler's orange: the set only breaks. */
+export const PREVIEW_BREAKS = '#f47000'
+
+/** How long the aim rests on a new cell before the set is worked out again (a 31 by 31 by 31 gather with the Compiler). */
+export const PREVIEW_DEBOUNCE_MS = 80
+/** One pulse at rest, in milliseconds. */
+export const PULSE_MS = 1200
+/** The pulse at the end of a SMASH hold, in milliseconds: it quickens with the charge. */
+export const PULSE_FULL_MS = 300
+
+/** The overlay's opacity: the low and high of the pulse, and the steady level with reduced motion. */
+export const PULSE_LOW = 0.16
+export const PULSE_HIGH = 0.5
+export const PULSE_STEADY = 0.34
+
+/** One preview: the cells a smash at `hit` would delete, what it would do with them, and a fast lookup of the cells. */
+export interface Preview {
+  hit: Cell
+  bare: boolean
+  cells: Array<[number, number, number]>
+  state: PreviewState
+  /** Packed cells (packCell), to ask whether a cell is in the set without making strings. */
+  keys: Set<number>
+}
+
+/** A cell as one number (each axis within 2^16 of the field's origin, far more than a field holds), for a Set without strings. */
+const SPAN = 131072
+const HALF = 65536
+export function packCell(x: number, y: number, z: number): number {
+  return ((x + HALF) * SPAN + (y + HALF)) * SPAN + (z + HALF)
+}
+
+/** What a smash at `hit` would do, by the smash's own function (smash.ts smashGroup); null when nothing is there. */
+export function smashPreview(read: (x: number, y: number, z: number) => number, hit: Cell, bare: boolean): Preview | null {
+  const g = smashGroup(read, hit, bare)
+  if (!g.smash.length) return null
+  // A construction compiles with the Compiler; a bare hand compiles only the Compiler's own recipe (smash.ts compile).
+  const compiles = !!g.arrangement && (!bare || sameArrangement(g.arrangement, COMPILER_RECIPE))
+  const keys = new Set<number>()
+  for (const c of g.smash) keys.add(packCell(c[0], c[1], c[2]))
+  return { hit: [hit[0], hit[1], hit[2]], bare, cells: g.smash, state: compiles ? 'compiles' : 'breaks', keys }
+}
+
+/** The colour of a state. */
+export function previewColor(state: PreviewState): string {
+  return state === 'compiles' ? PREVIEW_COMPILES : PREVIEW_BREAKS
+}
+
+/** The line by the cross: COMPILES, or BREAKS and how many blocks. */
+export function previewLine(state: PreviewState, count: number): string {
+  return state === 'compiles' ? 'COMPILES' : `BREAKS ${count}`
+}
+
+/** How long one pulse lasts for a hold `charge` of 0 (none, or not holding) to 1 (about to swing). */
+export function pulsePeriod(charge: number): number {
+  const c = Math.min(1, Math.max(0, charge))
+  return PULSE_MS + (PULSE_FULL_MS - PULSE_MS) * c
+}
+
+/** The overlay's opacity at pulse phase `phase` (turns; 0 and every whole turn is the low); steady with reduced motion. */
+export function pulseOpacity(phase: number, reduced: boolean): number {
+  if (reduced) return PULSE_STEADY
+  return PULSE_LOW + (PULSE_HIGH - PULSE_LOW) * (0.5 - 0.5 * Math.cos(2 * Math.PI * phase))
+}
+
+/** The phase after `dt` milliseconds at hold `charge`: advanced by turns, so a quickening pulse never jumps. */
+export function advancePhase(phase: number, dt: number, charge: number): number {
+  const p = phase + Math.max(0, dt) / pulsePeriod(charge)
+  return p - Math.floor(p)
+}
+
+/** How far the outer faces stand off the blocks' faces, in blocks, so it never fights them. */
+export const FACE_LIFT = 0.006
+
+/** The six faces of a cell: the axis, the side, and the two axes across it in counter-clockwise order seen from outside. */
+const FACES: ReadonlyArray<readonly [number, 1 | -1, number, number]> = [
+  [0, 1, 1, 2], [0, -1, 2, 1],
+  [1, 1, 2, 0], [1, -1, 0, 2],
+  [2, 1, 0, 1], [2, -1, 1, 0],
+]
+
+/**
+ * The set's outer faces as triangles (cells in the field's frame, a cell d spanning d to d + 1): every face of a cell
+ * whose neighbour across it is not in the set, lifted FACE_LIFT off it. One array for the whole set, so it is one
+ * mesh and one draw, never one per cell.
+ */
+export function outerFaces(cells: ReadonlyArray<Cell>, keys: ReadonlySet<number>): Float32Array {
+  // Whether the neighbour across a face is in the set, with no array made per face.
+  const open = (c: Cell, a: number, s: number): boolean => !keys.has(packCell(c[0] + (a === 0 ? s : 0), c[1] + (a === 1 ? s : 0), c[2] + (a === 2 ? s : 0)))
+  let faces = 0
+  for (const c of cells) for (const [a, s] of FACES) if (open(c, a, s)) faces++
+  const out = new Float32Array(faces * 18)
+  let i = 0
+  const v = [0, 0, 0]
+  const put = (base: readonly number[], a: number, s: number, u: number, w: number, du: number, dw: number): void => {
+    v[0] = base[0]; v[1] = base[1]; v[2] = base[2]
+    v[a] += s > 0 ? 1 + FACE_LIFT : -FACE_LIFT
+    v[u] += du; v[w] += dw
+    out[i++] = v[0]; out[i++] = v[1]; out[i++] = v[2]
+  }
+  for (const c of cells) for (const [a, s, u, w] of FACES) {
+    if (!open(c, a, s)) continue
+    // Two triangles across the face: (0,0) (1,0) (1,1) and (0,0) (1,1) (0,1) in its own (u, w).
+    put(c, a, s, u, w, 0, 0); put(c, a, s, u, w, 1, 0); put(c, a, s, u, w, 1, 1)
+    put(c, a, s, u, w, 0, 0); put(c, a, s, u, w, 1, 1); put(c, a, s, u, w, 0, 1)
+  }
+  return out
+}
+
+/** What the tracker is aimed at this frame: the field, the cell, the hand and the blocks' version. */
+export interface PreviewAim {
+  field: object
+  x: number
+  y: number
+  z: number
+  bare: boolean
+  version: number
+}
+
+/**
+ * Works the preview out again only when what it depends on changes (the field, the aimed cell, the hand, the blocks'
+ * version), and only once that has held for PREVIEW_DEBOUNCE_MS: never per frame. While a new aim waits, the old set
+ * stays on screen if the new cell is in it with the same hand (sweeping across one build does not blink), else
+ * nothing is shown, so a stale set never sits on a block it does not hold.
+ */
+export class PreviewTracker {
+  /** The preview worked out last, for `done`; null when there was nothing there. */
+  current: Preview | null = null
+  /** How many times the set was worked out (tests). */
+  computed = 0
+  private doneField: object | null = null
+  private doneX = 0; private doneY = 0; private doneZ = 0
+  private doneBare = false
+  private doneVersion = -1
+  private has = false
+  private seenField: object | null = null
+  private seenX = 0; private seenY = 0; private seenZ = 0
+  private seenBare = false
+  private seenVersion = -1
+  private seenAt = 0
+
+  constructor(private readonly compute: (aim: PreviewAim) => Preview | null, private readonly debounceMs = PREVIEW_DEBOUNCE_MS) {}
+
+  /** Nothing aimed: the preview goes at once. */
+  clear(): void {
+    this.has = false
+    this.current = null
+    this.seenField = null
+  }
+
+  /** One frame's aim; returns what to show now (the preview, the old one while a new aim waits, or null). */
+  step(aim: PreviewAim | null, now: number): Preview | null {
+    if (!aim) { this.clear(); return null }
+    if (this.has && aim.field === this.doneField && aim.x === this.doneX && aim.y === this.doneY && aim.z === this.doneZ && aim.bare === this.doneBare && aim.version === this.doneVersion) {
+      this.seenField = null
+      return this.current
+    }
+    if (aim.field !== this.seenField || aim.x !== this.seenX || aim.y !== this.seenY || aim.z !== this.seenZ || aim.bare !== this.seenBare || aim.version !== this.seenVersion) {
+      this.seenField = aim.field; this.seenX = aim.x; this.seenY = aim.y; this.seenZ = aim.z; this.seenBare = aim.bare; this.seenVersion = aim.version
+      this.seenAt = now
+    }
+    if (now - this.seenAt >= this.debounceMs) {
+      this.computed++
+      this.current = this.compute(aim)
+      this.has = true
+      this.doneField = aim.field; this.doneX = aim.x; this.doneY = aim.y; this.doneZ = aim.z; this.doneBare = aim.bare; this.doneVersion = aim.version
+      this.seenField = null
+      return this.current
+    }
+    // Waiting: the old set only while the new cell is one of its own, with the same hand, in the same field.
+    const old = this.has ? this.current : null
+    if (old && aim.field === this.doneField && aim.bare === old.bare && old.keys.has(packCell(aim.x, aim.y, aim.z))) return old
+    return null
+  }
+}
+
+/** What the HUD prints by the cross: the state and the count of the preview on screen, or nothing. */
+export interface SmashPreviewShown {
+  state: PreviewState | null
+  count: number
+}
+
+/** The preview on screen, for the HUD's line: set by the scene only when it changes, never per frame. */
+export const useSmashPreview = create<SmashPreviewShown>(() => ({ state: null, count: 0 }))
+
+/** Tell the HUD what is shown, only when that changed. */
+export function showPreview(p: Preview | null): void {
+  const state = p?.state ?? null
+  const count = p?.cells.length ?? 0
+  const now = useSmashPreview.getState()
+  if (now.state !== state || now.count !== count) useSmashPreview.setState({ state, count })
+}

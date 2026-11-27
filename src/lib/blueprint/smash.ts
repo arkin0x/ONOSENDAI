@@ -8,7 +8,9 @@
  *    hit, placed or natural ground, within the 16 by 16 by 16 box.
  * 2. Clear them all, as edits in your own layer (store/useTerrain.ts clear):
  *    the blocks are spent whether or not they compile. Nothing is said
- *    before the smash (the Compiler tells you nothing).
+ *    about prizes before the smash (the Compiler tells you nothing); while
+ *    you aim, only what would go, and whether it is a construction, pulses
+ *    (smashPreview.ts, by smashGroup itself).
  * 3. The shatter starts (store/useSmashFx.ts, scene/SmashFx.tsx).
  * 4. (Later: a drop step. An upgraded Compiler could let some of the smashed
  *    blocks fall as small blocks to pick up. `dropStep` below is where it

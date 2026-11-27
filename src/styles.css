@@ -14590,11 +14590,44 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
 }
 .terrain-survey__btn:disabled { opacity: 0.6; cursor: default; }
 
+/* Under the cross, from the top: what a smash there would do (one 11px line), then the message slot. Both start
+   --terrain-cross-clear below the centre, so anything drawn round the cross (a hold ring) sets that once and both move
+   clear of it together. */
+.terrainview { --terrain-cross-clear: 22px; }
+.terrain-smash-preview {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  top: calc(50% + var(--terrain-cross-clear));
+  height: 16px;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+.terrain-smash-preview__text {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #fff;
+  font-size: 11px;
+  line-height: 16px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-shadow: 0 1px 3px #000, 0 0 2px #000;
+  white-space: nowrap;
+}
+.terrain-smash-preview__mark {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  clip-path: polygon(2px 0, 100% 0, 100% calc(100% - 2px), calc(100% - 2px) 100%, 0 100%, 0 2px);
+  box-shadow: 0 0 3px #000;
+}
 .terrain-message {
   position: absolute;
   left: 16px;
   right: 16px;
-  top: calc(50% + 22px);
+  top: calc(50% + var(--terrain-cross-clear) + 20px);
   display: flex;
   justify-content: center;
   pointer-events: none;

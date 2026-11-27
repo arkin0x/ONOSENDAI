@@ -49,6 +49,7 @@ import { BARE_HOLD_MS, COMPILER_HOLD_MS, RESOLVE_AFTER_MS } from '../lib/bluepri
 import { PrizeCard, PrizeFlights, PrizePicker, PrizeStrip, usePrizesHere } from './PrizePanel'
 import { useBlueprintTool } from '../store/useBlueprintTool'
 import { recordAtCursor } from '../lib/blueprint/capture'
+import { previewColor, previewLine, useSmashPreview } from '../lib/blueprint/smashPreview'
 
 /** A press held this long without moving places (a long press). */
 export const LONG_PRESS_MS = 420
@@ -263,6 +264,27 @@ function useCompiling(): boolean {
     return () => clearTimeout(t)
   }, [show])
   return late && show?.outcome === 'pending'
+}
+
+/**
+ * What a smash at the cross would do, in one line just under the cross (scene/SmashPreview.tsx pulses the blocks):
+ * COMPILES for a construction, BREAKS and the count for anything else, with a mark in the pulse's colour. Its slot is
+ * always there, so nothing moves when it comes and goes; it sits under anything round the cross (the
+ * --terrain-cross-clear offset), and the message slot sits under it.
+ */
+export function SmashPreviewLabel(): JSX.Element {
+  const state = useSmashPreview((s) => s.state)
+  const count = useSmashPreview((s) => s.count)
+  return (
+    <div className="terrain-smash-preview" aria-live="off">
+      {state && (
+        <span className={`terrain-smash-preview__text terrain-smash-preview__text--${state}`}>
+          <span className="terrain-smash-preview__mark" style={{ background: previewColor(state) }} aria-hidden />
+          {previewLine(state, count)}
+        </span>
+      )}
+    </div>
+  )
 }
 
 /** The survey target, looked at a few times a second (it follows the body and the look). */
@@ -532,6 +554,7 @@ function TerrainScreen({ covered }: { covered: boolean }): JSX.Element {
   return (
     <div className={`terrainview${covered ? ' is-covered' : ''}${bag ? ' is-bag' : ''}${folded ? ' is-folded' : ''}`} role="group" aria-label="TERRAIN: block tools" aria-hidden={covered || undefined}>
       <span className="terrain-crosshair" aria-hidden />
+      <SmashPreviewLabel />
 
       {/* What just happened (a refusal, a survey), under the cross, in a slot of its own: up to two lines, nothing moves. */}
       <div className="terrain-message" role="status" aria-live="polite">{message ? <span className="terrain-message__text">{message}</span> : compiling ? <span className="terrain-message__text terrain-message__text--compiling">COMPILING</span> : catching ? <span className="terrain-message__text">{standing}</span> : null}</div>

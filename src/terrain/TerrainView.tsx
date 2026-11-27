@@ -21,7 +21,7 @@
  */
 
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
-import { Backpack, Box, Hammer, HandFist, Radar } from 'lucide-react'
+import { Backpack, Bomb, Box, Hammer, HandFist, Radar } from 'lucide-react'
 import { HINT_DONE, headNow, offsetOf, surveyTarget as targetNow, terrainSession, useTerrain } from '../store/useTerrain'
 import { useWalk } from '../store/useWalk'
 import { terrainCursor } from '../scene/TerrainLayer'
@@ -41,7 +41,7 @@ import { noCallout } from '../hooks/useRepeatable'
 import { ShareLine } from './ShareLine'
 import { TerrainCrew, crewChipAsking } from './TerrainCrew'
 import { CrewLayer, CrewPanel, closeCrewLayer } from './CrewPanel'
-import { isCompiler } from '../lib/terrain/terrainDb'
+import { isCompiler, isQuarry } from '../lib/terrain/terrainDb'
 import { HeldCompiler } from './HeldCompiler'
 import { useSmashHold } from './smashHold'
 import { cancelSmashHold, holdSmash } from '../lib/blueprint/smashRun'
@@ -128,6 +128,40 @@ function HeldBlock(): JSX.Element | null {
   )
 }
 
+/**
+ * The Quarry Charge, carried (DECK-0010 §8.6): a small block-like charge in
+ * the same place and the same tilt as a carried block, its casing dark and
+ * banded in the Compiler's orange, with an orange light blinking on top.
+ * CSS 3D, as the block is. Hidden with none left.
+ */
+function HeldCharge(): JSX.Element | null {
+  const n = useTerrain((s) => s.inventory.charges ?? 0)
+  const walking = useWalk((w) => w.behind > 0 || w.open !== null)
+  // A dip each time one is placed (the count changes).
+  const [dip, setDip] = useState(0)
+  const was = useRef(n)
+  useEffect(() => {
+    if (was.current === n) return
+    was.current = n
+    setDip((d) => d + 1)
+  }, [n])
+  if (n <= 0) return null
+  return (
+    <div className={`terrain-held terrain-held--charge${walking ? ' is-walking' : ''}`} aria-hidden>
+      <div key={dip} className={`terrain-held__dip${dip > 0 ? ' is-dipping' : ''}`}>
+        <div className="terrain-held__cube">
+          <span className="terrain-held__face terrain-held__face--top"><span className="terrain-held__lamp" /></span>
+          <span className="terrain-held__face terrain-held__face--front" />
+          <span className="terrain-held__face terrain-held__face--right" />
+          <span className="terrain-held__face terrain-held__face--left" />
+          <span className="terrain-held__face terrain-held__face--back" />
+          <span className="terrain-held__face terrain-held__face--bottom" />
+        </div>
+      </div>
+    </div>
+  )
+}
+
 /** Wheel steps: a notch (this many pixels or more in one event) or small scrolls adding up to it choose the next slot. */
 export const WHEEL_STEP = 40
 
@@ -196,6 +230,25 @@ function Hotbar(): JSX.Element {
             </button>
           )
         }
+        // The Quarry Charges, once compiled, beside the Compiler for good: shown at 0, greyed out and disabled, until more are compiled.
+        if (isQuarry(id)) {
+          const left = inv.charges ?? 0
+          return (
+            <button
+              key={i}
+              className={`terrain-slot terrain-slot--quarry${i === inv.slot ? ' is-on' : ''}${left === 0 ? ' is-out' : ''}`}
+              onClick={(e) => { e.currentTarget.blur(); useTerrain.getState().selectSlot(i) }}
+              disabled={left === 0}
+              aria-label={`Quarry Charges, ${left} left, slot ${i + 1}`}
+              aria-pressed={i === inv.slot}
+              title={left ? `Quarry Charges: ${left}. PLACE one and it clears the blocks round it (${i + 1})` : `No Quarry Charges left: compile more (${i + 1})`}
+            >
+              <span className="terrain-slot__num">{i + 1}</span>
+              <Bomb size={18} strokeWidth={2} aria-hidden />
+              <span className="terrain-slot__count">{left}</span>
+            </button>
+          )
+        }
         const n = id ? inv.counts[id] ?? 0 : 0
         return (
           <button
@@ -237,6 +290,15 @@ function InventorySheet(): JSX.Element | null {
         {/* What scrolls, under a title line that stays: the card's frame and fill stand still around it. */}
         <div className="terrain-sheet__body">
           <p className="terrain-sheet__sub">Kept on this device. Tap a block to put it in slot&nbsp;{inv.slot + 1}.</p>
+          {inv.charges !== undefined && (
+            <div className="terrain-sheet__grid terrain-sheet__grid--tools">
+              <button className={`terrain-kind terrain-kind--quarry${inv.charges === 0 ? ' is-out' : ''}${isQuarry(inv.hotbar[inv.slot]) ? ' is-on' : ''}`} disabled={inv.charges === 0} onClick={() => { const at = inv.hotbar.findIndex(isQuarry); if (at >= 0) useTerrain.getState().selectSlot(at) }} aria-label={`Quarry Charges, ${inv.charges}: choose them`}>
+                <Chamfer size={64}><Bomb size={30} strokeWidth={1.75} aria-hidden /></Chamfer>
+                <span className="terrain-kind__name">Quarry Charge</span>
+                <span className="terrain-kind__count">{inv.charges}</span>
+              </button>
+            </div>
+          )}
           {kinds.length === 0
             ? <p className="terrain-sheet__empty">Nothing yet: mine a block to carry it.</p>
             : (
@@ -315,8 +377,9 @@ function useSurveyTarget(): string | null {
 export function TerrainView({ covered = false }: { covered?: boolean }): JSX.Element | null {
   const active = useTerrain((s) => s.active)
   const compiler = useTerrain((s) => isCompiler(s.inventory.hotbar[s.inventory.slot]))
+  const charge = useTerrain((s) => isQuarry(s.inventory.hotbar[s.inventory.slot]))
   const owns = useTerrain((s) => !!s.inventory.compiler)
-  return active ? <>{owns && <HeldCompiler shown={compiler} />}{!compiler && <HeldBlock />}<TerrainScreen covered={covered} /></> : null
+  return active ? <>{owns && <HeldCompiler shown={compiler} />}{charge ? <HeldCharge /> : !compiler && <HeldBlock />}<TerrainScreen covered={covered} /></> : null
 }
 
 /** A press held longer than this is not a tap: it does not mine. */

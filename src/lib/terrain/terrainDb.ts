@@ -15,8 +15,9 @@
  *   with the removal of the ops it folded, so nothing is ever lost between.
  * - surveyed: the chunks this identity has surveyed. The ground itself is
  *   never stored: everyone computes it again.
- * - meta: the inventory (counts by block id, the hotbar, the chosen slot) and
- *   the first-visit hint's progress.
+ * - meta: the inventory (counts by block id, the hotbar, the chosen slot, the
+ *   Quarry Charges), the first-visit hint's progress, and the Quarry Charge's
+ *   drops still floating (never published).
  *
  * Nothing here is published. The same promise wrapper as the rest of the app
  * (lib/idb.ts); nothing here knows about zustand.
@@ -69,27 +70,44 @@ export interface SurveyedRow {
 
 /**
  * What a builder carries, kept on this device: counts by block id, the nine
- * hotbar slots (a block id, COMPILER_ID, or 0), and the chosen slot.
+ * hotbar slots (a block id, COMPILER_ID, QUARRY_ID, or 0), and the chosen slot.
  * `compiler`: 'made' when this identity made the Compiler from its recipe,
  * 'granted' when a preview build handed it one to test with
  * (lib/blueprint/devGrant.ts; production never does). Once it has, the Compiler
  * always sits in slot 1 (owner, 2026-11-27), and the block slots shift one
  * along: the ninth block slot is pushed off the bar (its blocks stay in the
  * bag).
+ * `charges`: how many Quarry Charges it holds, once it has compiled any
+ * (DECK-0010 §8.6, owner 2026-11-27): no cap, 7 a compile, 1 a placing. From
+ * the first compile on, the charges have the slot after the Compiler for good,
+ * shown at 0 and disabled when none are left.
  */
 export interface Inventory {
   counts: Record<number, number>
   hotbar: number[]
   slot: number
   compiler?: 'made' | 'granted'
+  charges?: number
 }
 
 export const HOTBAR_SLOTS = 9
 /** The Compiler's place in the hotbar: never a block id (those are 1 to 255). */
 export const COMPILER_ID = 1000
+/** The Quarry Charges' place in the hotbar: never a block id either. */
+export const QUARRY_ID = 1001
 
 /** Whether a hotbar entry is the Compiler. */
 export const isCompiler = (id: number): boolean => id === COMPILER_ID
+/** Whether a hotbar entry is the Quarry Charges. */
+export const isQuarry = (id: number): boolean => id === QUARRY_ID
+
+/** What PLACE would put down from the chosen slot: a block with some left, the charges with some left, or null. */
+export function placeable(inv: Inventory): number | null {
+  const id = inv.hotbar[inv.slot]
+  if (!id || isCompiler(id)) return null
+  if (isQuarry(id)) return (inv.charges ?? 0) > 0 ? id : null
+  return (inv.counts[id] ?? 0) > 0 ? id : null
+}
 
 export function emptyInventory(): Inventory {
   return { counts: {}, hotbar: new Array(HOTBAR_SLOTS).fill(0), slot: 0 }
@@ -117,7 +135,36 @@ export function withoutCompiler(inv: Inventory): Inventory {
   const hotbar = [...blocks, ...new Array(HOTBAR_SLOTS).fill(0)].slice(0, HOTBAR_SLOTS)
   const at = inv.hotbar.indexOf(COMPILER_ID)
   const slot = at >= 0 && inv.slot > at ? inv.slot - 1 : at === inv.slot ? 0 : inv.slot
-  return { counts: inv.counts, hotbar, slot }
+  // Everything else it holds stays (the charges among it).
+  const { compiler: _compiler, ...rest } = inv
+  return { ...rest, hotbar, slot }
+}
+
+/**
+ * The charges in the bar, `charges` of them: in the slot after the Compiler
+ * (slot 1 with none), the block slots from there shifted one along, the last
+ * pushed off the bar (its blocks stay in the bag), and the chosen slot
+ * following what it held. Unchanged but for the count when already there.
+ */
+export function withCharges(inv: Inventory, charges: number): Inventory {
+  const n = Math.max(0, Math.floor(charges))
+  const at = isCompiler(inv.hotbar[0]) ? 1 : 0
+  if (inv.hotbar[at] === QUARRY_ID && inv.hotbar.indexOf(QUARRY_ID) === at && inv.hotbar.lastIndexOf(QUARRY_ID) === at) return inv.charges === n ? inv : { ...inv, charges: n }
+  const hotbar: number[] = inv.hotbar.slice(0, at)
+  hotbar.push(QUARRY_ID)
+  // Where each old slot lands, so the chosen one follows what it held.
+  const moved = new Array<number>(inv.hotbar.length).fill(-1)
+  for (let i = 0; i < at; i++) moved[i] = i
+  for (let i = at; i < inv.hotbar.length; i++) {
+    if (isQuarry(inv.hotbar[i])) { moved[i] = at; continue }
+    if (hotbar.length >= HOTBAR_SLOTS) continue
+    moved[i] = hotbar.length
+    hotbar.push(inv.hotbar[i])
+  }
+  while (hotbar.length < HOTBAR_SLOTS) hotbar.push(0)
+  const to = moved[inv.slot] ?? -1
+  const slot = to >= 0 ? to : HOTBAR_SLOTS - 1
+  return { ...inv, hotbar, slot, charges: n }
 }
 
 /** Everything one identity has kept. */
@@ -134,7 +181,7 @@ export interface Kept {
 const pad = (n: number): string => n.toString().padStart(12, '0')
 export const opKey = (owner: string, seq: number): string => `${owner}|${pad(seq)}`
 export const chunkRowKey = (owner: string, chunk: string): string => `${owner}|${chunk}`
-const metaKey = (owner: string, what: 'inventory' | 'hint'): string => `${owner}|${what}`
+const metaKey = (owner: string, what: 'inventory' | 'hint' | 'drops'): string => `${owner}|${what}`
 
 export function openTerrainDb(timeoutMs: number = OPEN_TIMEOUT_MS): Promise<IDBDatabase> {
   const opening = openDatabase(TERRAIN_DB, DB_VERSION, [
@@ -165,15 +212,19 @@ export function tidyInventory(v: unknown): Inventory {
     const id = Number(k)
     if (Number.isInteger(id) && id > 0 && id < 256 && Number.isInteger(n) && n > 0) counts[id] = n
   }
+  // The charges, once any were compiled: a whole count, 0 or more (DECK-0010 §8.6).
+  const charges = Number.isInteger(v.charges) && (v.charges as number) >= 0 ? v.charges as number : null
   const hotbar = new Array(HOTBAR_SLOTS).fill(0).map((_, i) => {
     const id = v.hotbar[i]
-    return Number.isInteger(id) && id > 0 && id < 256 ? id : 0
+    return Number.isInteger(id) && ((id > 0 && id < 256) || (charges !== null && isQuarry(id))) ? id : 0
   })
   const slot = Number.isInteger(v.slot) && v.slot >= 0 && v.slot < HOTBAR_SLOTS ? v.slot : 0
-  const tidy = { counts, hotbar, slot }
+  const tidy: Inventory = { counts, hotbar, slot }
   // The Compiler, once made, is always in slot 1 (withCompiler), whatever was stored.
-  if (v.compiler !== 'made' && v.compiler !== 'granted') return tidy
-  return withCompiler({ ...tidy, hotbar: v.hotbar.slice(0, HOTBAR_SLOTS).map((id, i) => (i === 0 && isCompiler(id) ? id : hotbar[i])) }, v.compiler)
+  const kept = v.compiler !== 'made' && v.compiler !== 'granted' ? tidy
+    : withCompiler({ ...tidy, hotbar: v.hotbar.slice(0, HOTBAR_SLOTS).map((id, i) => (i === 0 && isCompiler(id) ? id : hotbar[i])) }, v.compiler)
+  // And the charges after it (withCharges).
+  return charges === null ? kept : withCharges(kept, charges)
 }
 
 /**
@@ -234,6 +285,21 @@ export function writeSurveyed(db: IDBDatabase, owner: string, chunk: string, t: 
 
 export function writeInventory(db: IDBDatabase, owner: string, inv: Inventory): Promise<void> {
   return putMany(db, META, [{ key: metaKey(owner, 'inventory'), value: inv }])
+}
+
+/**
+ * The Quarry Charge's drops one identity has floating (lib/terrain/quarry.ts),
+ * as one row: kept on this device only, never published, so a reload within
+ * their ten minutes finds them where they were. Read back raw: the caller
+ * tidies them (quarry.ts tidyDrops).
+ */
+export async function readDrops(db: IDBDatabase, owner: string): Promise<unknown> {
+  const row = await request(db.transaction(META, 'readonly').objectStore(META).get(metaKey(owner, 'drops'))) as { value?: unknown } | undefined
+  return row?.value
+}
+
+export function writeDrops(db: IDBDatabase, owner: string, drops: readonly unknown[]): Promise<void> {
+  return putMany(db, META, [{ key: metaKey(owner, 'drops'), value: drops }])
 }
 
 export function writeHint(db: IDBDatabase, owner: string, step: number): Promise<void> {

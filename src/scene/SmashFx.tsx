@@ -350,7 +350,7 @@ export function SmashFx({ axes }: { axes: ViewAxes }): JSX.Element {
     const now = performance.now()
     const t = now - show.struck
     const calm = live.current?.calm ?? reduced
-    const R = live.current?.radius ?? radius
+    const R = Math.max(show.minRadius ?? 0, live.current?.radius ?? radius)
     const [cx, cy, cz] = show.centre
 
     // The shatter, then its triangles freed.

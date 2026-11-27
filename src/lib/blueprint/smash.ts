@@ -25,7 +25,9 @@
  *    Per maker only the newest record counts; muted makers never; yours
  *    first, then people you follow, then everyone else, newest first. The
  *    Compiler's own lookup yields the Compiler alone, so nobody can attach a
- *    stranger's prize to every newcomer's first smash (§6.1).
+ *    stranger's prize to every newcomer's first smash (§6.1). The other game
+ *    recipe, the Quarry Charge's (§8.5), likewise yields seven Quarry
+ *    Charges alone, and only with the Compiler in hand.
  * 6. Prizes appear as toys where the build stood (store/useBlueprints.ts
  *    toys, scene/PrizeToys.tsx); no match leaves grey dust and one line.
  *
@@ -37,7 +39,8 @@
 import { gather, smashCells, type Cell } from './arrangement'
 import { BLUEPRINT_RECORD_KIND, BLUEPRINT_RELAY_READY, WINDOW_ABOVE, WINDOW_BELOW, isPrize, openPrize, readRecord, type Arrangement, type Prize, type RecordEvent } from './format'
 import { keyOf } from './keyClient'
-import { COMPILER_RECIPE, sameArrangement } from './recipes'
+import { COMPILER_RECIPE, QUARRY_CHARGE_COUNT, QUARRY_CHARGE_RECIPE, sameArrangement } from './recipes'
+import { QUARRY_LOOKUP, QUARRY_NAME } from './gameCard'
 import type { NostrEvent } from '../events'
 
 /*
@@ -152,7 +155,7 @@ export async function prizesOf(records: readonly RecordEvent[], lookup: string, 
     if (out.length >= max) { more.left = true; break }
     const v = readRecord(r)!
     const prize = await openPrize(key, v.sealed)
-    // The Compiler comes only from its own recipe (§8.1): a record's tool prize is passed over.
+    // A tool comes only from a game recipe (§5.5, §8.4): a record's tool prize is passed over.
     if (!isPrize(prize) || prize.type === 'tool') {
       // A prize this version cannot open is counted and said in plain words; its record stays on the device (§5.5).
       if (prize && typeof prize === 'object' && !isPrize(prize)) unknown.count++
@@ -171,6 +174,8 @@ export async function compile(a: Arrangement, bare: boolean, deps: SmashDeps): P
   // The Compiler's own recipe yields the Compiler, and only it (§6.1): known by its blocks, so its key is never made twice.
   if (sameArrangement(a, COMPILER_RECIPE)) return { lookup: await compilerRecipeLookup(), found: [{ prize: { type: 'tool', tool: 'compiler' }, name: 'The Compiler', maker: 'game', lookup: await compilerRecipeLookup(), record: null }], offline: false, unknown: 0, more: false }
   if (bare) return { lookup: '', found: [], offline: false, unknown: 0, more: false }
+  // The Quarry Charge's recipe (§8.5) yields seven Quarry Charges from the client's own copy, and records under its lookup are never read (§6.1).
+  if (sameArrangement(a, QUARRY_CHARGE_RECIPE)) return { lookup: QUARRY_LOOKUP, found: [{ prize: { type: 'tool', tool: 'quarry-charge', count: QUARRY_CHARGE_COUNT }, name: QUARRY_NAME, maker: 'game', lookup: QUARRY_LOOKUP, record: null }], offline: false, unknown: 0, more: false }
   const { key, lookup } = await keyOf(a)
   const unknown = { count: 0 }
   const more = { left: false }

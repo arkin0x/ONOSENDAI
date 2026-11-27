@@ -28,7 +28,8 @@ import { bytesToHex, type NostrEvent } from '../events'
 import { readItem, SHARD_KIND } from '../hidden'
 import { heldFromEntry } from '../inventory'
 import { BARE_HOLD_MS, COMPILER_HOLD_MS, RESOLVE_AFTER_MS, SWING_MS, compile, compiles, dropStep, missLine, relayAsker, smashGroup, type Found, type SmashDeps } from './smash'
-import { readRecord, type Prize, type RecordEvent } from './format'
+import { readRecord, toolCount, type Prize, type RecordEvent } from './format'
+import { isQuarry } from '../terrain/terrainDb'
 import type { ToyRow } from './blueprintDb'
 
 // Whether the Compiler is the chosen slot (otherwise the hand is bare): with the terrain store, where the preview asks it too.
@@ -168,12 +169,18 @@ function prizeEvent(prize: Extract<Prize, { type: 'sno' }>, record: RecordEvent 
   return { id, pubkey: record?.pubkey ?? maker, created_at: record?.created_at ?? Math.floor(Date.now() / 1000), kind: SHARD_KIND, tags: [], content, sig: '' }
 }
 
-/** Take a waiting prize: the Compiler joins the bar, a shard joins ITEMS › OTHER LOOT. True when taken. */
+/** Take a waiting prize: the Compiler joins the bar, Quarry Charges are added to theirs, a shard joins ITEMS › OTHER LOOT. True when taken. */
 export function takeToy(rowKey: string): boolean {
   const bp = useBlueprints.getState()
   const toy = bp.toys.find((t) => t.rowKey === rowKey)
   if (!toy) return false
-  if (toy.prize.type === 'tool') {
+  if (toy.prize.type === 'tool' && toy.prize.tool === 'quarry-charge') {
+    // No cap: each compile adds its count (DECK-0010 §8.6), beside the Compiler for good.
+    const n = toolCount(toy.prize)
+    useTerrain.getState().gainCharges(n)
+    const inv = useTerrain.getState().inventory
+    useTerrain.getState().say(`${n} Quarry Charges: slot ${inv.hotbar.findIndex(isQuarry) + 1}. You have ${inv.charges ?? n}.`)
+  } else if (toy.prize.type === 'tool') {
     const had = useTerrain.getState().inventory.compiler === 'made'
     useTerrain.getState().gainCompiler()
     useTerrain.getState().say(had ? 'You already have the Compiler.' : 'The Compiler is yours: slot 1.')

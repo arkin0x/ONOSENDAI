@@ -65,6 +65,7 @@ import { committedAnchor, committedScale } from '../lib/renderFrame'
 import { TapOccluder } from './TapOccluder'
 import { tapClaimNearer } from './TapTarget'
 import { SmashFx } from './SmashFx'
+import { QuarryFx } from './QuarryFx'
 import { SmashKick } from './SmashKick'
 import { SmashPreview } from './SmashPreview'
 import { pickToy } from './toySpots'
@@ -73,7 +74,8 @@ import { useAirPlace } from '../store/useAirPlace'
 import { airPlacing } from '../store/airSwitch'
 import { SurveyGlow } from './SurveyGlow'
 import { airCellInto, type Cell } from '../lib/terrain/airPlace'
-import { isCompiler } from '../lib/terrain/terrainDb'
+import { isQuarry, placeable } from '../lib/terrain/terrainDb'
+import { ITEM_ORANGE } from '../lib/blueprint/itemMark'
 import { useSurveyHold } from '../terrain/surveyHold'
 import { edgeSegments, outlineLines, outlineMaterial as sharedOutline, sizeOutline } from './hiddenParts'
 
@@ -454,11 +456,9 @@ const GHOST_LINE_COLOUR = new Color(GHOST_LINE)
 const GHOST_BAD_COLOUR = new Color(OUTLINE_FAR)
 /** How often a ghost that stays in one cell asks again whether a block can go there (a chunk surveyed meanwhile), in milliseconds. */
 const GHOST_RECHECK_MS = 250
-/** The block in hand that PLACE would put down, or null (an empty slot, none left, the Compiler). */
+/** What PLACE would put down from the hand, or null (an empty slot, none left, the Compiler): a block, or the charges (terrainDb.ts placeable). */
 function heldPlaceable(): number | null {
-  const inv = useTerrain.getState().inventory
-  const id = inv.hotbar[inv.slot]
-  return id && !isCompiler(id) && (inv.counts[id] ?? 0) > 0 ? id : null
+  return placeable(useTerrain.getState().inventory)
 }
 
 /** A ghost's cell and eye, kept and written over, so a frame allocates nothing: one for the cursor, one for a press at a point. */
@@ -591,7 +591,7 @@ function Marks({ axes }: { axes: ViewAxes }): JSX.Element {
       if (id !== g.drawnId || bad !== g.drawnBad) {
         g.drawnId = id; g.drawnBad = bad
         if (bad) ghost.fill.color.copy(GHOST_BAD_COLOUR)
-        else ghost.fill.color.set(blockKind(id)?.color ?? GHOST_LINE)
+        else ghost.fill.color.set(isQuarry(id) ? ITEM_ORANGE : blockKind(id)?.color ?? GHOST_LINE)
         ghost.fill.opacity = bad ? GHOST_BAD_FILL : GHOST_FILL
         ghost.line.color.copy(bad ? GHOST_BAD_COLOUR : GHOST_LINE_COLOUR)
       }
@@ -668,6 +668,7 @@ export function TerrainLayer({ axes }: { axes: ViewAxes }): JSX.Element {
       <Chunks axes={axes} />
       <Marks axes={axes} />
       <SmashFx axes={axes} />
+      <QuarryFx axes={axes} />
       <SmashKick />
       {/* What the blocks hide takes no tap, in every mode; in TERRAIN a tap on them mines (TapOccluder.tsx). */}
       <TapOccluder distance={(r) => (terrainInput.swallowTap ? 0 : blockOcclusion(terrainSession, axes, r))} claims={terrainClaims} />

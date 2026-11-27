@@ -397,3 +397,76 @@ export function prizeChime(step: number): void {
     }
   } catch { /* silent */ }
 }
+
+/*
+ * The Quarry Charge's sounds (DECK-0010 §8.6; owner, 2026-11-27: "a beep that
+ * speeds up", and the smash's shatter "scaled up" for the blast). Through the
+ * same gates and the same limiter as the smash.
+ */
+
+/**
+ * The fuse's beeps, laid out at once on the audio clock at `times` (ms from
+ * now, lib/terrain/quarry.ts beepTimes), each a little higher than the last.
+ * Returns a stop for a fuse that ends early; nothing sounds when sound is off.
+ */
+export function fuseBeeps(times: readonly number[]): () => void {
+  const ac = ctx()
+  if (!ac) return () => {}
+  preloadSmashSounds()
+  const oscs: OscillatorNode[] = []
+  try {
+    const out = smashOut(ac)
+    const t0 = ac.currentTime + 0.01
+    times.forEach((ms, i) => {
+      const t = t0 + ms / 1000
+      const o = ac.createOscillator()
+      o.type = 'square'
+      o.frequency.setValueAtTime(1480 * Math.pow(2, Math.min(i, 24) / 60), t)
+      const g = ac.createGain()
+      g.gain.setValueAtTime(0.0001, t)
+      g.gain.exponentialRampToValueAtTime(0.05, t + 0.004)
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.07)
+      o.connect(g); g.connect(out)
+      o.start(t); o.stop(t + 0.08)
+      oscs.push(o)
+    })
+  } catch { /* silent */ }
+  return () => { for (const o of oscs) { try { o.stop() } catch { /* already done */ } } }
+}
+
+/** The blast: the smash's impact for `blocks` blocks, under a deeper boom and a second, later break. */
+export function blastSound(blocks: number): void {
+  const ac = ctx()
+  if (!ac) return
+  try {
+    const out = smashOut(ac)
+    const t = ac.currentTime
+    scheduleImpact(ac, out, t, Math.max(64, blocks), buffers)
+    sample(ac, out, buffers, 'boom', t + 0.02, 1, 0.62)
+    sample(ac, out, buffers, 'shatter-big', t + 0.09, 0.7, 0.8)
+    sample(ac, out, buffers, 'rubble-1', t + 0.35, 0.4, 0.75)
+    noise(ac, out, t, 1.4, 900, 60, 0.5, 'lowpass', 0.01)
+  } catch { /* silent */ }
+}
+
+/** A drop collected: a soft rising pair of notes. */
+export function pickupSound(): void {
+  const ac = ctx()
+  if (!ac) return
+  try {
+    const t = ac.currentTime
+    const g = ac.createGain()
+    g.gain.setValueAtTime(0.0001, t)
+    g.gain.exponentialRampToValueAtTime(0.045, t + 0.008)
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.22)
+    g.connect(smashOut(ac))
+    for (const [f, at] of [[880, 0], [1318.5, 0.055]] as const) {
+      const o = ac.createOscillator()
+      o.type = 'sine'
+      o.frequency.setValueAtTime(f, t + at)
+      o.connect(g)
+      o.start(t + at)
+      o.stop(t + at + 0.18)
+    }
+  } catch { /* silent */ }
+}

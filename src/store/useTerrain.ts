@@ -48,7 +48,7 @@ import { generateChunk } from '../lib/terrain/blocksClient'
 import { EMPTY, blockName, kindId, solid as isSolid } from '../lib/terrain/blocks'
 import { terrainWallItems } from '../lib/terrain/walls'
 import {
-  FOLD_AT, HOTBAR_SLOTS, emptyInventory, foldChunk, isCompiler, openTerrainDb, opKey, readKept, readOwner, withCompiler, withoutCompiler, writeHint, writeInventory, writeOps, writeSurveyed,
+  FOLD_AT, HOTBAR_SLOTS, emptyInventory, foldChunk, isCompiler, isQuarry, openTerrainDb, opKey, placeable, readKept, readOwner, withCharges, withCompiler, withoutCompiler, writeHint, writeInventory, writeOps, writeSurveyed,
   type Inventory, type OpRow,
 } from '../lib/terrain/terrainDb'
 import { compilerGranted } from '../lib/blueprint/devGrant'
@@ -59,6 +59,7 @@ import {
   applyCarried, connectShareHost, fieldClosing, liveChanged, noteChange, noteChanges, noteMove, prepareChunk, READ_RING, identityLeaving, readNear, sharedKeys, surveyedForYou, terrainClosed, terrainOpened, viewOf,
 } from './terrainShare'
 import { loadBuilder, releaseBuilderDb } from '../lib/terrain/builderKey'
+import { quarryHooks } from './quarryHooks'
 import './terrainShareLive'
 
 /** The first-visit hint's steps: mine one, place one, open the inventory; then done. */
@@ -158,6 +159,19 @@ export interface TerrainState {
   assignSlot: (id: number, slot?: number) => void
   /** The Compiler joins the bar in slot 1, kept for good (made from its recipe: lib/blueprint/smash.ts). */
   gainCompiler: () => void
+  /** `n` more Quarry Charges (a compile of its recipe gives 7: lib/blueprint/smash.ts); they join the bar after the Compiler, kept for good. */
+  gainCharges: (n: number) => void
+  /** `n` more blocks of kind `id` carried (a drop picked up: store/useQuarry.ts), as mining carries them. */
+  carry: (id: number, n?: number) => void
+  /**
+   * A Quarry Charge's blast (lib/terrain/quarry.ts): every cell given that
+   * mining could take (in reach, in a chunk you can build in, holding a
+   * block), cleared as edits in your own layer in one batch, as mining
+   * would; the rest left as they are. Carries nothing: what mining would have
+   * carried comes back as the `carry` of each cell taken (0 for nothing),
+   * for the drops. `id` is the block as it was drawn, for the shatter.
+   */
+  blast: (cells: ReadonlyArray<readonly [number, number, number]>) => Array<{ at: [number, number, number]; id: number; carry: number }>
   /**
    * Clear cells (cs offsets) to open space as edits in your own layer, as
    * mining would but carrying nothing: a smash spends its blocks (lib/blueprint/smash.ts).
@@ -204,6 +218,12 @@ export function slotInReach(s: Pick<TerrainSession, 'world'>, key: string, head:
   if (!sl) return false
   return TerrainWorld.inReach(32 * sl.off[0], 32 * sl.off[1], 32 * sl.off[2], offsetOf(s, head))
 }
+
+/** The plain words for PLACE with the charges chosen and none left. */
+export const NO_CHARGES = 'No Quarry Charges left: compile more from the Quarry Charge blueprint.'
+
+// Where a Quarry Charge is armed (store/quarryHooks.ts; store/useQuarry.ts sets it).
+export { quarryHooks } from './quarryHooks'
 
 /** The plain words for a block out of reach. */
 export const OUT_OF_REACH = `Too far from your avatar: you build within ${REACH} blocks of it. Hop closer to build here.`
@@ -342,20 +362,25 @@ export const useTerrain = create<TerrainState>((set, get) => ({
     if (yours <= EMPTY) return true
     const was = kindId(yours)
     if (was === 255) return true
+    get().carry(was)
+    return true
+  },
+
+  carry: (id, n = 1) => {
+    if (!(id > EMPTY && id < 255) || !(n > 0)) return
     const inv = get().inventory
-    const counts = { ...inv.counts, [was]: (inv.counts[was] ?? 0) + 1 }
+    const counts = { ...inv.counts, [id]: (inv.counts[id] ?? 0) + n }
     let hotbar = inv.hotbar
     // A kind newly carried takes the first empty slot, so it is ready to place.
-    if (!hotbar.includes(was)) {
+    if (!hotbar.includes(id)) {
       const free = hotbar.indexOf(0)
-      if (free >= 0) { hotbar = [...hotbar]; hotbar[free] = was }
+      if (free >= 0) { hotbar = [...hotbar]; hotbar[free] = id }
     }
-    // With an empty slot chosen, the kind just mined is chosen instead.
-    const slot = hotbar[inv.slot] === 0 && hotbar.includes(was) ? hotbar.indexOf(was) : inv.slot
-    // Everything else the inventory holds (the Compiler and how it came) stays: dropping it here hid the held Compiler
-    // until a reload (owner, 2026-11-27), and a reload then lost a made one.
+    // With an empty slot chosen, the kind just carried is chosen instead.
+    const slot = hotbar[inv.slot] === 0 && hotbar.includes(id) ? hotbar.indexOf(id) : inv.slot
+    // Everything else the inventory holds (the Compiler and how it came, the charges) stays: dropping it here hid the held
+    // Compiler until a reload (owner, 2026-11-27), and a reload then lost a made one.
     saveInventory({ ...inv, counts, hotbar, slot })
-    return true
   },
 
   place: (hit, air) => {
@@ -368,11 +393,12 @@ export const useTerrain = create<TerrainState>((set, get) => ({
     if (!target) {
       // Nothing at the cross with air placing switched off (store/airSwitch.ts): nothing happens, and the first time a
       // page, one quiet word on turning it back on, never a message at every press.
-      if (!hit && !airPlacing() && id && !isCompiler(id) && inv.counts[id] > 0) hintAirOff(get().say)
+      if (!hit && !airPlacing() && placeable(inv) !== null) hintAirOff(get().say)
       return false
     }
     if (isCompiler(id)) { get().say('The Compiler is in your hand: choose a block to place.'); return false }
-    if (!id || !(inv.counts[id] > 0)) { get().say(id ? `No ${blockName(id)} left: mine some first.` : 'Nothing to place: mine a block first.'); return false }
+    if (isQuarry(id) && !((inv.charges ?? 0) > 0)) { get().say(NO_CHARGES); return false }
+    if (!isQuarry(id) && (!id || !(inv.counts[id] > 0))) { get().say(id ? `No ${blockName(id)} left: mine some first.` : 'Nothing to place: mine a block first.'); return false }
     const cell = target.cell
     const [dx, dy, dz] = cell
     if (target.kind === 'air') {
@@ -387,6 +413,13 @@ export const useTerrain = create<TerrainState>((set, get) => ({
     // Never where you stand: the walk's own gibson. Asked first, so a refused place never surveys the chunk for you.
     if (walkerAt(s, cell)) { get().say('You are standing there: step back to place it.'); return false }
     if (!surveyShown(s, slot)) { get().say('Survey this chunk before building in it.'); return false }
+    if (isQuarry(id)) {
+      // A charge is placed like a block but is not one: it arms where it stands and writes nothing until its blast (store/useQuarry.ts).
+      if (quarryHooks.chargeAt?.(cell)) { get().say('A charge is already there.'); return false }
+      if (!quarryHooks.arm?.(cell)) return false
+      saveInventory(withCharges(inv, (inv.charges ?? 0) - 1))
+      return true
+    }
     // Stored and shared as every placed block is: one change in your layer, whether or not it touches another block.
     const change = s.world.setCs(dx, dy, dz, id)
     if (!change) return false
@@ -411,8 +444,9 @@ export const useTerrain = create<TerrainState>((set, get) => ({
     const inv = get().inventory
     const at = slot ?? inv.slot
     if (at < 0 || at >= HOTBAR_SLOTS) return
-    // Slot 1 holds the Compiler for good once it is made (owner, 2026-11-27).
+    // Slot 1 holds the Compiler for good once it is made (owner, 2026-11-27), and the charges keep theirs.
     if (isCompiler(inv.hotbar[at])) { get().say('Slot 1 holds the Compiler: choose another slot.'); return }
+    if (isQuarry(inv.hotbar[at])) { get().say(`Slot ${at + 1} holds the Quarry Charges: choose another slot.`); return }
     const hotbar = inv.hotbar.map((h) => (h === id ? 0 : h))
     hotbar[at] = id
     saveInventory({ ...inv, hotbar, slot: at })
@@ -421,6 +455,35 @@ export const useTerrain = create<TerrainState>((set, get) => ({
 
   gainCompiler: () => {
     saveInventory(withCompiler(get().inventory, 'made'))
+  },
+
+  gainCharges: (n) => {
+    const inv = get().inventory
+    saveInventory(withCharges(inv, (inv.charges ?? 0) + Math.max(0, Math.floor(n))))
+  },
+
+  blast: (cells) => {
+    const s = terrainSession
+    const out: Array<{ at: [number, number, number]; id: number; carry: number }> = []
+    if (!s) return out
+    const changes: Change[] = []
+    for (const c of cells) {
+      // What mining asks of each cell (mine above): in reach, a block there, a chunk you can build in.
+      if (!cellInReach(s, c)) continue
+      const id = s.world.blockCs(c[0], c[1], c[2])
+      if (id <= EMPTY) continue
+      const at = s.world.locate(c[0], c[1], c[2])
+      if (!surveyShown(s, at.slot)) continue
+      // What is yours in that cell: someone else's block taken is gone for you, never carried.
+      const yours = at.slot.own[at.cell]
+      const change = s.world.setCs(c[0], c[1], c[2], EMPTY)
+      if (!change) continue
+      changes.push(change)
+      const carry = yours > EMPTY ? kindId(yours) : 0
+      out.push({ at: [c[0], c[1], c[2]], id, carry: carry === 255 ? 0 : carry })
+    }
+    recordMany(s, changes)
+    return out
   },
 
   clear: (cells) => {
@@ -632,6 +695,7 @@ function makeField(owner: string, plane: number, at: Position): TerrainSession {
       if (compilerGranted() && !inventory.compiler) inventory = withCompiler(inventory, 'granted')
       else if (!compilerGranted() && inventory.compiler === 'granted') inventory = withoutCompiler(inventory)
       useTerrain.setState({ inventory, hint: kept.hint })
+      for (const f of quarryHooks.fieldReady) { try { f(s) } catch { /* one listener failing never stops the field */ } }
     } catch {
       db?.close()
     }

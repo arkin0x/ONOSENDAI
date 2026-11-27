@@ -7,7 +7,8 @@
  * wide screen, where the scene stays beside it) open, and checks that the
  * boxes of the hotbar, SURVEY (with its hold bar), PLACE, CHAT, the walk
  * pad, the menu button, JUMP and DOWN, the LOOK ball, the commit block, the
- * carried block and the first-visit hint do not intersect. With the bag open on a phone (375 and 430 portrait) it
+ * carried block, the first-visit hint and the ghost block's distance stepper (its slot is always kept, so it is measured
+ * shown, as when the ghost block is out) do not intersect. With the bag open on a phone (375 and 430 portrait) it
  * covers everything as the menu does: every point of its card is the card's own, and none of the HUD (the boxes above,
  * the carried block, the instruments and the tutorial card) is left showing under it. Nothing reaches a relay: every
  * socket is answered here. With SHOTS=<dir>, a screenshot of each phone with the bag open is saved there.
@@ -41,9 +42,10 @@ const BOXES = {
   look: '.orbsquare',
   commit: '.touchops',
   hint: '.terrain-hint__box',
+  air: '.terrain-air',
 }
 /** TERRAIN's own HUD: with the menu open none may stand over its columns (hidden under it on a phone, as WALK's pad is). */
-const TERRAIN = { hotbar: '.terrain-hotbar', survey: '.terrain-act--survey', place: '.terrain-act--place', hint: '.terrain-hint__box', cross: '.terrain-crosshair' }
+const TERRAIN = { hotbar: '.terrain-hotbar', survey: '.terrain-act--survey', place: '.terrain-act--place', hint: '.terrain-hint__box', cross: '.terrain-crosshair', air: '.terrain-air' }
 // The carried block (.terrain-held) is under everything by design, menu included, so it is not measured.
 
 const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] })
@@ -63,6 +65,8 @@ for (const size of SIZES) {
     await page.waitForTimeout(3500)
     // A block in hand, so the carried block is drawn and measured too.
     await page.evaluate(async () => { const m = await import('/src/store/useTerrain.ts'); const inv = m.useTerrain.getState().inventory; m.useTerrain.setState({ inventory: { ...inv, hotbar: [8, ...inv.hotbar.slice(1)], counts: { ...inv.counts, 8: 5 }, slot: 0 } }) })
+    // The ghost block's distance stepper, shown in its kept slot (it shows while the ghost block is out: terrain/AirStepper.tsx).
+    await page.addStyleTag({ content: '.terrainview:not(.is-covered):not(.is-folded):not(.is-bag) .terrain-tools__slot--air.is-off { visibility: visible !important; }' })
     await page.waitForTimeout(500)
     if (menu) { await page.evaluate(() => document.querySelector('.hamburger-menu')?.click()); await page.waitForTimeout(1500) }
     const box = (boxes) => Object.fromEntries(Object.entries(boxes).map(([k, sel]) => {
@@ -83,7 +87,7 @@ for (const size of SIZES) {
       else console.log(`${label0}: nothing of TERRAIN's over the menu`)
     }
     const label = `${size.name}${menu ? ', menu open' : ''}`
-    const missing = (menu && size.w < 1101 ? ['menu'] : ['hotbar', 'place', 'pad', 'menu']).filter((k) => !rects[k])
+    const missing = (menu && size.w < 1101 ? ['menu'] : ['hotbar', 'place', 'pad', 'menu', 'air']).filter((k) => !rects[k])
     if (missing.length) { bad++; console.log(`${label}: missing ${missing.join(', ')}`) }
     const keys = Object.keys(rects).filter((k) => rects[k])
     const hits = []

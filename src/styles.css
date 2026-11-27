@@ -16454,3 +16454,76 @@ div.bpt-tile__hit { cursor: default; }
   .bp-place__acts .chest__act, .bp-place__acts .secret__act { min-height: 44px; }
 }
 /* ===== end blueprints: cards in the world (bp-place) ===== */
+
+/* ===== TERRAIN: the ghost block's distance (air-place) ===== */
+/* Beside PLACE while the ghost block shows (terrain/AirStepper.tsx): under SMASH, right of SURVEY's slot, in the
+   tools' free cell. Its slot is always kept, hidden while the ghost is off, so nothing round it ever moves. */
+.terrain-tools > .terrain-tools__slot--air { grid-column: 2; grid-row: 2; height: 38px; }
+.terrain-tools__slot--air.is-off { visibility: hidden; }
+/* A phone held upright: one column, the LOOK ball beside it, so the stepper takes a short row of its own on top,
+   over SMASH; the rows under it keep their places (the tools stand on the pad's bottom). */
+@media (max-width: 699px) and (min-height: 521px) {
+  .terrain-tools { grid-template-rows: 30px 54px 54px 38px; }
+  .terrain-tools > .terrain-act--place { grid-row: 3; }
+  .terrain-tools > .terrain-tools__slot { grid-row: 4; }
+  .terrain-tools > .terrain-tools__slot--smash { grid-row: 2; }
+  .terrain-tools > .terrain-tools__slot--air { grid-column: 1; grid-row: 1; height: 30px; }
+}
+/* The frame: TERRAIN's chamfer, the line and fill of every tool, in three cells: nearer, the distance, farther. */
+.terrain-air {
+  --air-line: var(--terrain-line);
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  grid-template-columns: 26px 1fr 26px;
+  align-items: stretch;
+  width: 86px;
+  height: 100%;
+  background: var(--air-line);
+  clip-path: polygon(var(--terrain-cut) 0, 100% 0, 100% calc(100% - var(--terrain-cut)), calc(100% - var(--terrain-cut)) 100%, 0 100%, 0 var(--terrain-cut));
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+}
+.terrain-air::before {
+  content: "";
+  position: absolute;
+  inset: 1px;
+  z-index: -1;
+  background: var(--terrain-fill);
+  clip-path: polygon(calc(var(--terrain-cut) - 0.6px) 0, 100% 0, 100% calc(100% - var(--terrain-cut) + 0.6px), calc(100% - var(--terrain-cut) + 0.6px) 100%, 0 100%, 0 calc(var(--terrain-cut) - 0.6px));
+}
+/* Where it cannot go: the ghost's dim red, on the line too. */
+.terrain-air.is-bad { --air-line: rgba(200, 100, 100, 0.75); }
+.terrain-air__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  touch-action: none;
+  cursor: pointer;
+}
+.terrain-air__btn:active { background: rgba(124, 255, 196, 0.22); }
+.terrain-air__btn:disabled { opacity: 0.35; cursor: default; }
+.terrain-air__btn:disabled:active { background: transparent; }
+/* The distance in blocks, with a hairline either side, like an inlay. */
+.terrain-air__value {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  border-left: 1px solid rgba(124, 255, 196, 0.22);
+  border-right: 1px solid rgba(124, 255, 196, 0.22);
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.terrain-air.is-bad .terrain-air__value { color: #ffb4b4; }
+/* The wheel's hint, where there is a wheel. */
+.terrain-air__wheel { display: none; opacity: 0.75; }
+@media (hover: hover) and (pointer: fine) {
+  .terrain-air__wheel { display: inline-block; }
+}
+/* ===== end TERRAIN: the ghost block's distance (air-place) ===== */

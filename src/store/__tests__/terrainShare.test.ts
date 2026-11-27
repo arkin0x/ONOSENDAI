@@ -253,6 +253,41 @@ describe('publishing', () => {
   })
 })
 
+describe('a block placed in open air', () => {
+  it('is stored and goes out in your layer exactly as any placed block, touching nothing', async () => {
+    const { base } = await named()
+    const key = await surveyHere()
+    const s = terrainSession!
+    expect(mineSome(1)).toBe(1)
+    const id = Number(Object.keys(T().inventory.counts)[0])
+    T().selectSlot(T().inventory.hotbar.indexOf(id))
+    // An open cell with open space on all six sides, in the chunk you stand in, clear of your body's column.
+    const sl = s.world.slotByKey(key)!
+    const head = useCyberspace.getState().cursor
+    const w = [Number(head.x - s.world.origin.x), Number(head.y - s.world.origin.y), Number(head.z - s.world.origin.z)]
+    const open = (x: number, y: number, z: number): boolean => s.world.blockCs(x, y, z) === EMPTY
+    let cell: [number, number, number] | null = null
+    for (let y = 30; y > 1 && !cell; y--) for (let z = 2; z < 30 && !cell; z++) for (let x = 2; x < 30 && !cell; x++) {
+      const c: [number, number, number] = [32 * sl.off[0] + x, 32 * sl.off[1] + y, 32 * sl.off[2] + z]
+      if (c[0] === w[0] && c[2] === w[2]) continue
+      if (open(...c) && open(c[0] - 1, c[1], c[2]) && open(c[0] + 1, c[1], c[2]) && open(c[0], c[1] - 1, c[2]) && open(c[0], c[1] + 1, c[2]) && open(c[0], c[1], c[2] - 1) && open(c[0], c[1], c[2] + 1)) cell = c
+    }
+    expect(cell).not.toBeNull()
+    expect(T().place(null, { cell: cell!, eye: null })).toBe(true)
+    await flush('test')
+    await settle(100)
+    const ev = published.at(-1)!
+    expect(ev.kind).toBe(LAYER_KIND)
+    const plain = await opened(ev, base)
+    const at = s.world.locate(...cell!).cell
+    const placed = plain.planes.some((pl) => {
+      const idxs = expandRuns(pl.cells, 32768, pl.pal.length)
+      return !!idxs && pl.pal[idxs[at]] === id
+    })
+    expect(placed).toBe(true)
+  })
+})
+
 describe('the Crew', () => {
   it('is written into every layer you publish; adding and removing someone publishes them again', async () => {
     const friend = getPublicKey(generateSecretKey())

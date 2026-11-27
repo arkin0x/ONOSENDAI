@@ -53,6 +53,7 @@ import {
 import { compilerGranted } from '../lib/blueprint/devGrant'
 import type { Position, ViewAxes } from '../lib/space'
 import type { RayHit } from '../lib/terrain/raycast'
+import { airProblem, bodyCells, placeTarget, type Cell } from '../lib/terrain/airPlace'
 import {
   applyCarried, connectShareHost, fieldClosing, liveChanged, noteChange, noteChanges, noteMove, prepareChunk, READ_RING, identityLeaving, readNear, sharedKeys, surveyedForYou, terrainClosed, terrainOpened, viewOf,
 } from './terrainShare'
@@ -145,8 +146,12 @@ export interface TerrainState {
   survey: (key: string) => Promise<void>
   /** Mine the block a ray hit (cs offsets). True when it was mined. */
   mine: (hit: RayHit | null) => boolean
-  /** Place the chosen block on the face a ray hit. True when it was placed. */
-  place: (hit: RayHit | null) => boolean
+  /**
+   * Place the chosen block on the face a ray hit, or, when the ray hit
+   * nothing, in the open-air cell of the ghost at arm's length (`air`,
+   * lib/terrain/airPlace.ts). True when it was placed.
+   */
+  place: (hit: RayHit | null, air?: AirAim | null) => boolean
   selectSlot: (slot: number) => void
   /** Put a block kind in a hotbar slot (the chosen one when absent). */
   assignSlot: (id: number, slot?: number) => void
@@ -346,23 +351,31 @@ export const useTerrain = create<TerrainState>((set, get) => ({
     return true
   },
 
-  place: (hit) => {
+  place: (hit, air) => {
     const s = terrainSession
-    if (!s || !hit) return false
-    if (hit.normal[0] === 0 && hit.normal[1] === 0 && hit.normal[2] === 0) return false
+    if (!s) return false
+    // A hit always comes first; with none, the ghost's cell in open air.
+    const target = placeTarget(hit, hit ? null : air?.cell ?? null)
+    if (!target) return false
     const inv = get().inventory
     const id = inv.hotbar[inv.slot]
     if (isCompiler(id)) { get().say('The Compiler is in your hand: choose a block to place.'); return false }
     if (!id || !(inv.counts[id] > 0)) { get().say(id ? `No ${blockName(id)} left: mine some first.` : 'Nothing to place: mine a block first.'); return false }
-    const cell: [number, number, number] = [hit.cell[0] + hit.normal[0], hit.cell[1] + hit.normal[1], hit.cell[2] + hit.normal[2]]
-    if (!cellInReach(s, cell)) { get().say(OUT_OF_REACH); return false }
+    const cell = target.cell
     const [dx, dy, dz] = cell
+    if (target.kind === 'air') {
+      // In open air: never into a block, never inside your own body (lib/terrain/airPlace.ts).
+      const problem = airProblem(cell, (c) => isSolid(s.world.blockCs(c[0], c[1], c[2])), bodyCells(offsetOf(s, headNow()), air?.eye ?? null))
+      if (problem) { get().say(problem); return false }
+    }
+    if (!cellInReach(s, cell)) { get().say(OUT_OF_REACH); return false }
     // Open space, or a liquid, which a placed block takes the place of.
     if (isSolid(s.world.blockCs(dx, dy, dz))) return false
     const slot = s.world.slotAtCs(dx, dy, dz)
     // Never where you stand: the walk's own gibson. Asked first, so a refused place never surveys the chunk for you.
     if (walkerAt(s, cell)) { get().say('You are standing there: step back to place it.'); return false }
     if (!surveyShown(s, slot)) { get().say('Survey this chunk before building in it.'); return false }
+    // Stored and shared as every placed block is: one change in your layer, whether or not it touches another block.
     const change = s.world.setCs(dx, dy, dz, id)
     if (!change) return false
     record(s, change)
@@ -436,6 +449,26 @@ function restoreZoom(): void {
 export function walkerAt(s: TerrainSession, cell: readonly [number, number, number]): boolean {
   const w = offsetOf(s, headNow())
   return w[0] === cell[0] && w[1] === cell[1] && w[2] === cell[2]
+}
+
+/** The ghost at arm's length, for PLACE (lib/terrain/airPlace.ts): its cell, and where the eye is (the raycast's frame), so your body's cells are kept clear. */
+export interface AirAim { cell: Cell; eye: readonly [number, number, number] | null }
+
+/**
+ * Why a block will not go in the ghost's cell now, in plain words, or null:
+ * a block already there, your own body, out of reach, a chunk you cannot
+ * build in yet. The scene draws the ghost dim red for any of them. Asks only:
+ * nothing is surveyed or changed.
+ */
+export function airRefusal(s: TerrainSession, air: AirAim): string | null {
+  const problem = airProblem(air.cell, (c) => isSolid(s.world.blockCs(c[0], c[1], c[2])), bodyCells(offsetOf(s, headNow()), air.eye))
+  if (problem) return problem
+  if (!cellInReach(s, air.cell)) return OUT_OF_REACH
+  const slot = s.world.slotAtCs(air.cell[0], air.cell[1], air.cell[2])
+  if (!slot) return 'Survey this chunk before building in it.'
+  if (slot.own) return null
+  if (!slot.generated || !slot.inSpace || s.building.has(slot.key) || !surveyedForYou(slot.key)) return 'Survey this chunk before building in it.'
+  return null
 }
 
 /**

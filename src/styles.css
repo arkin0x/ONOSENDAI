@@ -14629,6 +14629,59 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
 .terrain-crosshair::before { left: 8px; top: 0; width: 2px; height: 18px; }
 .terrain-crosshair::after { top: 8px; left: 0; height: 2px; width: 18px; }
 
+/* A hold's progress at the cross (terrain/HoldRing.tsx; owner, 2026-11-27: "my thumb covers the bar"): a thin ring round
+   the cross, filling clockwise from the top over the hold in the action's colour (--hold-colour), four short ticks
+   outside it, and the action's name and the seconds left under it in white on a small chamfered plate, in the message
+   slot's place (hidden while the ring is up, so nothing moves). A plain linear fill: nothing pulses. */
+.hold-ring {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 48px;
+  height: 48px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  animation: hold-ring-in 120ms ease-out;
+}
+.hold-ring__svg { display: block; overflow: visible; filter: drop-shadow(0 0 3px rgba(0, 0, 0, 0.9)); }
+.hold-ring__track { fill: none; stroke: var(--hold-colour); stroke-opacity: 0.22; stroke-width: 2; }
+.hold-ring__fill {
+  fill: none;
+  stroke: var(--hold-colour);
+  stroke-width: 2.5;
+  filter: drop-shadow(0 0 3px var(--hold-colour));
+  animation: hold-ring-fill var(--hold-ms, 4s) linear forwards;
+}
+.hold-ring__tick { stroke: var(--hold-colour); stroke-opacity: 0.75; stroke-width: 1.5; }
+@keyframes hold-ring-fill { from { stroke-dashoffset: var(--ring-c); } to { stroke-dashoffset: 0; } }
+@keyframes hold-ring-in { from { opacity: 0; } to { opacity: 1; } }
+.hold-ring__label {
+  position: absolute;
+  left: 50%;
+  top: calc(100% + 4px);
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 2px 8px;
+  white-space: nowrap;
+  background: rgba(2, 5, 9, 0.55);
+  box-shadow: inset 0 -1px 0 var(--hold-colour);
+  clip-path: polygon(4px 0, 100% 0, 100% calc(100% - 4px), calc(100% - 4px) 100%, 0 100%, 0 4px);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.4;
+  letter-spacing: 0.16em;
+  text-shadow: 0 1px 3px #000;
+}
+/* The seconds keep one width as they count down, so the plate never changes size. */
+.hold-ring__secs { min-width: 2ch; text-align: right; font-variant-numeric: tabular-nums; letter-spacing: 0.04em; }
+.terrain-message.is-under-hold { visibility: hidden; }
+@media (prefers-reduced-motion: reduce) {
+  .hold-ring { animation: none; }
+}
+
 /* The hotbar: nine slots and the bag, a slim row just over WALK's LOOK ball and pad. */
 .terrain-hotbar {
   position: fixed;
@@ -14723,7 +14776,9 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
   cursor: pointer;
 }
 .terrain-act--place { height: 54px; }
-/* SURVEY's hold: a bar fills under the label over the 5 seconds (terrain/surveyHold.ts), and empties when let go. */
+/* A hold's small bar on its button, for a key held on a desktop: it fills over the hold (--hold-ms, terrain/surveyHold.ts
+   and lib/blueprint/smash.ts) and empties when let go. On a phone the thumb covers it, so the ring at the cross
+   (.hold-ring, terrain/HoldRing.tsx) is the one to watch. */
 .terrain-act__bar {
   position: absolute;
   left: 6px;
@@ -14741,7 +14796,7 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
   transform: scaleX(0);
   background: var(--terrain);
 }
-.terrain-act--survey.is-holding .terrain-act__bar::after { animation: terrain-hold 5s linear forwards; }
+.terrain-act--survey.is-holding .terrain-act__bar::after { animation: terrain-hold var(--hold-ms, 5s) linear forwards; }
 @keyframes terrain-hold { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 .terrain-act--survey { --terrain-line: var(--terrain); color: var(--terrain); }
 .terrain-act:active::before { background: rgba(124, 255, 196, 0.22); }

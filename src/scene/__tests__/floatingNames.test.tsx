@@ -59,11 +59,11 @@ describe('floating names in the world', () => {
   it('a chest or a door drawn with no label has none; LookMark still draws one when handed one', async () => {
     for (const name of ['treasure', 'door'] as const) {
       const look = builtInLook(name)
-      const bare = await mount(createElement(LookMark, { look, model: look.closed, at: [0, 0, 0], axes: AXES, minPx: 8 }))
+      const bare = await mount(createElement(LookMark, { look, model: look.closed, at: [0, 0, 0], axes: AXES }))
       expect(labels(bare)).toHaveLength(0)
       expect(bare.all().filter((h) => h.type === 'shardmesh')).toHaveLength(1)
       await bare.unmount()
-      const named = await mount(createElement(LookMark, { look, model: look.closed, at: [0, 0, 0], axes: AXES, minPx: 8, label }))
+      const named = await mount(createElement(LookMark, { look, model: look.closed, at: [0, 0, 0], axes: AXES, label }))
       expect(labels(named)).toHaveLength(1)
       await named.unmount()
     }

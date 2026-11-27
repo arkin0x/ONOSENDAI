@@ -144,3 +144,36 @@ export const CREDIT_FADE = [1.5, 2] as const
 
 /** A mark's name fades between these multiples of the reach: gone past three times it, after its credit. */
 export const NAME_FADE = [2.25, 3] as const
+
+/**
+ * Under this many CSS pixels on screen, a thing drawn at its true size is
+ * drawn as a dot this wide instead (scene/FarDot.tsx; arkinox, 2026-11-26,
+ * BUILD at 2^0 zoomed far out: "doors and chests are not scaling with the
+ * view zoom? getting way too big").
+ *
+ * A chest, a door and an item's model were held to a floor on screen, the
+ * note's old cube, 24.5 pixels, so a chest one gibson across stood over the
+ * castle beside it from far off: at BUILD's 1280-cell orbit a gibson is under
+ * a pixel on a phone, and the floor drew it some forty times its size. They
+ * are their true size now at every distance, as a shard, a message's box, a
+ * letter and a token are, so a thing beside a block keeps its size against
+ * the block at every zoom. Only once that is too small to be anything does a
+ * dot this size stand in its place, so a far chest is still somewhere to look.
+ */
+export const FAR_DOT_PX = 3
+
+/**
+ * Whether a thing whose longest side is `trueLongest` render units, drawn at
+ * its true size, is drawn as the far dot instead: its side on screen, at
+ * `perPx` render units a CSS pixel, under FAR_DOT_PX. A thing with no size, or
+ * a camera that measures nothing, keeps the thing itself.
+ */
+export function farDotShown(trueLongest: number, perPx: number): boolean {
+  if (!(trueLongest > 0) || !(perPx > 0)) return false
+  return trueLongest / perPx < FAR_DOT_PX
+}
+
+/** Render units one CSS pixel spans `depth` from a perspective camera of `fovDegrees` over a view `viewportHeight` CSS pixels tall. */
+export function perPixelAt(depth: number, fovDegrees: number, viewportHeight: number): number {
+  return (2 * Math.tan((fovDegrees * Math.PI) / 360) * depth) / viewportHeight
+}

@@ -6,13 +6,17 @@
  * The note's cube was a blue outline held at a fixed size on screen. An item
  * that wears a model is drawn at the model's true size instead (2^unit
  * gibsons a model unit, as WorldShards draws a shard), inside a blue outline
- * of whole gibsons that holds it through the whole of its motion, and never
- * smaller on screen than the cube was (lib/itemModel.ts modelScale). The
- * item's place means what it always did: the model's centre and the box's
- * centre sit exactly where the cube's centre sat (itemCentre).
+ * of whole gibsons that holds it through the whole of its motion. Always its
+ * true size, at every distance and zoom, never larger: it was held to the
+ * cube's size on screen, which far off drew a small model many times its
+ * size against the blocks around it (arkinox, 2026-11-26, of chests and doors
+ * held the same way: "getting way too big"). Once its box is under a few
+ * pixels on screen a small dot stands in its place (FarDot, lib/markerSize
+ * FAR_DOT_PX). The item's place means what it always did: the model's centre
+ * and the box's centre sit exactly where the cube's centre sat (itemCentre).
  *
  * The frame, from the outside in:
- *   - the item's place, scaled each frame (true size, or the cube's floor);
+ *   - the item's place, scaled to the model's true size;
  *   - the view's turn (lib/pose.ts viewPose), so a view turn turns the item
  *     with everything else, as it does a shard;
  *   - the box, still, in the model's own frame;
@@ -31,9 +35,9 @@
 
 import { useEffect, useMemo, useRef, type MutableRefObject, type ReactNode } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
-import { Matrix4, Plane, Vector3, type Group, type PerspectiveCamera } from 'three'
+import { Matrix4, Plane, Vector3, type Group, type PerspectiveCamera, type Points } from 'three'
 import type { Box } from '../lib/clip'
-import { boxInRegion, boxShape, itemBoxSize, modelScale, motionAt, phaseOf, trueScale, turnBox, type ItemAnimation, type MotionPose } from '../lib/itemModel'
+import { boxInRegion, boxShape, itemBoxSize, motionAt, phaseOf, trueScale, turnBox, type ItemAnimation, type MotionPose } from '../lib/itemModel'
 import { renderPose, viewPose } from '../lib/pose'
 import type { ViewAxes } from '../lib/space'
 import type { LoadedModel } from '../hooks/useItemModel'
@@ -42,8 +46,8 @@ import { useCyberspace } from '../store/useCyberspace'
 import { CUBE_EDGES, ShardMesh } from './ShardMesh'
 import { TapTarget } from './TapTarget'
 import { LABEL_PRIORITY, WorldLabel } from './WorldLabel'
-import { MARK_RECEDE_FLOOR, recedeShare } from '../lib/markerSize'
-import { headlampUniforms } from './headlamp'
+import { farDotShown, perPixelAt } from '../lib/markerSize'
+import { FarDot } from './FarDot'
 
 /** The note's own blue, the cube's color (WorldMessages NOTE_BLUE). */
 export const ITEM_BOX_BLUE = '#4aa3ff'
@@ -146,8 +150,8 @@ interface MarkProps {
   /** Its region about the place, in gibsons, in the render frame (regionBox at unit 0); null for none. */
   region: Box | null
   axes: ViewAxes
-  /** The edge of the note's cube on screen, CSS pixels: the smallest the box is ever drawn. */
-  minPx: number
+  /** The colour of the dot it is drawn as once too small on screen to be itself (FarDot); the box's blue when absent. */
+  dot?: string
   opacity?: number
   /** A tap on what it draws; TV's have none. */
   onTap?: () => void
@@ -165,7 +169,7 @@ interface MarkProps {
 }
 
 /** An item in the world as the model it wears: the scene's and Cyberspace TV's (WorldMessages ItemMark). */
-export function ItemModelMark({ id, model, animation, at, region, axes, minPx, opacity = 1, onTap, label, vanish, held, encompass }: MarkProps): JSX.Element {
+export function ItemModelMark({ id, model, animation, at, region, axes, dot = ITEM_BOX_BLUE, opacity = 1, onTap, label, vanish, held, encompass }: MarkProps): JSX.Element {
   const scaleExp = useCyberspace((s) => s.scaleExp)
   const gl = useThree((s) => s.gl)
   const unit = model.shard.unit
@@ -194,26 +198,26 @@ export function ItemModelMark({ id, model, animation, at, region, axes, minPx, o
 
   const atTrue = useMemo(() => trueScale(unit, scaleExp), [unit, scaleExp])
   const longest = Math.max(...boxShape(cut.box).size)
-  // The label clears the box on screen from any side, at the same scale the
-  // box is drawn at: the reach handed over is this box's half diagonal about
-  // the place, at true size and at the floor alike (modelScale). Its top
-  // alone sat the label on the box from a camera looking down (review of #439).
+  // The label clears the box on screen from any side, at the size the box is
+  // drawn at: the reach handed over is this box's half diagonal about the
+  // place, at true size. Its top alone sat the label on the box from a camera
+  // looking down (review of #439).
   const reach = useMemo(() => Math.hypot(...[0, 1, 2].map((k) => Math.max(Math.abs(cut.box.min[k]), Math.abs(cut.box.max[k])))), [cut.box])
   // Its name stands over a ball of that reach by the same rule as a letter's and a token's (WorldLabel `clear`
-  // shape): a constant few pixels over its top on screen, never under the floor the model is drawn at.
-  const clear = useMemo(() => ({ shape: { radius: reach * atTrue, height: reach * atTrue, minPx: longest > 0 ? (reach * minPx) / longest : minPx } }), [reach, atTrue, longest, minPx])
+  // shape): a constant few pixels over its top on screen.
+  const clear = useMemo(() => ({ shape: { radius: reach * atTrue, height: reach * atTrue } }), [reach, atTrue])
   const outer = useRef<Group>(null)
+  const body = useRef<Group>(null)
+  const far = useRef<Points>(null)
   const frame = useRef<Group | null>(null)
   useFrame((state) => {
     const g = outer.current
     if (!g) return
     const cam = state.camera as PerspectiveCamera
-    const depth = cam.position.distanceTo(g.position)
-    const perPx = (2 * Math.tan((cam.fov * Math.PI) / 360) * depth) / state.size.height
-    // The floor recedes as the note's cube does (lib/markerSize.ts
-    // recedeShare); the true size already keeps its perspective.
-    const floorPx = minPx * recedeShare(depth, headlampUniforms.uHeadlampReach.value, MARK_RECEDE_FLOOR)
-    g.scale.setScalar(Math.max(1e-9, modelScale(atTrue, longest, floorPx, perPx)))
+    // The model at its true size, or the dot once that is too small to be anything.
+    const shown = farDotShown(longest * atTrue, perPixelAt(cam.position.distanceTo(g.position), cam.fov, state.size.height))
+    if (body.current) body.current.visible = !shown
+    if (far.current) far.current.visible = shown
     if (planes && frame.current) {
       frame.current.updateWorldMatrix(true, false)
       for (let i = 0; i < planes.local.length; i++) planes.world[i].copy(planes.local[i]).applyMatrix4(frame.current.matrixWorld)
@@ -222,8 +226,9 @@ export function ItemModelMark({ id, model, animation, at, region, axes, minPx, o
 
   return (
     <>
-      <group ref={outer} position={at}>
-        <group matrix={turn} matrixAutoUpdate={false}>
+      <group ref={outer} position={at} scale={Math.max(1e-9, atTrue)}>
+        <FarDot dotRef={far} color={dot} opacity={opacity * (held ?? 1)} />
+        <group ref={body} matrix={turn} matrixAutoUpdate={false}>
           <ModelInMotion model={model} animation={animation} id={id} box={cut.box} amplitude={size.amplitude} planes={planes?.world} opacity={opacity} ghost={!!vanish} dim={held} outline={held === undefined} encompass={encompass} frameRef={frame} />
         </group>
       </group>

@@ -14,7 +14,7 @@ import { renderPose, viewPose } from '../pose'
 import type { ViewAxes } from '../space'
 import {
   ANIMATE_TAG, GOLDEN, MODEL_TAG, SPIN_RAD_PER_S, animationOf, boxInRegion, bobAmplitude, extentOf, isModelAddress, itemBoxSize,
-  modelOf, modelScale, modelTags, motionAt, phaseOf, spinRates, sweptHalf, trueScale, turnBox, wholeGibsons, type ItemAnimation,
+  modelOf, modelTags, motionAt, phaseOf, spinRates, sweptHalf, trueScale, turnBox, wholeGibsons, type ItemAnimation,
 } from '../itemModel'
 import { modelFromPayload } from '../../hooks/useItemModel'
 import { itemMarkShape } from '../../scene/WorldMessages'
@@ -191,12 +191,9 @@ describe('the box', () => {
     expect(back.max.map((v) => v + 0)).toEqual(box.max)
   })
 
-  it('is drawn at the model\'s true size, or the cube\'s size on screen when that is larger', () => {
+  it('is drawn at the model\'s true size', () => {
     expect(trueScale(3, 0)).toBe(8)
     expect(trueScale(0, 2)).toBe(0.25)
-    // A 2-unit box at true scale 1 is 2 render units; at 0.1 units a pixel that is 20 px, under a 24 px floor.
-    expect(modelScale(1, 2, 24, 0.1)).toBeCloseTo(1.2)
-    expect(modelScale(1, 2, 24, 0.01)).toBe(1)
   })
 })
 

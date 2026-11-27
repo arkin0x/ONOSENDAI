@@ -49,7 +49,7 @@ import { r3fRoot, type R3fRoot } from '../../test/r3fRoot'
 import { useCyberspace } from '../../store/useCyberspace'
 import { useInventory } from '../../store/useInventory'
 import { useShards, type WorldItem } from '../../store/useShards'
-import { ItemMark, keyBoxSide, markFadeLeft, MARK_FADE_MS, noteBoxSide, NOTE_EDGE_PX, WorldMessages } from '../WorldMessages'
+import { ItemMark, keyBoxSide, markFadeLeft, MARK_FADE_MS, noteBoxSide, WorldMessages } from '../WorldMessages'
 import { lettersDrawn, LETTER_GIBSONS } from '../LetterField'
 import { ItemToken, TOKEN_CORE, TOKEN_OUTLINE } from '../ItemToken'
 import { SEE_THROUGH_BLEND } from '../shardFaces'
@@ -393,7 +393,7 @@ describe('what keeps its look', () => {
     r = await scene([worldKey('1'.repeat(64), true)])
     await r.frame()
     expect(hooks.modelMarks.length).toBeGreaterThan(0)
-    expect(hooks.modelMarks.at(-1)!.minPx).toBe(NOTE_EDGE_PX)
+    expect(hooks.modelMarks.at(-1)!).not.toHaveProperty('minPx')
     expect(drawn(r.state().scene).filter((o) => o.type === 'LineSegments')).toHaveLength(0)
   })
 

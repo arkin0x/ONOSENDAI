@@ -101,7 +101,7 @@ describe('LookMark', () => {
   const meshes = (m: Awaited<ReturnType<typeof mount>>) => m.all().filter((h) => h.type === 'shardmesh')
 
   it('draws the model with the frame: cut, budget and all', async () => {
-    const m = await mount(createElement(LookMark, { look, model: look.closed, at: [0, 0, 0], axes: AXES, minPx: 8, label, frame }))
+    const m = await mount(createElement(LookMark, { look, model: look.closed, at: [0, 0, 0], axes: AXES, label, frame }))
     expect(meshes(m)).toHaveLength(1)
     expect(meshes(m)[0].props.budget).toBe(frame.budget)
     expect(meshes(m)[0].props.clip).toBe(frame.clip)
@@ -110,7 +110,7 @@ describe('LookMark', () => {
 
   it('hands the frame to what draws in its place, the loot and ceremony branch', async () => {
     const seen: unknown[] = []
-    const m = await mount(createElement(LookMark, { look, model: look.closed, at: [0, 0, 0], axes: AXES, minPx: 8, label, frame }, ((f: LookFrame) => { seen.push(f.budget, f.clip); return null }) as never))
+    const m = await mount(createElement(LookMark, { look, model: look.closed, at: [0, 0, 0], axes: AXES, label, frame }, ((f: LookFrame) => { seen.push(f.budget, f.clip); return null }) as never))
     expect(seen).toEqual([frame.budget, frame.clip])
     await m.unmount()
   })

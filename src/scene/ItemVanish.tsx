@@ -66,15 +66,13 @@ export function wallRoom(region: Box | null | undefined): number {
   return Math.max(0, room)
 }
 
-export function ItemVanish({ id, label, at, wears, region, axes, minPx, play, clear }: {
+export function ItemVanish({ id, label, at, wears, region, axes, play, clear }: {
   id: string
   label: { text: string; color: string; sub: string; subColor: string }
   at: [number, number, number]
   wears?: { model: ItemModelRef; animation: readonly ItemAnimation[] }
   region: Box | null
   axes: ViewAxes
-  /** The smallest its model's box is drawn, as the mark it was (WorldMessages ItemMark). */
-  minPx: number
   play: Vanishing
   /**
    * The blue box it fades out over (WorldMessages PlacedBox), or for an item
@@ -110,7 +108,7 @@ export function ItemVanish({ id, label, at, wears, region, axes, minPx, play, cl
     <>
       <group ref={root}>
         {model
-          ? <ItemModelMark id={id} model={model} animation={animation} at={at} region={region} axes={axes} minPx={minPx} label={label} vanish={fade} />
+          ? <ItemModelMark id={id} model={model} animation={animation} at={at} region={region} axes={axes} label={label} vanish={fade} />
           : <WorldLabel text={label.text} color={label.color} at={at} align="center" px={11} sub={label.sub} subColor={label.subColor} subScale={1} subOpacity={1} fade={fade} clear={clear} recede="name" />}
       </group>
       {!play.calm && (

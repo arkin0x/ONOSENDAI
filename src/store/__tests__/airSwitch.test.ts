@@ -8,7 +8,7 @@
  * saying how to turn it back on once a page, never at every press.
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 import { AIR_OFF_HINT, AIR_PLACE_PREFIX, airPlacing, airPlacingFor, forgetAirSwitch, setAirPlacing, toggleAirPlacing } from '../airSwitch'
 import { kvGet, movesToKv } from '../../lib/kvStore'
 import { useCyberspace } from '../useCyberspace'
@@ -75,7 +75,7 @@ describe('air placing, kept per identity', () => {
 
 describe('PLACE with air placing off', () => {
   const field = { world: { blockCs: () => 0 } } as unknown as TerrainSession
-  let say: ReturnType<typeof vi.fn>
+  let say: Mock<(message: string | null) => void>
   let real: (m: string | null) => void
   beforeEach(() => {
     real = useTerrain.getState().say

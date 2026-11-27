@@ -48,7 +48,7 @@ const GLOW_EDGES = edgeSegments(GLOW_BOX)
 /** The glow's parts and materials, made once for a glow, moved and faded every frame. */
 export function makeSurveyGlow(): { faces: MeshBasicMaterial; edges: LineMaterial; halo: LineMaterial; edgeLines: LineSegments2; haloLines: LineSegments2 } {
   const faces = new MeshBasicMaterial({
-    color: GLOW_COLOUR, transparent: true, opacity: 0, depthTest: true, depthWrite: false, side: DoubleSide, toneMapped: false,
+    color: GLOW_COLOUR, transparent: true, opacity: 0, depthTest: true, depthWrite: false, side: DoubleSide, forceSinglePass: true, toneMapped: false,
     polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2, ...NO_BLOOM_BLEND,
   })
   // Both sides: the field's frame can be mirrored (an axis running -1), which turns a screen-space line's quads round.
@@ -67,7 +67,12 @@ function slotOf(s: TerrainSession, key: string): ChunkSlot | null {
   return m.slot
 }
 
-export function SurveyGlow({ session = () => terrainSession }: { session?: () => TerrainSession | null } = {}): JSX.Element {
+/** Where the glow finds the field (the scene's own session; a test passes its own). */
+export interface SurveyGlowProps {
+  session?: () => TerrainSession | null
+}
+
+export function SurveyGlow({ session = () => terrainSession }: SurveyGlowProps): JSX.Element {
   const reduced = useReducedMotion()
   const calm = useRef(reduced)
   calm.current = reduced

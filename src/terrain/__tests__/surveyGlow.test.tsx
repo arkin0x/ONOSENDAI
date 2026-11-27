@@ -9,7 +9,7 @@
  * release, and flashes once on completion; one group made once, at the
  * chunk's place in the field's frame.
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 
 ;(globalThis as { window?: unknown }).window ??= globalThis
 let reducedMotion = false
@@ -73,7 +73,7 @@ describe('the glow\'s numbers', () => {
 })
 
 describe('the chunk held is the chunk surveyed', () => {
-  let survey: ReturnType<typeof vi.fn>
+  let survey: Mock<(key: string) => Promise<void>>
   let real: (key: string) => Promise<void>
   beforeEach(() => {
     vi.useFakeTimers()

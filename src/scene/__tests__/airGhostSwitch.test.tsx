@@ -8,7 +8,7 @@
  * stepper shows its off state), and PLACE puts nothing there, saying how to
  * turn it on once; on again, the ghost is back where it stood.
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 import { createElement } from 'react'
 import { r3fRoot, type R3fRoot } from '../../test/r3fRoot'
 import { TerrainLayer, terrainCursor } from '../TerrainLayer'
@@ -47,7 +47,7 @@ function session(): TerrainSession {
 
 let r: R3fRoot
 let field: TerrainSession
-let say: ReturnType<typeof vi.fn>
+let say: Mock<(message: string | null) => void>
 let realSay: (m: string | null) => void
 
 beforeEach(async () => {

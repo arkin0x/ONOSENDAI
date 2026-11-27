@@ -4,7 +4,8 @@
  * belongs, so nothing round it moves; while the ghost shows, − and + move it
  * a block nearer or farther, stopping at the ends; a tap on the number turns
  * air placing off (an eye struck through, − and + dimmed and dead) and the
- * next on again (owner, 2026-11-27); and the tools stand two by two on every
+ * next on again (owner, 2026-11-27), Enter and Space too, never twice for one
+ * tap, and no letter key (H is HOP's); and the tools stand two by two on every
  * screen, the stepper under PLACE and SURVEY under SMASH.
  */
 
@@ -70,12 +71,13 @@ describe('the ghost block\'s distance', () => {
     expect(m.all().filter((h) => h === hint).length).toBe(1)
     const inFrame = (h: Host): boolean => h.children.some((c) => c === hint || (typeof c !== 'string' && inFrame(c)))
     expect(inFrame(frame)).toBe(false)
-    // Under the frame (SURVEY stands beside it now), with H's printed key beside the wheel's.
+    // Under the frame (SURVEY stands beside it now), the wheel's alone: no letter key (H is HOP's, review of #950).
     const css = readFileSync(resolve(__dirname, '../../styles.css'), 'utf8')
     expect(css).toMatch(/\.terrain-air__hint \{\n  position: absolute;\n  left: 0;\n  top: calc\(100% \+ 6px\);/)
     expect(css).toContain('color: rgba(255, 255, 255, 0.6);')
     expect(textOf(hint)).toContain('WHEEL')
-    expect(m.all().some((h) => h.type === 'kbd' && textOf(h) === 'H')).toBe(true)
+    expect(m.all().some((h) => h.type === 'kbd')).toBe(false)
+    expect(textOf(hint)).not.toMatch(/HIDE|SHOW/)
     await m.unmount()
   })
 
@@ -125,10 +127,10 @@ describe('the ghost block\'s distance', () => {
     await tap(btn(m.all(), 'Farther'))
     expect(useAirPlace.getState().distance).toBe(4)
     expect(airPlacing()).toBe(false)
-    // The hint under it offers H to show it again, and no wheel (the wheel leaves the distance alone while off).
+    // No wheel hint while off (the wheel leaves the distance alone), and no key offered: the number is the way back.
     const hint = m.all().find((h) => h.props.className === 'terrain-air__hint')!
-    expect(textOf(hint)).not.toContain('WHEEL')
-    expect(textOf(hint)).toContain('SHOW')
+    expect(textOf(hint)).toBe('')
+    expect(String(middle(m.all()).props['aria-label'])).not.toContain('(H)')
     // Tap again: on, as before.
     await tap(middle(m.all()))
     expect(airPlacing()).toBe(true)
@@ -146,6 +148,26 @@ describe('the ghost block\'s distance', () => {
     expect(String(slotOf(m.all()).props.className)).toContain('is-off')
     expect(middle(m.all()).props.disabled).toBe(true)
     expect(middle(m.all()).props.tabIndex).toBe(-1)
+    await m.unmount()
+  })
+
+  it('the number answers Enter and Space (the click a keyboard makes), and a tap turns it once, not twice', async () => {
+    useAirPlace.setState({ ghost: 'ok', distance: 4 })
+    const m = await mount(createElement(AirStepper))
+    const click = async (detail: number): Promise<void> => {
+      ;(middle(m.all()).props.onClick as (e: unknown) => void)({ detail, stopPropagation: () => {} })
+      await settled()
+    }
+    // Enter or Space on the focused button: a click with no pointer (detail 0).
+    await click(0)
+    expect(airPlacing()).toBe(false)
+    await click(0)
+    expect(airPlacing()).toBe(true)
+    // A tap: the press turns it, and the click the browser sends after it (detail 1) leaves it be.
+    await tap(middle(m.all()))
+    await click(1)
+    expect(airPlacing()).toBe(false)
+    expect(String(middle(m.all()).props['aria-label'])).not.toContain('(H)')
     await m.unmount()
   })
 })

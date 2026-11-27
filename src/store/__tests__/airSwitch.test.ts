@@ -111,7 +111,7 @@ describe('PLACE with air placing off', () => {
 })
 
 describe('H on a keyboard', () => {
-  it('turns air placing off and on, as the number does, and says which under the cross', async () => {
+  it('is not TERRAIN\'s (H is HOP\'s: review of #950): air placing stays as it was, and the key goes on', async () => {
     const { terrainKeys } = await import('../../terrain/TerrainView')
     const say = vi.fn()
     const real = useTerrain.getState().say
@@ -123,16 +123,15 @@ describe('H on a keyboard', () => {
       Object.assign(e, { code: 'KeyH', repeat, metaKey: false, ctrlKey: false, altKey: false })
       on.dispatchEvent(e)
     }
+    const heard = vi.fn()
+    on.addEventListener('keydown', (e) => heard(e.defaultPrevented))
     try {
-      press()
-      expect(airPlacing()).toBe(false)
-      expect(say).toHaveBeenLastCalledWith('Air placing is off')
-      // A held key's repeats do not flip it back and forth.
-      press(true); press(true)
-      expect(airPlacing()).toBe(false)
-      press()
+      press(); press(true)
       expect(airPlacing()).toBe(true)
-      expect(say).toHaveBeenLastCalledWith('Air placing is on')
+      expect(say).not.toHaveBeenCalled()
+      // Neither taken nor stopped: the main keymap (hooks/useKeyboard.ts) hears it next.
+      expect(heard).toHaveBeenCalledTimes(2)
+      expect(heard).toHaveBeenLastCalledWith(false)
     } finally {
       stop()
       useTerrain.setState({ say: real })

@@ -12,12 +12,13 @@
  * kept per identity). Off, the middle shows an eye struck through over the
  * number struck through, the frame dims, and − and + are dimmed and do
  * nothing (the wheel leaves the distance alone too): the middle is the one
- * way back, and H on a keyboard.
+ * way back. It is a button like any other: a click with the mouse, a tap, or
+ * Enter and Space on a keyboard (no letter key: H is HOP's).
  *
  * On a desktop the wheel sets the distance while the ghost shows
- * (TerrainView.tsx terrainWheel); the stepper's hints (the wheel, H) stand
- * under it, never in the number's cell, where a mouse read as a zero (review
- * of #949), so the distance is always in sight while it matters.
+ * (TerrainView.tsx terrainWheel); the wheel's hint stands under it, never in
+ * the number's cell, where a mouse read as a zero (review of #949), so the
+ * distance is always in sight while it matters.
  */
 
 import { EyeOff, Minus, Mouse, Plus } from 'lucide-react'
@@ -45,7 +46,7 @@ export function AirStepper(): JSX.Element {
         className={`terrain-air${ghost === 'bad' && on ? ' is-bad' : ''}${on ? '' : ' is-paused'}`}
         role="group"
         aria-label={on ? `Ghost block distance: ${distance} blocks` : 'Air placing is off'}
-        title={on ? 'How far the ghost block stands: scroll the wheel, or tap − and +. Tap the number to turn air placing off (H)' : 'Air placing is off: tap the number to turn it on (H)'}
+        title={on ? 'How far the ghost block stands: scroll the wheel, or tap − and +. Tap the number to turn air placing off' : 'Air placing is off: tap the number to turn it on'}
       >
         <button className="terrain-air__btn" {...noCallout} disabled={!live || distance <= AIR_MIN} tabIndex={live ? 0 : -1} onPointerDown={nudge(-1)} aria-label="Nearer"><Minus size={13} strokeWidth={2.5} aria-hidden /></button>
         <button
@@ -54,15 +55,18 @@ export function AirStepper(): JSX.Element {
           disabled={!shown}
           tabIndex={shown ? 0 : -1}
           onPointerDown={press(() => { toggleAirPlacing() })}
+          // Enter and Space: a click the keyboard made (no pointer, detail 0). A pointer's own click after its press is
+          // ignored, so a tap never turns it twice.
+          onClick={(e) => { e.stopPropagation(); if (e.detail === 0) toggleAirPlacing() }}
           aria-pressed={on}
-          aria-label={on ? `Air placing on, ${distance} blocks: turn it off (H)` : 'Air placing off: turn it on (H)'}
+          aria-label={on ? `Air placing on, ${distance} blocks: turn it off` : 'Air placing off: turn it on'}
         >
           {on ? distance : <><EyeOff size={11} strokeWidth={2.25} aria-hidden data-icon="eye-off" /><s className="terrain-air__struck">{distance}</s></>}
         </button>
         <button className="terrain-air__btn" {...noCallout} disabled={!live || distance >= AIR_MAX} tabIndex={live ? 0 : -1} onPointerDown={nudge(1)} aria-label="Farther"><Plus size={13} strokeWidth={2.5} aria-hidden /></button>
       </span>
-      {/* The keys' hint, where there is a wheel and a keyboard (styles.css), outside the frame with a clear gap. */}
-      <span className="terrain-air__hint" aria-hidden>{on && <><Mouse size={11} strokeWidth={2} />WHEEL</>}<kbd className="terrain-key">H</kbd>{on ? 'HIDE' : 'SHOW'}</span>
+      {/* The wheel's hint, where there is a wheel (styles.css), outside the frame with a clear gap; none while off. */}
+      <span className="terrain-air__hint" aria-hidden>{on && <><Mouse size={11} strokeWidth={2} />WHEEL</>}</span>
     </span>
   )
 }

@@ -75,7 +75,7 @@ export function setAirPlacing(on: boolean, pubkey: string = identity()): void {
   flipped()
 }
 
-/** The stepper's middle, and H on a keyboard. Returns whether it is on now. */
+/** The stepper's middle (a tap, a click, or Enter and Space). Returns whether it is on now. */
 export function toggleAirPlacing(): boolean {
   const on = !airPlacing()
   setAirPlacing(on)

@@ -25,7 +25,7 @@ import { Backpack, Box, Hammer, HandFist, Radar } from 'lucide-react'
 import { HINT_DONE, headNow, offsetOf, surveyTarget as targetNow, terrainSession, useTerrain } from '../store/useTerrain'
 import { useWalk } from '../store/useWalk'
 import { terrainCursor } from '../scene/TerrainLayer'
-import { SURVEY_HOLD_MS, cancelSurveyHold, startSurveyHold, useSurveyHold } from './surveyHold'
+import { SURVEY_HOLD_MS, cancelSurveyHold, flashSurvey, startSurveyHold, useSurveyHold } from './surveyHold'
 import { HoldRing } from './HoldRing'
 import { walkLookBy } from '../lib/walkLook'
 import { topEscape } from '../hooks/useEscape'
@@ -53,7 +53,6 @@ import { recordAtCursor } from '../lib/blueprint/capture'
 import { previewColor, previewLine, useSmashPreview } from '../lib/blueprint/smashPreview'
 import { useAirPlace } from '../store/useAirPlace'
 import { AirStepper } from './AirStepper'
-import { toggleAirPlacing } from '../store/airSwitch'
 
 /** A press held this long without moving places (a long press). */
 export const LONG_PRESS_MS = 420
@@ -472,15 +471,18 @@ export function terrainPointer(on: EventTarget): () => void {
   }
 }
 
-/** Survey the chunk `key`, or say there is none to survey. */
-export function surveyChunk(key: string | null): void {
-  if (key) void useTerrain.getState().survey(key)
-  else useTerrain.getState().say('Everything here is surveyed.')
-}
-
-/** Survey the chunk SURVEY offers now (the one you stand in, else the one ahead), or say there is none. */
-export function surveyNow(): void {
-  surveyChunk(surveyTarget())
+/**
+ * Survey the chunk `key`, or say there is none to survey. Returns whether the
+ * survey took the chunk: store/useTerrain.ts survey checks the chunk before
+ * its first wait and marks it `surveying` only when it goes ahead (past the
+ * edge, out of reach, already yours or under way, it says why or does nothing).
+ */
+export function surveyChunk(key: string | null): boolean {
+  const st = useTerrain.getState()
+  if (!key) { st.say('Everything here is surveyed.'); return false }
+  const before = st.surveying.includes(key)
+  void st.survey(key)
+  return !before && useTerrain.getState().surveying.includes(key)
 }
 
 /**
@@ -490,13 +492,15 @@ export function surveyNow(): void {
  */
 export function holdSurvey(): void {
   if (useSurveyHold.getState().since !== null) return
-  startSurveyHold(surveyChunk, performance.now(), surveyTarget())
+  // The glow flashes only once the survey has taken the chunk, never over one it turned down.
+  startSurveyHold((key) => { if (surveyChunk(key) && key) flashSurvey(key) }, performance.now(), surveyTarget())
 }
 
 /**
  * TERRAIN's own keys, heard on `on` (the window, in capture) ahead of the rest:
  * the tools, T and Esc; G is a hold (surveyHold.ts), its repeats ignored and its
- * release before the end a cancel; H turns air placing on or off. Returns what stops them.
+ * release before the end a cancel. H is not TERRAIN's: it goes to HOP, as everywhere
+ * (hooks/useKeyboard.ts). Returns what stops them.
  */
 export function terrainKeys(on: EventTarget): () => void {
   const down = (ev: Event): void => {
@@ -516,10 +520,7 @@ export function terrainKeys(on: EventTarget): () => void {
     if (e.code === 'KeyF') { take(); if (!e.repeat) holdSmash(); return }
     if (e.code === 'KeyR' && useBlueprintTool.getState().capturing) { take(); if (!e.repeat) recordAtCursor(); return }
     if (e.code === 'KeyQ') { take(); if (!e.repeat) terrainInput.action = { kind: 'mine', at: null }; return }
-    if (e.code === 'KeyE') { take(); if (!e.repeat) terrainInput.action = { kind: 'place', at: null }; return }
-    // Air placing on or off (store/airSwitch.ts), as a tap on the stepper's number does; said under the cross, since the
-    // stepper shows only while you look into open air.
-    if (e.code === 'KeyH') { take(); if (!e.repeat) st.say(toggleAirPlacing() ? 'Air placing is on' : 'Air placing is off') }
+    if (e.code === 'KeyE') { take(); if (!e.repeat) terrainInput.action = { kind: 'place', at: null } }
   }
   // G held: letting it up before the bar fills cancels the survey.
   const up = (ev: Event): void => {

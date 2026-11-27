@@ -16660,8 +16660,8 @@ div.bpt-tile__hit { cursor: default; }
   .terrain-air { grid-template-columns: 1fr 1.15fr 1fr; }
   .terrain-air__value { font-size: 11px; }
 }
-/* The keys' hints, where there is a wheel and a keyboard: under the frame with a clear gap (SURVEY stands beside it,
-   the hotbar further under), dimmer than the number, never in its cell. */
+/* The wheel's hint, where there is a wheel: under the frame with a clear gap (SURVEY stands beside it, the hotbar
+   further under), dimmer than the number, never in its cell. */
 .terrain-tools__slot--air { position: relative; }
 .terrain-air__hint {
   position: absolute;
@@ -16681,11 +16681,11 @@ div.bpt-tile__hit { cursor: default; }
 @media (hover: hover) and (pointer: fine) {
   .terrain-air__hint { display: inline-flex; }
 }
-/* A narrow window held upright: the hotbar stands right under the tools, so the hints stay in the tooltip. */
+/* A narrow window held upright: the hotbar stands right under the tools, so the hint stays in the tooltip. */
 @media (hover: hover) and (pointer: fine) and (max-width: 699px) and (min-height: 521px) {
   .terrain-air__hint { display: none; }
 }
-/* A short window: the hotbar stands close under the tools there too, so the hints stay in the tooltip. */
+/* A short window: the hotbar stands close under the tools there too, so the hint stays in the tooltip. */
 @media (hover: hover) and (pointer: fine) and (max-height: 520px) {
   .terrain-air__hint { display: none; }
 }

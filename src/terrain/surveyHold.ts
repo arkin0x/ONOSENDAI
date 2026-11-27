@@ -11,8 +11,9 @@
  * while it is held (scene/SurveyGlow.tsx; owner, 2026-11-27: "light up the
  * chunk region being surveyed somehow while the survey button is being held
  * so we know what one is being acted upon") is the very one surveyed: both
- * read this `key`, and nothing chooses again in between. As the hold
- * completes, `flash` names that chunk and when, for the glow's brief flash.
+ * read this `key`, and nothing chooses again in between. Once the survey has
+ * taken the chunk (TerrainView.tsx holdSurvey, flashSurvey), `flash` names it
+ * and when, for the glow's brief flash; a chunk the survey turns down never flashes.
  */
 
 import { create } from 'zustand'
@@ -25,7 +26,7 @@ interface SurveyHoldState {
   since: number | null
   /** The chunk the hold will survey (its key), chosen as it began; null with none to survey or nothing held. */
   key: string | null
-  /** The chunk the last completed hold surveyed and when it completed, for the glow's flash; null before any. */
+  /** The chunk the last survey took and when, for the glow's flash; null before any. */
   flash: { key: string; at: number } | null
 }
 
@@ -43,9 +44,14 @@ export function startSurveyHold(done: (key: string | null) => void, now: number 
   useSurveyHold.setState({ since: now, key })
   timer = setTimeout(() => {
     timer = null
-    useSurveyHold.setState({ since: null, key: null, flash: key ? { key, at: performance.now() } : useSurveyHold.getState().flash })
+    useSurveyHold.setState({ since: null, key: null })
     done(key)
   }, SURVEY_HOLD_MS)
+}
+
+/** The survey took the chunk `key`: the glow flashes there once (scene/SurveyGlow.tsx). */
+export function flashSurvey(key: string, at: number = performance.now()): void {
+  useSurveyHold.setState({ flash: { key, at } })
 }
 
 /** Let go before the end: the bar empties and nothing is surveyed. */

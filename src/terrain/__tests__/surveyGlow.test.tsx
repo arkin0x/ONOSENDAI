@@ -80,10 +80,11 @@ describe('the chunk held is the chunk surveyed', () => {
     cancelSurveyHold()
     useSurveyHold.setState({ flash: null })
     real = useTerrain.getState().survey
-    survey = vi.fn(async () => {})
-    useTerrain.setState({ survey })
+    // As the real survey does: a chunk it takes is marked surveying before its first wait.
+    survey = vi.fn(async (key: string) => { useTerrain.setState({ surveying: [...useTerrain.getState().surveying, key] }) })
+    useTerrain.setState({ survey, surveying: [] })
   })
-  afterEach(() => { cancelSurveyHold(); useTerrain.setState({ survey: real }); vi.useRealTimers(); aim.key = null })
+  afterEach(() => { cancelSurveyHold(); useTerrain.setState({ survey: real, surveying: [] }); vi.useRealTimers(); aim.key = null })
 
   it('chosen by the button\'s own surveyTarget as the hold starts, kept while the look moves, surveyed at the end', () => {
     aim.key = 'chunk-a'
@@ -98,6 +99,21 @@ describe('the chunk held is the chunk surveyed', () => {
     expect(survey).toHaveBeenCalledTimes(1)
     expect(survey).toHaveBeenCalledWith('chunk-a')
     expect(useSurveyHold.getState()).toMatchObject({ since: null, key: null, flash: { key: 'chunk-a' } })
+  })
+
+  it('no flash over a chunk the survey turns down (out of reach, past the edge, already under way)', () => {
+    survey.mockImplementation(async () => {})
+    aim.key = 'chunk-a'
+    holdSurvey()
+    vi.advanceTimersByTime(SURVEY_HOLD_MS)
+    expect(survey).toHaveBeenCalledWith('chunk-a')
+    expect(useSurveyHold.getState()).toMatchObject({ since: null, key: null, flash: null })
+    // One already being surveyed: this hold did not start it, so no flash either.
+    survey.mockImplementation(async (key: string) => { useTerrain.setState({ surveying: [...useTerrain.getState().surveying, key] }) })
+    useTerrain.setState({ surveying: ['chunk-a'] })
+    holdSurvey()
+    vi.advanceTimersByTime(SURVEY_HOLD_MS)
+    expect(useSurveyHold.getState().flash).toBeNull()
   })
 
   it('let go early: nothing surveyed, nothing lit, no flash', () => {

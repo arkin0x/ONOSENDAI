@@ -71,6 +71,7 @@ import { stampedIndices, type CopySource, type StampForm, type StampedRange } fr
 import { subdivide, subdivideNotice } from '../lib/subdivide'
 import { withCredit, type Credit } from 'sno-core/feed'
 import { newestFirst } from '../lib/shardFolders'
+import { carryKitMark } from '../lib/blueprint/prizeGuard'
 import { attach, initialShards, persist, saveNow as saveStored, workshopReading } from './workshopStorage'
 import { addMembers, allHeld, canAdd, canRemove, cleanName, copyName, freeName, groupsOf, heldBy, heldState, hiddenSets, isEmpty, makeGroup, membersHeld, missing, nextName, remapGroups, removeMembers, withAppendedGroup, withGroups, withoutHidden, type RemapHint, type ShardGroup } from '../lib/shardGroups'
 
@@ -1523,6 +1524,8 @@ export const useWorkshop = create<WorkshopState>((set, get) => {
       // Beside its source, in the same folder; a source at the top keeps the copy there.
       // Filing is a nicety: a fault in it never costs the copy itself.
       try { fileCopy(copy.id, src.id) } catch (err) { console.warn('[workshop] could not file the copy in its folder', err) }
+      // A copy of a kit piece is a kit piece: never a blueprint's prize, edited or not (lib/blueprint/prizeGuard.ts).
+      try { carryKitMark(src.id, copy.id) } catch { /* the model fingerprint still bars an unedited copy */ }
       const list = [...get().shards, copy]
       set({ shards: list, currentId: copy.id, selection: [], partSel: [], selectedFaces: [], facePick: [], past: [], future: [], notice: null }); save(list)
       return copy.id

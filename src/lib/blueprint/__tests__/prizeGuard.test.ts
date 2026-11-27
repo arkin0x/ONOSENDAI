@@ -18,7 +18,8 @@ vi.hoisted(() => {
   }
 })
 
-import { BAR_WORDS, includedPrizes, kitPieces, markKitPieces, prizeBar, setIncluded, type GuardInput } from '../prizeGuard'
+import { fromPayload, type ShardModel } from 'sno-core/shards'
+import { BAR_WORDS, backfillKitPrints, includedPrizes, kitPieces, kitPrint, markKitPieces, prizeBar, setIncluded, type GuardInput } from '../prizeGuard'
 import { prizeAllowed } from '../../../hud/blueprint/BlueprintTool'
 
 const me = 'a'.repeat(64)
@@ -67,6 +68,54 @@ describe('which objects may be prizes', () => {
 
   it('a zip import with PUBLISH off marks what it brings in as kit pieces', () => {
     const src = readFileSync(join(__dirname, '..', '..', '..', 'store', 'useShardImport.ts'), 'utf8')
-    expect(src).toMatch(/if \(get\(\)\.noun === 'zip' && !publish\) markKitPieces\(\[id\]\)/)
+    // By id and by the model's fingerprint (the whole model goes in, under its new id).
+    expect(src).toMatch(/if \(get\(\)\.noun === 'zip' && !publish\) markKitPieces\(\[\{ \.\.\.model, id \}\]\)/)
+  })
+})
+
+describe('the kit mark follows the model (review of #943, 2026-11-27)', () => {
+  const piece = (id: string, name = 'Piece', k = 1): ShardModel => fromPayload({ v: 2, name, unit: 0, mode: 'solid', vertices: [[0, 0, 0], [k, 0, 0], [0, k, 0], [0, 0, k]], colors: Array(4).fill([200, 60, 60]), faces: [[0, 1, 2], [0, 1, 3], [0, 2, 3], [1, 2, 3]] }, id)!
+  const kitG = (kit: ReadonlySet<string>): GuardInput => g({ kit, ledger: {} })
+
+  it('marked at import by id and fingerprint: the same model under any other id or name is barred', () => {
+    markKitPieces([piece('kit-b/one')])
+    const kit = kitPieces()
+    expect(kit.has('kit-b/one')).toBe(true)
+    expect(kit.has(kitPrint(piece('kit-b/one'))!)).toBe(true)
+    // Renamed, under a new id: still the kit piece.
+    expect(prizeBar(piece('some-other-id', 'Renamed'), kitG(kit))).toBe('kit')
+    // Another model is not.
+    const other = fromPayload({ v: 2, name: 'Mine', unit: 0, mode: 'solid', vertices: [[0, 0, 0], [2, 0, 0], [0, 2, 0], [0, 0, 2]], colors: Array(4).fill([10, 200, 60]), faces: [[0, 1, 2], [0, 1, 3], [0, 2, 3], [1, 2, 3]] }, 'mine-1')!
+    expect(prizeBar(other, kitG(kit))).toBe('unpublished')
+  })
+
+  it('ITEMS: a kit piece hidden in a chest and taken back, keyed by the bag item\'s event id, is never a prize, when picking or at SEAL', () => {
+    markKitPieces([piece('kit-c/one')])
+    const taken = piece('e'.repeat(64), 'Piece')
+    expect(prizeAllowed(taken, 'items', kitG(kitPieces()))).toBe(false)
+  })
+
+  it('DUPLICATE: the copy is barred by its model, and still by its id once edited', async () => {
+    const { useWorkshop } = await import('../../../store/useWorkshop')
+    const src = piece('kit-d/one')
+    markKitPieces([src])
+    useWorkshop.setState({ shards: [src] })
+    const copyId = useWorkshop.getState().duplicate(src.id)
+    expect(copyId).not.toBe(src.id)
+    const copy = useWorkshop.getState().shards.find((m) => m.id === copyId)!
+    expect(prizeAllowed(copy, 'workshop', kitG(kitPieces()))).toBe(false)
+    expect(prizeBar(copy, kitG(kitPieces()))).toBe('kit')
+    // Edited (a face taken off): a different model, and the carried id mark still bars it.
+    const edited: ShardModel = { ...copy, faces: copy.faces.slice(0, 3) }
+    expect(kitPrint(edited)).not.toBe(kitPrint(copy))
+    expect(prizeBar(edited, kitG(kitPieces()))).toBe('kit')
+  })
+
+  it('kit pieces marked by id before fingerprints were kept get theirs from the workshop', () => {
+    markKitPieces(['kit-e/one'])
+    const old = piece('kit-e/one', 'Old', 5)
+    expect(kitPieces().has(kitPrint(old)!)).toBe(false)
+    backfillKitPrints([old, piece('not-kit')])
+    expect(kitPieces().has(kitPrint(old)!)).toBe(true)
   })
 })

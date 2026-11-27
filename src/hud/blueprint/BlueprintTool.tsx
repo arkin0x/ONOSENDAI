@@ -40,7 +40,7 @@ import { withAuthoredConstrain } from '../../lib/walkConstrain'
 import { isKeyItem } from '../../lib/inventory'
 import { ModalClose } from '../ui/ModalClose'
 import { ItemThumb } from '../ItemThumb'
-import { BAR_WORDS, includedPrizes, kitPieces, prizeBar, setIncluded, type GuardInput } from '../../lib/blueprint/prizeGuard'
+import { BAR_WORDS, backfillKitPrints, includedPrizes, kitPieces, prizeBar, setIncluded, type GuardInput } from '../../lib/blueprint/prizeGuard'
 import { usePublished } from '../../store/usePublished'
 import { modelEditedAt, modelRef, useNewestFirst } from '../ShardFolders'
 import { useShardFolders } from '../../store/useShardFolders'
@@ -206,6 +206,8 @@ function ArrangementStep(): JSX.Element {
 
 /** The guard's view of this device: who you are, what you published, the kit pieces, what you included. */
 function guardNow(): GuardInput {
+  // Kit pieces marked before fingerprints were kept get theirs now, from the workshop's models.
+  backfillKitPrints(useWorkshop.getState().shards)
   return { me: useCyberspace.getState().identity.pubkey, ledger: usePublished.getState().ledger, kit: kitPieces(), included: includedPrizes() }
 }
 

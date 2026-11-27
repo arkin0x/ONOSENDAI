@@ -114,6 +114,8 @@ export const MOVED_PREFIXES: readonly string[] = [
   'onosendai:chips-folded:',
   // The finds NEARBY counts new (the orange +N) per player (store/nearbyNew.ts).
   'onosendai:nearby-new:',
+  // MINING's stats per player (store/miningStats.ts): this device's id, the counts, and the salted chunk hashes.
+  'onosendai:mining:',
   // TERRAIN's air placing (the ghost block) on or off per player (store/airSwitch.ts).
   'onosendai:air-place:',
 ]
@@ -128,7 +130,7 @@ export const STAYS_IN_LOCAL_STORAGE: readonly string[] = [
   'onosendai:secrets:bought', 'onosendai:secrets:refused', 'onosendai:secrets:fallback',
   'onosendai:nsec', 'onosendai:mintedKey', 'onosendai:signer', 'onosendai:live', 'onosendai:live:', 'onosendai:live-moved', 'onosendai:outbound:', 'onosendai:moveMode',
   'onosendai:showSecrets', 'onosendai:showTrail', 'onosendai:chain-mark:', 'onosendai:chain-rows:',
-  'onosendai:chain-unsaved:', 'onosendai:shards:moved', 'onosendai:calibration', 'onosendai:menu-open', MOVED_MARK,
+  'onosendai:chain-unsaved:', 'onosendai:shards:moved', 'onosendai:calibration', 'onosendai:menu-open', 'onosendai:mining-sync', MOVED_MARK,
 ]
 
 /** Whether this record lives in the database (when there is one). */

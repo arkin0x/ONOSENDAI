@@ -235,7 +235,7 @@ describe('the saved panel layout (arkinox, 2026-10-10)', () => {
   it('lays the columns out in the saved order, with the brand, the license and the build where they were', () => {
     usePanelLayout.setState({ order: moveBefore(moveBefore(defaultOrder(), 'relays', 'identity', 'left'), 'hidden', null, 'right') })
     const { left, right } = columns()
-    expect(left).toEqual(['Brand', 'RelaysPanel', 'IdentityPanel', 'InventoryPanel', 'GamesPanel', 'AgentsPanel', 'AvatarsPanel', 'ShardsPanel', 'DiscoveredPanel', 'TargetsPanel', 'LinksPanel'])
+    expect(left).toEqual(['Brand', 'RelaysPanel', 'IdentityPanel', 'InventoryPanel', 'GamesPanel', 'AgentsPanel', 'AvatarsPanel', 'ShardsPanel', 'MiningPanel', 'DiscoveredPanel', 'TargetsPanel', 'LinksPanel'])
     // TUTORIAL is drawn for everyone since the tutorial went on by default (2026-11-13).
     expect(right).toEqual(['ModesPanel', 'TutorialPanel', 'PositionPanel', 'ScalePanel', 'ViewAtPanel', 'ProofPanel', 'CloudPanel', 'ChainPanel', 'HyperspacePanel', 'ViewPanel', 'Legend', 'Controls', 'DerezzPanel', 'HiddenPanel'])
   })

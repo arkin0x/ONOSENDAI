@@ -106,6 +106,7 @@ import {
 } from '../lib/hidden'
 import { BLUEPRINT_RELAY_READY, readRecord } from '../lib/blueprint/format'
 import type { BlueprintCard } from '../lib/blueprint/blueprintDb'
+import { noteMining } from './miningStats'
 import { useBlueprints } from './useBlueprints'
 import { dnaTextRefusal, draftPrice, seedWorkHolds, type SeedDraft } from '../lib/seeds/plant'
 import { MineCancelled } from '../lib/avatarWorker'
@@ -5855,6 +5856,9 @@ export const useShards = create<ShardsState>((set, get) => {
         if (kept && !keyFitsLookup(kept.keyHex, kept.lookupId)) {
           useToast.getState().show({ label: 'KEY CHECK FAILED', meta: `${route === 'cloud' ? `${WRONG_KEY}. ` : ''}The lookup id this was filed under is not the one its key gives, so strangers cannot find it. Tap it and TEST DISCOVERY.`, mark: 'build' })
         }
+        // MINING: blueprint cards left in the world (a card here, or new cards in a new chest).
+        const cardsLeft = pending.type === 'blueprint' ? 1 : pending.type === 'chest' && !movedChest ? pending.contents.filter((c) => c.kind === 'blueprint').length : 0
+        for (let n = 0; n < cardsLeft; n++) noteMining({ type: 'blueprint', what: 'placed' }, cs.identity.pubkey)
         // Placed: first in your shard lists from now. Local, and never the
         // deploy's failure; not for an identity switched to meanwhile.
         if (cyber().identity.pubkey === cs.identity.pubkey) {

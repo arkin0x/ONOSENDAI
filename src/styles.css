@@ -15838,18 +15838,31 @@ body:has(.terrainview.is-folded) .terrain-held { visibility: hidden; }
 .terrain-message__text--compiling { color: #ffc27a; letter-spacing: 0.24em; animation: bp-compiling 1.1s ease-in-out infinite alternate; }
 @keyframes bp-compiling { from { opacity: 0.55; } to { opacity: 1; } }
 
-/* The held Compiler: bottom right, under every control and the menu, never taking a tap (as the carried block). */
+/* The held Compiler: a canvas the whole screen wide, under every control and the menu, never taking a tap (as the carried
+   block). At rest the hammer is a small item in the bottom right corner; for a smash it comes forward across the screen
+   (terrain/HeldCompiler.tsx). It reaches a little past every edge, so its breathing never shows the canvas's own edge. */
 .terrain-compiler {
-  --held: 200px;
   position: fixed;
-  right: calc(var(--controls-right) + 20px);
-  bottom: calc(var(--held) * -0.28);
+  inset: -16px;
   z-index: 0;
-  width: calc(var(--held) * 1.1);
-  height: calc(var(--held) * 1.5);
+  overflow: hidden;
   pointer-events: none;
 }
-@media (min-width: 1101px) { .terrain-compiler { --held: 280px; } }
+/* Breathing at rest, a bob with a walk: the page's own motion, so an idle hammer draws no frames. */
+.terrain-compiler__sway { width: 100%; height: 100%; animation: terrain-compiler-breathe 3.6s ease-in-out infinite alternate; }
+.terrain-compiler.is-walking .terrain-compiler__sway { animation: terrain-compiler-bob 460ms ease-in-out infinite alternate; }
+.terrain-compiler.is-holding .terrain-compiler__sway { animation-play-state: paused; }
+@keyframes terrain-compiler-breathe {
+  from { transform: translate(0, 0); }
+  to { transform: translate(-2px, 5px); }
+}
+@keyframes terrain-compiler-bob {
+  from { transform: translate(-4px, -2px); }
+  to { transform: translate(4px, 7px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .terrain-compiler .terrain-compiler__sway { animation: none; }
+}
 
 /* The prize strip, in the hint's slot over the hotbar. */
 .prize-strip {

@@ -14,7 +14,11 @@
  *     from one time uniform. Freed FREE_MS after impact;
  *   - while the compile is still working once the shatter ends, an ember at
  *     the centre (the HUD prints COMPILING over it);
- *   - the ending: grey dust settling for a miss, a short bright burst for a
+ *   - the smoke: grey motes born inside the smashed blocks at the impact
+ *     itself (lib/blueprint/shatter.ts buildSmoke), pushed out by the blow
+ *     and sinking. It hangs while the compile works, settles away for a
+ *     miss, and clears quickly for a match;
+ *   - the ending: the smoke settling for a miss, a short bright burst for a
  *     match (the toy itself is drawn elsewhere).
  *
  * The glowing parts add their light and write alpha, so the world's bloom
@@ -43,8 +47,8 @@ import { NO_BLOOM_BLEND } from './shardFaces'
 import { MAX_SCALE, drawnScale, fieldMatrix } from './TerrainLayer'
 import type { ViewAxes } from '../lib/space'
 import {
-  BURST_MS, CALM_SHATTER_MS, DUST_MS, EMBER_FADE_MS, FLASH_MS, FREE_MS, RING_MS, SHATTER_MS, buildDust, buildRadius, buildShatter, endingFrom, linearRgb,
-  shatterCap,
+  BURST_MS, CALM_SHATTER_MS, EMBER_FADE_MS, FLASH_MS, FREE_MS, RING_MS, SHATTER_MS, SMOKE_MS, buildRadius, buildShatter, buildSmoke, endingFrom, linearRgb,
+  shatterCap, smokeLevel,
 } from '../lib/blueprint/shatter'
 
 /** Light added, colour and alpha both: what the shader writes is what lands, and the alpha it writes lets the bloom see it. */
@@ -52,7 +56,7 @@ const GLOW_ADD = {
   blending: CustomBlending, blendEquation: AddEquation, blendSrc: OneFactor, blendDst: OneFactor, blendSrcAlpha: OneFactor, blendDstAlpha: OneFactor,
 } as const
 
-/** Motes of dust for a miss. */
+/** Motes of smoke. */
 const DUST_COUNT = 320
 const CALM_DUST_COUNT = 120
 
@@ -197,14 +201,18 @@ const DUST_VERTEX = /* glsl */ `
   uniform float uDur;
   uniform float uPx;
   uniform float uSize;
+  uniform float uLevel;
   varying float vA;
   void main() {
     float p = clamp(uT / uDur, 0.0, 1.0);
-    vec3 at = position + aDrift * (1.0 - pow(1.0 - p, 2.4));
-    vec4 mv = modelViewMatrix * vec4(at, 1.0);
     float h = fract(sin(dot(position, vec3(12.9898, 78.233, 37.719))) * 43758.5453);
-    vA = smoothstep(0.0, 0.1, p) * (1.0 - smoothstep(0.45, 1.0, p)) * (0.35 + 0.4 * h) * step(0.0, uT);
-    gl_PointSize = min(48.0, uSize * (0.6 + 0.8 * h) * uPx * length(modelViewMatrix[0].xyz) / max(0.001, -mv.z));
+    // Out of its block fast, slowing as it goes, and sinking all the while.
+    vec3 at = position + aDrift * (1.0 - pow(1.0 - p, 2.4 + 1.2 * h));
+    at.y -= 0.12 * uT * (0.5 + h);
+    vec4 mv = modelViewMatrix * vec4(at, 1.0);
+    vA = uLevel * (0.3 + 0.4 * h) * step(0.0, uT);
+    // Each mote swells as it thins out.
+    gl_PointSize = min(64.0, uSize * (0.6 + 0.8 * h) * (0.7 + 1.1 * p) * uPx * length(modelViewMatrix[0].xyz) / max(0.001, -mv.z));
     gl_Position = projectionMatrix * mv;
   }
 `
@@ -216,7 +224,9 @@ const DUST_FRAGMENT = /* glsl */ `
     vec2 d = gl_PointCoord * 2.0 - 1.0;
     float r2 = dot(d, d);
     if (r2 > 1.0 || vA <= 0.0) discard;
-    gl_FragColor = vec4(uColor, vA * (1.0 - r2));
+    // Soft to its edge: a puff, not a disc.
+    float soft = 1.0 - r2;
+    gl_FragColor = vec4(uColor, vA * soft * soft * 1.5);
   }
 `
 
@@ -270,16 +280,16 @@ export function SmashFx({ axes }: { axes: ViewAxes }): JSX.Element {
     burst: glowMaterial('#ffd27d'),
     dust: new ShaderMaterial({
       vertexShader: DUST_VERTEX, fragmentShader: DUST_FRAGMENT,
-      uniforms: { uT: { value: -1 }, uDur: { value: DUST_MS / 1000 }, uPx: { value: 800 }, uSize: { value: 0.12 }, uColor: { value: new Vector3(...linearRgb('#9aa0a6')) } },
+      uniforms: { uT: { value: -1 }, uDur: { value: SMOKE_MS / 1000 }, uPx: { value: 800 }, uSize: { value: 0.16 }, uLevel: { value: 0 }, uColor: { value: new Vector3(...linearRgb('#9aa0a6')) } },
       transparent: true, depthWrite: false, ...NO_BLOOM_BLEND,
     }),
   }), [])
   useEffect(() => () => { for (const m of Object.values(mats)) m.dispose() }, [mats])
 
-  // The dust is made with the show, a few hundred points; it only draws for a miss.
+  // The smoke is made with the show, a few hundred points born inside its blocks.
   const dustGeometry = useMemo(() => {
     if (!show) return null
-    const d = buildDust(show.centre, buildRadius(show.blocks, show.centre), reduced ? CALM_DUST_COUNT : DUST_COUNT, show.id)
+    const d = buildSmoke(show.blocks, show.centre, reduced ? CALM_DUST_COUNT : DUST_COUNT, show.id)
     const g = new BufferGeometry()
     g.setAttribute('position', new BufferAttribute(d.at, 3))
     g.setAttribute('aDrift', new BufferAttribute(d.drift, 3))
@@ -401,10 +411,13 @@ export function SmashFx({ axes }: { axes: ViewAxes }): JSX.Element {
       u.uPull.value = R
       u.uLevel.value = burstLevel
     }
-    if (du) du.visible = show.outcome === 'miss' && e >= 0 && e < DUST_MS
+    // The smoke: from the impact, out of the blocks themselves.
+    const smoke = smokeLevel(show, now)
+    if (du) du.visible = smoke > 0
     if (du?.visible) {
       const u = mats.dust.uniforms
-      u.uT.value = e / 1000
+      u.uT.value = t / 1000
+      u.uLevel.value = smoke
       const cam = state.camera as PerspectiveCamera
       const fov = cam.isPerspectiveCamera ? cam.fov : 60
       u.uPx.value = (state.size.height * state.viewport.dpr) / (2 * Math.tan((fov * Math.PI) / 360))

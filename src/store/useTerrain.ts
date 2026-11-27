@@ -101,6 +101,8 @@ export interface TerrainSession {
   db: IDBDatabase | null
   /** Bumped by every change to the blocks the field holds. */
   version: number
+  /** When this identity surveyed each chunk (ms), for the survey card's date (terrain/SurveyCard.tsx). */
+  surveyedAt?: Map<string, number>
   /** What the identity kept is read (the inventory, the surveyed list). */
   ready: Promise<void>
 }
@@ -328,7 +330,9 @@ export const useTerrain = create<TerrainState>((set, get) => ({
       s.surveyedKeys.add(key)
       await build(s, slot)
       if (terrainSession !== s) return
-      if (s.db) keep(writeSurveyed(s.db, s.owner, key, Date.now()))
+      const at = Date.now()
+      ;(s.surveyedAt ??= new Map()).set(key, at)
+      if (s.db) keep(writeSurveyed(s.db, s.owner, key, at))
       // A survey is shared like any change (DECK-0009 §3.1).
       noteChange(key)
       clearWalker(s, key)
@@ -668,6 +672,8 @@ async function build(s: TerrainSession, slot: ChunkSlot): Promise<void> {
     // Blocks a new key carried in from your other keys' layers (store/terrainShare.ts, DECK-0009 §5.6) are yours here.
     if (own) applyCarried(slot.key, own, g.blocks)
     slot.own = own
+    // What the generator said of this ground (its type and hardness), for the survey card (lib/terrain/assay.ts).
+    slot.ground = typeof g.family === 'string' ? { family: g.family, maxK: g.maxK, meanK: g.meanK, top: g.top } : null
     s.world.setBlocks(slot.key, g.blocks, viewOf(slot.key, g.blocks, own))
     s.version++
     useTerrain.setState({ waiting: countWaiting(s) })
@@ -691,6 +697,7 @@ function makeField(owner: string, plane: number, at: Position): TerrainSession {
       // The database joins the field only once what it kept is read: a change in between never overwrites the saved inventory.
       if (terrainSession !== s) { db.close(); return }
       for (const k of kept.surveyed) s.surveyedKeys.add(k)
+      s.surveyedAt = new Map(Object.entries(kept.surveyedAt ?? {}))
       s.nextSeq = Math.max(s.nextSeq, kept.nextSeq)
       s.db = db
       await loadBuilder(db, owner).catch(() => undefined)
@@ -848,6 +855,19 @@ export function hereSurveyedBy(s: TerrainSession | null = terrainSession): 'you'
   if (!here || !here.inSpace) return null
   if (s.surveyedKeys.has(here.key)) return 'you'
   return surveyedForYou(here.key) ? 'someone' : null
+}
+
+/**
+ * The chunk you stand in when it is surveyed for you (by you, or counted as
+ * surveyed from someone else's layer) and its blocks are in: the one SURVEY's
+ * button offers the survey card for (terrain/SurveyCard.tsx). Null otherwise.
+ */
+export function cardChunkHere(s: TerrainSession | null = terrainSession): string | null {
+  if (!s) return null
+  const w = offsetOf(s, headNow())
+  const here = s.world.slotAtCs(w[0], w[1], w[2])
+  if (!here || !here.inSpace || !here.blocks || s.building.has(here.key)) return null
+  return s.surveyedKeys.has(here.key) || surveyedForYou(here.key) ? here.key : null
 }
 
 /**

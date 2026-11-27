@@ -542,6 +542,18 @@ export function surveyedForYou(key: string): boolean {
   return sessionFor()?.views.get(key)?.surveyed ?? false
 }
 
+/**
+ * When the chunk was first built in by anyone drawn for you, in milliseconds
+ * (its oldest layer's created_at): the survey card's date for a chunk someone
+ * else surveyed. Null when no layer is drawn there.
+ */
+export function firstLayerAt(key: string): number | null {
+  const layers = sessionFor()?.views.get(key)?.layers ?? []
+  let first = Infinity
+  for (const l of layers) if (l.createdAt > 0 && l.createdAt < first) first = l.createdAt
+  return Number.isFinite(first) ? first * 1000 : null
+}
+
 /** Chunks that others built in near you: loaded and drawn even where you never surveyed. */
 export function sharedKeys(): ReadonlySet<string> {
   const s = sessionFor()

@@ -27,6 +27,7 @@ import { CELLS, chunkInSpace, chunkKey, idx, type ChunkBase } from './coords'
 import { EMPTY } from './blocks'
 import { FOOT, aroundIndex, lightReaches } from './light'
 import type { AxisDirection, ViewAxes, AxisName } from '../space'
+import type { GroundFacts } from './assay'
 
 /** Blocks of reach past the chunk's walls, on each axis (DECK-0009 §6.2). */
 export const REACH = 16
@@ -84,6 +85,8 @@ export interface ChunkSlot {
   blocks: Uint8Array | null
   /** Your own blocks alone: the ground with your layer and log over it, what your layer is written from. Null where you have not surveyed. */
   own?: Uint8Array | null
+  /** What the generator said of its ground (its type and hardness), for the survey card (assay.ts); absent until generated. */
+  ground?: GroundFacts | null
   /** Changed since it was last meshed. */
   dirty: boolean
   /** Its light (light.ts) may have changed since it was last worked out: a block within its reach changed, or a chunk came or went. */

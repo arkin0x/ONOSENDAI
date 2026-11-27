@@ -258,7 +258,7 @@ export async function readKept(db: IDBDatabase, owner: string, chunks: readonly 
 }
 
 /** What one identity kept that is not per chunk: every chunk it surveyed (keys), the inventory, the hint, and past its newest op. */
-export async function readOwner(db: IDBDatabase, owner: string): Promise<{ surveyed: string[]; inventory: Inventory; hint: number; nextSeq: number }> {
+export async function readOwner(db: IDBDatabase, owner: string): Promise<{ surveyed: string[]; surveyedAt: Record<string, number>; inventory: Inventory; hint: number; nextSeq: number }> {
   const tx = db.transaction([OPS, SURVEYED, META], 'readonly')
   const [rows, inv, hint, last] = await Promise.all([
     request(tx.objectStore(SURVEYED).index(BY_OWNER).getAll(owner)) as Promise<SurveyedRow[]>,
@@ -269,6 +269,8 @@ export async function readOwner(db: IDBDatabase, owner: string): Promise<{ surve
   const lastSeq = last && typeof (last.value as OpRow).seq === 'number' ? (last.value as OpRow).seq : 0
   return {
     surveyed: rows.filter((r) => r && typeof r.chunk === 'string').map((r) => r.chunk),
+    // When each was surveyed, for the survey card's date (terrain/SurveyCard.tsx).
+    surveyedAt: Object.fromEntries(rows.filter((r) => r && typeof r.chunk === 'string' && typeof r.t === 'number').map((r) => [r.chunk, r.t])),
     inventory: tidyInventory(inv?.value),
     hint: typeof hint?.value === 'number' ? hint.value : 0,
     nextSeq: lastSeq + 1,

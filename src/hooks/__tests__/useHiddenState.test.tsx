@@ -9,8 +9,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createElement } from 'react'
 import { act } from 'react'
 import { mount, type Mounted } from '../../test/elementRoot'
-import { useHiddenState } from '../useHiddenState'
-import { addNearbyNew, clearNearbyNew, forgetNearbyNew } from '../../store/nearbyNew'
+import { useHiddenState, useMarkOpened } from '../useHiddenState'
+import { addNearbyNew, clearNearbyNew, forgetNearbyNew, nearbyNewFor } from '../../store/nearbyNew'
 import { useMessagesRead } from '../../store/useMessagesRead'
 import { useCyberspace } from '../../store/useCyberspace'
 import { useShards } from '../../store/useShards'
@@ -71,5 +71,45 @@ describe('a hidden thing’s state', () => {
     useMessagesRead.setState({ ready: false })
     m = await mount(createElement(Probe, { id: 'a5', mine: false }))
     expect(last()).toBe('read')
+  })
+})
+
+function Opened({ item }: { item: { key: string; lineage?: string; type: string; author?: string } }): null {
+  useMarkOpened(item)
+  return null
+}
+
+describe('opening a card', () => {
+  const OTHER = 'b'.repeat(64)
+  for (const type of ['key', 'audio'] as const) {
+    it(`an ${type === 'key' ? 'item' : 'sound'}’s card marks it read, by its lineage, and takes it off NEARBY’s +N`, async () => {
+      const me = useCyberspace.getState().identity.pubkey
+      addNearbyNew([`${type}-1`], me)
+      m = await mount(createElement(Opened, { item: { key: `${type}-1`, lineage: `${type}-lin`, type, author: OTHER } }))
+      expect(useMessagesRead.getState().read.ids).toContain(`${type}-lin`)
+      expect(nearbyNewFor(me).has(`${type}-1`)).toBe(false)
+    })
+  }
+
+  it('a message’s card takes it off +N (its letter card marks it read, as before)', async () => {
+    const me = useCyberspace.getState().identity.pubkey
+    addNearbyNew(['msg-1'], me)
+    m = await mount(createElement(Opened, { item: { key: 'msg-1', type: 'message', author: OTHER } }))
+    expect(nearbyNewFor(me).has('msg-1')).toBe(false)
+    expect(useMessagesRead.getState().read.ids).not.toContain('msg-1')
+  })
+
+  it('your own item is not written to the record (it is read already)', async () => {
+    const me = useCyberspace.getState().identity.pubkey
+    m = await mount(createElement(Opened, { item: { key: 'own-1', type: 'key', author: me } }))
+    expect(useMessagesRead.getState().read.ids).not.toContain('own-1')
+  })
+
+  it('a chest’s or a door’s card is neither marked read nor taken off +N: NEARBY keeps its own rule', async () => {
+    const me = useCyberspace.getState().identity.pubkey
+    addNearbyNew(['chest-1'], me)
+    m = await mount(createElement(Opened, { item: { key: 'chest-1', type: 'chest', author: OTHER } }))
+    expect(useMessagesRead.getState().read.ids).not.toContain('chest-1')
+    expect(nearbyNewFor(me).has('chest-1')).toBe(true)
   })
 })

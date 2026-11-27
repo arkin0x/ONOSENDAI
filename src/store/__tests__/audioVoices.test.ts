@@ -34,6 +34,11 @@ import { waitingCount } from '../../hud/NowPlaying'
 import { toneWav } from '../../lib/__tests__/audioFixture'
 import { cardKey, letSoundOut, playAudio, stopAllAudio, useHiddenAudio, worldFailed, worldFailure } from '../useHiddenAudio'
 import * as tv from '../useTvMusic'
+import { useMessagesRead } from '../useMessagesRead'
+import { useCyberspace } from '../useCyberspace'
+import { useShards } from '../useShards'
+import { addNearbyNew, clearNearbyNew, forgetNearbyNew, nearbyNewFor } from '../nearbyNew'
+import { useSoundMutes } from '../useSoundMutes'
 
 /** An element stand-in whose play is refused until `allowed`, as Safari refuses one outside a tap. */
 class FakeAudio extends EventTarget {
@@ -134,5 +139,31 @@ describe('TV ducking', () => {
     expect(duck.mock.calls.at(-1)?.[0]).toBeLessThan(1)
     stopAllAudio()
     expect(duck.mock.calls.at(-1)?.[0]).toBe(1)
+  })
+})
+
+describe('a sound heard', () => {
+  it('is READ in the world by its track and off NEARBY\'s +N, whatever Spatial Audio shows; a track muted in NOW PLAYING is not heard', async () => {
+    const me = useCyberspace.getState().identity.pubkey
+    forgetNearbyNew()
+    useShards.setState({ nearbyOpen: false } as never)
+    useMessagesRead.setState({ owner: me, read: { ids: [] }, ready: true })
+    addNearbyNew(['k3'], me)
+    useSoundMutes.setState({ ready: true, master: false, tracks: new Set() })
+    FakeAudio.allowed = true
+    await playAudio('k3', audio, undefined, 'lineage-3')
+    await flush()
+    expect(useHiddenAudio.getState().entries[cardKey('k3')]?.phase).toBe('playing')
+    expect(useMessagesRead.getState().read.ids).toContain('lineage-3')
+    expect(nearbyNewFor(me).has('k3')).toBe(false)
+    stopAllAudio()
+    // Muted in NOW PLAYING: played silent, so not heard, and not read.
+    useSoundMutes.setState({ tracks: new Set(['lineage-4']) })
+    useMessagesRead.setState({ read: { ids: [] } })
+    await playAudio('k4', audio, undefined, 'lineage-4')
+    await flush()
+    expect(useMessagesRead.getState().read.ids).not.toContain('lineage-4')
+    useSoundMutes.setState({ tracks: new Set() })
+    clearNearbyNew(me)
   })
 })

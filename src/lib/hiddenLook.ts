@@ -169,15 +169,20 @@ export function waveAt(a: number, wavePhase: number): number {
 
 /**
  * A NEW thing's pulse at `t`: its radius as a share of the ring's reach and
- * its opacity. It leaves the ring every PULSE_S, grows past it and fades;
- * held at a faint still ring with reduced motion, so NEW still shows.
+ * its opacity. It leaves the ring every PULSE_S, grows out to the ring's reach
+ * and fades there, never past it, so it never crosses the name standing
+ * LABEL_GAP over the reach (labelShape; review of #945: the design's pulse
+ * grew to 1.1 gibson and ran through the labels). Held at a faint still ring
+ * at the reach with reduced motion, so NEW still shows.
  */
 export function pulseAt(t: number, phase: number, reduced: boolean, out: { scale: number; opacity: number } = { scale: 0, opacity: 0 }): { scale: number; opacity: number } {
   // `out` is written and returned, so a frame loop can pass one it keeps and allocate nothing.
   if (reduced) { out.scale = 1; out.opacity = 0.35; return out }
   const cyc = (((t + phase) % PULSE_S) + PULSE_S) % PULSE_S
   const k = Math.min(1, cyc / PULSE_RUN_S)
-  out.scale = 0.8 + 0.32 * k
+  // From the ring itself out to the reach.
+  const from = RING_RADIUS / RING_REACH
+  out.scale = from + (1 - from) * k
   out.opacity = (1 - k) * 0.9
   return out
 }

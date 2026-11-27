@@ -101,13 +101,15 @@ describe('motion', () => {
     expect(crests).toBe(2)
   })
 
-  it('a new thing’s pulse leaves the ring every 2.4 s, grows past it and fades; a faint still ring with reduced motion', () => {
+  it('a new thing’s pulse leaves the ring every 2.4 s, grows to the ring’s reach and fades there, never into the name over it; a faint still ring with reduced motion', () => {
     const start = pulseAt(0, 0, false)
-    expect(start.scale).toBeCloseTo(0.8, 12)
+    expect(start.scale * RING_REACH).toBeCloseTo(RING_RADIUS, 12)
     expect(start.opacity).toBeCloseTo(0.9, 12)
     const out = pulseAt(1.6, 0, false)
-    expect(out.scale).toBeCloseTo(1.12, 12)
+    expect(out.scale).toBeCloseTo(1, 12)
     expect(out.opacity).toBeCloseTo(0, 12)
+    // Never past the reach the names stand clear of (labelShape flat).
+    for (let t = 0; t < 5; t += 0.05) expect(pulseAt(t, 0.3, false).scale * RING_REACH).toBeLessThanOrEqual(labelShape(0.5, 0.4).flat + 1e-9)
     expect(pulseAt(0.5 + PULSE_S, 0, false)).toEqual(pulseAt(0.5, 0, false))
     expect(pulseAt(3, 1, true)).toEqual({ scale: 1, opacity: 0.35 })
   })

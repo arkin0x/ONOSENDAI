@@ -63,7 +63,7 @@
  * its card. TAKE fades the whole model out over it (scene/ItemVanish).
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react'
 import { nip19 } from 'nostr-tools'
 import { COIN } from '../lib/palette'
 import { useFrame } from '@react-three/fiber'
@@ -419,7 +419,7 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
         // A model-less item being moved is its token, faint (ItemToken); a message its faint box.
         if (w.key === moving) return worldCube(w) && draw === 'item'
           ? w.type === 'key'
-            ? <ItemToken key={w.key} id={w.key} at={w.centre} side={noteBoxSide(scaleExp)} colour={authorColour(w.itemAuthor ?? w.author)} opacity={MOVING_OPACITY} />
+            ? <MakerToken key={w.key} id={w.key} lineage={w.lineage} at={w.centre} side={noteBoxSide(scaleExp)} who={{ pubkey: w.itemAuthor ?? w.author, mine: w.mine }} opacity={MOVING_OPACITY} />
             : <WorldMark key={w.key} kind="note" at={w.centre} side={noteBoxSide(scaleExp)} opacity={MOVING_OPACITY} />
           : <PlacedBox key={w.key} at={w.centre} opacity={MOVING_OPACITY} />
         if (w.coin) return <CoinItem key={w.key} id={w.key} text={w.text} at={w.centre} onTap={open} />
@@ -525,10 +525,6 @@ export function ItemMark({ id, lineage, text, sub, who, at, opacity = 1, wears, 
   const named = useByName(who)
   const scaleExp = useCyberspace((s) => s.scaleExp)
   const token = useRef<Group | null>(null)
-  // Its state under the rulebook (NEW, UNREAD, READ) and its maker's initial for the token's seal; above the early return.
-  const state = useHiddenState({ key: id ?? text, lineage }, !!who?.mine)
-  const makerProfile = useProfile(who?.pubkey || null)
-  const initial = who ? atlasIndex(sealInitial(makerProfile?.name, safeNpubOf(who.pubkey))) : undefined
   // Its name and who left it, white over the scene as every name label is (owner, 2026-11-27).
   const by = named ?? sub
   // A model's faces would hide a label at its middle, so its label stands
@@ -544,7 +540,7 @@ export function ItemMark({ id, lineage, text, sub, who, at, opacity = 1, wears, 
       {/* In the world with no model drawn (none, or one still loading or that never came): the token (ItemToken), one gibson.
           Cyberspace TV's finds (no `who`), sized on screen, keep the cube. */}
       {who
-        ? <ItemToken id={id ?? text} at={at} side={tokenSide} colour={authorColour(who.pubkey)} initial={initial} state={state} opacity={opacity} groupRef={token} />
+        ? <MakerToken id={id ?? text} lineage={lineage} at={at} side={tokenSide} who={who} opacity={opacity} groupRef={token} />
         : <WorldMark kind="note" at={at} opacity={opacity} side={side} />}
       {/* A fingertip over the token where it rests (TOKEN_LIFT), and the whole token once it is larger (TapTarget `side`):
           a key with no model, and a key whose model has not come, alike. */}
@@ -553,6 +549,19 @@ export function ItemMark({ id, lineage, text, sub, who, at, opacity = 1, wears, 
       {FLOATING_NAME.item && <WorldLabel text={label.text} color={label.color} at={who ? tokenRest(at, tokenSide) : at} align="center" px={LABEL_PX} sub={label.sub} subColor={label.subColor} subScale={1} subOpacity={1} opacity={opacity} clear={who ? { shape: scaledShape(TOKEN_SHAPE, tokenSide) } : undefined} recede="name" />}
     </>
   )
+}
+
+/**
+ * An item's token in its maker's colours: their seal and initial, and its
+ * state under the rulebook (NEW, UNREAD, READ: hooks/useHiddenState). Every
+ * token in the world is drawn through here, standing, being moved or fading
+ * out under TAKE, so none of them loses its seal letter or its state.
+ */
+function MakerToken({ id, lineage, at, side, who, opacity, fadeOut, groupRef }: { id: string; lineage?: string; at: [number, number, number]; side: number; who: { pubkey: string; mine: boolean }; opacity?: number; fadeOut?: number; groupRef?: MutableRefObject<Group | null> }): JSX.Element {
+  const state = useHiddenState({ key: id, lineage }, who.mine)
+  const profile = useProfile(who.pubkey || null)
+  const initial = atlasIndex(sealInitial(profile?.name, safeNpubOf(who.pubkey)))
+  return <ItemToken id={id} at={at} side={side} colour={authorColour(who.pubkey)} initial={initial} state={state} opacity={opacity} fadeOut={fadeOut} groupRef={groupRef} />
 }
 
 /**
@@ -685,12 +694,12 @@ function NamedVanish({ who, label, ...rest }: Omit<Parameters<typeof ItemVanish>
  * standing label, so the name keeps its place); with one, its model fading
  * (ItemVanish) and its name over the half box it leaves.
  */
-function TakenItem({ w, side, play, axes, scaleExp }: { w: { key: string; text: string; centre: [number, number, number]; wears?: ItemWears; region: Box | null; author: string; itemAuthor?: string; mine: boolean }; side: number | undefined; play: Vanishing; axes: ViewAxes; scaleExp: number }): JSX.Element {
+function TakenItem({ w, side, play, axes, scaleExp }: { w: { key: string; lineage?: string; text: string; centre: [number, number, number]; wears?: ItemWears; region: Box | null; author: string; itemAuthor?: string; mine: boolean }; side: number | undefined; play: Vanishing; axes: ViewAxes; scaleExp: number }): JSX.Element {
   const token = useRef<Group | null>(null)
   const who = { pubkey: w.itemAuthor ?? w.author, mine: w.mine }
   return (
     <>
-      {side !== undefined && <ItemToken id={w.key} at={w.centre} side={side} colour={authorColour(who.pubkey)} fadeOut={play.at} groupRef={token} />}
+      {side !== undefined && <MakerToken id={w.key} lineage={w.lineage} at={w.centre} side={side} who={who} fadeOut={play.at} groupRef={token} />}
       <NamedVanish id={w.key} who={who} label={{ text: w.text, color: NAME_WHITE, subColor: NAME_WHITE }} at={side === undefined ? w.centre : tokenRest(w.centre, side)} wears={w.wears} region={w.region} axes={axes} play={play} clear={side === undefined ? { trueSide: placedBoxSide(scaleExp), minPx: 0 } : { shape: scaledShape(TOKEN_SHAPE, side) }} />
     </>
   )
@@ -711,17 +720,14 @@ function safeNpubOf(pubkey: string): string {
  * ruling, 2026-11-27), one gibson across and resting over its place. Its
  * name, the sound's title over who left it, stands a few pixels over its
  * ring as every hidden thing's does. Heard playing, it counts as opened
- * (READ), as opening its card does.
+ * (READ), as opening its card does: store/useHiddenAudio marks it, whether
+ * or not it is drawn.
  */
 export function AudioMark({ id, lineage, title, who, at, opacity = 1, onTap }: { id?: string; lineage?: string; title: string; who?: { pubkey: string; mine: boolean }; at: [number, number, number]; opacity?: number; onTap?: () => void }): JSX.Element {
   const playing = useSoundPlaying(id)
-  const mine = !!who?.mine
-  const state = useHiddenState({ key: id ?? title, lineage }, mine)
+  const state = useHiddenState({ key: id ?? title, lineage }, !!who?.mine)
   const by = useByName(who)
   const side = noteBoxSide(useCyberspace((s) => s.scaleExp))
-  useEffect(() => {
-    if (playing && id && !mine) useMessagesRead.getState().markRead(readId({ key: id, lineage }))
-  }, [playing, id, lineage, mine])
   const rest = useMemo<[number, number, number]>(() => [at[0], at[1] + SOUND_LIFT * side, at[2]], [at, side])
   return (
     <group>

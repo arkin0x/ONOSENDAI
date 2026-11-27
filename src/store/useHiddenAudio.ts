@@ -36,6 +36,8 @@ import { useCyberspace } from './useCyberspace'
 import { duckMusic } from './useTvMusic'
 import { trackSilenced, useSoundMutes } from './useSoundMutes'
 import { DUCKED } from '../lib/audioWorld'
+import { useMessagesRead } from './useMessagesRead'
+import { clearNearbyNew } from './nearbyNew'
 
 export type AudioPhase = 'loading' | 'waiting' | 'playing' | 'error'
 export type VoiceMode = 'card' | 'world'
@@ -255,10 +257,27 @@ if (import.meta.hot) import.meta.hot.dispose(() => { offMutes(); offSoundMutes()
 const sessions = new Map<string, number>()
 
 function setEntry(key: string, entry: AudioEntry | null): void {
+  const was = useHiddenAudio.getState().entries[key]
   const entries = { ...useHiddenAudio.getState().entries }
   if (entry) entries[key] = entry
   else delete entries[key]
   useHiddenAudio.setState({ entries })
+  if (entry && entryHeard(entry) && was?.phase !== 'playing') soundHeard(entry)
+}
+
+/**
+ * A sound heard, from its card or where it is hidden, whatever the Spatial
+ * Audio switch shows: it is READ in the world, as a letter opened is
+ * (store/useMessagesRead, by its track, the item's lineage), and no longer
+ * NEW on NEARBY's +N (store/nearbyNew; owner ruling, 2026-11-27: read and new
+ * states on every hidden thing). A track muted in NOW PLAYING is not heard.
+ */
+function soundHeard(entry: AudioEntry): void {
+  try {
+    useMessagesRead.getState().markRead(entry.trackId || entry.itemKey)
+    const me = useCyberspace.getState().identity.pubkey
+    if (me) clearNearbyNew(me, [entry.itemKey])
+  } catch { /* the record is a nicety; a sound plays whatever it says */ }
 }
 
 let listener: AudioListener | null = null

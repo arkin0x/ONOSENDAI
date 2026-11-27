@@ -30,7 +30,7 @@
  * bloom; the outline and the ring are light.
  */
 
-import { useEffect, useMemo, useRef, type MutableRefObject } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, type MutableRefObject } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { Color, DoubleSide, MeshBasicMaterial, PlaneGeometry, ShaderMaterial, type BufferGeometry, type Group, type InterleavedBufferAttribute, type Mesh } from 'three'
 import { useReducedMotion } from '../hooks/useReducedMotion'
@@ -163,26 +163,41 @@ export function ItemToken({ id, at, side, colour, initial, state = 'unread', opa
     line: outlineMaterial({ color: look.outline, opacity }),
     ring: lineRingMaterial(look.ringOpacity * opacity),
     pulse: pulseMaterial(),
-  // The outline's colour and the ring's opacity are set every frame from the state.
+  // The outline's colour, the ring's opacity and the initial are set from the state below, never by rebuilding.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [colour, faceOpacity, opacity, initial])
+  }), [colour, faceOpacity, opacity])
   useEffect(() => () => { for (const m of Object.values(materials)) m.dispose() }, [materials])
+  // The maker's initial is a uniform: it changes (the npub's letter, then the profile's) without a rebuild.
+  useLayoutEffect(() => { materials.initial.uniforms.uGlyph.value = initial ?? 0 }, [materials, initial])
+  // The outline's colour and width follow the state, parsed once per change, not every frame.
+  useLayoutEffect(() => {
+    materials.line.color.set(look.outline)
+    materials.line.linewidth = look.outlinePx
+  }, [materials, look.outline, look.outlinePx])
+  // The card and its edges, by the item alone; its outline object, by them and the outline's material.
   const card = useMemo(() => {
     const geometry = cardGeometry(id)
-    const lines = outlineLines(edgeSegments(geometry, 30), materials.line)
+    return { geometry, edges: edgeSegments(geometry, 30) }
+  }, [id])
+  useEffect(() => () => card.geometry.dispose(), [card])
+  const cardLines = useMemo(() => {
+    const lines = outlineLines(card.edges, materials.line)
     lines.name = 'item-token-lines'
-    return { geometry, lines }
-  }, [id, materials])
-  useEffect(() => () => { card.geometry.dispose(); card.lines.geometry.dispose() }, [card])
+    return lines
+  }, [card, materials])
+  useEffect(() => () => cardLines.geometry.dispose(), [cardLines])
+  // The ring's geometry lives as long as the token, so the colours written into it survive a material rebuild.
+  const ringGeometry = useMemo(() => lineRingGeometry(), [])
+  useEffect(() => () => ringGeometry.dispose(), [ringGeometry])
   const ringLine = useMemo(() => {
-    const l = liveOutlineLines(lineRingGeometry(), materials.ring)
+    const l = liveOutlineLines(ringGeometry, materials.ring)
     l.name = 'item-token-ring'
     return l
-  }, [materials])
-  useEffect(() => () => ringLine.geometry.dispose(), [ringLine])
+  }, [ringGeometry, materials])
   const phase = useMemo(() => (seedOf(id) / 4294967296) * Math.PI * 2, [id])
   const ringColour = useMemo(() => new Color(RING_COLOUR), [])
-  const waved = useRef(false)
+  // The ring geometry whose still colours are written (reduced motion); none while it moves, so turning reduced motion on writes its still pose.
+  const waved = useRef<unknown>(null)
 
   useFrame((state3) => {
     const g = group.current
@@ -197,8 +212,6 @@ export function ItemToken({ id, at, side, colour, initial, state = 'unread', opa
     }
     sizeOutline(materials.line, state3.size)
     sizeOutline(materials.ring, state3.size)
-    materials.line.color.set(look.outline)
-    materials.line.linewidth = look.outlinePx
     materials.line.opacity = opacity * left
     materials.ring.opacity = look.ringOpacity * opacity * left
     const t = state3.clock.elapsedTime
@@ -210,11 +223,11 @@ export function ItemToken({ id, at, side, colour, initial, state = 'unread', opa
       // The ring faces the camera; the group holding it never turns.
       r.quaternion.copy(state3.camera.quaternion)
       // The idle wave running round it: rewritten each frame, once with reduced motion.
-      if (!reduced || !waved.current) {
-        waved.current = true
+      if (!reduced || waved.current !== ringGeometry) {
+        waved.current = reduced ? ringGeometry : null
         const turn = ringTurnAt(t, reduced)
         const wph = wavePhaseAt(t, reduced)
-        const cols = segmentColours(ringLine.geometry)
+        const cols = segmentColours(ringGeometry)
         for (let i = 0; i < LINE_RING_SEGMENTS; i++) {
           for (let k = 0; k < 2; k++) {
             const v = 0.45 + 0.55 * waveAt(((i + k) / LINE_RING_SEGMENTS) * Math.PI * 2 + turn, wph)
@@ -222,7 +235,7 @@ export function ItemToken({ id, at, side, colour, initial, state = 'unread', opa
             cols[o] = ringColour.r * v; cols[o + 1] = ringColour.g * v; cols[o + 2] = ringColour.b * v
           }
         }
-        ;(ringLine.geometry.getAttribute('instanceColorStart') as InterleavedBufferAttribute).data.needsUpdate = true
+        ;(ringGeometry.getAttribute('instanceColorStart') as InterleavedBufferAttribute).data.needsUpdate = true
       }
       const p = pulse.current
       if (p) {
@@ -240,7 +253,7 @@ export function ItemToken({ id, at, side, colour, initial, state = 'unread', opa
     <group ref={group} position={[at[0], at[1] + TOKEN_LIFT * side, at[2]]} scale={side} name="item-token">
       <group ref={body} rotation={[0, phase, 0]}>
         <mesh geometry={card.geometry} material={materials.core} name="item-token-core" />
-        <primitive object={card.lines} />
+        <primitive object={cardLines} />
         <mesh geometry={SEAL_GEOMETRY} material={materials.seal} name="item-token-seal" />
         {initial !== undefined && <mesh geometry={INITIAL_GEOMETRY} material={materials.initial} name="item-token-initial" />}
       </group>

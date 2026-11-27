@@ -649,15 +649,17 @@ function LetterMeshes({ list, capacity }: { list: LetterSpec[]; capacity: number
   const rng = useRef<Rng>(mulberry32((Date.now() >>> 0) ^ 0x5eed))
   const carry = useRef(0)
   const last = useRef<number | null>(null)
-  const still = useRef({ list: null as LetterSpec[] | null })
+  const still = useRef({ list: null as LetterSpec[] | null, reduced: false })
   useFrame((state) => {
     const cam = state.camera as PerspectiveCamera
     const t = state.clock.elapsedTime
     const { m, q, spin, tilt, p, s, up, c } = scratch
     sizeOutline(materials.lines, state.size)
-    // With reduced motion nothing turns or bobs: the matrices change only with the letters.
-    const unchanged = reduced && still.current.list === list
+    // With reduced motion nothing turns or bobs: the matrices change only with the letters,
+    // and once when reduced motion is turned on, so every letter snaps square on rather than freezing mid-turn.
+    const unchanged = reduced && still.current.reduced && still.current.list === list
     still.current.list = list
+    still.current.reduced = reduced
     if (!unchanged) placeLetters()
     function placeLetters(): void {
       const pos = segmentPositions(lineGeometry)

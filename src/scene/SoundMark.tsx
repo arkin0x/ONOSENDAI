@@ -22,7 +22,7 @@
  * plays and how loud is HiddenAudio's.
  */
 
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { Color, CylinderGeometry, InstancedMesh, Matrix4, MeshBasicMaterial, PlaneGeometry, Quaternion, Vector3, type Group, type Mesh } from 'three'
 import { useReducedMotion } from '../hooks/useReducedMotion'
@@ -78,10 +78,15 @@ export function SoundMark({ id, at, side, state = 'unread', playing, opacity = 1
     // The bars' colour is set per bar (instance colour), so the wave can brighten each one.
     bar: new MeshBasicMaterial({ color: '#ffffff', toneMapped: false, transparent: true, opacity: look.ringOpacity * opacity, depthWrite: false }),
     pulse: pulseMaterial(),
-  // The outline's colour and the ring's opacity are set every frame from the state.
+  // The outline's colour and the ring's opacity follow the state below, never by rebuilding.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [opacity])
   useEffect(() => () => { for (const m of Object.values(materials)) m.dispose() }, [materials])
+  // The outline's colour and width follow the state, parsed once per change, not every frame.
+  useLayoutEffect(() => {
+    materials.line.color.set(look.outline)
+    materials.line.linewidth = look.outlinePx
+  }, [materials, look.outline, look.outlinePx])
   const rims = useMemo(() => liveOutlineGeometry(RIM_SEGMENTS, false), [])
   const rimLines = useMemo(() => {
     const l = liveOutlineLines(rims, materials.line)
@@ -93,7 +98,8 @@ export function SoundMark({ id, at, side, state = 'unread', playing, opacity = 1
   const scratch = useMemo(() => ({ m: new Matrix4(), q: new Quaternion(), p: new Vector3(), s: new Vector3(), z: new Vector3(0, 0, 1), c: new Color(), ring: new Color(RING_COLOUR), white: new Color('#ffffff') }), [])
   const started = useRef(performance.now())
   useEffect(() => { started.current = performance.now() }, [playing])
-  const laid = useRef<boolean | null>(null)
+  // What the still pose (reduced motion) was laid for: playing or not, and the meshes it was laid on. None while it moves.
+  const laid = useRef<{ playing: boolean; materials: unknown } | null>(null)
   const pulseNow = useMemo(() => ({ scale: 0, opacity: 0 }), [])
 
   useFrame((st) => {
@@ -103,8 +109,6 @@ export function SoundMark({ id, at, side, state = 'unread', playing, opacity = 1
     g.position.set(at[0], at[1] + (SOUND_LIFT + bobAt(t, phase, reduced)) * side, at[2])
     g.scale.setScalar(side)
     sizeOutline(materials.line, st.size)
-    materials.line.color.set(look.outline)
-    materials.line.linewidth = look.outlinePx
     materials.line.opacity = opacity
     setFaceOpacity(materials.face, opacity)
     materials.bar.opacity = look.ringOpacity * opacity
@@ -117,9 +121,10 @@ export function SoundMark({ id, at, side, state = 'unread', playing, opacity = 1
         materials.pulse.opacity = p.opacity * opacity
       }
     }
-    // Held still with reduced motion: laid once, and again only when it starts or stops.
-    if (reduced && laid.current === playing) return
-    laid.current = playing
+    // Held still with reduced motion: laid once, again when it starts or stops or its meshes are made anew,
+    // and at once when reduced motion is turned on, so it takes its still pose rather than freezing mid-dance.
+    if (reduced && laid.current?.playing === playing && laid.current.materials === materials) return
+    laid.current = reduced ? { playing, materials } : null
     const since = (performance.now() - started.current) / 1000
     const { m, q, p, s, z, c } = scratch
     // The slices and their rims.

@@ -9,7 +9,7 @@
  */
 import { afterEach, describe, expect, it } from 'vitest'
 import { createElement } from 'react'
-import { Color, Matrix4, Vector3, type InstancedBufferAttribute, type InstancedMesh, type Mesh, type Object3D } from 'three'
+import { Color, Matrix4, Quaternion, Vector3, type InstancedBufferAttribute, type InstancedMesh, type InterleavedBufferAttribute, type Mesh, type Object3D } from 'three'
 import type { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js'
 import { r3fRoot, type R3fRoot } from '../../test/r3fRoot'
 import { LetterField, dropLetter, putLetter } from '../LetterField'
@@ -36,6 +36,13 @@ function named<T = Object3D>(name: string): T {
 }
 const hex = (c: Color): string => `#${c.getHexString()}`
 const reducedMotion = (): void => { (globalThis as { matchMedia?: unknown }).matchMedia = (q: string) => ({ matches: q.includes('reduce'), addEventListener: () => {}, removeEventListener: () => {} }) }
+/** A reduced-motion setting that can be switched while mounted, as a person switching it in their system does. */
+function switchableMotion(): { set: (on: boolean) => void } {
+  const listeners = new Set<() => void>()
+  const media = { matches: false, addEventListener: (_: string, l: () => void) => listeners.add(l), removeEventListener: (_: string, l: () => void) => listeners.delete(l) }
+  ;(globalThis as { matchMedia?: unknown }).matchMedia = () => media
+  return { set: (on) => { media.matches = on; for (const l of listeners) l() } }
+}
 
 describe('the letter', () => {
   const keys = ['l-new', 'l-unread', 'l-read']
@@ -55,6 +62,34 @@ describe('the letter', () => {
     // The outline: one width for all, each letter in its state's colour.
     const lines = named<Mesh & { material: LineMaterial }>('letter-fold-lines')
     expect(lines.material.linewidth).toBe(OUTLINE_PX)
+  })
+})
+
+describe('switching reduced motion on while things move', () => {
+  afterEach(() => dropLetter('l-still'))
+
+  it('snaps a letter square on, and a sound to its still pose, rather than freezing them mid-motion', async () => {
+    const motion = switchableMotion()
+    putLetter({ key: 'l-still', centre: [-3, 0, 0], width: 1, colour: '#ffa35e', initial: atlasIndex('A'), broken: false })
+    r = await r3fRoot()
+    await r.render(createElement('group', null, createElement(LetterField), createElement(SoundMark, { id: 's1', at: [3, 0, 0], side: 1, state: 'unread', playing: true })))
+    for (let f = 0; f < 30; f++) await r.frame()
+    const { act } = await import('react')
+    await act(async () => motion.set(true))
+    await r.frame()
+    await r.frame()
+    const m = new Matrix4()
+    named<InstancedMesh>('letter-paper').getMatrixAt(0, m)
+    const q = new Quaternion().setFromRotationMatrix(m.extractRotation(m))
+    // Square on: no turn about the up axis, only its slight tilt about its own face.
+    const facing = new Vector3(0, 0, 1).applyQuaternion(q)
+    expect(facing.z).toBeCloseTo(1, 6)
+    // The sound's middle slice at its still, playing size, whatever the moment.
+    const s = new Matrix4(); named<InstancedMesh>('sound-slices').getMatrixAt(3, s)
+    const still = new Vector3().setFromMatrixScale(s).x
+    for (let f = 0; f < 10; f++) await r.frame()
+    named<InstancedMesh>('sound-slices').getMatrixAt(3, s)
+    expect(new Vector3().setFromMatrixScale(s).x).toBe(still)
   })
 })
 
@@ -90,6 +125,32 @@ describe('an item’s token', () => {
     named('item-token-seal')
     named('item-token-initial')
     expect(cardOutline('k1')).not.toEqual(cardOutline('another item'))
+  })
+
+  it('with reduced motion, keeps its ring coloured and its materials when its maker’s initial changes (the npub’s letter, then the profile’s)', async () => {
+    reducedMotion()
+    r = await r3fRoot()
+    const at: [number, number, number] = [0, 0, 0]
+    await r.render(createElement(ItemToken, { id: 'k1', at, side: 1, colour: '#ffa35e', initial: atlasIndex('N'), state: 'unread' }))
+    await r.frame()
+    const lines = named<Mesh & { material: LineMaterial }>('item-token-lines')
+    const material = lines.material
+    await r.render(createElement(ItemToken, { id: 'k1', at, side: 1, colour: '#ffa35e', initial: atlasIndex('A'), state: 'unread' }))
+    await r.frame()
+    await r.frame()
+    // Not rebuilt for a uniform.
+    expect(named<Mesh & { material: LineMaterial }>('item-token-lines').material).toBe(material)
+    expect((named<Mesh & { material: { uniforms: { uGlyph: { value: number } } } }>('item-token-initial').material).uniforms.uGlyph.value).toBe(atlasIndex('A'))
+    // The ring is the HUD's cyan, not plain white.
+    const ringColours = (): Float32Array => (named<Mesh>('item-token-ring').geometry.getAttribute('instanceColorStart') as unknown as InterleavedBufferAttribute).data.array as Float32Array
+    const cols = ringColours()
+    expect(cols[0]).toBeLessThan(0.2)
+    expect(cols[2]).toBeGreaterThan(0.4)
+    // And a new opacity, which does rebuild the materials, keeps it coloured too.
+    await r.render(createElement(ItemToken, { id: 'k1', at, side: 1, colour: '#ffa35e', initial: atlasIndex('A'), state: 'unread', opacity: 0.5 }))
+    await r.frame()
+    const after = ringColours()
+    expect(after[0]).toBeLessThan(0.2)
   })
 
   it('its ring faces the camera while the card turns', async () => {
@@ -137,6 +198,18 @@ describe('a sound', () => {
     await mountSound('read', false)
     expect(named<Mesh>('sound-pulse').visible).toBe(false)
     expect(hex(named<Mesh & { material: LineMaterial }>('sound-slice-lines').material.color)).toBe(OUTLINE_READ)
+  })
+
+  it('with reduced motion, takes its still pose again when its meshes are made anew (a new opacity)', async () => {
+    reducedMotion()
+    r = await r3fRoot()
+    await r.render(createElement(SoundMark, { id: 's1', at: [0, 0, 0], side: 1, state: 'unread', playing: false }))
+    await r.frame()
+    const before = sliceRadius(0)
+    await r.render(createElement(SoundMark, { id: 's1', at: [0, 0, 0], side: 1, state: 'unread', playing: false, opacity: 0.5 }))
+    await r.frame()
+    expect(sliceRadius(0)).toBeCloseTo(before, 9)
+    expect(sliceRadius(0)).toBeLessThan(0.5)
   })
 
   it('with reduced motion holds still, quiet or playing', async () => {

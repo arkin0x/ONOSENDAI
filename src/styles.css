@@ -16788,7 +16788,7 @@ div.bpt-tile__hit { cursor: default; }
   transform-origin: 0 0;
 }
 .mining__tile::before { left: 0; top: var(--mt-cut); transform: rotate(-45deg); }
-.mining__tile::after { right: 0; bottom: var(--mt-cut); transform: rotate(-45deg); transform-origin: 100% 0; }
+.mining__tile::after { right: 0; bottom: var(--mt-cut); transform: rotate(-45deg); transform-origin: 100% 100%; }
 .mining__grid--pairs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .mining__tile--wide { grid-column: span 2; }
 .mining__num {

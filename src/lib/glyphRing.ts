@@ -51,8 +51,8 @@ export const RING_HIDE_PX = 10
 /** Below this many, the ring is thinned to RING_GLYPHS_FAR. */
 export const RING_THIN_PX = 26
 
-/** One full turn of the ring, seconds (direction 1's 18 s). */
-export const RING_TURN_S = 18
+/** One full turn of the ring, seconds: every hidden thing's ring turns at the same speed (lib/hiddenLook RING_TURN_S, direction 1's 18 s). */
+export { RING_TURN_S } from './hiddenLook'
 
 /** How many of one ring's glyphs change each second. */
 export const CHANGES_PER_RING_S = 14

@@ -39,6 +39,9 @@ import { useProfile } from '../hooks/useProfile'
 import { isGuideAuthor } from '../tutorial/guideBags'
 import { profileLabel } from '../store/useProfiles'
 import { useCyberspace } from '../store/useCyberspace'
+import { useMessagesRead } from '../store/useMessagesRead'
+import { clearNearbyNew } from '../store/nearbyNew'
+import { readId } from '../lib/messagesRead'
 import { editable, movable as movableDep, muteSubject, rowLoss, useShards, worldItemHidden, type WorldItem } from '../store/useShards'
 import { useInventory } from '../store/useInventory'
 import { addToRoom, editPlaced, movePlaced } from '../store/useBuilder'
@@ -106,6 +109,21 @@ export function SecretModal(): JSX.Element | null {
   const close = (): void => useShards.getState().selectSecret(null)
   // A selection that no longer resolves (deleted, scrolled out) closes itself.
   useEffect(() => { if (selected && !item) useShards.getState().selectSecret(null) }, [selected, item])
+  // Opened: an item's or a sound's card marks it READ in the world, as a
+  // letter's card does (LetterCard), and a hidden message, item or sound
+  // opened is no longer NEW, here or on NEARBY's +N (hooks/useHiddenState;
+  // owner ruling, 2026-11-27: read and new states on all four). Chests and
+  // doors keep NEARBY's own rule (store/nearbyNew).
+  const me = useCyberspace((s) => s.identity.pubkey)
+  const hidden = !!item && (item.type === 'message' || item.type === 'key' || item.type === 'audio')
+  const openedKey = hidden ? item.key : null
+  const openedId = hidden ? readId(item) : null
+  const opensAsRead = hidden && item.type !== 'message' && item.author !== me
+  useEffect(() => {
+    if (!openedKey || !openedId) return
+    if (opensAsRead) useMessagesRead.getState().markRead(openedId)
+    if (me) clearNearbyNew(me, [openedKey])
+  }, [openedKey, openedId, opensAsRead, me])
   // Escape closes it as a tap outside does (arkinox, 2026-10-01); over a
   // modal that opened it (notifications), which is there again when it closes (modalStack).
   useModalStack(item !== null && author !== '', close)

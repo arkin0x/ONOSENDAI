@@ -19,6 +19,10 @@
  * player can tell they did, where "viewed each item" would leave a +2
  * nobody can account for. A find made somewhere else and not listed here
  * stays new until you are back where NEARBY lists it and open the list.
+ * Opening a hidden message's, item's or sound's own card (the item modal)
+ * has seen that one too: it leaves the +N and stops pulsing NEW in the world
+ * (hud/SecretModal; owner ruling, 2026-11-27, read and new states on every
+ * hidden thing).
  *
  * KEPT PER IDENTITY IN INDEXEDDB (owner, 2026-11-19): one record per pubkey,
  * `onosendai:nearby-new:<pubkey>`, a JSON list of event ids (at most

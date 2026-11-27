@@ -29,11 +29,12 @@ vi.mock('@react-three/drei', async () => {
 
 import { ItemMark, NoteItem, noteBoxSide, patchNoteDepthPull, NOTE_BOX_GIBSONS, NOTE_DEPTH_PULL } from '../WorldMessages'
 import { bothFaces, shapeOf, FOLD_LINE_VERTS, foldLinePoints, LetterField, lettersDrawn, LETTER_GIBSONS, LETTER_LIFT, LETTER_SHAPE, LETTER_TURN_S, PAPER } from '../LetterField'
-import { TOKEN_OUTLINE } from '../ItemToken'
+import { TOKEN_LIFT, TOKEN_SHAPE } from '../ItemToken'
+import type { InstancedBufferGeometry, InterleavedBufferAttribute } from 'three'
 import { LABEL_GAP_PX } from '../../lib/markerSize'
 import { authorColour } from '../../lib/authorColour'
 import { useMessagesRead } from '../../store/useMessagesRead'
-import { Color, DoubleSide, InstancedMesh, PerspectiveCamera, ShaderMaterial, type BufferGeometry, type LineSegments } from 'three'
+import { Color, DoubleSide, InstancedMesh, PerspectiveCamera, ShaderMaterial } from 'three'
 import { ShardMesh } from '../ShardMesh'
 import { TapTarget } from '../TapTarget'
 import { useCyberspace } from '../../store/useCyberspace'
@@ -174,20 +175,28 @@ describe('a message’s box', () => {
     expect(turned(b, facing())).toBeCloseTo(360 / LETTER_TURN_S, 0)
   })
 
-  it('is paper on both sides, with its flap, seal and initial on both faces, and its edge and flap drawn as lines that keep a pixel at any distance', async () => {
+  it('is a solid sheet seen from both sides, with its flap, seal and initial on both faces, and every hard edge and the flap outlined the same width at any distance', async () => {
     useCyberspace.setState({ scaleExp: 0 })
     r = await r3fRoot()
     await r.render(scene())
     await placeCamera(r, [0, 0, 200])
     expect((paper(r).material as Material).side).toBe(DoubleSide)
-    let lines: (LineSegments & { geometry: BufferGeometry }) | undefined
+    // A solid: its sheet has depth.
+    const geo = paper(r).geometry
+    geo.computeBoundingBox()
+    expect(geo.boundingBox!.max.z - geo.boundingBox!.min.z).toBeGreaterThan(0.02)
+    let lines: (Object3D & { geometry: InstancedBufferGeometry; material: { linewidth: number; worldUnits: boolean } }) | undefined
     r.state().scene.traverse((o) => { if (o.name === 'letter-fold-lines') lines = o as never })
-    expect(lines!.type).toBe('LineSegments')
-    expect(lines!.geometry.drawRange.count).toBe(FOLD_LINE_VERTS)
-    // The lines stand on both faces, off the paper, in the scene's frame where the letter is.
-    const pos = lines!.geometry.getAttribute('position')
+    // Screen-space lines, OUTLINE_PX wide whatever the distance.
+    expect(lines!.type).toBe('LineSegments2')
+    expect(lines!.material.worldUnits).toBe(false)
+    expect(lines!.material.linewidth).toBe(1.5)
+    expect(lines!.geometry.instanceCount).toBe(FOLD_LINE_VERTS / 2)
+    // The lines stand on both faces, in the scene's frame where the letter is.
+    const arr = (lines!.geometry.getAttribute('instanceStart') as InterleavedBufferAttribute).data.array as Float32Array
+    const normal = new Vector3(0, 0, 1).transformDirection((() => { const m = new Matrix4(); paper(r!).getMatrixAt(0, m); return m })())
     const zs = new Set<number>()
-    for (let i = 0; i < FOLD_LINE_VERTS; i++) zs.add(Math.sign(new Vector3(pos.getX(i), pos.getY(i), pos.getZ(i)).sub(new Vector3(0, 0, 0)).dot(new Vector3(0, 0, 1).transformDirection((() => { const m = new Matrix4(); paper(r!).getMatrixAt(0, m); return m })()))))
+    for (let i = 0; i < FOLD_LINE_VERTS; i++) { const d = new Vector3(arr[i * 3], arr[i * 3 + 1], arr[i * 3 + 2]).dot(normal); if (Math.abs(d) > 1e-4) zs.add(Math.sign(d)) }
     expect([...zs].sort()).toEqual([-1, 1])
     // The flap's fold is among them: from the left edge to the seal and up to the corner, on each face.
     const pts = foldLinePoints()
@@ -271,17 +280,17 @@ describe('a message’s box', () => {
     expect(lettersDrawn()).toEqual([])
   })
 
-  it('draws its paper opaque, out of the bloom; its folds and its ring as light that writes no depth', async () => {
+  it('draws its paper opaque, out of the bloom; its outline and its ring as light that writes no depth', async () => {
     useCyberspace.setState({ scaleExp: 0 })
     r = await r3fRoot()
     await r.render(scene())
-    const sheet = paper(r).material as Material & { color: Color }
+    const sheet = paper(r).material as ShaderMaterial
     expect(sheet.depthWrite).not.toBe(false)
-    expect(`#${sheet.color.getHexString()}`).toBe(PAPER)
+    expect(`#${(sheet.uniforms.uColor.value as Color).getHexString()}`).toBe(PAPER)
     let folds: Material | undefined
     let ring: ShaderMaterial | undefined
     r.state().scene.traverse((o) => {
-      if (o.name === 'letter-folds') folds = (o as Mesh).material as Material
+      if (o.name === 'letter-fold-lines') folds = (o as Mesh).material as Material
       if (o.name === 'letter-rings') ring = (o as Mesh).material as ShaderMaterial
     })
     expect(folds!.depthWrite).toBe(false)
@@ -319,9 +328,10 @@ describe('a message’s box', () => {
     r = await r3fRoot()
     await r.render(scene({ ...NOTE, mine: false, author: me }))
     await placeCamera(r, [0, 0, 5])
-    let text: Object3D | undefined
-    r.state().scene.traverse((o) => { if (o.name === 'text') text = o })
-    expect(text!.userData.text).toBe('you')
+    const texts: unknown[] = []
+    r.state().scene.traverse((o) => { if (o.name === 'text') texts.push(o.userData.text) })
+    // Name over maker: "message", and under it who left it.
+    expect(texts).toEqual(['message', 'you'])
   })
 
   it('stands the name a constant few pixels over the letter’s ring at any distance and angle: close by it does not float off (owner, 2026-11-27)', async () => {
@@ -342,7 +352,9 @@ describe('a message’s box', () => {
         const m = new Matrix4(); paper(r).getMatrixAt(0, m)
         const corners = [[-0.5, 0.33], [0.5, 0.33], [0.5, -0.33], [-0.5, -0.33]].map(([x, y]) => toY(new Vector3(x, y, 0).applyMatrix4(m)))
         const top = Math.min(ringTop, ...corners)
-        const foot = bottoms[bottoms.length - 1]
+        const foot = Math.max(...bottoms)
+        // So close the ring's reach would lift the name past half the screen: it is held on screen instead (WorldLabel MAX_LIFT_SHARE).
+        if (toY(rest) - top + LABEL_GAP_PX > 0.48 * 800) continue
         // Never on the letter, and no more than a pixel or two over the gap (the paper's bound is an ellipsoid, a few pixels loose up close).
         expect(top - foot).toBeGreaterThanOrEqual(LABEL_GAP_PX - 1)
         expect(top - foot).toBeLessThan(LABEL_GAP_PX + (eye[2] <= 2.5 ? 12 : 2))
@@ -365,10 +377,16 @@ describe('a message’s box', () => {
         for (let k = 0; k < 40; k++) await r.frame()
         const { bottoms, toY } = await measureLabel(r, eye, look)
         expect(bottoms).toHaveLength(2)
-        // The highest point of the token as drawn: its tag and its ring, through the group's own matrix this frame.
-        group!.updateWorldMatrix(true, false)
-        const top = Math.min(...TOKEN_OUTLINE.map((p) => toY(new Vector3(p[0], p[1], p[2]).applyMatrix4(group!.matrixWorld))))
-        expect(Math.abs(top - Math.max(...bottoms) - LABEL_GAP_PX)).toBeLessThan(1)
+        // The top of its ring's reach, turned to the camera, from where it rests (the rule every hidden thing's name keeps).
+        const camera = r.state().camera
+        const up = new Vector3(0, 1, 0).applyQuaternion(camera.quaternion)
+        const top = toY(up.multiplyScalar(TOKEN_SHAPE.flat).add(new Vector3(0, TOKEN_LIFT, 0)))
+        // And the card as drawn never stands over its name.
+        group!.updateWorldMatrix(true, true)
+        if (toY(new Vector3(0, TOKEN_LIFT, 0)) - top + LABEL_GAP_PX > 0.48 * 800) continue
+        const gap = top - Math.max(...bottoms)
+        expect(gap).toBeGreaterThanOrEqual(LABEL_GAP_PX - 1)
+        expect(gap).toBeLessThan(LABEL_GAP_PX + (eye[2] <= 2.5 ? 12 : 2))
       }
     }
   })

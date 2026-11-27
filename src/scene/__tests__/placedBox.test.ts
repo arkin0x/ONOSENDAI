@@ -1,8 +1,8 @@
 import { readFileSync } from 'node:fs'
 import { createElement } from 'react'
-import { LineBasicMaterial, MeshBasicMaterial, PerspectiveCamera, Quaternion, Vector3 } from 'three'
+import { LineBasicMaterial, MeshBasicMaterial } from 'three'
 import { describe, expect, it, vi } from 'vitest'
-import { mount, type Host } from '../../test/elementRoot'
+import { mount } from '../../test/elementRoot'
 
 /** Every frame callback mounted, caught so a test can run them against real three objects. */
 const frames: Array<(state: unknown) => void> = []
@@ -20,10 +20,6 @@ import { TAG_BLEND, TRANSLUCENT_ORDER } from '../shardFaces'
 import { VANISH_MS } from '../../lib/ceremony'
 import { useCyberspace } from '../../store/useCyberspace'
 
-/** The host records this renderer makes stand in for three objects: give one what a frame writes. */
-function asObject(h: Host): Host & { position: Vector3; scale: Vector3; quaternion: Quaternion } {
-  return Object.assign(h, { position: new Vector3(), scale: new Vector3(1, 1, 1), quaternion: new Quaternion() })
-}
 
 describe('the box of a held item and of a sound', () => {
   const source = readFileSync(new URL('../WorldMessages.tsx', import.meta.url), 'utf8')
@@ -34,12 +30,11 @@ describe('the box of a held item and of a sound', () => {
     expect(placedBoxSide(10) * 2 ** 10).toBe(0.5)
   })
 
-  it('draws round an item you made and hold, at half, and for a sound, and is not sized to the screen', () => {
+  it('draws round an item you made and hold, at half, and is not sized to the screen', () => {
     // The fixed box while a held item's model loads or when it has none; a
     // held item you made with its model drawn has the model's own box (heldItems.test).
     expect(source).toMatch(/\{box === 'placed' && <PlacedBox at=\{at\} opacity=\{HELD_OPACITY\} appear=\{appear\} \/>\}/)
     expect(source).toMatch(/encompass=\{box === 'model' \? \(s\) => <PlacedBox at=\{s\.centre\} size=\{s\.size\} opacity=\{HELD_OPACITY\} appear=\{appear\} \/> : undefined\}/)
-    expect(source).toMatch(/<PlacedBox at=\{at\} opacity=\{opacity\} \/>\s*<AudioNote/)
     const body = source.slice(source.indexOf('function PlacedBox'), source.indexOf('The line color and opacity'))
     // Its size is the world's, never the screen's: its one frame is TAKE's fade, which sizes nothing.
     expect(body).not.toMatch(/perPixel|markRecede|state\.size|scale\.set/)
@@ -51,43 +46,15 @@ describe('the box of a held item and of a sound', () => {
     expect(props.depthWrite).not.toBe(false)
   })
 
-  it('draws its faces, its edges and a sound’s note with those props, the faces under the edges', async () => {
+  it('no longer stands round a sound: a sound is its layer slices and its level lines (owner, 2026-11-27: "just the layer slices, like option C")', async () => {
     const m = await mount(createElement(AudioMark, { title: 'Rain Loop', at: [1, 2, 3] }))
-    const want = placedBoxProps(1)
-    const faces = m.all().filter((h) => h.type === 'meshBasicMaterial')
-    const edges = m.all().filter((h) => h.type === 'lineBasicMaterial')
-    // The box's fill, and the note's head, stem and flag.
-    expect(faces).toHaveLength(4)
-    expect(edges).toHaveLength(1)
-    for (const h of [...faces, ...edges]) expect(h.props).toMatchObject(want)
-    expect(faces.filter((h) => h.props.polygonOffset === true)).toHaveLength(1)
-    await m.unmount()
-  })
-
-  it('stands a sound’s note outside the box, toward the camera, from any side', async () => {
-    useCyberspace.setState({ scaleExp: 0 })
-    const at: [number, number, number] = [1, 2, 3]
-    frames.length = 0
-    const m = await mount(createElement(AudioMark, { title: 'Rain Loop', at }))
-    // The note is the group of three flat shapes: head, stem and flag.
-    const note = m.all().find((h) => h.type === 'group' && h.children.filter((c) => typeof c !== 'string' && c.type === 'mesh').length === 3)!
-    const g = asObject(note)
-    // The level ring turns to the camera too (LevelRing): an object for its frame to move.
-    for (const h of m.all().filter((h) => h.type === 'group' && h.props.name === 'level-ring')) asObject(h)
-    const side = placedBoxSide(0)
-    const centre = new Vector3(...at)
-    for (const eye of [[1, 2, 20], [-9, 8, -4], [14, -3, 3], [1, 30, 3]] as const) {
-      const camera = new PerspectiveCamera(50, 1, 0.1, 6000)
-      camera.position.set(eye[0], eye[1], eye[2])
-      for (const frame of frames) frame({ camera, size: { width: 600, height: 600 } })
-      const off = g.position.clone().sub(centre)
-      // Past the farthest corner of the box (half its diagonal), so its faces never cover it.
-      expect(off.length()).toBeGreaterThan((side * Math.sqrt(3)) / 2)
-      expect(off.length()).toBeLessThan(side)
-      // On the camera's side, straight toward it.
-      const toward = camera.position.clone().sub(centre).normalize()
-      expect(off.normalize().dot(toward)).toBeCloseTo(1, 9)
-    }
+    // No box: no box edges and no box faces.
+    expect(m.all().filter((h) => h.type === 'lineBasicMaterial')).toHaveLength(0)
+    expect(m.all().filter((h) => h.type === 'meshBasicMaterial')).toHaveLength(0)
+    expect(source).not.toMatch(/<PlacedBox at=\{at\} opacity=\{opacity\} \/>\s*<AudioNote/)
+    // The slices and the level lines.
+    expect(m.all().filter((h) => h.type === 'instancedMesh' && h.props.name === 'sound-slices')).toHaveLength(1)
+    expect(m.all().filter((h) => h.type === 'instancedMesh' && h.props.name === 'level-lines')).toHaveLength(1)
     await m.unmount()
   })
 })
@@ -148,7 +115,7 @@ describe('the box under TAKE', () => {
     expect(source).toMatch(/<HeldItemMark id=\{w\.key\} own=\{draw === 'own'\} [^\n]*appear=\{play\} \/>/)
     expect(source).toMatch(/\{draw !== 'item' && play && <TakenItem /)
     // Over the half box; an item with no model over its token as drawn, its name where it was (keyCube.test.tsx).
-    expect(source).toMatch(/<NamedVanish [^\n]*clear=\{side === undefined \? \{ trueSide: placedBoxSide\(scaleExp\), minPx: 0 \} : \{ object: token, points: TOKEN_OUTLINE \}\}/)
+    expect(source).toMatch(/<NamedVanish [^\n]*clear=\{side === undefined \? \{ trueSide: placedBoxSide\(scaleExp\), minPx: 0 \} : \{ shape: scaledShape\(TOKEN_SHAPE, side\) \}\}/)
   })
 })
 

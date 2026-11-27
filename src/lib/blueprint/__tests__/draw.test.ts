@@ -211,3 +211,53 @@ describe('drawCompass', () => {
     expect(sun).toBeTruthy()
   })
 })
+
+describe('the black sun beside the isometric drawing', () => {
+  // The box's outline on screen and a point's distance to it (outside), from the drawing's own projection.
+  const outline = (L: ReturnType<typeof isoLayout>, s: readonly [number, number, number]): Array<[number, number]> => {
+    const pts: Array<[number, number]> = []
+    for (const X of [0, s[0]]) for (const Y of [0, s[1]]) for (const Z of [0, s[2]]) pts.push(isoPoint(L, X, Y, Z))
+    return pts
+  }
+  const segDist = (p: [number, number], a: [number, number], b: [number, number]): number => {
+    const ex = b[0] - a[0], ey = b[1] - a[1]
+    const t = Math.max(0, Math.min(1, ((p[0] - a[0]) * ex + (p[1] - a[1]) * ey) / (ex * ex + ey * ey || 1)))
+    return Math.hypot(p[0] - a[0] - ex * t, p[1] - a[1] - ey * t)
+  }
+  // Distance to the nearest edge between any two corners: never more than the true distance to the outline.
+  const nearest = (p: [number, number], pts: Array<[number, number]>): number => {
+    let best = Infinity
+    for (let i = 0; i < pts.length; i++) for (let j = i + 1; j < pts.length; j++) best = Math.min(best, segDist(p, pts[i], pts[j]))
+    return best
+  }
+
+  for (const s of [[1, 1, 1], [3, 2, 3], [16, 16, 16], [16, 1, 1], [1, 16, 1], [1, 1, 16]] as const) {
+    it(`a ${s.join(' by ')} box: the line reaches well past the box, the sun's glow stays clear of it, and everything fits`, () => {
+      const L = isoLayout(s, { x: 0, y: 0, size: 320, floor: true, compass: 24 })
+      expect(L.sun).toBeTruthy()
+      const sun = L.sun!
+      const at = (q: readonly number[]): [number, number] => [L.ox + q[0] * L.u, L.oy + q[1] * L.u]
+      const pts = outline(L, s)
+      const S = at(sun.s), B = at(sun.b), r = sun.r * L.u
+      // The glow (about 1.9 radii) at least 16 px from the box.
+      expect(nearest(S, pts) - r * 1.9).toBeGreaterThanOrEqual(15.5)
+      // The line's end at least 48 px past the box along +Z (at the outline's 60 degree crossing, 48 x sin 60 straight out).
+      expect(nearest(B, pts)).toBeGreaterThanOrEqual(48 * Math.sin(Math.PI / 3) - 1)
+      // The sun and its glow inside the panel; the "+Z" label too.
+      expect(S[0] + r * 1.9).toBeLessThanOrEqual(320)
+      expect(S[1] - r * 1.9).toBeGreaterThanOrEqual(0)
+      expect(S[0] + r * 1.8 + sun.font * L.u * 1.4).toBeLessThanOrEqual(320.5)
+      // The sun runs up and to the right of the build's +Z face.
+      const A = at(sun.a)
+      expect(S[0]).toBeGreaterThan(A[0]); expect(S[1]).toBeLessThan(A[1])
+      // The compass corner, top left, is clear of the box.
+      const pad = 320 * 0.05
+      expect(nearest([pad + 24, pad + 24], pts)).toBeGreaterThanOrEqual(24)
+    })
+  }
+
+  it('the sun is the same size, against the drawing, for a tiny build and a big one', () => {
+    const r = (s: readonly [number, number, number]): number => { const L = isoLayout(s, { x: 0, y: 0, size: 320, floor: true }); return L.sun!.r * L.u }
+    expect(Math.abs(r([1, 1, 1]) - r([16, 16, 16]))).toBeLessThan(3)
+  })
+})

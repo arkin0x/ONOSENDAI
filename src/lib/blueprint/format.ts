@@ -161,6 +161,8 @@ export type PrizeReveal = 'hidden' | 'description' | 'silhouette' | 'render'
 /** A 2D prize reveal's views: from +X, from above (+Y), from the sun (+Z), isometric. */
 export type PrizeView = 'x' | 'y' | 'z' | 'iso'
 export const PRIZE_VIEWS: readonly PrizeView[] = ['x', 'y', 'z', 'iso']
+/** The order pictures are shown in, as the EXAMINE sheet's views: isometric, facing the sun, from above, from +X. */
+export const PRIZE_VIEWS_SHOWN: readonly PrizeView[] = ['iso', 'z', 'y', 'x']
 export const PRIZE_REVEALS: readonly PrizeReveal[] = ['hidden', 'description', 'silhouette', 'render']
 /** What locks it: the blocks alone, or the blocks built inside a region of the record's height. */
 export type LockKind = 'standard' | 'location'

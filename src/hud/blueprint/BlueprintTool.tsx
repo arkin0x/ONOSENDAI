@@ -29,7 +29,7 @@ import { useToast, BRIEF_TOAST_MS } from '../../store/useToast'
 import { enterTerrainMode } from '../../store/padMode'
 import { KINDS, blockKind, blockName } from '../../lib/terrain/blocks'
 import { tileUrl } from '../../lib/terrain/tiles'
-import { MAX_SIDE, PRIZE_VIEWS, fullView, type PrizeReveal, type PrizeView } from '../../lib/blueprint/format'
+import { MAX_SIDE, PRIZE_VIEWS_SHOWN, fullView, type PrizeReveal, type PrizeView } from '../../lib/blueprint/format'
 import { blockCount } from '../../lib/blueprint/arrangement'
 import { makeBlueprint, makeRefusal, makerSecret } from '../../lib/blueprint/make'
 import { prizeImagesWhole } from '../../lib/blueprint/prizeViews'
@@ -352,7 +352,7 @@ function SettingsStep({ onExamine }: { onExamine: () => void }): JSX.Element {
       </div>
       {(st.reveal === 'silhouette' || st.reveal === 'render') && (
         <div className="bpt-seg bpt-seg--views">
-          {PRIZE_VIEWS.map((v) => (
+          {PRIZE_VIEWS_SHOWN.map((v) => (
             <button key={v} aria-pressed={st.views.has(v)} className={st.views.has(v) ? 'is-on' : ''} onClick={() => { const n = new Set(st.views); if (n.has(v)) { if (n.size > 1) n.delete(v) } else n.add(v); st.set({ views: n }) }} title={st.views.has(v) && st.views.size === 1 ? 'At least one view is shown' : undefined}>{VIEW_WORDS[v]}</button>
           ))}
         </div>

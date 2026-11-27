@@ -36,8 +36,21 @@ import { cellAt, cellIndex, type FinderView } from './format'
 export const ISO_C = Math.cos(Math.PI / 6)
 /** How far apart the layers float when fully exploded, in blocks between one layer and the next. */
 export const EXPLODE_GAP = 0.75
-/** How far past the box's +Z side the floor arrow reaches to the black sun, in blocks. */
-const FLOOR_SUN = 1.6
+/**
+ * The black sun beside the isometric drawing (owner, 2026-11-27: not so far it
+ * floats free, not so close it touches the box). The dotted line runs from the
+ * build's +Z face along +Z for this share of the box's longest on-screen
+ * extent, at least SUN_LINE_MIN css px past the box; the sun's glow keeps at
+ * least SUN_GAP css px clear of the box. Sizes follow the drawing, so tiny and
+ * big builds read the same.
+ */
+const SUN_LINE_SHARE = 0.6
+const SUN_LINE_MIN = 48
+const SUN_GAP = 16
+/** The sun's radius as a share of the box's longest extent, and its glow (ring and blur) as a multiple of the radius. */
+const SUN_R_SHARE = 0.06
+const SUN_R_MIN = 5
+const SUN_HALO = 1.9
 
 /** The compass's colours: the app's 3D compass (scene/Compass3D.tsx). */
 export const AXIS_COLOR = { X: '#ff4444', Y: '#44ff44', Z: '#4488ff' } as const
@@ -72,6 +85,8 @@ export interface IsoOpts {
   cutaway?: boolean
   /** A floor grid under the box and a +Z arrow on it to the black sun. */
   floor?: boolean
+  /** Room kept clear in the top-left corner for a compass of this radius (css px), so the drawing never runs under it. */
+  compass?: number
   tiles?: TileImages
 }
 
@@ -82,10 +97,15 @@ export interface IsoLayout {
   oy: number
   gap: number
   sz: number
+  /** Where the floor's line and black sun go, in raw (unscaled) units; with `floor` only. */
+  sun?: SunPlace
 }
 
 type Size = readonly [number, number, number]
 type Pt = [number, number]
+
+/** The black sun's line and disc, in raw units (multiply by u and add the origin for screen). */
+interface SunPlace { a: Pt; b: Pt; s: Pt; r: number; font: number }
 
 /** A world point's screen offset in blocks, before scale: +X right and down, +Z right and up, +Y up (from the (+X, +Y, -Z) corner). */
 function isoRaw(X: number, Y: number, Z: number): Pt {
@@ -93,27 +113,89 @@ function isoRaw(X: number, Y: number, Z: number): Pt {
 }
 
 /** The scale and placement that fit the box (and its floor and exploded room) into the square. */
-export function isoLayout(size: Size, opts: Pick<IsoOpts, 'x' | 'y' | 'size' | 'exploded' | 'floor'>): IsoLayout {
+export function isoLayout(size: Size, opts: Pick<IsoOpts, 'x' | 'y' | 'size' | 'exploded' | 'floor' | 'compass'>): IsoLayout {
   const [sx, sy, sz] = size
   const gap = opts.exploded === undefined ? 0 : EXPLODE_GAP
   const top = sy + Math.max(0, sy - 1) * gap
-  const zr = sz + (opts.floor ? FLOOR_SUN : 0)
-  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
-  for (const X of [0, sx]) for (const Y of [0, top]) for (const Z of [0, zr]) {
-    const [px, py] = isoRaw(X, Y, Z)
-    minX = Math.min(minX, px); maxX = Math.max(maxX, px); minY = Math.min(minY, py); maxY = Math.max(maxY, py)
-  }
-  if (opts.floor) { minY -= 0.4; maxX += 0.6 }
-  const w = maxX - minX, h = maxY - minY
+  const box: Pt[] = []
+  for (const X of [0, sx]) for (const Y of [0, top]) for (const Z of [0, sz]) box.push(isoRaw(X, Y, Z))
   const pad = Math.max(1, opts.size * 0.05)
-  const u = Math.max(0.01, Math.min((opts.size - 2 * pad) / w, (opts.size - 2 * pad) / h))
+  const fit = (sun?: SunPlace, shrink = 1): { u: number; minX: number; minY: number; w: number; h: number } => {
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
+    const take = (px: number, py: number): void => { minX = Math.min(minX, px); maxX = Math.max(maxX, px); minY = Math.min(minY, py); maxY = Math.max(maxY, py) }
+    for (const [px, py] of box) take(px, py)
+    if (sun) {
+      const g = sun.r * SUN_HALO
+      take(sun.s[0] - g, sun.s[1] - g); take(sun.s[0] + g, sun.s[1] + g)
+      // The "+Z" label to the sun's right: two characters of the label's font.
+      take(sun.s[0] + sun.r * 1.8 + sun.font * 1.4, sun.s[1] + sun.font * 0.6)
+    }
+    const w = maxX - minX, h = maxY - minY
+    return { u: Math.max(0.01, shrink * Math.min((opts.size - 2 * pad) / w, (opts.size - 2 * pad) / h)), minX, minY, w, h }
+  }
+  let f = fit()
+  let sun: SunPlace | undefined
+  if (opts.floor) {
+    // The pixel minimums depend on the scale and the scale on the sun's room, so settle them together.
+    for (let k = 0; k < 6; k++) { sun = placeSun(size, box, f.u); f = fit(sun) }
+    sun = placeSun(size, box, f.u)
+    f = fit(sun)
+  }
+  // A compass in the top-left corner: shrink the drawing until the box's outline keeps clear of it.
+  if (opts.compass) {
+    const R = opts.compass + 6, c: Pt = [opts.x + pad + opts.compass, opts.y + pad + opts.compass]
+    const H = hull(box)
+    for (let shrink = 1; shrink > 0.5; shrink -= 0.03) {
+      const g = fit(sun, shrink)
+      const ox = opts.x + (opts.size - g.w * g.u) / 2 - g.minX * g.u, oy = opts.y + (opts.size - g.h * g.u) / 2 - g.minY * g.u
+      const local: Pt = [(c[0] - ox) / g.u, (c[1] - oy) / g.u]
+      f = g
+      if (!inConvex(H, local[0], local[1]) && distToPolygon(H, local) * g.u >= R) break
+    }
+  }
+  const { u, minX, minY, w, h } = f
   return {
     u,
     ox: opts.x + (opts.size - w * u) / 2 - minX * u,
     oy: opts.y + (opts.size - h * u) / 2 - minY * u,
     gap,
     sz,
+    sun,
   }
+}
+
+/** The black sun's line and disc for a box, at scale u (css px per block), in raw units. */
+function placeSun(size: Size, box: Pt[], u: number): SunPlace {
+  const [sx, , sz] = size
+  const H = hull(box)
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
+  for (const [x, y] of H) { minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y) }
+  const extent = Math.max(maxX - minX, maxY - minY)
+  const a = isoRaw(sx / 2, 0, sz)
+  const dl = Math.hypot(ISO_C, 0.5), d: Pt = [ISO_C / dl, -0.5 / dl]
+  const at = (t: number): Pt => [a[0] + d[0] * t, a[1] + d[1] * t]
+  // Where the line leaves the box's outline.
+  let lo = 0, hi = extent * 2 + 1
+  for (let k = 0; k < 40; k++) { const m = (lo + hi) / 2; if (inConvex(H, ...at(m))) lo = m; else hi = m }
+  const exit = hi
+  const r = Math.max(SUN_R_MIN / u, extent * SUN_R_SHARE)
+  const len = Math.max(extent * SUN_LINE_SHARE, SUN_LINE_MIN / u)
+  let t = exit + len + r * SUN_HALO
+  // However the line crosses the outline, the glow stays SUN_GAP clear of it.
+  for (let k = 0; k < 200 && distToPolygon(H, at(t)) - r * SUN_HALO < SUN_GAP / u; k++) t += 2 / u
+  return { a, b: at(t - r * SUN_HALO), s: at(t), r, font: Math.max(10 / u, r * 1.3) }
+}
+
+/** The distance from a point outside a convex polygon to its outline. */
+function distToPolygon(P: Pt[], p: Pt): number {
+  let best = Infinity
+  for (let i = 0; i < P.length; i++) {
+    const a = P[i], b = P[(i + 1) % P.length]
+    const ex = b[0] - a[0], ey = b[1] - a[1]
+    const t = Math.max(0, Math.min(1, ((p[0] - a[0]) * ex + (p[1] - a[1]) * ey) / (ex * ex + ey * ey || 1)))
+    best = Math.min(best, Math.hypot(p[0] - a[0] - ex * t, p[1] - a[1] - ey * t))
+  }
+  return best
 }
 
 /** A world point (in blocks, the box's own frame) on the screen; `lift` raises it along +Y without moving it in depth. */
@@ -252,17 +334,19 @@ export function drawIso(ctx: CanvasRenderingContext2D, view: FinderView, opts: I
     ctx.lineWidth = lw
     for (let i = 0; i <= sx; i++) line(isoPoint(L, i, 0, 0), isoPoint(L, i, 0, sz))
     for (let j = 0; j <= sz; j++) line(isoPoint(L, 0, 0, j), isoPoint(L, sx, 0, j))
-    // From the build's +Z face, a short dotted line along +Z to the black sun just beyond it (owner, 2026-11-27: the
-    // line and the sun belong to the build, not far off from it).
-    const a = isoPoint(L, sx / 2, 0, sz), b = isoPoint(L, sx / 2, 0, sz + 0.75)
+    // From the build's +Z face, a dotted line along +Z to the black sun just beyond the box (see placeSun).
+    const sp = L.sun ?? placeSun(size, [...[0, sx].flatMap((X) => [0, sy].flatMap((Y) => [0, sz].map((Z) => isoRaw(X, Y, Z))))], L.u)
+    const scr = (q: Pt): Pt => [L.ox + q[0] * L.u, L.oy + q[1] * L.u]
+    const a = scr(sp.a), b = scr(sp.b)
     ctx.strokeStyle = 'rgba(212, 140, 255, 0.85)'
-    ctx.lineWidth = Math.max(1, L.u * 0.06)
-    ctx.setLineDash([Math.max(2, L.u * 0.12), Math.max(2, L.u * 0.1)])
+    const rr = sp.r * L.u
+    ctx.lineWidth = Math.max(1, rr * 0.16)
+    ctx.setLineDash([Math.max(2, rr * 0.5), Math.max(2, rr * 0.4)])
     line(a, b)
     ctx.setLineDash([])
     const d: Pt = [b[0] - a[0], b[1] - a[1]]
     const len = Math.hypot(d[0], d[1]) || 1
-    const ux = d[0] / len, uy = d[1] / len, hs = Math.max(3, L.u * 0.2)
+    const ux = d[0] / len, uy = d[1] / len, hs = Math.max(3, rr * 0.7)
     ctx.fillStyle = 'rgba(212, 140, 255, 0.9)'
     ctx.beginPath()
     ctx.moveTo(b[0] + ux * hs, b[1] + uy * hs)
@@ -270,10 +354,10 @@ export function drawIso(ctx: CanvasRenderingContext2D, view: FinderView, opts: I
     ctx.lineTo(b[0] + uy * hs * 0.6, b[1] - ux * hs * 0.6)
     ctx.closePath()
     ctx.fill()
-    const s = isoPoint(L, sx / 2, 0, sz + 1.2)
-    const r = Math.max(3, L.u * 0.28)
+    const s = scr(sp.s)
+    const r = sp.r * L.u
     drawBlackSun(ctx, s[0], s[1], r)
-    ctx.font = `600 ${Math.max(9, Math.round(L.u * 0.34))}px ui-monospace, monospace`
+    ctx.font = `600 ${Math.round(sp.font * L.u)}px ui-monospace, monospace`
     ctx.fillStyle = SUN_CORE
     ctx.textAlign = 'left'
     ctx.textBaseline = 'middle'

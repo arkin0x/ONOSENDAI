@@ -57,7 +57,7 @@ import {
   type AxisView,
   type CompassOrientation,
 } from '../../lib/blueprint/draw'
-import { PRIZE_VIEWS, type FinderView, type LockKind, type PrizeReveal, type PrizeView } from '../../lib/blueprint/format'
+import { PRIZE_VIEWS_SHOWN, type FinderView, type LockKind, type PrizeReveal, type PrizeView } from '../../lib/blueprint/format'
 import { blockKind } from '../../lib/terrain/blocks'
 import { tileUrl } from '../../lib/terrain/tiles'
 import { Chamfer } from '../ui/Chamfer'
@@ -188,6 +188,8 @@ export function prizeShort(reveal: PrizeReveal, nameShown: boolean): string {
 
 /** The heading of PRIZE when its maker did not choose to show its name. */
 export const MYSTERY_PRIZE = 'A mystery prize'
+/** The prize heading when the prize shows but its maker kept the name back. */
+export const NAME_HIDDEN = 'Name hidden'
 /** What PRIZE says when it should show pictures and none came. */
 export const NO_PICTURES = 'The pictures did not come with this copy.'
 
@@ -223,7 +225,7 @@ export function ExamineSheet({ bp, maker, onClose }: { bp: ExamineBlueprint; mak
     return maker ? Math.max(f, partsOf(maker.view).length + (hiddenCount(maker.view) > 0 ? 1 : 0)) : f
   }, [finder, finderHidden, maker])
   const pad = Math.max(0, slots - parts.length - (hidden > 0 ? 1 : 0))
-  const prizeViews = PRIZE_VIEWS.filter((v) => bp.prize.views[v])
+  const prizeViews = PRIZE_VIEWS_SHOWN.filter((v) => bp.prize.views[v])
   const pictures = bp.prize.reveal === 'silhouette' || bp.prize.reveal === 'render'
   const prizeName = bp.prize.name?.trim() || null
 
@@ -328,9 +330,10 @@ export function ExamineSheet({ bp, maker, onClose }: { bp: ExamineBlueprint; mak
 
   /* ---------- the drawings ---------- */
   const paintIso = useCallback<Paint>((ctx, f) => {
-    drawIso(ctx, view, { x: 0, y: 0, size: ISO_PX, smokePhase: f.phase, exploded: f.exploded, floor: true })
-    // The compass in its own corner, bottom left, away from the black sun (which stands beyond the build's +Z face, up and to the right).
-    drawCompass(ctx, 30, ISO_PX - 30, 26, 'iso')
+    // The compass in the top-left corner, opposite the black sun (up and to the right); the drawing keeps clear of it.
+    drawIso(ctx, view, { x: 0, y: 0, size: ISO_PX, smokePhase: f.phase, exploded: f.exploded, floor: true, compass: 24 })
+    const pad = Math.max(1, ISO_PX * 0.05)
+    drawCompass(ctx, pad + 24, pad + 24, 24, 'iso')
   }, [view])
   const paintCut = useCallback<Paint>((ctx, f) => drawIso(ctx, view, { x: 0, y: 0, size: CUT_PX, smokePhase: f.phase, cutaway: true, floor: true }), [view])
 
@@ -366,16 +369,17 @@ export function ExamineSheet({ bp, maker, onClose }: { bp: ExamineBlueprint; mak
       ))}
     </div>
   )
-  // PRIZE as a finder gets it: its name only when the maker chose to show it.
+  // PRIZE as a finder gets it: its name only when the maker chose to show it. "Mystery" only when the prize is kept
+  // secret (the PRIZE value says "A mystery" then); otherwise a hidden name says just that.
   const finderPrize = bp.prize.reveal === 'hidden' ? (
     <>
-      {prizeName && <div className="bp-ex__ptitle">{prizeName}</div>}
+      <div className="bp-ex__ptitle">{prizeName ?? MYSTERY_PRIZE}</div>
       <div className="bp-ex__redact" aria-hidden><i style={{ width: '86%' }} /><i style={{ width: '58%' }} /></div>
       <p className="bp-ex__ptext bp-ex__ptext--dim">Nothing more is shown. Build it and see.</p>
     </>
   ) : (
     <>
-      <div className="bp-ex__ptitle">{prizeName ?? MYSTERY_PRIZE}</div>
+      <div className={`bp-ex__ptitle${prizeName ? '' : ' bp-ex__ptitle--hidden'}`}>{prizeName ?? NAME_HIDDEN}</div>
       {bp.prize.text && <p className="bp-ex__ptext">{bp.prize.text}</p>}
       {pictures && (prizeViews.length > 0 ? frames : <p className="bp-ex__ptext bp-ex__ptext--dim">{NO_PICTURES}</p>)}
     </>

@@ -14,7 +14,7 @@ import { describe, expect, it } from 'vitest'
 import { createElement } from 'react'
 import { fullView, type FinderView, type PrizeReveal } from '../../lib/blueprint/format'
 import { mount, textOf, type Host } from '../../test/elementRoot'
-import { ExamineSheet, MYSTERY_PRIZE, NO_PICTURES, constructionShort, constructionWords, materialsWords, prizeShort, prizeWords, type ExamineBlueprint, type ExamineMaker } from '../blueprint/ExamineSheet'
+import { ExamineSheet, MYSTERY_PRIZE, NAME_HIDDEN, NO_PICTURES, constructionShort, constructionWords, materialsWords, prizeShort, prizeWords, type ExamineBlueprint, type ExamineMaker } from '../blueprint/ExamineSheet'
 
 /** Two blocks side by side, a Gridstone and a Glowcore; a finder is shown the Glowcore alone. */
 const FULL: FinderView = fullView({ size: [2, 1, 1], cells: Uint16Array.from([1, 42]) })
@@ -36,17 +36,38 @@ describe('PRIZE on the sheet', () => {
     for (const reveal of ['description', 'silhouette', 'render'] as const) {
       const m = await mount(createElement(ExamineSheet, { bp: blueprint(reveal, { text: 'Something small and bright.' }), onClose: noop }))
       const box = prizeBox(m)
-      expect(box).toContain(MYSTERY_PRIZE)
+      // "Mystery" only when the prize is kept secret; a prize that shows says its name is hidden.
+      expect(box).toContain(NAME_HIDDEN)
+      expect(box.toLowerCase()).not.toContain('mystery')
       expect(box).not.toContain('Sky Shrine')
-      expect(m.all().filter((h) => h.props.className === 'bp-ex__ptitle').map(textOf)).toEqual([MYSTERY_PRIZE])
+      expect(m.all().filter((h) => String(h.props.className).startsWith('bp-ex__ptitle')).map(textOf)).toEqual([NAME_HIDDEN])
       await m.unmount()
     }
-    // Kept secret: the redaction, and no name over it.
+    // Kept secret: a mystery, the redaction, and no name.
     const m = await mount(createElement(ExamineSheet, { bp: blueprint('hidden'), onClose: noop }))
-    expect(m.all().filter((h) => h.props.className === 'bp-ex__ptitle')).toHaveLength(0)
+    expect(m.all().filter((h) => h.props.className === 'bp-ex__ptitle').map(textOf)).toEqual([MYSTERY_PRIZE])
     expect(prizeBox(m)).not.toContain('Sky Shrine')
     expect(prizeBox(m)).toContain('Nothing more is shown. Build it and see.')
     await m.unmount()
+  })
+
+  it('the PRIZE tag on the panel equals the summary value, and the mapping holds: outline is hints, pictures or a shown name are public', async () => {
+    const cases = [
+      ['hidden', undefined, 'A mystery'],
+      ['description', undefined, 'Hints only'],
+      ['silhouette', undefined, 'Hints only'],
+      ['render', undefined, 'Public information'],
+      ['silhouette', 'Lantern of Chiba', 'Public information'],
+    ] as const
+    for (const [reveal, name, word] of cases) {
+      const m = await mount(createElement(ExamineSheet, { bp: blueprint(reveal, name ? { name } : {}), onClose: noop }))
+      const tag = m.all().find((h) => h.props.className === 'bp-ex__bh' && textOf(h).startsWith('PRIZE'))
+      const row = m.all().find((h) => h.type === 'dt' && textOf(h) === 'PRIZE')
+      expect(tag && textOf(tag)).toBe(`PRIZE${word}`)
+      expect(prizeShort(reveal, !!name)).toBe(word)
+      expect(row).toBeTruthy()
+      await m.unmount()
+    }
   })
 
   it('shows the prize\'s own name when its maker chose to show it', async () => {

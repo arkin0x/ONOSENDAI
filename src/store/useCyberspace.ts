@@ -387,7 +387,7 @@ export interface ChainCatchUp { pubkey: string; got: number; total: number | nul
 /** Why a move waits while the stretch your other device published is fetched (chainCatchUp). */
 export const CATCHING_UP_MESSAGE = 'Catching up with your other device…'
 /** The same, once retries have brought nothing for a while (chainCatchUp `stuck`). */
-export const CATCH_UP_STUCK_MESSAGE = "Your other device's newest moves could not all be fetched yet, so nothing is signed until they are. This device keeps trying."
+export const CATCH_UP_STUCK_MESSAGE = "Your other device's newest moves could not all be fetched yet, so nothing is signed until they are. It tries again when you come back to this tab, when the network returns, or when you tap CHECK AGAIN."
 
 /** Why no move is signed now because the catch-up is out for the identity in use, or null. */
 function catchUpMessage(): string | null {

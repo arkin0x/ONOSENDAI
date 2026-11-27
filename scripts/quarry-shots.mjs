@@ -41,6 +41,14 @@ for (const size of SIZES) {
   await page.goto(URL)
   await page.waitForTimeout(9000)
   await page.keyboard.press('Escape')
+  // An identity that has finished the tour: a newcomer, or one mid-tour, keeps to the teaching list without TERRAIN.
+  await page.evaluate(async () => {
+    const tu = (await import('/src/store/useTutorial.ts')).useTutorial
+    if (tu.getState().active) tu.getState().end('skipped')
+    const nc = (await import('/src/newcomer/useNewcomer.ts')).useNewcomer
+    nc.setState({ record: { ...nc.getState().record, stage: 'graduated', choice: undefined } })
+  })
+  await page.waitForTimeout(800)
 
   // 1. The blueprint, granted on the first Umberslate, in BUILD > BLUEPRINT with the orange mark.
   await page.evaluate(async (pk) => {
@@ -60,18 +68,36 @@ for (const size of SIZES) {
   await page.waitForTimeout(600)
 
   // 2. TERRAIN, the chunk here surveyed, looking down at the ground in front.
-  await page.evaluate(async () => { (await import('/src/store/padMode.ts')).enterTerrainMode() })
+  const entered = await page.evaluate(async () => (await import('/src/store/padMode.ts')).enterTerrainMode())
+  if (!entered) problems.push(`${size.name}: TERRAIN did not open`)
   await page.waitForTimeout(3500)
-  await page.evaluate(async () => {
+  const surveyed = await page.evaluate(async () => {
     const t = await import('/src/store/useTerrain.ts')
+    const out = []
     for (let i = 0; i < 4; i++) {
       const key = t.surveyTarget()
       if (!key) break
       await t.useTerrain.getState().survey(key)
+      out.push(`${key.slice(0, 12)}: ${t.useTerrain.getState().message}`)
     }
+    return { out, here: t.hereSurveyedBy(), active: t.useTerrain.getState().active }
   })
+  console.log(`${size.name}: survey`, JSON.stringify(surveyed))
   await page.waitForTimeout(2500)
-  await page.evaluate(async () => { (await import('/src/lib/walkLook.ts')).walkLookBy(0, 260) })
+  // A clearing round you, so the camera stands in open air over the ground (the store's own blast, which leaves no drops),
+  // the first-visit steps done, and the look tipped down at the ground ahead.
+  await page.evaluate(async () => {
+    const t = await import('/src/store/useTerrain.ts')
+    const s = t.terrainSession
+    const w = t.offsetOf(s, t.headNow())
+    const cells = []
+    for (let y = 0; y <= 6; y++) for (let z = -7; z <= 7; z++) for (let x = -7; x <= 7; x++) cells.push([w[0] + x, w[1] + y, w[2] + z])
+    t.useTerrain.getState().blast(cells)
+    t.useTerrain.setState({ hint: 3 })
+  })
+  await page.evaluate(() => { const later = [...document.querySelectorAll('button')].find((b) => /^\s*LATER\s*$/.test(b.textContent ?? '')); later?.click() })
+  await page.waitForTimeout(1200)
+  await page.evaluate(async (dy) => { (await import('/src/lib/walkLook.ts')).walkLookBy(0, dy) }, size.touch ? 150 : 90)
   await page.waitForTimeout(1500)
 
   // 3. Seven charges, from a compile's toy, chosen: the hotbar with its count and the charge in hand.
@@ -84,27 +110,46 @@ for (const size of SIZES) {
   })
   await page.waitForTimeout(1200)
   await shot('2-hotbar-7')
+  console.log(`${size.name}: hotbar`, await page.evaluate(async () => JSON.stringify((await import('/src/store/useTerrain.ts')).useTerrain.getState().inventory)), await page.evaluate(() => document.querySelectorAll('.terrain-hotbar > button')[1]?.outerHTML.slice(0, 300)))
 
   // 4. PLACE: on the face at the cross, else in the ground below the look.
   const placed = await page.evaluate(async () => {
     const t = await import('/src/store/useTerrain.ts')
     const { terrainCursor } = await import('/src/scene/TerrainLayer.tsx')
-    const hit = terrainCursor.hit
-    if (hit && t.useTerrain.getState().place(hit)) return 'face'
-    if (terrainCursor.air && t.useTerrain.getState().place(null, terrainCursor.air)) return 'air'
-    return t.useTerrain.getState().message ?? 'nothing'
+    void terrainCursor
+    // On the ground a few blocks ahead, the way you look.
+    const { walkLookDirection } = await import('/src/store/walkFluid.ts')
+    const { solid } = await import('/src/lib/terrain/blocks.ts')
+    const s = t.terrainSession
+    const w = t.offsetOf(s, t.headNow())
+    const f = walkLookDirection().forward
+    const len = Math.hypot(f.x, f.z) || 1
+    const fx = len > 0.05 ? f.x / len : 1, fz = len > 0.05 ? f.z / len : 0
+    const why = []
+    for (const [dx, dz] of [[fx, fz], [1, 0], [0, 1], [-1, 0], [0, -1]]) for (const d of [5, 4, 6, 3, 8]) {
+      const x = Math.round(w[0] + dx * d), z = Math.round(w[2] + dz * d)
+      for (let y = w[1] + 4; y > w[1] - 24; y--) {
+        if (solid(s.world.blockCs(x, y, z)) && !solid(s.world.blockCs(x, y + 1, z))) {
+          if (t.useTerrain.getState().place({ cell: [x, y, z], normal: [0, 1, 0], distance: d })) return 'ahead'
+          why.push(t.useTerrain.getState().message)
+          break
+        }
+      }
+    }
+    return `nothing: ${[...new Set(why)].join(' | ')} (walker ${w.join(',')})`
   })
   console.log(`${size.name}: placed ${placed}`)
-  if (placed !== 'face' && placed !== 'air') problems.push(`${size.name}: the charge was not placed (${placed})`)
-  await page.waitForTimeout(700)
+  if (placed !== 'face' && placed !== 'air' && placed !== 'ahead') problems.push(`${size.name}: the charge was not placed (${placed})`)
+  await page.waitForTimeout(500)
   await shot('3-fuse-a')
-  await page.waitForTimeout(650)
+  await page.waitForTimeout(500)
   await shot('3-fuse-b')
-  await page.waitForTimeout(1750)
+  // The blast, the moment the fuse is out.
+  await page.waitForFunction(async () => (await import('/src/store/useQuarry.ts')).useQuarry.getState().charges.length === 0, null, { polling: 30, timeout: 8000 }).catch(() => {})
   await shot('4-blast')
-  await page.waitForTimeout(250)
+  await page.waitForTimeout(300)
   await shot('4-blast-b')
-  await page.waitForTimeout(1800)
+  await page.waitForTimeout(2000)
   const before = await page.evaluate(async () => {
     const q = (await import('/src/store/useQuarry.ts')).useQuarry.getState()
     const t = (await import('/src/store/useTerrain.ts')).useTerrain.getState()

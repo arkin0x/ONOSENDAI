@@ -38,6 +38,8 @@ import { chunkKey, chunkOf } from '../../lib/terrain/coords'
 import { EMPTY, kindId } from '../../lib/terrain/blocks'
 import { totalsOf } from '../../lib/miningRecord'
 import type { RayHit } from '../../lib/terrain/raycast'
+import { setAirPlacing } from '../airSwitch'
+import { surveyChunk } from '../../terrain/TerrainView'
 
 // Each test is a fresh identity, so no test sees another's counts.
 let identityNo = 0
@@ -156,6 +158,28 @@ describe('TERRAIN counts for MINING', () => {
     expect(totals().prizes).toBe(1)
     expect(miningRecordFor(A).first.compiler).toBeGreaterThan(0)
   }, 15_000)
+
+  it('the SURVEY hold\'s own path (surveyChunk, #950) counts once; with air placing off, PLACE in open air counts nothing', async () => {
+    await T().enter()
+    const key = chunkKey(chunkOf(HEAD.x, HEAD.y, HEAD.z, 0))
+    expect(surveyChunk(key)).toBe(true)
+    await vi.waitFor(() => expect(T().surveying).not.toContain(key))
+    expect(totals().surveys).toBe(1)
+    expect(totals().chunks).toBe(1)
+    // Already yours: turned down, and not counted again.
+    expect(surveyChunk(key)).toBe(false)
+    expect(totals().surveys).toBe(1)
+    const [c] = solidCells(1)
+    expect(T().mine(hitAt(...c))).toBe(true)
+    const inv = T().inventory
+    T().selectSlot(inv.hotbar.findIndex((h) => h > 0 && (inv.counts[h] ?? 0) > 0))
+    // Off, the scene has no ghost to aim at, so PLACE with nothing at the cross comes with no air cell.
+    setAirPlacing(false, A)
+    expect(T().place(null, null)).toBe(false)
+    expect(totals().placed).toBe(0)
+    expect(totals().placedAir).toBe(0)
+    setAirPlacing(true, A)
+  })
 
   it('nothing counts during a tutorial run', async () => {
     tutorial = true

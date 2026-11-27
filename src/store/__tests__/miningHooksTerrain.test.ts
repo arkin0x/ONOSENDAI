@@ -39,7 +39,8 @@ import { EMPTY, kindId } from '../../lib/terrain/blocks'
 import { totalsOf } from '../../lib/miningRecord'
 import type { RayHit } from '../../lib/terrain/raycast'
 
-let run = 0
+// Each test is a fresh identity, so no test sees another's counts.
+let identityNo = 0
 let A = ''
 let tutorial = false
 const HEAD = { x: 0x1234567890abcdef12350n, y: 0xfedcba0987654321fed90n, z: 0x0f0f0f0f0f0f0f0f0f0f0n }
@@ -83,8 +84,8 @@ beforeEach(async () => {
   useCyberspace.setState({ walking: false })
   resetMiningStats()
   tutorial = false
-  run++
-  A = run.toString(16).padStart(64, 'c')
+  identityNo++
+  A = identityNo.toString(16).padStart(64, 'c')
   useWalk.setState({ gravity: false })
   useCyberspace.setState({ identity: { pubkey: A, npub: '' }, position: { ...HEAD }, cursor: { ...HEAD }, anchor: { ...HEAD }, plane: 0, walking: false, spectate: null, exploreIndex: null, transit: null })
 })

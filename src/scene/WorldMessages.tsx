@@ -8,9 +8,11 @@
  * NOTE_BOX_GIBSONS). Its words are labels, sized on screen like every other
  * world label so they stay readable, and fade out far off, the credit line
  * first (fadeShare). A key that wears no model of its own is the same
- * one-gibson cube, its name over it (owner, 2026-11-22; keyBoxSide). The
- * other marks (a coin, a key's cube while its model loads, Cyberspace
- * TV's finds) are still sized on screen, and past the headlamp's reach
+ * one-gibson cube, its name over it (owner, 2026-11-22; keyBoxSide). A coin
+ * is one gibson too, its diamond and its ₿ at their true size, and far off a
+ * small dot (CoinMark; owner, 2026-11-27). The other marks (a key's cube
+ * while its model loads, Cyberspace TV's finds) are still sized on screen,
+ * and past the headlamp's reach
  * recede with depth to a floor (lib/markerSize.ts recedeShare), so a chest
  * at the far end of a hall in WALK is smaller than one at your feet
  * (arkinox, 2026-10-25).
@@ -35,7 +37,9 @@
  * agree at every zoom (arkinox, 2026-10-01).
  *
  * Not everything is drawn at every zoom. A coin the mint has not called
- * redeemed is money, and money shows from anywhere. A note, and a coin the
+ * redeemed is money, and money is drawn at every zoom: at its true size, and
+ * once that is under a few pixels as a dot in the coin's gold, so a far coin
+ * is still somewhere to look (CoinMark). A note, and a coin the
  * mint says is spent, are drawn at 2^1 and below only: zoomed out, a field of
  * notes was a field of clutter (arkinox, 2026-10-09), and the words were
  * always one tap away. The rule is markShown (lib/worldMarks). A spent coin
@@ -61,9 +65,9 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { nip19 } from 'nostr-tools'
-import { ACCENT } from '../lib/palette'
+import { ACCENT, COIN } from '../lib/palette'
 import { useFrame } from '@react-three/fiber'
-import { BoxGeometry, CircleGeometry, EdgesGeometry, OctahedronGeometry, PlaneGeometry, Vector3, type Group, type LineSegments, type Material, type Mesh, type PerspectiveCamera } from 'three'
+import { BoxGeometry, CircleGeometry, EdgesGeometry, OctahedronGeometry, PlaneGeometry, Vector3, type Group, type LineSegments, type Material, type Mesh, type PerspectiveCamera, type Points } from 'three'
 import { decodeText, seedOf, TEXT_DECODE_MS } from '../lib/decode'
 import { useCeremony } from '../store/useCeremony'
 import { useInventory } from '../store/useInventory'
@@ -88,7 +92,8 @@ import { ItemModelMark } from './ItemModel'
 import { ItemVanish } from './ItemVanish'
 import { useMutes } from '../store/useMutes'
 import { spotlit, useSoundSpot, useSpatialAudioShown } from './AudioSpheres'
-import { MARK_RECEDE_FLOOR, recedeShare } from '../lib/markerSize'
+import { farDotShown, MARK_RECEDE_FLOOR, perPixelAt, recedeShare } from '../lib/markerSize'
+import { FarDot } from './FarDot'
 import { headlampUniforms } from './headlamp'
 import { basicFaceProps, TRANSLUCENT_ORDER } from './shardFaces'
 import { useDrawReach } from './buildZoom'
@@ -109,8 +114,6 @@ const TAP_PX = 44
 const REACH = GRID_RADIUS * 8
 /** The message color: a warm note against the cool field. */
 export const NOTE = '#ffd27d'
-/** Bitcoin's own orange, for a coin left in cyberspace. */
-const BITCOIN = '#f7931a'
 /** How strongly an item being moved is drawn where it stood: its box, faint. */
 export const MOVING_OPACITY = 0.35
 
@@ -118,10 +121,12 @@ export const MOVING_OPACITY = 0.35
 const NOTE_BLUE = '#4aa3ff'
 /** Steel, for a coin that has been redeemed: the shape stays, the money is gone. */
 const SPENT = '#7f8891'
-/** How wide the mark behind an item stands, in CSS pixels. The coin is larger
- * than the note: it is a whole object in itself, where the cube is a backing.
- * It was 51 until 2026-10-09; smaller reads less like a billboard (arkinox). */
-const MARK_PX = { coin: 40, spent: 40, note: 34 } as const
+/** How wide the note's cube stands where it is sized on screen, in CSS pixels
+ * (an item's cube while its model loads; WorldMark without a `side`). It was
+ * 51 until 2026-10-09; smaller reads less like a billboard (arkinox). A coin
+ * was drawn this way too, 40 pixels at any distance, until it took its true
+ * size (COIN_GIBSONS). */
+const MARK_PX = 34
 /** The note's cube in its own geometry: an edge of 0.72, scaled to the side it is drawn at. */
 const NOTE_GEOMETRY_EDGE = 0.72
 
@@ -192,8 +197,27 @@ const NOTE_EDGE_DEPTH = {
   onBeforeCompile: (shader: { vertexShader: string }) => { patchNoteDepthPull(shader) },
   customProgramCacheKey: () => `note-depth-pull-${PULL_GLSL}`,
 } as const
-/** The ₿ on a coin, in CSS pixels. */
-const COIN_PX = 31
+/**
+ * A coin, in gibsons: its diamond one gibson tip to tip, as a message's box
+ * is one on a side and a chest one across, at every distance and zoom
+ * (owner, 2026-11-27, of coins following chests and doors, #940).
+ *
+ * It was 40 CSS pixels at any distance, from "money shows from anywhere":
+ * zoomed out in BUILD a coin stood over the castle it was hidden in. Now it
+ * keeps its size against the blocks around it, and once that is under
+ * FAR_DOT_PX on screen a dot in the coin's gold stands in its place (FarDot),
+ * so money is still drawn at every zoom and a far coin is still somewhere to
+ * look.
+ */
+export const COIN_GIBSONS = 1
+
+/** A coin's diamond, tip to tip, in scene units: a scene unit is 2^scaleExp gibsons. */
+export function coinSide(scaleExp: number): number {
+  return COIN_GIBSONS / 2 ** scaleExp
+}
+
+/** The ₿'s height as a share of the coin's diamond, tip to tip: as it stood on a wide screen, 31 pixels in 40 (a phone's labels drew it smaller, at 0.72). */
+const COIN_GLYPH = 31 / 40
 /** The note's own color: the box's blue, lit. */
 const AUDIO_BLUE = '#9fd0ff'
 
@@ -212,7 +236,7 @@ export const FLOATING_NAME: Readonly<Record<NamedKind, boolean>> = { item: true,
  * A mark's share of its full size at `depth` from the camera: full out to
  * the headlamp's reach, smaller past it (lib/markerSize.ts recedeShare).
  * Its words keep their size and fade far off instead (WorldLabel `recede`),
- * the coin's glyph shrinks with it, and its tap target stays a fingertip.
+ * and its tap target stays a fingertip.
  * Marks size themselves when labels do (LABEL_PRIORITY), after the headlamp
  * has read this frame's camera, so a cut never draws a mark a frame behind.
  */
@@ -363,7 +387,7 @@ export function WorldMessages({ axes }: Props): JSX.Element | null {
             ? <ItemToken key={w.key} id={w.key} at={w.centre} side={noteBoxSide(scaleExp)} colour={authorColour(w.itemAuthor ?? w.author)} opacity={MOVING_OPACITY} />
             : <WorldMark key={w.key} kind="note" at={w.centre} side={noteBoxSide(scaleExp)} opacity={MOVING_OPACITY} />
           : <PlacedBox key={w.key} at={w.centre} opacity={MOVING_OPACITY} />
-        if (w.coin) return <CoinItem key={w.key} text={w.text} at={w.centre} scaleExp={scaleExp} onTap={open} />
+        if (w.coin) return <CoinItem key={w.key} text={w.text} at={w.centre} onTap={open} />
         if (w.type === 'message') return <NoteItem key={w.key} w={w} birth={births[w.key]} onTap={open} />
         if (w.type === 'audio') return <AudioMark key={w.key} id={w.key} title={w.text} at={w.centre} onTap={open} />
         // A key: the cube and its short name, or at half while it is held.
@@ -705,19 +729,58 @@ function AudioNote({ at, opacity = 1 }: { at: [number, number, number]; opacity?
  * the mint answers, or when it cannot be reached, the coin is drawn as a
  * coin: nobody has said it is gone.
  */
-function CoinItem({ text, at, scaleExp, onTap }: { text: string; at: [number, number, number]; scaleExp: number; onTap: () => void }): JSX.Element | null {
+function CoinItem({ text, at, onTap }: { text: string; at: [number, number, number]; onTap: () => void }): JSX.Element | null {
   const { state } = useCashu(text)
   const kind = coinKind(state)
+  const scaleExp = useCyberspace((s) => s.scaleExp)
   if (!markShown(kind, scaleExp)) return null
+  return <CoinMark kind={kind} at={at} onTap={onTap} />
+}
+
+/**
+ * A coin as it is drawn: its diamond and its ₿ at their true size, one
+ * gibson tip to tip (COIN_GIBSONS), at every distance and zoom, by the rule
+ * a chest and a door follow (LookMark, #940). Once that is under FAR_DOT_PX on
+ * screen the diamond and the ₿ are hidden and a dot stands in their place
+ * (FarDot): the coin's gold, or steel for a spent coin. The ₿ is part of the
+ * coin, not a name over it, so it is drawn at the coin's size and goes with
+ * it; a coin has no floating name (above).
+ *
+ * Its tap target is a fingertip over it, or the whole coin once that is
+ * larger, as a message's box has it; and as a chest's has it, none while the
+ * coin is under MIN_VISIBLE_PX on screen (TapTarget `minVisible`).
+ */
+export function CoinMark({ kind, at, onTap }: { kind: 'coin' | 'spent'; at: [number, number, number]; onTap: () => void }): JSX.Element {
+  const side = coinSide(useCyberspace((s) => s.scaleExp))
   const spent = kind === 'spent'
+  const outer = useRef<Group>(null)
+  const body = useRef<Group>(null)
+  const far = useRef<Points>(null)
+  useFrame((state) => {
+    const g = outer.current
+    if (!g) return
+    const cam = state.camera as PerspectiveCamera
+    // The coin at its true size, or the dot once that is too small to be anything.
+    const shown = farDotShown(side, perPixelAt(cam.position.distanceTo(g.position), cam.fov, state.size.height))
+    if (body.current) body.current.visible = !shown
+    if (far.current) far.current.visible = shown
+  }, LABEL_PRIORITY)
   return (
     <group>
-      <WorldMark kind={kind} at={at} />
-      <WorldLabel text="₿" color={spent ? SPENT : BITCOIN} opacity={spent ? 0.7 : 1} at={at} align="center" px={COIN_PX} recede="mark" />
-      <TapTarget px={TAP_PX} at={at} onTap={onTap} />
+      <group ref={outer} position={at} scale={side}>
+        <FarDot dotRef={far} color={spent ? SPENT : COIN} opacity={spent ? 0.7 : 1} />
+        <group ref={body}>
+          <WorldMark kind={kind} at={ORIGIN} side={1} />
+          <WorldLabel text="₿" color={spent ? SPENT : COIN} opacity={spent ? 0.7 : 1} at={ORIGIN} align="center" side={COIN_GLYPH} />
+        </group>
+      </group>
+      <TapTarget px={TAP_PX} side={side} minVisible at={at} onTap={onTap} />
     </group>
   )
 }
+
+/** Where a coin's diamond and ₿ stand in its own frame: its middle. */
+const ORIGIN: [number, number, number] = [0, 0, 0]
 
 /**
  * A message that was just found: its characters resolve out of glyphs over
@@ -872,7 +935,7 @@ export { MARK_FADE_MS, markFadeLeft }
 
 /** The line color and opacity of each mark. A spent coin is steel and faint. */
 const MARK_LOOK: Record<MarkKind, { color: string; opacity: number }> = {
-  coin: { color: BITCOIN, opacity: 0.9 },
+  coin: { color: COIN, opacity: 0.9 },
   spent: { color: SPENT, opacity: 0.6 },
   note: { color: NOTE_BLUE, opacity: 0.55 },
 }
@@ -883,9 +946,11 @@ const MARK_LOOK: Record<MarkKind, { color: string; opacity: number }> = {
  * cube for a message. Outlines rather than solids, so they read as drawn light
  * like everything else in the scene. Sized on screen (the same size to the
  * eye anywhere within the headlamp's reach, smaller past it: markRecede),
- * unless given a `side`: then the cube is that size in the world, in scene
- * units, at any distance, and its edges are pulled a hair toward the camera
- * (NOTE_EDGE_DEPTH). A message's box is (noteBoxSide), and a model-less key's (keyBoxSide).
+ * unless given a `side`: then it is that size in the world, in scene units,
+ * at any distance: the cube's edge, or the diamond tip to tip. A message's box
+ * is (noteBoxSide), a model-less key's (keyBoxSide), and a coin's (CoinMark).
+ * A cube sized so has its edges pulled a hair toward the camera
+ * (NOTE_EDGE_DEPTH), as it rests on a floor.
  */
 function WorldMark({ kind, at, opacity = 1, side, fadeOut }: {
   kind: MarkKind
@@ -902,8 +967,8 @@ function WorldMark({ kind, at, opacity = 1, side, fadeOut }: {
     [kind],
   )
   useEffect(() => () => geometry.dispose(), [geometry])
-  // A cube of `side` in the world: its geometry's edge scaled up to it. Only the note's cube is sized so.
-  const world = side !== undefined && kind === 'note' ? side / NOTE_GEOMETRY_EDGE : undefined
+  // `side` in the world: the cube's edge, or the diamond's height (its geometry is 1 tip to tip), scaled up to it.
+  const world = side === undefined ? undefined : kind === 'note' ? side / NOTE_GEOMETRY_EDGE : side
 
   const look = MARK_LOOK[kind]
   useFrame((state) => {
@@ -913,12 +978,14 @@ function WorldMark({ kind, at, opacity = 1, side, fadeOut }: {
       ;(edges.current.material as Material).opacity = look.opacity * opacity * left
       edges.current.visible = left > 0
     }
+    if (!g) return
     // A size in the world is set once, below, not read from the camera.
-    if (!g || world !== undefined) return
-    const cam = state.camera as PerspectiveCamera
-    const perPixel = 2 * Math.tan((cam.fov * Math.PI) / 360) / state.size.height
-    const depth = cam.position.distanceTo(g.position)
-    g.scale.setScalar(Math.max(1e-5, depth * perPixel * MARK_PX[kind] * markRecede(depth)))
+    if (world === undefined) {
+      const cam = state.camera as PerspectiveCamera
+      const perPixel = 2 * Math.tan((cam.fov * Math.PI) / 360) / state.size.height
+      const depth = cam.position.distanceTo(g.position)
+      g.scale.setScalar(Math.max(1e-5, depth * perPixel * MARK_PX * markRecede(depth)))
+    }
     // A live coin turns; a note, and a spent coin, stay where they were left.
     // Two axes at speeds that do not divide evenly, so the diamond tumbles
     // slowly instead of spinning on a spit, the way a selected hyperjump does
@@ -935,8 +1002,8 @@ function WorldMark({ kind, at, opacity = 1, side, fadeOut }: {
   const start = fadeOut === undefined ? 1 : markFadeLeft(performance.now() - fadeOut)
   return (
     <group key={kind} ref={group} position={at} scale={world}>
-      <lineSegments ref={edges} geometry={geometry} frustumCulled={false} visible={start > 0}>
-        <lineBasicMaterial color={look.color} toneMapped={false} transparent opacity={look.opacity * opacity * start} depthWrite={false} {...(world !== undefined ? NOTE_EDGE_DEPTH : {})} />
+      <lineSegments ref={edges} geometry={geometry} frustumCulled={false} visible={start > 0} name={kind === 'note' ? undefined : 'coin-mark'}>
+        <lineBasicMaterial color={look.color} toneMapped={false} transparent opacity={look.opacity * opacity * start} depthWrite={false} {...(world !== undefined && kind === 'note' ? NOTE_EDGE_DEPTH : {})} />
       </lineSegments>
     </group>
   )

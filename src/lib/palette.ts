@@ -15,6 +15,11 @@ export const FG = '#c8f5ff'
 export const ACCENT = '#00e5ff'
 export const WARN = '#ffb020'
 export const DANGER = '#ff3b6b'
+/**
+ * A coin left in cyberspace (scene/WorldMessages CoinMark): Bitcoin's own
+ * orange, the gold of its diamond, its ₿ and the dot it is drawn as far off.
+ */
+export const COIN = '#f7931a'
 /** Merkle sidestep: the ideaspace purple, distinct from hop amber. */
 export const SIDESTEP = '#c07dff'
 /**

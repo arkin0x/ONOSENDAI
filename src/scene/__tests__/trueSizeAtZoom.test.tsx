@@ -1,12 +1,13 @@
 /**
- * trueSizeAtZoom.test.tsx: a chest, a door and an item's model keep their
- * size against the blocks around them at every distance and zoom (arkinox,
- * 2026-11-26, BUILD at 2^0 zoomed far out: "doors and chests are not scaling
- * with the view zoom? getting way too big").
+ * trueSizeAtZoom.test.tsx: a chest, a door, an item's model and a coin keep
+ * their size against the blocks around them at every distance and zoom
+ * (arkinox, 2026-11-26, BUILD at 2^0 zoomed far out: "doors and chests are
+ * not scaling with the view zoom? getting way too big"; coins the same way,
+ * owner, 2026-11-27).
  *
  * They were held to the note's old cube on screen, 24.5 CSS pixels, so far
  * off a one-gibson chest stood many times its size beside a one-gibson
- * block. Here a one-gibson reference block stands beside each, and the
+ * block; a coin was a 40 pixel diamond at any distance. Here a one-gibson reference block stands beside each, and the
  * camera pulls back from 4 to BUILD's 1280 cells on a phone (375 by 812, FOV
  * 55): what the thing draws, measured against the block, is the same at
  * every distance, and once that is under FAR_DOT_PX on screen the thing is
@@ -29,7 +30,11 @@ if (typeof localStorage === 'undefined') {
 }
 
 vi.mock('../../lib/relay', () => ({ publishMany: vi.fn(async () => ({ ok: true })), query: vi.fn(async () => []), queryAny: vi.fn(async () => []), relaySet: () => ['wss://relay.test'] }))
-vi.mock('../WorldLabel', async (real) => ({ ...(await real<object>()), WorldLabel: () => null }))
+// A label sized on screen draws nothing here; one that is a size in the world (`side`: the coin's ₿) is a group of that scale, so it can be measured.
+vi.mock('../WorldLabel', async (real) => {
+  const { createElement } = await import('react')
+  return { ...(await real<object>()), WorldLabel: ({ side, at }: { side?: number; at?: [number, number, number] }) => side === undefined ? null : createElement('group', { name: 'glyph', scale: side, position: at }) }
+})
 vi.mock('../TapTarget', async (real) => ({ ...(await real<object>()), TapTarget: () => null }))
 vi.mock('../ShardMesh', async (real) => {
   const { createElement } = await import('react')
@@ -45,7 +50,7 @@ vi.mock('../ShardMesh', async (real) => {
 })
 
 import { createElement, Fragment, type ReactNode } from 'react'
-import { Box3, PerspectiveCamera, ShaderMaterial, Vector3, type Object3D } from 'three'
+import { Box3, PerspectiveCamera, ShaderMaterial, Vector3, type BufferGeometry, type Object3D } from 'three'
 import { flatten } from 'sno-core/shards'
 import { r3fRoot, type R3fRoot } from '../../test/r3fRoot'
 import { builtInLook } from '../../lib/looks'
@@ -55,6 +60,7 @@ import type { ViewAxes } from '../../lib/space'
 import { useCyberspace } from '../../store/useCyberspace'
 import { LookMark } from '../LookMark'
 import { ItemModelMark } from '../ItemModel'
+import { CoinMark } from '../WorldMessages'
 
 const AXES: ViewAxes = { right: { axis: 'x', dir: 1 }, up: { axis: 'y', dir: 1 }, out: { axis: 'z', dir: -1 } }
 const PHONE = { width: 375, height: 812 }
@@ -98,6 +104,17 @@ function longestOf(o: Object3D): number {
   return Math.max(s.x, s.y, s.z)
 }
 
+/**
+ * The longest side of what `o` draws in its own frame, at its world scale:
+ * the same however it is turned, for a coin's diamond, which tumbles.
+ */
+function trueLongestOf(o: Object3D): number {
+  const g = (o as Object3D & { geometry: BufferGeometry }).geometry
+  g.computeBoundingBox()
+  const s = g.boundingBox!.getSize(new Vector3())
+  return Math.max(s.x, s.y, s.z) * o.getWorldScale(new Vector3()).x
+}
+
 /** CSS pixels a length of `side` render units spans `depth` from the camera. */
 function px(side: number, depth: number): number {
   return side / perPixelAt(depth, FOV, PHONE.height)
@@ -114,13 +131,16 @@ const door = builtInLook('door')
 const itemShard = builtInLook('treasure').closed
 const item = { shard: itemShard, extent: extentOf(flatten(itemShard).positions, null)! }
 
-const MARKS: Array<{ name: string; draw: () => ReactNode }> = [
+/** What is measured of each: `thing`, the object it draws (ShardMesh's 'drawn' by default), by `measure`. */
+const MARKS: Array<{ name: string; draw: () => ReactNode; thing?: string; measure?: (o: Object3D) => number }> = [
   { name: 'a chest', draw: () => createElement(LookMark, { key: 'm', look: treasure, model: treasure.closed, at: [0, 0, 0], axes: AXES }) },
   { name: 'a door', draw: () => createElement(LookMark, { key: 'm', look: door, model: door.closed, at: [0, 0, 0], axes: AXES }) },
   { name: 'an item wearing a model', draw: () => createElement(ItemModelMark, { key: 'm', id: 'item', model: item, animation: [], at: [0, 0, 0], region: null, axes: AXES }) },
+  { name: 'a coin', draw: () => createElement(CoinMark, { key: 'm', kind: 'coin', at: [0, 0, 0], onTap: () => {} }), thing: 'coin-mark', measure: trueLongestOf },
+  { name: 'a spent coin', draw: () => createElement(CoinMark, { key: 'm', kind: 'spent', at: [0, 0, 0], onTap: () => {} }), thing: 'coin-mark', measure: trueLongestOf },
 ]
 
-describe('drawn at its true size against a block at every distance (LookMark, ItemModelMark)', () => {
+describe('drawn at its true size against a block at every distance (LookMark, ItemModelMark, CoinMark)', () => {
   for (const mark of MARKS) {
     for (const scaleExp of [0, 1]) {
       it(`${mark.name} at 2^${scaleExp}: the same size against a one-gibson block from 4 to 1280 cells, and a dot no larger than ${FAR_DOT_PX} px once it is too small`, async () => {
@@ -136,11 +156,11 @@ describe('drawn at its true size against a block at every distance (LookMark, It
           cam.updateMatrixWorld(true)
           await r.frame()
           await r.frame()
-          const [thing] = named('drawn')
+          const [thing] = named(mark.thing ?? 'drawn')
           const [ref] = named('block')
           const [dot] = named('far-dot')
           expect(thing && ref && dot).toBeTruthy()
-          const side = longestOf(thing)
+          const side = (mark.measure ?? longestOf)(thing)
           const gibson = longestOf(ref)
           ratios.push(side / gibson)
           const truePx = px(side, d)
@@ -166,6 +186,32 @@ describe('drawn at its true size against a block at every distance (LookMark, It
         if (scaleExp === 0) expect(sawDot).toBe(true)
       })
     }
+  }
+
+  for (const scaleExp of [0, 1]) {
+    it(`a coin at 2^${scaleExp} is one gibson tip to tip, as the block beside it, and its ₿ keeps its share of it and goes with it into the dot`, async () => {
+      useCyberspace.setState({ scaleExp })
+      await draw(block(scaleExp), MARKS[3].draw())
+      const cam = r.state().camera
+      const glyphs: number[] = []
+      let hidden = false
+      for (const d of DISTANCES) {
+        cam.position.set(0, 0, d)
+        cam.lookAt(0, 0, 0)
+        cam.updateMatrixWorld(true)
+        await r.frame()
+        const [coin] = named('coin-mark')
+        const [ref] = named('block')
+        const [glyph] = named('glyph')
+        expect(trueLongestOf(coin) / longestOf(ref)).toBeCloseTo(1, 6)
+        glyphs.push(glyph.getWorldScale(new Vector3()).x / trueLongestOf(coin))
+        // The ₿ is part of the coin: drawn with it, hidden with it once the dot stands in.
+        expect(shown(glyph)).toBe(shown(coin))
+        if (!shown(glyph)) hidden = true
+      }
+      for (const k of glyphs) expect(k).toBeCloseTo(glyphs[0], 6)
+      if (scaleExp === 0) expect(hidden).toBe(true)
+    })
   }
 
   it('the chest at 1280 cells is its true size, not held to the old 24.5 px', async () => {

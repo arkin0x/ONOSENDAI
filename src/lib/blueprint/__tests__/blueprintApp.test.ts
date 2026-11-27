@@ -240,7 +240,8 @@ describe('a bare hand reaches only the 3 by 3 by 3 box round the hit (owner, 202
     const u = smashGroup(ground, [0, 2, 0], true)
     expect(u.isolated).toBe(false)
     expect(u.arrangement).toBeNull()
-    expect(u.cells.every(([x, y, z]) => Math.abs(x) <= 2 && Math.abs(y - 2) <= 2 && Math.abs(z) <= 2)).toBe(true)
+    // What is deleted is the connected blocks in the 3 by 3 by 3 box round the hit.
+    expect(u.smash.every(([x, y, z]) => Math.abs(x) <= 1 && Math.abs(y - 2) <= 1 && Math.abs(z) <= 1)).toBe(true)
   })
 
   it('a group of extent 4 (one past a bare hand\'s 3) does not compile bare-handed; the Compiler compiles it', () => {
@@ -265,16 +266,25 @@ describe('a bare hand reaches only the 3 by 3 by 3 box round the hit (owner, 202
       const g = smashGroup(row(17), [x, 0, 0])
       expect(g.arrangement).toBeNull()
     }
-    // Struck in the middle, the whole 17 is in the window and stands alone, but is too long: smashed, nothing compiled.
+    // Struck in the middle: the gather finds all 17 standing alone, too long to compile; the smash deletes 16, its box.
     const mid = smashGroup(row(17), [8, 0, 0])
     expect(mid.cells).toHaveLength(17)
     expect(mid.isolated).toBe(true)
+    expect(mid.smash).toHaveLength(16)
+    expect(mid.smash.every(([x]) => x >= 0 && x <= 15)).toBe(true)
   })
 
-  it('a long row (not a construction): bare takes the 5 blocks of its window round the hit, the Compiler the 31 of its own', () => {
+  it('a long row (not a construction): the gather looks 5 (bare) or 31 (the Compiler) across; the smash deletes only its box, 3 or 16', () => {
     const row = (x: number, y: number, z: number): number => (y === 0 && z === 0 && x >= -20 && x <= 20 ? GRIDSTONE : 0)
-    expect(smashGroup(row, [0, 0, 0], true).cells).toHaveLength(5)
-    expect(smashGroup(row, [0, 0, 0]).cells).toHaveLength(31)
+    const bare = smashGroup(row, [0, 0, 0], true)
+    expect(bare.cells).toHaveLength(5)
+    expect(bare.smash).toHaveLength(3)
+    expect(bare.blocks).toHaveLength(3)
+    const c = smashGroup(row, [0, 0, 0])
+    expect(c.cells).toHaveLength(31)
+    expect(c.smash).toHaveLength(16)
+    expect(Math.min(...c.smash.map(([x]) => x))).toBe(-8)
+    expect(Math.max(...c.smash.map(([x]) => x))).toBe(7)
   })
 })
 
@@ -312,6 +322,34 @@ describe('sealing, blueprints live (2026-11-27)', () => {
     T.getState().set({ showName: true, cage: (() => { const c = new Uint16Array(16 ** 3); c[0] = GRIDSTONE; return c })() })
     expect(T.getState().takeCage({ lo: { x: 0n, y: 0n, z: 0n }, plane: 0 })).toBeNull()
     expect(T.getState().showName).toBe(false)
+  })
+})
+
+describe('the gather and the smash set are apart (owner, 2026-11-27: "smash up to the box")', () => {
+  const row = (n: number) => (x: number, y: number, z: number): number => (y === 0 && z === 0 && x >= 0 && x < n ? GRIDSTONE : 0)
+
+  it('a bare 4-row struck at its end: nothing compiles and 2 blocks go (the 3 by 3 by 3 box)', () => {
+    const g = smashGroup(row(4), [0, 0, 0], true)
+    expect(g.arrangement).toBeNull()
+    expect(g.smash.map(([x]) => x).sort()).toEqual([0, 1])
+  })
+
+  it('a 17-row struck in its middle: 16 go, never more than 16 along any axis', () => {
+    const g = smashGroup(row(17), [8, 0, 0])
+    expect(g.arrangement).toBeNull()
+    expect(g.smash).toHaveLength(16)
+  })
+
+  it('a construction goes whole wherever it is struck, the box notwithstanding', () => {
+    for (const x of [0, 15]) {
+      const g = smashGroup(row(16), [x, 0, 0])
+      expect(g.arrangement).not.toBeNull()
+      expect(g.smash).toHaveLength(16)
+    }
+    // The bare 3-row struck at its end: past a 3-box round the hit on one side, and still whole.
+    const b = smashGroup(row(3), [0, 0, 0], true)
+    expect(b.arrangement).not.toBeNull()
+    expect(b.smash.map(([x]) => x).sort()).toEqual([0, 1, 2])
   })
 })
 

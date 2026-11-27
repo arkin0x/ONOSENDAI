@@ -32,7 +32,7 @@
  * only the Compiler's own recipe compiles for it.
  */
 
-import { gather, type Cell } from './arrangement'
+import { gather, smashCells, type Cell } from './arrangement'
 import { BLUEPRINT_RECORD_KIND, BLUEPRINT_RELAY_READY, WINDOW_ABOVE, WINDOW_BELOW, isPrize, openPrize, readRecord, type Arrangement, type Prize, type RecordEvent } from './format'
 import { keyOf } from './keyClient'
 import { COMPILER_RECIPE, sameArrangement } from './recipes'
@@ -177,10 +177,17 @@ export function relayAsker(query: (filter: { kinds: number[]; '#d': string[]; li
   }
 }
 
-/** What one smash takes, from the blocks as drawn (`read`, cs offsets) at the hit; a bare hand reaches only BARE_REACH. */
-export function smashGroup(read: (x: number, y: number, z: number) => number, hit: Cell, bare = false): ReturnType<typeof gather> & { blocks: Array<{ at: [number, number, number]; id: number }> } {
-  const g = gather(read, hit, bare ? BARE_REACH : COMPILER_REACH)
-  return { ...g, blocks: g.cells.map((at) => ({ at, id: read(at[0], at[1], at[2]) })) }
+/**
+ * One smash, from the blocks as drawn (`read`, cs offsets) at the hit: the gather (DECK-0010 §4: the group, whether it
+ * is isolated, and the arrangement a lookup is made from) and, apart from it, what is deleted (`smash`, with `blocks`
+ * its ids): the construction whole, or else only the connected blocks in the reach's box round the hit
+ * (arrangement.ts smashCells). A bare hand reaches BARE_REACH.
+ */
+export function smashGroup(read: (x: number, y: number, z: number) => number, hit: Cell, bare = false): ReturnType<typeof gather> & { smash: Array<[number, number, number]>; blocks: Array<{ at: [number, number, number]; id: number }> } {
+  const n = bare ? BARE_REACH : COMPILER_REACH
+  const g = gather(read, hit, n)
+  const smash = smashCells(read, hit, n, g)
+  return { ...g, smash, blocks: smash.map((at) => ({ at, id: read(at[0], at[1], at[2]) })) }
 }
 
 /**

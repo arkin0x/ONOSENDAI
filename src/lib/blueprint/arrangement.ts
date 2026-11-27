@@ -65,6 +65,19 @@ export function gather(read: (x: number, y: number, z: number) => number, hit: C
   return { cells: group.cells, lo, size, isolated, arrangement }
 }
 
+/**
+ * What a smash deletes (the owner's ruling of 2026-11-27, "smash up to the box"; DECK-0010 leaves this to the
+ * client): a construction (gather's arrangement) whole, wherever it was struck; anything else, only the connected
+ * blocks inside the n by n by n box round the hit (hit - floor(n/2) to the rest above: hit - 8 to + 7 for 16, hit - 1
+ * to + 1 for 3), so a smash never deletes more than n along any axis.
+ */
+export function smashCells(read: (x: number, y: number, z: number) => number, hit: Cell, n: number, g: Gathered): Array<[number, number, number]> {
+  if (g.arrangement) return g.cells
+  if (read(hit[0], hit[1], hit[2]) === 0) return []
+  const below = Math.floor(n / 2), above = n - 1 - below
+  return flood(read, hit, below, above).cells
+}
+
 /** The occupied cells reachable from `hit` through faces, edges and corners, never more than `below` under or `above` over it on any axis. */
 function flood(read: (x: number, y: number, z: number) => number, hit: Cell, below: number, above: number): { cells: Array<[number, number, number]>; set: Set<string> } {
   const inside = (x: number, y: number, z: number): boolean =>

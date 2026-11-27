@@ -113,13 +113,14 @@ export async function strike(target: readonly [number, number, number], bare: bo
   if (from && (from.field !== s || from.me !== useCyberspace.getState().identity.pubkey)) { useTerrain.getState().say('The smash stopped: you changed identity or place.'); return }
   const read = (x: number, y: number, z: number): number => s.world.blockCs(x, y, z)
   const g = smashGroup(read, target, bare)
-  if (!g.cells.length) { useTerrain.getState().say('Nothing there to smash.'); return }
-  // The blocks are spent whether or not they compile (DECK-0010 §4.3).
-  const refused = useTerrain.getState().clear(g.cells)
+  if (!g.smash.length) { useTerrain.getState().say('Nothing there to smash.'); return }
+  // What goes is the smash set (a construction whole, else the reach's box round the hit), spent whether or not it
+  // compiles (DECK-0010 §4.3); what compiles is the gather's arrangement.
+  const refused = useTerrain.getState().clear(g.smash)
   if (refused) { useTerrain.getState().say(refused); return }
   const centre: [number, number, number] = [0, 0, 0]
-  for (const c of g.cells) for (let a = 0; a < 3; a++) centre[a] += c[a] + 0.5
-  for (let a = 0; a < 3; a++) centre[a] /= g.cells.length
+  for (const c of g.smash) for (let a = 0; a < 3; a++) centre[a] += c[a] + 0.5
+  for (let a = 0; a < 3; a++) centre[a] /= g.smash.length
   const struck = performance.now()
   const id = useSmashFx.getState().start({ blocks: g.blocks, centre, struck })
   impact(g.blocks.length)

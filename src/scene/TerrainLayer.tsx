@@ -63,6 +63,10 @@ import type { Position, ViewAxes } from '../lib/space'
 import { committedAnchor, committedScale } from '../lib/renderFrame'
 import { TapOccluder } from './TapOccluder'
 import { tapClaimNearer } from './TapTarget'
+import { SmashFx } from './SmashFx'
+import { SmashKick } from './SmashKick'
+import { pickToy } from './toySpots'
+import { usePrizePick } from '../store/usePrizePick'
 
 /** Chunks meshing at once. */
 const MESH_IN_FLIGHT = 2
@@ -484,6 +488,10 @@ function Marks({ axes }: { axes: ViewAxes }): JSX.Element {
       let hit = act.at ? aim(act.at) : terrainCursor.hit
       // One ray for the press: a shard in front takes the tap (R3F's click) and the block behind stays.
       if (hit && shardInFront(hit)) hit = null
+      // A prize toy in front takes the tap: its card opens (scene/PrizeToys.tsx), and the block behind stays.
+      if (act.at === null) aim(null)
+      const toy = pickToy(from, toward, hit ? hit.distance + 0.5 : CURSOR_REACH + 1)
+      if (toy) { usePrizePick.getState().select(toy); hidden.current = false; return }
       if (act.kind === 'mine') st.mine(hit)
       else st.place(hit)
       if (act.at) terrainCursor.hit = hit
@@ -549,6 +557,8 @@ export function TerrainLayer({ axes }: { axes: ViewAxes }): JSX.Element {
     <>
       <Chunks axes={axes} />
       <Marks axes={axes} />
+      <SmashFx axes={axes} />
+      <SmashKick />
       {/* What the blocks hide takes no tap, in every mode; in TERRAIN a tap on them mines (TapOccluder.tsx). */}
       <TapOccluder distance={(r) => (terrainInput.swallowTap ? 0 : blockOcclusion(terrainSession, axes, r))} claims={terrainClaims} />
     </>

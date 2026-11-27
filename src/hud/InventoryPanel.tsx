@@ -43,7 +43,9 @@
  * 2026-11-14: "My list of these items is getting too long and I think we
  * need to consolidate it just like we did with the other menu panels"). The
  * rows, their ACTIONS, ARCHIVED and PASTE are in those modals (ItemsModal),
- * and KEY ITEMS also has FEED, the published key items not yet found. There
+ * and KEY ITEMS also has FEED, the published key items not yet found. A
+ * third button, BLUEPRINTS, opens the blueprints held and the prizes built
+ * (blueprint/BlueprintsModal.tsx; design page craft-design/block-uses 4). There
  * is no X on a row and no CLEAR ALL (owner, 2026-11-14: "I'm afraid to press
  * Clear All ... get rid of it").
  */
@@ -89,6 +91,9 @@ import { BlockButton, MuteItemButton } from './BlockButton'
 import { searchListings } from '../lib/itemListing'
 import { BackupTrouble, RelayTrouble } from './RelayTrouble'
 import { Stacked, leaveModals, useModalStack } from './modalStack'
+import { BLUEPRINTS_ICON, BLUEPRINTS_LABEL, BlueprintsModal, useBlueprintsModal } from './blueprint/BlueprintsModal'
+import { BlueprintsGrid } from './blueprint/BlueprintsGrid'
+import { useBlueprints } from '../store/useBlueprints'
 
 /** How a held item came to be held, in a word for the row. */
 const SOURCE: Record<HeldItem['source'], string> = { forged: 'forged by you', found: 'found', taken: 'taken', pasted: 'pasted' }
@@ -251,7 +256,7 @@ export const useOpenActions = create<{ open: string | null }>(() => ({ open: nul
  * confirmation it opened, and when the row leaves the list or stops being
  * drawn (`shown`).
  */
-function useRowActions(id: string, name: string, shown = true): { button: JSX.Element; group: (acts: ReactNode) => JSX.Element | null; close: () => void } {
+export function useRowActions(id: string, name: string, shown = true): { button: JSX.Element; group: (acts: ReactNode) => JSX.Element | null; close: () => void } {
   const open = useOpenActions((s) => s.open === id) && shown
   const close = useCallback((): void => { if (useOpenActions.getState().open === id) useOpenActions.setState({ open: null }) }, [id])
   const gid = `held-actions-${id}`
@@ -310,7 +315,7 @@ function seenIsFor(owner: string): boolean {
 }
 
 /** NEW on a row of a list opened with it unseen (owner, 2026-11-26), as its tile wore it. */
-function NewChip(): JSX.Element {
+export function NewChip(): JSX.Element {
   return <span className="item__chip items-new__chip" title="Not looked at before you opened this list">{NEW_MARK}</span>
 }
 
@@ -747,7 +752,7 @@ function ItemsModal({ kind }: { kind: ItemsKind }): JSX.Element {
 }
 
 /**
- * ITEMS in the menu: two buttons and nothing else (owner, 2026-11-14: "I
+ * ITEMS in the menu: buttons and nothing else (owner, 2026-11-14: "I
  * want to have everything replaced with two buttons ... My list of these
  * items is getting too long"), each with how many it holds, 0 included, each
  * opening its modal (ItemsModal). Side by side, half the width each, as
@@ -757,11 +762,18 @@ function ItemsModal({ kind }: { kind: ItemsKind }): JSX.Element {
  * not count them. THIS SESSION stays in the head when storage could not be
  * opened, since then nothing held outlasts the page.
  */
-function KindButton({ kind, label }: { kind: ItemsKind; label: string }): JSX.Element {
-  const Icon = KIND_ICON[kind]
+function KindButton({ kind, label }: { kind: ItemsKind | 'blueprints'; label: string }): JSX.Element {
+  const Icon = kind === 'blueprints' ? BLUEPRINTS_ICON : KIND_ICON[kind]
+  const [name, count] = label.split(' · ')
+  const open = (): void => {
+    if (kind === 'blueprints') useBlueprintsModal.setState({ open: true, focus: null })
+    else useItemsModal.setState({ open: kind, focus: null })
+  }
   return (
-    <button className={`avatars__go shards__compose-open items-kinds__go items-kinds__go--${kind}`} onClick={() => useItemsModal.setState({ open: kind, focus: null })} aria-haspopup="dialog">
-      <Icon className="shards__build-icon" size={13} strokeWidth={2.5} aria-hidden /><span className="items-kinds__label">{label}</span>
+    <button className={`avatars__go shards__compose-open items-kinds__go items-kinds__go--${kind}`} onClick={open} aria-haspopup="dialog">
+      <Icon className="shards__build-icon" size={13} strokeWidth={2.5} aria-hidden />
+      {/* The name over its count, always two lines, so three buttons side by side never cut the count off. */}
+      <span className="items-kinds__label"><span className="items-kinds__name">{name}</span>{count !== undefined && <span className="items-kinds__count"><span className="items-kinds__dot"> · </span>{count}</span>}</span>
     </button>
   )
 }
@@ -772,8 +784,10 @@ export function InventoryPanel(): JSX.Element {
   const muted = useMutes((s) => s.muted)
   const self = useCyberspace((s) => s.identity.pubkey)
   const open = useItemsModal((s) => s.open)
+  const blueprintsOpen = useBlueprintsModal((s) => s.open)
+  const blueprints = useBlueprints((s) => s.cards.reduce((n, c) => n + (c.archived ? 0 : 1), 0))
   // The menu unmounts this panel when it hides (an offer, a secret, a phone's BUILD): the modal goes with it, and does not come back by itself with the menu.
-  useEffect(() => () => useItemsModal.setState({ open: null, focus: null }), [])
+  useEffect(() => () => { useItemsModal.setState({ open: null, focus: null }); useBlueprintsModal.setState({ open: false, focus: null }) }, [])
   // A key item's tile opens its card (KeyItemModal) over the menu; a loot tile, its row in OTHER LOOT, which has no card of its own.
   const [card, setCard] = useState<HeldItem | null>(null)
   const openTile = useCallback((it: HeldItem): void => {
@@ -791,18 +805,21 @@ export function InventoryPanel(): JSX.Element {
         <h2>Items</h2>
         {storage === 'memory' && <span className="loot__tags"><span className="tag" title="IndexedDB could not be opened; what you hold lasts this session only">THIS SESSION</span></span>}
       </header>
-      {/* OTHER LOOT on the left, KEY ITEMS on the right, each button over its own grid (owner, 2026-11-26: "left side is loot"). */}
+      {/* OTHER LOOT on the left, KEY ITEMS in the middle, BLUEPRINTS on the right, each button over its own grid (owner, 2026-11-26: "left side is loot"). */}
       <div className="shards__modes items-kinds">
         <KindButton kind="loot" label={kindLabel(OTHER_LOOT_LABEL, taken.length)} />
         <KindButton kind="keys" label={kindLabel(KEY_ITEMS_LABEL, keys.length)} />
+        <KindButton kind="blueprints" label={kindLabel(BLUEPRINTS_LABEL, blueprints)} />
       </div>
       <div className="items-grids">
         <ItemsGrid kind="loot" items={taken} empty={NO_OTHER_LOOT} onOpen={openTile} onMore={() => useItemsModal.setState({ open: 'loot', focus: null })} />
         <ItemsGrid kind="keys" items={keys} empty={NO_KEY_ITEMS} onOpen={openTile} onMore={() => useItemsModal.setState({ open: 'keys', focus: null })} />
+        <BlueprintsGrid />
       </div>
       {open && <ItemsModal key={open} kind={open} />}
+      {blueprintsOpen && <BlueprintsModal />}
       {card && <HeldKeyCard item={card} onClose={() => setCard(null)} />}
-      <Explanation>Key items open doors and chests. Other loot is everything you've taken from chests.</Explanation>
+      <Explanation>Key items open doors and chests. Other loot is everything you've taken from chests. Blueprints are recipes: build one and smash it to make its prize.</Explanation>
     </section>
   )
 }

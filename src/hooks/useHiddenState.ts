@@ -28,7 +28,7 @@ export function useHiddenState(item: { key: string; lineage?: string }, mine: bo
 
 /** The hidden things whose card opening reads them: a message, an item (kind key) and a sound. */
 export function opensAsHidden(type: string): boolean {
-  return type === 'message' || type === 'key' || type === 'audio'
+  return type === 'message' || type === 'key' || type === 'audio' || type === 'blueprint'
 }
 
 /**

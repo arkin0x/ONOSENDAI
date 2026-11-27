@@ -47,13 +47,14 @@ import { generateChunk } from '../lib/terrain/blocksClient'
 import { EMPTY, blockName, kindId, solid as isSolid } from '../lib/terrain/blocks'
 import { terrainWallItems } from '../lib/terrain/walls'
 import {
-  FOLD_AT, HOTBAR_SLOTS, emptyInventory, foldChunk, openTerrainDb, opKey, readKept, readOwner, writeHint, writeInventory, writeOps, writeSurveyed,
+  FOLD_AT, HOTBAR_SLOTS, emptyInventory, foldChunk, isCompiler, openTerrainDb, opKey, readKept, readOwner, withCompiler, withoutCompiler, writeHint, writeInventory, writeOps, writeSurveyed,
   type Inventory, type OpRow,
 } from '../lib/terrain/terrainDb'
+import { compilerGranted } from '../lib/blueprint/devGrant'
 import type { Position, ViewAxes } from '../lib/space'
 import type { RayHit } from '../lib/terrain/raycast'
 import {
-  applyCarried, connectShareHost, fieldClosing, liveChanged, noteChange, noteMove, prepareChunk, READ_RING, identityLeaving, readNear, sharedKeys, surveyedForYou, terrainClosed, terrainOpened, viewOf,
+  applyCarried, connectShareHost, fieldClosing, liveChanged, noteChange, noteChanges, noteMove, prepareChunk, READ_RING, identityLeaving, readNear, sharedKeys, surveyedForYou, terrainClosed, terrainOpened, viewOf,
 } from './terrainShare'
 import { loadBuilder, releaseBuilderDb } from '../lib/terrain/builderKey'
 import './terrainShareLive'
@@ -149,6 +150,14 @@ export interface TerrainState {
   selectSlot: (slot: number) => void
   /** Put a block kind in a hotbar slot (the chosen one when absent). */
   assignSlot: (id: number, slot?: number) => void
+  /** The Compiler joins the bar in slot 1, kept for good (made from its recipe: lib/blueprint/smash.ts). */
+  gainCompiler: () => void
+  /**
+   * Clear cells (cs offsets) to open space as edits in your own layer, as
+   * mining would but carrying nothing: a smash spends its blocks (lib/blueprint/smash.ts).
+   * All or nothing: a refusal in plain words when any cell is out of reach or in a chunk you cannot build in.
+   */
+  clear: (cells: ReadonlyArray<readonly [number, number, number]>) => string | null
   setSheet: (open: boolean) => void
   say: (message: string | null) => void
 }
@@ -331,7 +340,9 @@ export const useTerrain = create<TerrainState>((set, get) => ({
     }
     // With an empty slot chosen, the kind just mined is chosen instead.
     const slot = hotbar[inv.slot] === 0 && hotbar.includes(was) ? hotbar.indexOf(was) : inv.slot
-    saveInventory({ counts, hotbar, slot })
+    // Everything else the inventory holds (the Compiler and how it came) stays: dropping it here hid the held Compiler
+    // until a reload (owner, 2026-11-27), and a reload then lost a made one.
+    saveInventory({ ...inv, counts, hotbar, slot })
     return true
   },
 
@@ -341,6 +352,7 @@ export const useTerrain = create<TerrainState>((set, get) => ({
     if (hit.normal[0] === 0 && hit.normal[1] === 0 && hit.normal[2] === 0) return false
     const inv = get().inventory
     const id = inv.hotbar[inv.slot]
+    if (isCompiler(id)) { get().say('The Compiler is in your hand: choose a block to place.'); return false }
     if (!id || !(inv.counts[id] > 0)) { get().say(id ? `No ${blockName(id)} left: mine some first.` : 'Nothing to place: mine a block first.'); return false }
     const cell: [number, number, number] = [hit.cell[0] + hit.normal[0], hit.cell[1] + hit.normal[1], hit.cell[2] + hit.normal[2]]
     if (!cellInReach(s, cell)) { get().say(OUT_OF_REACH); return false }
@@ -374,10 +386,31 @@ export const useTerrain = create<TerrainState>((set, get) => ({
     const inv = get().inventory
     const at = slot ?? inv.slot
     if (at < 0 || at >= HOTBAR_SLOTS) return
+    // Slot 1 holds the Compiler for good once it is made (owner, 2026-11-27).
+    if (isCompiler(inv.hotbar[at])) { get().say('Slot 1 holds the Compiler: choose another slot.'); return }
     const hotbar = inv.hotbar.map((h) => (h === id ? 0 : h))
     hotbar[at] = id
     saveInventory({ ...inv, hotbar, slot: at })
     count('picked')
+  },
+
+  gainCompiler: () => {
+    saveInventory(withCompiler(get().inventory, 'made'))
+  },
+
+  clear: (cells) => {
+    const s = terrainSession
+    if (!s) return 'Nothing to clear here.'
+    if (cells.some((c) => !cellInReach(s, c))) return OUT_OF_REACH
+    const slots = new Set<ChunkSlot | null>(cells.map((c) => s.world.slotAtCs(c[0], c[1], c[2])))
+    for (const sl of slots) if (!surveyShown(s, sl)) return 'Survey this chunk before building in it.'
+    const changes: Change[] = []
+    for (const [dx, dy, dz] of cells) {
+      const change = s.world.setCs(dx, dy, dz, EMPTY)
+      if (change) changes.push(change)
+    }
+    recordMany(s, changes)
+    return null
   },
 
   setSheet: (open) => {
@@ -444,20 +477,40 @@ async function foldKey(s: TerrainSession, key: string): Promise<void> {
 
 /** Record a change: the log in memory and on the device, the layer folded when the log is long. */
 function record(s: TerrainSession, change: Change): void {
-  const slot = s.world.slotByKey(change.chunk)
-  const ownBefore = slot?.own ? slot.own[change.cell] : change.was
-  if (slot?.own) slot.own[change.cell] = change.id
-  // What it was, for the layer: setting a cell to its ground over someone else's block is written as a change (DECK-0009 §5.4).
-  noteChange(change.chunk, slot?.generated ? { cell: change.cell, ownBefore, ownAfter: change.id, shownBefore: change.was, ground: slot.generated[change.cell] } : undefined)
-  const seq = s.nextSeq++
-  const list = s.pending.get(change.chunk) ?? []
-  list.push({ seq, change })
-  s.pending.set(change.chunk, list)
-  s.version++
-  const row: OpRow = { rowKey: opKey(s.owner, seq), owner: s.owner, chunk: change.chunk, seq, cell: change.cell, id: change.id, t: Date.now() }
-  if (s.db) keep(writeOps(s.db, [row]))
+  recordMany(s, [change])
+}
+
+/**
+ * Changes kept as one batch: one database write and one state update for
+ * all of them, however many (a smash can clear thousands of cells: review of
+ * #943), and each chunk past FOLD_AT folded once.
+ */
+function recordMany(s: TerrainSession, changes: readonly Change[]): void {
+  if (!changes.length) return
+  const rows: OpRow[] = []
+  const full = new Set<string>()
+  const noted = new Map<string, Array<Parameters<typeof noteChange>[1]>>()
+  const t = Date.now()
+  for (const change of changes) {
+    const slot = s.world.slotByKey(change.chunk)
+    const ownBefore = slot?.own ? slot.own[change.cell] : change.was
+    if (slot?.own) slot.own[change.cell] = change.id
+    // What it was, for the layer: setting a cell to its ground over someone else's block is written as a change (DECK-0009 §5.4).
+    const notes = noted.get(change.chunk) ?? []
+    notes.push(slot?.generated ? { cell: change.cell, ownBefore, ownAfter: change.id, shownBefore: change.was, ground: slot.generated[change.cell] } : undefined)
+    noted.set(change.chunk, notes)
+    const seq = s.nextSeq++
+    const list = s.pending.get(change.chunk) ?? []
+    list.push({ seq, change })
+    s.pending.set(change.chunk, list)
+    s.version++
+    rows.push({ rowKey: opKey(s.owner, seq), owner: s.owner, chunk: change.chunk, seq, cell: change.cell, id: change.id, t })
+    if (list.length >= FOLD_AT) full.add(change.chunk)
+  }
+  for (const [chunk, notes] of noted) noteChanges(chunk, notes)
+  if (s.db) keep(writeOps(s.db, rows))
   useTerrain.setState({ waiting: countWaiting(s) })
-  if (list.length >= FOLD_AT) void foldKey(s, change.chunk)
+  for (const chunk of full) void foldKey(s, chunk)
 }
 
 /** One more of something done, for the tutorial's TERRAIN route (TerrainState `tally`). */
@@ -529,7 +582,11 @@ function makeField(owner: string, plane: number, at: Position): TerrainSession {
       s.nextSeq = Math.max(s.nextSeq, kept.nextSeq)
       s.db = db
       await loadBuilder(db, owner).catch(() => undefined)
-      useTerrain.setState({ inventory: kept.inventory, hint: kept.hint })
+      // A preview build's Compiler to test with (lib/blueprint/devGrant.ts): on when the preview grants it, off again when not. Production never grants.
+      let inventory = kept.inventory
+      if (compilerGranted() && !inventory.compiler) inventory = withCompiler(inventory, 'granted')
+      else if (!compilerGranted() && inventory.compiler === 'granted') inventory = withoutCompiler(inventory)
+      useTerrain.setState({ inventory, hint: kept.hint })
     } catch {
       db?.close()
     }

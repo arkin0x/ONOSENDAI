@@ -59,6 +59,7 @@ vi.mock('../TargetAvatars', async (real) => ({ ...(await real<object>()), Target
 vi.mock('../PresenceAvatars', async (real) => ({ ...(await real<object>()), PresenceAvatars: stub('PresenceAvatars') }))
 vi.mock('../WorldShards', async (real) => ({ ...(await real<object>()), WorldShards: stub('WorldShards') }))
 vi.mock('../TerrainLayer', async (real) => ({ ...(await real<object>()), TerrainLayer: stub('TerrainLayer') }))
+vi.mock('../PrizeToys', async (real) => ({ ...(await real<object>()), PrizeToys: stub('PrizeToys') }))
 vi.mock('../WorldSeeds', async (real) => ({ ...(await real<object>()), WorldSeeds: stub('WorldSeeds') }))
 vi.mock('../WorldMessages', async (real) => ({ ...(await real<object>()), WorldMessages: stub('WorldMessages') }))
 vi.mock('../ChestLooks', async (real) => ({ ...(await real<object>()), ChestLooks: stub('ChestLooks') }))

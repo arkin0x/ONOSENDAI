@@ -4,7 +4,7 @@
  * they do not fit, blank tiles when they do.
  */
 import { describe, expect, it } from 'vitest'
-import { EMPTY_SEEN, GRID_SLOTS, SEEN_IDS_MAX, SEEN_SINCE, cleanSeen, gridOf, isNewItem, kindOf, mergeSeen, seeItem, seeKind } from '../itemsSeen'
+import { EMPTY_SEEN, GRID_SLOTS, SEEN_IDS_MAX, SEEN_SINCE, blueprintSeenAs, cleanSeen, gridOf, isNewBlueprint, isNewItem, kindOf, mergeSeen, seeItem, seeKind } from '../itemsSeen'
 
 const loot = (id: string, at: number) => ({ id, type: 'message' as const, at })
 const key = (id: string, at: number) => ({ id, type: 'key' as const, at })
@@ -45,13 +45,26 @@ describe('NEW', () => {
   })
 
   it('merges two records losing nothing either saw, and reads back anything malformed as nothing seen', () => {
-    const one = { through: { keys: SEEN_SINCE + 10, loot: SEEN_SINCE }, ids: ['x'] }
-    const two = { through: { keys: SEEN_SINCE + 2, loot: SEEN_SINCE + 8 }, ids: ['y', 'x'] }
-    expect(mergeSeen(one, two)).toEqual({ through: { keys: SEEN_SINCE + 10, loot: SEEN_SINCE + 8 }, ids: ['y', 'x'] })
+    const one = { through: { keys: SEEN_SINCE + 10, loot: SEEN_SINCE, blueprints: SEEN_SINCE + 3 }, ids: ['x'] }
+    const two = { through: { keys: SEEN_SINCE + 2, loot: SEEN_SINCE + 8, blueprints: SEEN_SINCE }, ids: ['y', 'x'] }
+    expect(mergeSeen(one, two)).toEqual({ through: { keys: SEEN_SINCE + 10, loot: SEEN_SINCE + 8, blueprints: SEEN_SINCE + 3 }, ids: ['y', 'x'] })
     expect(cleanSeen(undefined)).toEqual(EMPTY_SEEN)
-    expect(cleanSeen({ through: { keys: 'soon', loot: 1 }, ids: [1, 'a', 'a', null] })).toEqual({ through: { keys: SEEN_SINCE, loot: SEEN_SINCE }, ids: ['a'] })
+    // A record kept before BLUEPRINTS had a line reads back with it at the start.
+    expect(cleanSeen({ through: { keys: 'soon', loot: 1 }, ids: [1, 'a', 'a', null] })).toEqual({ through: { keys: SEEN_SINCE, loot: SEEN_SINCE, blueprints: SEEN_SINCE }, ids: ['a'] })
     const many = Array.from({ length: SEEN_IDS_MAX + 20 }, (_, i) => `id${i}`)
     expect(cleanSeen({ ids: many }).ids).toHaveLength(SEEN_IDS_MAX)
+  })
+})
+
+describe('NEW on blueprints', () => {
+  it('a blueprint card is new until BLUEPRINTS is opened, and opening KEY ITEMS or OTHER LOOT leaves it new', () => {
+    const card = { record: { id: 'r1' }, at: SEEN_SINCE + 5 }
+    expect(isNewBlueprint(EMPTY_SEEN, card)).toBe(true)
+    expect(isNewBlueprint(seeKind(EMPTY_SEEN, 'loot', [{ id: 'l', at: SEEN_SINCE + 9 }]), card)).toBe(true)
+    const after = seeKind(EMPTY_SEEN, 'blueprints', [blueprintSeenAs(card)])
+    expect(isNewBlueprint(after, card)).toBe(false)
+    expect(isNewItem(after, loot('l', SEEN_SINCE + 1))).toBe(true)
+    expect(isNewBlueprint(after, { record: { id: 'r2' }, at: SEEN_SINCE + 6 })).toBe(true)
   })
 })
 

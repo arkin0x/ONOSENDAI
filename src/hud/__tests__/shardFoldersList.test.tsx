@@ -136,6 +136,8 @@ describe('every list of your shards', () => {
     // Any spelling: a selector by any name, with or without parentheses, a filter after it, or getState().
     const readers = sources(join(__dirname, '..', '..')).filter((p) => /useWorkshop[\s\S]{0,80}?\.shards\b/.test(readFileSync(p, 'utf8')) && /<[a-z]/i.test(readFileSync(p, 'utf8')))
       .filter((p) => !/[\\/](scene|workshop[\\/]Bench)\b/.test(p) && /\.(map|filter)\(/.test(readFileSync(p, 'utf8')))
+      // The BLUEPRINT tool's prize picker filters by folder read-only (owner, 2026-11-27: no folder management in a picker).
+      .filter((p) => !p.endsWith('BlueprintTool.tsx'))
     expect(readers.length).toBeGreaterThanOrEqual(3)
     for (const p of readers) expect([p, readFileSync(p, 'utf8').includes('<ShardFolders')]).toEqual([p, true])
   })

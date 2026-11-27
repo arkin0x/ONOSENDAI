@@ -34,7 +34,7 @@ import { OUT_OF_REACH, setTerrainSession, syncTerrain, terrainSession, useTerrai
 import { switchMode, currentPadMode, enterTerrainMode, leaveTerrain, pressSecond, backOf, watchLastRing } from '../padMode'
 import { DEFAULT_MODES, modeRoles, resetModes, updateModes, useModes, type ModeId, type ModeSettings } from '../modeOrder'
 import { chunkKey, chunkOf, CELLS } from '../../lib/terrain/coords'
-import { FOLD_AT, openTerrainDb, readKept } from '../../lib/terrain/terrainDb'
+import { COMPILER_ID, FOLD_AT, openTerrainDb, readKept, withCompiler } from '../../lib/terrain/terrainDb'
 import { applyLayer } from '../../lib/terrain/layer'
 import { generate } from '../../lib/terrain/generate'
 import { EMPTY } from '../../lib/terrain/blocks'
@@ -219,6 +219,22 @@ describe('SURVEY', () => {
 })
 
 describe('mining and placing', () => {
+  it('mining with the Compiler in hand keeps the Compiler: the held hammer stays (owner, 2026-11-27)', async () => {
+    await openSurveyed()
+    const s = terrainSession!
+    useTerrain.setState({ inventory: withCompiler(T().inventory, 'made') })
+    T().selectSlot(0)
+    const [x, y, z] = solidCells(4000).find(([cx, cy, cz]) => cy > 0 && !(cx === 16 && cy === 16 && cz === 16))!
+    expect(T().mine(hitAt(x, y, z))).toBe(true)
+    const inv = T().inventory
+    // TerrainView mounts the held Compiler while inventory.compiler is set, and shows it while slot 1 holds it.
+    expect(inv.compiler).toBe('made')
+    expect(inv.hotbar[0]).toBe(COMPILER_ID)
+    expect(inv.slot).toBe(0)
+    expect(Object.values(inv.counts).reduce((n, c) => n + c, 0)).toBeGreaterThan(0)
+    void s
+  })
+
   it('mining takes the block into the inventory and opens the cell; placing puts one back', async () => {
     await openSurveyed()
     const s = terrainSession!

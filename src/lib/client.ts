@@ -42,8 +42,12 @@ export const CLIENT_NAME = 'ONOSENDAI'
 /** NIP-89 client attribution, by name only until the app has a handler event. */
 export const CLIENT_TAG: [string, string] = ['client', CLIENT_NAME]
 
-/** Auth events (NIP-42 relay auth, Blossom upload auth, NIP-98 HTTP auth), the NIP-17 seal and gift wrap, a sealed entry (33335) and a block layer (33339). */
-const UNATTRIBUTED_KINDS = new Set([22242, 24242, 27235, 13, 1059, 33335, 33339])
+/**
+ * Auth events (NIP-42 relay auth, Blossom upload auth, NIP-98 HTTP auth), the NIP-17 seal and gift wrap, a sealed entry
+ * (33335), a block layer (33339), and a blueprint record (33343) and card (3343): a record carries only its listed tags
+ * and a reader drops one with any other (DECK-0010 §5.1, §5.4), and a card is checked the same way.
+ */
+const UNATTRIBUTED_KINDS = new Set([22242, 24242, 27235, 13, 1059, 33335, 33339, 33343, 3343])
 
 /** Whether a template is the deletion of a sealed entry (kind 5 whose `k` is 33335, lib/sealed.ts sealedDeletionTemplate). */
 function deletesSealed(template: EventTemplate): boolean {

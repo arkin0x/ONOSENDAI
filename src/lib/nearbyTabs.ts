@@ -1,7 +1,8 @@
 /**
  * nearbyTabs.ts: the tabs of DISCOVERED NEARBY, left to right (arkinox,
  * 2026-11-01): ITEMS, CHESTS, DOORS, MESSAGES, SOUNDS, SHARDS, then SEEDS
- * (arkinox, 2026-11-13: "we need to add seeds to this modal"). A door is a
+ * (arkinox, 2026-11-13: "we need to add seeds to this modal"), then
+ * BLUEPRINTS (DECK-0010 §7.3: cards found like key items). A door is a
  * chest with a `door` tag and counts only under DOORS. The list opens on the
  * first tab, left to right, with anything in it (firstFilledTab); on ITEMS
  * when every tab is empty.
@@ -9,7 +10,7 @@
 
 import { isDoor } from './looks'
 
-export type NearbyTab = 'items' | 'shards' | 'sounds' | 'chests' | 'doors' | 'messages' | 'seeds'
+export type NearbyTab = 'items' | 'shards' | 'sounds' | 'chests' | 'doors' | 'messages' | 'seeds' | 'blueprints'
 
 export const NEARBY_TABS: ReadonlyArray<{ id: NearbyTab; label: string }> = [
   { id: 'items', label: 'ITEMS' },
@@ -19,6 +20,7 @@ export const NEARBY_TABS: ReadonlyArray<{ id: NearbyTab; label: string }> = [
   { id: 'sounds', label: 'SOUNDS' },
   { id: 'shards', label: 'SHARDS' },
   { id: 'seeds', label: 'SEEDS' },
+  { id: 'blueprints', label: 'BLUEPRINTS' },
 ]
 
 /** The tab the list opens on when every tab is empty. */
@@ -35,6 +37,7 @@ export function tabOf(item: { type: string; event?: { tags?: readonly unknown[] 
     case 'key': return 'items'
     case 'shard': return 'shards'
     case 'seed': return 'seeds'
+    case 'blueprint': return 'blueprints'
     case 'audio': return 'sounds'
     case 'chest': return isDoor(item.event?.tags) ? 'doors' : 'chests'
     default: return 'messages'
@@ -43,7 +46,7 @@ export function tabOf(item: { type: string; event?: { tags?: readonly unknown[] 
 
 /** The list cut into tabs, keeping its order. */
 export function byTab<T extends { type: string; event?: { tags?: readonly unknown[] } }>(list: readonly T[]): Record<NearbyTab, T[]> {
-  const out: Record<NearbyTab, T[]> = { items: [], shards: [], sounds: [], chests: [], doors: [], messages: [], seeds: [] }
+  const out: Record<NearbyTab, T[]> = { items: [], shards: [], sounds: [], chests: [], doors: [], messages: [], seeds: [], blueprints: [] }
   for (const item of list) out[tabOf(item)].push(item)
   return out
 }

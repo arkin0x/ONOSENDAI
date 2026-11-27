@@ -25,7 +25,7 @@
  * at 2.5) passes that instead.
  */
 
-import { Bitcoin, Dna, KeyRound, Music, Pyramid, ScrollText, Sprout, Vault, type LucideIcon } from 'lucide-react'
+import { Bitcoin, Dna, DraftingCompass, KeyRound, Music, Pyramid, ScrollText, Sprout, Vault, type LucideIcon } from 'lucide-react'
 import type { HiddenType } from '../lib/hidden'
 import { isPictureUri } from '../lib/itemPicture'
 
@@ -46,6 +46,8 @@ export function itemIconOf(type: HiddenType, coin = false): LucideIcon {
   if (type === 'seed') return Sprout
   // A DNA taken out of a chest (DECK-0008 §8.1): what a seed is planted from.
   if (type === 'dna') return Dna
+  // A blueprint card (DECK-0010 §7): the drafting compass the BLUEPRINT tool wears.
+  if (type === 'blueprint') return DraftingCompass
   return Pyramid
 }
 

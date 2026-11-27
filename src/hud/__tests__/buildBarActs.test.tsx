@@ -41,7 +41,7 @@ import { moveDirection } from '../../lib/moves'
 import { useKeyboard } from '../../hooks/useKeyboard'
 import { BuildBar } from '../BuildBar'
 
-const ORDER = ['OBJECT', 'MESSAGE', 'AUDIO', 'ITEM', 'CHEST', 'DOOR', 'SEED', 'TERRAIN', 'AGAIN']
+const ORDER = ['OBJECT', 'MESSAGE', 'AUDIO', 'ITEM', 'CHEST', 'DOOR', 'SEED', 'BLUEPRINT', 'TERRAIN', 'AGAIN']
 /** A message placed once, so AGAIN has something to line up. */
 const placedOnce = (): void => useShards.setState({ placedLast: { pending: { type: 'message', text: 'hello' } } as unknown as PlacedLast })
 
@@ -84,7 +84,7 @@ describe('the BUILD bar: ITEM, CHEST, DOOR, and no verbs', () => {
   it('names each button by its full phrase, its visible word inside it (label in name)', async () => {
     placedOnce()
     const bar = await mount(<BuildBar />)
-    const names = ['Place object', 'Hide message', 'Place audio', 'Forge an item', 'Seal a chest', 'Seal a door', 'Plant a seed', 'Terrain', 'Place again']
+    const names = ['Place object', 'Hide message', 'Place audio', 'Forge an item', 'Seal a chest', 'Seal a door', 'Plant a seed', 'Make a blueprint', 'Terrain', 'Place again']
     expect(acts(bar).map((h) => h.props['aria-label'])).toEqual(names)
     for (const h of acts(bar)) expect(String(h.props['aria-label']).toUpperCase()).toContain(textOf(h))
     await bar.unmount()

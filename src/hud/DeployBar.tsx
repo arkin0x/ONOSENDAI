@@ -95,7 +95,7 @@ import { noCallout, useRepeatable } from '../hooks/useRepeatable'
 import { MAX_UNIT, type ShardModel } from 'sno-core/shards'
 import { formatCellSize, formatDistance } from 'sno-core/scale'
 import { fadeStep, inscribedRadius, sourceLocal } from '../lib/audioItem'
-import { LINK_PROTECTED, SCAN_MAX_HEIGHT, autoRoomFor, bagRowsFor, deployBagMeter, plannedShard, posedForDeploy, type BagMeter, fillingChest, placedDoorHeight, movingId, placingChest, sealingDoor, lookModelOf, lookTagsFor, type LookChoice, aimedOf, atLastSpot, copyLinedUp, isProtected, moneyRowShown, ownBagIn, pendingEmpty, pendingName, positionOf, regionOf, useShards } from '../store/useShards'
+import { CARDS_LOCAL_NOTE, cardsStayLocal, LINK_PROTECTED, SCAN_MAX_HEIGHT, autoRoomFor, bagRowsFor, deployBagMeter, plannedShard, posedForDeploy, type BagMeter, fillingChest, placedDoorHeight, movingId, placingChest, sealingDoor, lookModelOf, lookTagsFor, type LookChoice, aimedOf, atLastSpot, copyLinedUp, isProtected, moneyRowShown, ownBagIn, pendingEmpty, pendingName, positionOf, regionOf, useShards } from '../store/useShards'
 import { aimedPoint } from '../lib/chests'
 import { snapOffered } from '../lib/pose'
 import { MAX_RIDDLE_LENGTH } from '../lib/hidden'
@@ -538,7 +538,9 @@ function DeployBarOpen({ pad }: { pad: boolean }): JSX.Element | null {
   // dataspace (DECK-0008 §5.7; owner ruling 2026-11-10). Its scale is set in SEED.
   const seedStands = pending.type === 'seed'
   const snapHere = seedStands ? seedSnapOffered(plane) : !isMessage && !link && snapOffered(plane, height)
-  const title = intoChest ? 'AIM' : moving ? (pending.type === 'shard' ? 'EDIT' : 'MOVE') : pending.type === 'shard' ? 'DEPLOY' : door ? 'HIDE DOOR' : `HIDE ${pending.type.toUpperCase()}`
+  const title = intoChest ? 'AIM' : moving ? (pending.type === 'shard' ? 'EDIT' : 'MOVE') : pending.type === 'shard' ? 'DEPLOY' : door ? 'HIDE DOOR' : pending.type === 'blueprint' ? 'LEAVE BLUEPRINT' : `HIDE ${pending.type.toUpperCase()}`
+  // A blueprint card, or a chest with one inside, stays on this device until blueprints go live (useShards cardsStayLocal).
+  const cardsLocal = cardsStayLocal(pending)
   const name = pendingName(pending, shard)
   const empty = pendingEmpty(pending, shard)
   const working = status === 'working'
@@ -580,7 +582,7 @@ function DeployBarOpen({ pad }: { pad: boolean }): JSX.Element | null {
             onClick={() => { if (placing) useShards.getState().placeChest(); else void useShards.getState().deploy() }}
             {...noCallout}
           >
-            {placing ? <>{door ? 'PLACE DOOR' : 'PLACE CHEST'}<GoArrow /></> : empty ? `${pending.type.toUpperCase()} IS EMPTY` : here && !working ? 'PLACED HERE' : working ? (note ? `${note.toUpperCase()}…` : 'HIDING…') : intoChest ? 'PUT IN CHEST' : moving ? (route === 'cloud' ? 'MOVE VIA HOSAKA' : live || movedPublished ? 'MOVE & PUBLISH' : 'MOVE (LOCAL)') : route === 'cloud' ? 'HIDE VIA HOSAKA' : live ? 'HIDE & PUBLISH' : 'HIDE (LOCAL)'}
+            {placing ? <>{door ? 'PLACE DOOR' : 'PLACE CHEST'}<GoArrow /></> : empty ? `${pending.type.toUpperCase()} IS EMPTY` : here && !working ? 'PLACED HERE' : working ? (note ? `${note.toUpperCase()}…` : 'HIDING…') : intoChest ? 'PUT IN CHEST' : moving ? (route === 'cloud' ? 'MOVE VIA HOSAKA' : live || movedPublished ? 'MOVE & PUBLISH' : 'MOVE (LOCAL)') : route === 'cloud' ? 'HIDE VIA HOSAKA' : live && !cardsLocal ? 'HIDE & PUBLISH' : 'HIDE (LOCAL)'}
           </button>
         )}
         {/* Once hiding, it finishes where it was placed: CANCEL would only pretend. */}
@@ -589,6 +591,7 @@ function DeployBarOpen({ pad }: { pad: boolean }): JSX.Element | null {
       </div>
 
       {error && <div className="deploybar__row notice">{error}</div>}
+      {cardsLocal && <div className="deploybar__row deploybar__fitnote bp-place__local" role="status">{CARDS_LOCAL_NOTE}</div>}
       {/* 4.3: the icon, the door's name, and an X that leaves this one placement out (R2). */}
       {sealing && (
         <div className="deploybar__doorchip" role="status" title="Sealed to this door: only whoever opens it finds this">

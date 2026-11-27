@@ -21,7 +21,7 @@
  */
 
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
-import { Backpack, Box, Radar } from 'lucide-react'
+import { Backpack, Box, Hammer, HandFist, Radar } from 'lucide-react'
 import { HINT_DONE, headNow, offsetOf, surveyTarget as targetNow, terrainSession, useTerrain } from '../store/useTerrain'
 import { useWalk } from '../store/useWalk'
 import { terrainCursor } from '../scene/TerrainLayer'
@@ -40,6 +40,15 @@ import { noCallout } from '../hooks/useRepeatable'
 import { ShareLine } from './ShareLine'
 import { TerrainCrew, crewChipAsking } from './TerrainCrew'
 import { CrewLayer, CrewPanel, closeCrewLayer } from './CrewPanel'
+import { isCompiler } from '../lib/terrain/terrainDb'
+import { HeldCompiler } from './HeldCompiler'
+import { useSmashHold } from './smashHold'
+import { cancelSmashHold, holdSmash } from '../lib/blueprint/smashRun'
+import { useSmashFx } from '../store/useSmashFx'
+import { BARE_HOLD_MS, COMPILER_HOLD_MS, RESOLVE_AFTER_MS } from '../lib/blueprint/smash'
+import { PrizeCard, PrizeFlights, PrizePicker, PrizeStrip, usePrizesHere } from './PrizePanel'
+import { useBlueprintTool } from '../store/useBlueprintTool'
+import { recordAtCursor } from '../lib/blueprint/capture'
 
 /** A press held this long without moving places (a long press). */
 export const LONG_PRESS_MS = 420
@@ -88,7 +97,7 @@ function HeldBlock(): JSX.Element | null {
   const inv = useTerrain((s) => s.inventory)
   const walking = useWalk((w) => w.behind > 0 || w.open !== null)
   const id = inv.hotbar[inv.slot]
-  const k = id && (inv.counts[id] ?? 0) > 0 ? blockKind(id) : null
+  const k = id && !isCompiler(id) && (inv.counts[id] ?? 0) > 0 ? blockKind(id) : null
   // A dip each time what you carry changes by a mine or a place (the counts change; choosing a slot does not).
   const [dip, setDip] = useState(0)
   const counts = useRef(inv.counts)
@@ -155,6 +164,23 @@ function Hotbar(): JSX.Element {
   return (
     <div className="terrain-hotbar" role="toolbar" aria-label="Blocks you carry" data-chat-avoid>
       {inv.hotbar.map((id, i) => {
+        // The Compiler, once made, in slot 1 for good (owner, 2026-11-27).
+        if (isCompiler(id)) {
+          return (
+            <button
+              key={i}
+              className={`terrain-slot terrain-slot--compiler${i === inv.slot ? ' is-on' : ''}`}
+              onClick={(e) => { e.currentTarget.blur(); useTerrain.getState().selectSlot(i) }}
+              aria-label={`The Compiler, slot ${i + 1}`}
+              aria-pressed={i === inv.slot}
+              title={`The Compiler: hold SMASH (${i + 1})`}
+            >
+              <span className="terrain-slot__num">{i + 1}</span>
+              <Hammer size={18} strokeWidth={2} aria-hidden />
+              <span className="terrain-slot__count" />
+            </button>
+          )
+        }
         const n = id ? inv.counts[id] ?? 0 : 0
         return (
           <button
@@ -226,6 +252,19 @@ function standingWords(loading: boolean, surveying: boolean, target: string | nu
   return 'Build near your avatar'
 }
 
+/** COMPILING under the cross while a smash's answer is late (design page 4.3): past the shatter, still pending. */
+function useCompiling(): boolean {
+  const show = useSmashFx((s) => s.show)
+  const [late, setLate] = useState(false)
+  useEffect(() => {
+    setLate(false)
+    if (!show || show.outcome !== 'pending') return
+    const t = window.setTimeout(() => setLate(true), Math.max(0, show.struck + RESOLVE_AFTER_MS + 200 - performance.now()))
+    return () => clearTimeout(t)
+  }, [show])
+  return late && show?.outcome === 'pending'
+}
+
 /** The survey target, looked at a few times a second (it follows the body and the look). */
 function useSurveyTarget(): string | null {
   const [target, setTarget] = useState<string | null>(null)
@@ -238,7 +277,9 @@ function useSurveyTarget(): string | null {
 
 export function TerrainView({ covered = false }: { covered?: boolean }): JSX.Element | null {
   const active = useTerrain((s) => s.active)
-  return active ? <><HeldBlock /><TerrainScreen covered={covered} /></> : null
+  const compiler = useTerrain((s) => isCompiler(s.inventory.hotbar[s.inventory.slot]))
+  const owns = useTerrain((s) => !!s.inventory.compiler)
+  return active ? <>{owns && <HeldCompiler shown={compiler} />}{!compiler && <HeldBlock />}<TerrainScreen covered={covered} /></> : null
 }
 
 /** A press held longer than this is not a tap: it does not mine. */
@@ -425,12 +466,18 @@ export function terrainKeys(on: EventTarget): () => void {
     const slot = slotKey(e.code)
     if (slot !== null) { take(); st.selectSlot(slot); return }
     if (e.code === 'KeyG') { take(); if (!e.repeat) holdSurvey(); return }
+    if (e.code === 'KeyF') { take(); if (!e.repeat) holdSmash(); return }
+    if (e.code === 'KeyR' && useBlueprintTool.getState().capturing) { take(); if (!e.repeat) recordAtCursor(); return }
     if (e.code === 'KeyQ') { take(); if (!e.repeat) terrainInput.action = { kind: 'mine', at: null }; return }
     if (e.code === 'KeyE') { take(); if (!e.repeat) terrainInput.action = { kind: 'place', at: null } }
   }
   // G held: letting it up before the bar fills cancels the survey.
-  const up = (ev: Event): void => { if ((ev as KeyboardEvent).code === 'KeyG') cancelSurveyHold() }
-  const blur = (): void => cancelSurveyHold()
+  const up = (ev: Event): void => {
+    const code = (ev as KeyboardEvent).code
+    if (code === 'KeyG') cancelSurveyHold()
+    if (code === 'KeyF') cancelSmashHold()
+  }
+  const blur = (): void => { cancelSurveyHold(); cancelSmashHold() }
   on.addEventListener('keydown', down, true)
   on.addEventListener('keyup', up, true)
   const win = typeof window !== 'undefined' ? window : null
@@ -440,6 +487,7 @@ export function terrainKeys(on: EventTarget): () => void {
     on.removeEventListener('keyup', up, true)
     win?.removeEventListener('blur', blur)
     cancelSurveyHold()
+    cancelSmashHold()
   }
 }
 
@@ -462,8 +510,14 @@ function TerrainScreen({ covered }: { covered: boolean }): JSX.Element {
   useEffect(() => { resetTerrainInput() }, [])
 
   const holding = useSurveyHold((s) => s.since !== null)
-  // A SURVEY hold the fold hides would never hear its finger lift: it ends there.
-  useEffect(() => { if (folded) cancelSurveyHold() }, [folded])
+  const smashing = useSmashHold((s) => s.since !== null)
+  const smashMs = useSmashHold((s) => s.ms)
+  const bare = useTerrain((s) => !isCompiler(s.inventory.hotbar[s.inventory.slot]))
+  const compiling = useCompiling()
+  const here = usePrizesHere()
+  const capturing = useBlueprintTool((s) => s.capturing)
+  // A SURVEY or SMASH hold the fold hides would never hear its finger lift: it ends there.
+  useEffect(() => { if (folded) { cancelSurveyHold(); cancelSmashHold() } }, [folded])
   // A tour run guides TERRAIN itself (tutorial/terrainRoute.ts): its own three steps wait until after, their slot kept.
   const touring = useTutorial((s) => s.active)
 
@@ -480,18 +534,46 @@ function TerrainScreen({ covered }: { covered: boolean }): JSX.Element {
       <span className="terrain-crosshair" aria-hidden />
 
       {/* What just happened (a refusal, a survey), under the cross, in a slot of its own: up to two lines, nothing moves. */}
-      <div className="terrain-message" role="status" aria-live="polite">{message ? <span className="terrain-message__text">{message}</span> : catching ? <span className="terrain-message__text">{standing}</span> : null}</div>
+      <div className="terrain-message" role="status" aria-live="polite">{message ? <span className="terrain-message__text">{message}</span> : compiling ? <span className="terrain-message__text terrain-message__text--compiling">COMPILING</span> : catching ? <span className="terrain-message__text">{standing}</span> : null}</div>
 
       {/* The first visit's three steps, just over the hotbar, in a slot of its own. */}
       <div className="terrain-hint" aria-live="polite">
-        {!loading && hint < HINT_DONE && !touring && (
+        {capturing ? (
+          <span className="prize-strip prize-strip--record" role="group" aria-label="Record a blueprint">
+            <span className="prize-strip__count">Aim at a build that stands alone</span>
+            <button className="prize-strip__btn prize-strip__btn--go" onClick={recordAtCursor}>RECORD<Key>R</Key></button>
+            <button className="prize-strip__btn" onClick={() => { useBlueprintTool.getState().set({ capturing: false, open: true }); leaveTerrain() }}>BACK</button>
+          </span>
+        ) : here.length > 0 ? <PrizeStrip here={here} /> : !loading && hint < HINT_DONE && !touring && (
           <span className="terrain-hint__box"><span className="terrain-hint__step">{hint + 1} of 3</span>{HINT_STEPS[hint]}</span>
         )}
       </div>
 
       {/* PLACE beside FORWARD, and SURVEY (a hold) beside the row under it, while one is offered: just right of WALK's
           walk pad (owner, 2026-11-24), clear of the right column the menu opens over. Mining is a tap on the scene. */}
-      <div className="terrain-tools" aria-label="Place and survey">
+      <div className="terrain-tools" aria-label="Smash, place and survey">
+        {/* SMASH, a hold (smashHold.ts; the times are lib/blueprint/smash.ts COMPILER_HOLD_MS and BARE_HOLD_MS). A hammer
+            with the Compiler in hand, a fist with a bare hand (owner, 2026-11-27). Its slot is always there. */}
+        <span className="terrain-tools__slot terrain-tools__slot--smash">
+          <button
+            className={`terrain-act terrain-act--smash${smashing ? ' is-holding' : ''}${bare ? ' is-bare' : ''}`}
+            style={{ ['--hold-ms' as string]: `${smashMs || (bare ? BARE_HOLD_MS : COMPILER_HOLD_MS)}ms` }}
+            {...noCallout}
+            onPointerDown={(e) => {
+              e.preventDefault(); e.stopPropagation()
+              try { e.currentTarget.releasePointerCapture(e.pointerId) } catch { /* not captured */ }
+              holdSmash()
+            }}
+            onPointerUp={cancelSmashHold}
+            onPointerLeave={cancelSmashHold}
+            onPointerCancel={cancelSmashHold}
+            title={bare ? `Hold to smash the blocks at the cross with your bare hand (hold F, ${BARE_HOLD_MS / 1000} seconds)` : `Hold to smash the blocks at the cross with the Compiler (hold F, ${COMPILER_HOLD_MS / 1000} seconds)`}
+            aria-label="Hold to smash (hold F)"
+          >
+            {bare ? <HandFist size={15} strokeWidth={2.25} aria-hidden data-icon="fist" /> : <Hammer size={15} strokeWidth={2.25} aria-hidden data-icon="hammer" />}{smashing ? 'Smashing' : 'SMASH'}<Key>F</Key>
+            <span className="terrain-act__bar" aria-hidden />
+          </button>
+        </span>
         <button className="terrain-act terrain-act--place" {...noCallout} onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); terrainInput.action = { kind: 'place', at: null } }} title="Place the chosen block on the face at the cross (E, or right click)" aria-label="Place (E)"><Box size={15} strokeWidth={2.25} aria-hidden />PLACE<Key>E</Key></button>
         <span className="terrain-tools__slot">
           {(target || surveying || holding) && (
@@ -521,6 +603,9 @@ function TerrainScreen({ covered }: { covered: boolean }): JSX.Element {
       <TerrainCrew />
       <Hotbar />
       <InventorySheet />
+      <PrizeCard />
+      <PrizePicker here={here} />
+      <PrizeFlights />
     </div>
   )
 }

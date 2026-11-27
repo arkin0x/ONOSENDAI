@@ -540,7 +540,20 @@ export function modelPrint(shard: ShardModel): string {
  * shared with some other item. A chest's TAKE refuses exactly what this
  * holds (store/useInventory take), so TAKE ALL always finishes.
  */
+/**
+ * Whether this identity holds a copy of a blueprint record, by its event id:
+ * a card is taken into BLUEPRINTS (store/useBlueprints), never into ITEMS, so
+ * the HUD that knows that store says so here (hud/ItemRows setCardHeld).
+ * Nothing is held until it is set.
+ */
+let cardHeld: (recordId: string) => boolean = () => false
+export function setCardHeld(fn: (recordId: string) => boolean): void {
+  cardHeld = fn
+}
+
 export function holdsEntry(items: Record<string, HeldItem>, entry: ChestEntry): boolean {
+  // A blueprint card is held in BLUEPRINTS, by its record (DECK-0010 §7.4), never as an ITEMS row.
+  if (entry.body.type === 'blueprint') return !!entry.body.blueprint && cardHeld(entry.body.blueprint.record.id)
   const row = items[entry.id]
   if (row && !row.cleared) return true
   const keypair = entry.body.type === 'key' ? entry.body.key?.itemPubkey : null

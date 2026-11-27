@@ -1,6 +1,6 @@
 /**
- * itemsPanelCompact.test.tsx: the ITEMS panel as two buttons, KEY ITEMS and
- * OTHER LOOT, each opening a stacked modal of that kind alone, KEY ITEMS
+ * itemsPanelCompact.test.tsx: the ITEMS panel as its buttons, KEY ITEMS and
+ * OTHER LOOT (and BLUEPRINTS beside them, itemsGrid.test), each opening a stacked modal of that kind alone, KEY ITEMS
  * with MINE and FEED (owner, 2026-11-14). Then, inside them, the key item
  * buttons (arkinox, 2026-11-09: "the buttons on the Items are way too
  * large. Make them like the buttons below on the 'taken' things"), and the
@@ -46,6 +46,7 @@ import { heldFromForged, type HeldItem } from '../../lib/inventory'
 import { mount, textOf, type Host } from '../../test/elementRoot'
 import { useCyberspace } from '../../store/useCyberspace'
 import { useInventory } from '../../store/useInventory'
+import { useBlueprints } from '../../store/useBlueprints'
 import { useItemFeed } from '../../store/useItemFeed'
 import { escapeTop, topEscape } from '../../hooks/useEscape'
 import { useShards } from '../../store/useShards'
@@ -74,6 +75,7 @@ function seed(): { me: string; silver: HeldItem; restore: () => void } {
   const note: HeldItem = { rowKey: `${me}/${noteEv.id}`, owner: me, id: noteEv.id, type: 'message', name: 'A note', event: noteEv, author: noteEv.pubkey, verified: true, source: 'taken', place, from: { chestId: 'c'.repeat(64), chestName: 'Wind Chest' }, at: 3, text: 'meet me at the obelisk' }
   useShards.setState({ mine: [], discovered: {}, deleted: {} })
   useInventory.setState({ owner: me, items: { [key.id]: key, [goldKey.id]: goldKey, [note.id]: note }, storage: 'memory' })
+  useBlueprints.setState({ owner: me, cards: [], toys: [] })
   return { me, silver: key, restore: () => { useItemsModal.setState({ open: null }); useCyberspace.setState({ identity: was }) } }
 }
 
@@ -102,21 +104,21 @@ async function openKind(label: string): Promise<Awaited<ReturnType<typeof mount>
 }
 
 describe('the ITEMS panel', () => {
-  it('shows only two buttons, KEY ITEMS and OTHER LOOT with their counts, a lucide icon each and no emoji, and no rows, headings, PASTE or CLEAR ALL', async () => {
+  it('shows only its buttons, OTHER LOOT, KEY ITEMS and BLUEPRINTS with their counts, a lucide icon each and no emoji, and no rows, headings, PASTE or CLEAR ALL', async () => {
     expect(kindLabel(KEY_ITEMS_LABEL, 3)).toBe('KEY ITEMS · 3')
     expect(kindLabel(OTHER_LOOT_LABEL, 0)).toBe('OTHER LOOT · 0')
     const { restore } = seed()
     const m = await mount(createElement(InventoryPanel))
     // Beside the house EXPLAIN toggle and the grids' tiles (itemsGrid.test): OTHER LOOT on the left, KEY ITEMS on the right (owner, 2026-11-26).
     const buttons = m.all().filter((h) => h.type === 'button' && h.props['data-tile'] === undefined).map(textOf)
-    expect(buttons.filter((b) => !/^EXPLAIN|^HIDE/i.test(b))).toEqual(['OTHER LOOT · 1', 'KEY ITEMS · 2'])
+    expect(buttons.filter((b) => !/^EXPLAIN|^HIDE/i.test(b))).toEqual(['OTHER LOOT · 1', 'KEY ITEMS · 2', 'BLUEPRINTS · 0'])
     expect(m.all().filter((h) => h.type === 'li')).toHaveLength(0)
     expect(m.all().filter((h) => h.type === 'input' || h.type === 'form')).toHaveLength(0)
     expect(m.says('Silver Key')).toBe(false)
     expect(m.says('A note')).toBe(false)
     expect(m.all().some((h) => cls(h) === 'legend__label')).toBe(false)
     // Each button is CREATE's (avatars__go shards__compose-open, in a shards__modes row), its icon first.
-    const kinds = m.all().filter((h) => h.type === 'button' && /KEY ITEMS|OTHER LOOT/.test(textOf(h)))
+    const kinds = m.all().filter((h) => h.type === 'button' && /KEY ITEMS|OTHER LOOT|BLUEPRINTS/.test(textOf(h)))
     expect(cls(m.all().find((h) => cls(h).includes('items-kinds'))!).split(' ')).toContain('shards__modes')
     for (const b of kinds) {
       expect(cls(b).split(' ')).toEqual(expect.arrayContaining(['avatars__go', 'shards__compose-open']))

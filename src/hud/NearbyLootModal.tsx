@@ -19,6 +19,10 @@
  * its comments and its owner's actions (arkinox, 2026-11-22: "I can't tap on
  * a shard when it's only fog. I should be able to trigger its modal from the
  * Nearby modal"). A key row's INFO is its key card, as before.
+ * A blueprint card's row (DECK-0010 §7.3) shows its shape as smoke in the
+ * chamfered frame, its title, who made it and who left it here, and TAKE A
+ * COPY beside INFO and VIEW, which copies it into BLUEPRINTS and leaves it
+ * where it is for the next finder.
  * Tabs sort the list by kind, ITEMS first (lib/nearbyTabs.ts); every opening
  * starts on the first tab, left to right, with anything in it (arkinox,
  * 2026-11-01), and RETURN from a VIEW comes back to the tab it left.
@@ -37,7 +41,7 @@ import { useCyberspace } from '../store/useCyberspace'
 import { useShards } from '../store/useShards'
 import { rememberNearbyReturn } from '../lib/nearbyReturn'
 import { ProfileTap } from './ProfileBadge'
-import { ChestBlock, KeyLine, listedOnce, useChestOpen } from './ItemRows'
+import { BlueprintLine, BlueprintThumb, ChestBlock, KeyLine, TakeCopy, listedOnce, useChestOpen } from './ItemRows'
 import { isGuideKey, subjectOfWorldItem } from '../lib/commentSubjects'
 import { KeyInfo, type KeyInfoSource } from './KeyItemInfo'
 import { useModalStack } from './modalStack'
@@ -262,6 +266,33 @@ export function SeedRow({ item, me, onView }: { item: NearbyItem; me: string; on
   )
 }
 
+/**
+ * A blueprint card's row (DECK-0010 §7.3): its shape as smoke, its title, by
+ * its maker and left here by whoever signed the bag when that is someone
+ * else, where it is, and TAKE A COPY beside INFO and VIEW.
+ */
+export function BlueprintRow({ item, onView }: { item: NearbyItem; onView: (item: NearbyItem) => void }): JSX.Element | null {
+  const tip = useTip()
+  const card = item.blueprint
+  if (!card) return null
+  const when = whenOf(item, tip, 'left')
+  return (
+    <li className="secrets__row nearby__row">
+      <BlueprintThumb record={card.record} />
+      <div className="nearby__body">
+        <BlueprintLine title={card.title} maker={card.record.pubkey} placer={item.author} />
+        {when && <span className="nearby__meta"><span className="nearby__when" title={item.createdAt ? formatAgo(item.createdAt) : undefined}>{when}</span></span>}
+        <WhichWay item={item} />
+      </div>
+      <span className="nearby__acts">
+        <span className="nearby__door"><TakeCopy record={card.record} placer={item.author} /></span>
+        <CardButton item={item} />
+        <button className="avatars__go nearby__view" onClick={() => onView(item)} title="Fly to it">VIEW<GoArrow /></button>
+      </span>
+    </li>
+  )
+}
+
 /** The tab a VIEW left, for the list RETURN reopens. */
 let viewedTab: NearbyTab | null = null
 
@@ -298,7 +329,7 @@ export function NearbyList(): JSX.Element {
   // that chest, with its TAKE, and not again on its own (review of #519).
   const list = useMemo(() => listedOnce(items, (i) => i.key, chestOpen).sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0)), [items, chestOpen])
   const tabs = useMemo(() => byTab(list), [list])
-  const counts: Record<NearbyTab, number> = { items: tabs.items.length, shards: tabs.shards.length, sounds: tabs.sounds.length, chests: tabs.chests.length, doors: tabs.doors.length, messages: tabs.messages.length, seeds: tabs.seeds.length }
+  const counts: Record<NearbyTab, number> = { items: tabs.items.length, shards: tabs.shards.length, sounds: tabs.sounds.length, chests: tabs.chests.length, doors: tabs.doors.length, messages: tabs.messages.length, seeds: tabs.seeds.length, blueprints: tabs.blueprints.length }
   // The tab a VIEW left, or the first with anything in it.
   const [tab, setTab] = useState<NearbyTab>(() => viewedTab ?? firstFilledTab(counts))
   useEffect(() => { viewedTab = null }, [])
@@ -330,7 +361,7 @@ export function NearbyList(): JSX.Element {
         <ul className="secrets__list" role="tabpanel">
           {list.length === 0 && <li className="secrets__empty">Nothing decrypted in this region. A rescan is triggered after every movement action.</li>}
           {list.length > 0 && tabs[tab].length === 0 && <li className="secrets__empty">None here.</li>}
-          {tabs[tab].map((item) => item.type === 'seed' ? <SeedRow key={item.key} item={item} me={me} onView={view} /> : <Row key={item.key} item={item} me={me} onView={view} />)}
+          {tabs[tab].map((item) => item.type === 'seed' ? <SeedRow key={item.key} item={item} me={me} onView={view} /> : item.type === 'blueprint' ? <BlueprintRow key={item.key} item={item} onView={view} /> : <Row key={item.key} item={item} me={me} onView={view} />)}
         </ul>
       </div>
     </div>

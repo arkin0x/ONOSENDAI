@@ -12,6 +12,9 @@
  * never happened (as ClockKeeper did), and a skipped frame is just a longer delta.
  */
 
+import { useSmashFx } from '../store/useSmashFx'
+import { useBlueprints } from '../store/useBlueprints'
+import { smashBusy } from '../lib/blueprint/shatter'
 import { advance, useThree } from '@react-three/fiber'
 import { useEffect, useRef } from 'react'
 import { FrameGate, WAKE_EVENTS, sceneStamp } from '../lib/frameGate'
@@ -49,12 +52,14 @@ export function viewBusy(): boolean {
   // A shard decoding needs no line here: its births stay listed for good, but each
   // frame of the decode writes its vertices, which the stamp sees, and the store's
   // change wakes it first. No allocation here: this runs every display frame.
+  // A smash's shatter, dust or ember still drawing (scene/SmashFx.tsx).
+  if (smashBusy(useSmashFx.getState().show, performance.now())) return true
   for (const _ in useOpenCeremony.getState().playing) return true
   return false
 }
 
 /** Stores whose every change means the view may be about to change: wake on it. */
-const STORES = [useCyberspace, useHyperspace, useShards, useTv, useDemo, useBuilder, useCeremony, useOpenCeremony, useViewFly] as const
+const STORES = [useCyberspace, useHyperspace, useShards, useTv, useDemo, useBuilder, useCeremony, useOpenCeremony, useViewFly, useSmashFx, useBlueprints] as const
 
 export function FrameDriver(): null {
   const get = useThree((s) => s.get)

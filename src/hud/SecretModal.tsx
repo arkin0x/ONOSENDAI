@@ -20,11 +20,17 @@
  * Hidden audio opens here too, with its own body (AudioCard: PLAY,
  * DOWNLOAD, RESET TRIGGER), and the creator, reactions, comments and
  * actions every item has.
+ *
+ * A blueprint card (DECK-0010 §7.2) opens on its own body (BlueprintCardBody):
+ * its title, its shape as smoke with the revealed blocks, by its maker (the
+ * record's signer) and left here by whoever signed its bag or chest when that
+ * is someone else, its three settings in plain words, the prize as far as the
+ * maker revealed it, TAKE A COPY and EXAMINE. Taking leaves it in the world.
  */
 
 import { fetchRef } from '../lib/parts'
 import { useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react'
-import { Copy, CopyPlus, GitFork, Move3d, PackagePlus, Pencil, Rotate3d, Target, TvMinimal } from 'lucide-react'
+import { Copy, CopyPlus, DraftingCompass, GitFork, Move3d, PackagePlus, Pencil, Rotate3d, Target, TvMinimal } from 'lucide-react'
 import type { FeedObject } from 'sno-core/feed'
 import { nip19 } from 'nostr-tools'
 import { regionLabel } from '../lib/loot'
@@ -52,7 +58,14 @@ import { usePublicShard, worldItemOfObject } from '../store/usePublicShard'
 import { findCashuToken, textWithoutToken } from '../lib/cashu'
 import { hasNftLink, textWithoutNftLinks } from '../lib/nftLink'
 import { deleteWords, removeWords } from '../lib/deleteWords'
-import { ChestBlock, KeyLine } from './ItemRows'
+import { BlueprintLine, ChestBlock, KeyLine, TakeCopy } from './ItemRows'
+import { BLUEPRINT_RELAY_READY, finderView, readRecord } from '../lib/blueprint/format'
+import { blockCount, hiddenCount } from '../lib/blueprint/draw'
+import { BlueprintModel } from './blueprint/BlueprintModel'
+import { ExamineSheet, ItemChip, constructionWords, materialsWords, prizeShort } from './blueprint/ExamineSheet'
+import { isItemBlueprint } from '../lib/blueprint/itemMark'
+import { useBlueprints } from '../store/useBlueprints'
+import { Chamfer } from './ui/Chamfer'
 import { ConfirmModal } from './ConfirmModal'
 import { ItemFace } from './ItemIcon'
 import { CardSpin } from '../scene/CardSpin'
@@ -73,6 +86,70 @@ import { AuthorLine } from './AuthorLine'
 import { CopyValue } from './ui/CopyValue'
 
 const ICON = 12
+
+/** The card's main picture: its shape as smoke with the revealed blocks, in world axes. */
+const CARD_MODEL_PX = 176
+
+/**
+ * A blueprint card's body (DECK-0010 §7.2 step 4): its title, its shape,
+ * who made it and who left it here, its settings, the prize as far as it is
+ * revealed, and TAKE A COPY (into BLUEPRINTS, nothing leaves the world) and
+ * EXAMINE (the drafting sheet of every clue it gives).
+ */
+export function BlueprintCardBody({ item, placer }: { item: WorldItem; placer: string }): JSX.Element {
+  const card = item.blueprint
+  const read = useMemo(() => (card ? readRecord(card.record) : null), [card])
+  const view = useMemo(() => (read ? finderView(read) : null), [read])
+  const maker = useProfile(card?.record.pubkey ?? null)
+  const [examining, setExamining] = useState(false)
+  // A found card's prize stays sealed until it is built: it wears the item mark only when this device holds it and knows (your own).
+  const itemMark = useBlueprints((s) => {
+    const id = card?.record.id
+    const held = id ? s.cards.find((c) => c.record.id === id) : undefined
+    return !!held && isItemBlueprint(held)
+  })
+  if (!card || !read || !view) return <p className="secret__status" role="status">A blueprint was found here and could not be read.</p>
+  const total = blockCount(view)
+  const shown = total - hiddenCount(view)
+  const prize = read.sheet.prize
+  const pictures = Object.entries(read.views)
+  const makerName = profileLabel(maker, nip19.npubEncode(card.record.pubkey))
+  return (
+    <div className="bp-place__card">
+      <div className="bp-place__titlerow">
+        <h3 className="secret__look-name">{card.title}</h3>
+        {itemMark && <ItemChip />}
+      </div>
+      <div className="bp-place__model">
+        <Chamfer size={CARD_MODEL_PX} decorative={false}>
+          <BlueprintModel view={view} size={CARD_MODEL_PX} label={`${card.title}: ${shown} of ${total} blocks shown, the rest as smoke`} />
+        </Chamfer>
+      </div>
+      <div className="bp-place__who"><BlueprintLine maker={card.record.pubkey} placer={placer} /></div>
+      <dl className="secret__facts bp-place__facts">
+        <div><dt>Materials</dt><dd>{materialsWords(shown, total - shown)}</dd></div>
+        <div><dt>Construction</dt><dd>{constructionWords(read.sheet.lock, read.sheet.height)}</dd></div>
+        <div><dt>Prize</dt><dd>{prizeShort(prize.reveal, !!read.prizeName)}</dd></div>
+      </dl>
+      {prize.text && <p className="bp-place__note">{prize.text}</p>}
+      {pictures.length > 0 && (
+        <div className="bp-place__views">
+          {pictures.map(([k, uri]) => <Chamfer key={k} className="bp-place__view"><img src={uri} alt="" width={80} height={80} /></Chamfer>)}
+        </div>
+      )}
+      <div className="secret__actions bp-place__acts">
+        <TakeCopy record={card.record} placer={placer} />
+        <button className="secret__act" onClick={() => setExamining(true)} title="Every clue it gives, on one drafting sheet"><DraftingCompass size={ICON} strokeWidth={2.25} aria-hidden />EXAMINE</button>
+      </div>
+      {examining && (
+        <ExamineSheet
+          bp={{ name: card.title, maker: makerName, description: prize.text ?? '', view, prize: { reveal: prize.reveal, text: prize.text, views: read.views, name: read.prizeName }, lock: read.sheet.lock, height: read.sheet.height, drawnAt: card.record.created_at, item: itemMark }}
+          onClose={() => setExamining(false)}
+        />
+      )}
+    </div>
+  )
+}
 
 /** Why DELETE waits: a hide is still going out (SecretModal `hiding`). */
 export const DELETE_WAITS = 'A hide is still going out. DELETE when it lands.'
@@ -209,12 +286,13 @@ export function ItemCard({ item, onClose, published: object }: { item: WorldItem
 
   const goTo = (): void => {
     leave()
-    const label = item.type === 'message' ? name : item.type === 'key' ? item.keyItem?.name ?? 'key' : item.type === 'chest' ? item.chest?.name ?? 'chest' : item.type === 'audio' ? item.audio?.title ?? 'audio' : item.type === 'seed' ? 'seed' : item.shard?.name ?? 'shard'
+    const label = item.type === 'message' ? name : item.type === 'key' ? item.keyItem?.name ?? 'key' : item.type === 'chest' ? item.chest?.name ?? 'chest' : item.type === 'audio' ? item.audio?.title ?? 'audio' : item.type === 'seed' ? 'seed' : item.type === 'blueprint' ? item.blueprint?.title ?? 'blueprint' : item.shard?.name ?? 'shard'
     useCyberspace.getState().viewAt(item.at, item.plane, label, viewScaleOf(item), { item: true })
   }
   // Where it was found, for what is taken out of a chest here.
   const place = { lookupId: item.lookupId ?? '', bagId: item.bagId ?? '', at: { x: item.at.x.toString(), y: item.at.y.toString(), z: item.at.z.toString() }, plane: item.plane, height: item.height, ...(author ? { author } : {}) }
   const commentSubject = useMemo(() => subjectOfWorldItem(item), [item])
+  const quiet = item.type === 'blueprint' && !BLUEPRINT_RELAY_READY
   const watch = (): void => { leave(); void spectate(author) }
   // A message with a Cashu token in it copies only the words around the
   // token: the token has its own COPY TOKEN on the card, and a message that
@@ -290,6 +368,9 @@ export function ItemCard({ item, onClose, published: object }: { item: WorldItem
         ) : item.type === 'seed' ? (
           // A seed's bloom, grown here, and what keeps it from growing (DECK-0008).
           <BloomCard event={item.event} />
+        ) : item.type === 'blueprint' ? (
+          // A blueprint card: by its maker, left here by its placer (DECK-0010 §7.2).
+          <BlueprintCardBody item={item} placer={author} />
         ) : (
           <div className="secret__shard">
             <span className="secret__shard-name">{item.shard?.name}</span>
@@ -319,7 +400,8 @@ export function ItemCard({ item, onClose, published: object }: { item: WorldItem
           </div>
         ) : (<>
         {/* A message or a sound opens on its author line (AuthorLine), which says who left it: no second LEFT BY. */}
-        {item.type !== 'message' && item.type !== 'audio' && <div className="secret__creator">
+        {/* A blueprint card says who made it and who left it here in its own body (BlueprintCardBody). */}
+        {item.type !== 'message' && item.type !== 'audio' && item.type !== 'blueprint' && <div className="secret__creator">
           <span className="secret__label">Left by</span>
           <div className="secret__person">
             <ProfileTap pubkey={author}><ProfilePic pubkey={author} size={40} /></ProfileTap>
@@ -337,7 +419,8 @@ export function ItemCard({ item, onClose, published: object }: { item: WorldItem
         {/* A LIVE LINK (a public object, yours or another author's) is reacted to as that
             object alone: its author is told, the hider and the bag are not
             named (isForeignItem). */}
-        {item.target?.id && item.target.public
+        {/* A blueprint card says nothing to the relays until blueprints go live (BLUEPRINT_RELAY_READY): no reactions or comments on it either. */}
+        {quiet ? null : item.target?.id && item.target.public
           ? <Reactions target={{ id: item.target.id, pubkey: item.target.pubkey, kind: item.target.kind, address: item.target.address }} />
           : <Reactions
               target={{ id: item.lineage ?? item.key, pubkey: item.target?.pubkey ?? author, kind: item.target?.kind ?? itemKind(item.type), address: item.target?.address }}
@@ -345,7 +428,7 @@ export function ItemCard({ item, onClose, published: object }: { item: WorldItem
             />}
 
         {/* The thread every surface opens for this item (lib/commentSubjects): KEY ITEMS > MINE opens this one for a key taken from here. */}
-        {commentSubject && <Comments subject={commentSubject} />}
+        {commentSubject && !quiet && <Comments subject={commentSubject} />}
         {/* A published shard's comments are public, as it is (Comments PublicComments). */}
         {published && item.target?.id && (
           <PublicComments target={{ id: item.target.id, pubkey: item.target.pubkey, kind: item.target.kind, address: item.target.address }} />

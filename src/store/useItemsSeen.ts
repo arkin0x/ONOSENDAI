@@ -14,7 +14,7 @@
 
 import { create } from 'zustand'
 import type { HeldItem } from '../lib/inventory'
-import { EMPTY_SEEN, cleanSeen, mergeSeen, seeItem, seeKind, type ItemsKind, type ItemsSeen } from '../lib/itemsSeen'
+import { EMPTY_SEEN, cleanSeen, mergeSeen, seeItem, seeKind, type ItemsSeen, type SeenKind } from '../lib/itemsSeen'
 import { personalList } from './personalLists'
 
 export const ITEMS_SEEN_LIST = 'items-seen'
@@ -25,8 +25,8 @@ interface ItemsSeenState {
   seen: ItemsSeen
   /** The owner's stored record has been read (or there was none to read). */
   ready: boolean
-  /** The list of `kind` was opened showing these items. */
-  markKind: (kind: ItemsKind, items: ReadonlyArray<Pick<HeldItem, 'id' | 'at'>>) => void
+  /** The list of `kind` was opened showing these items (for BLUEPRINTS, lib/itemsSeen blueprintSeenAs of each card). */
+  markKind: (kind: SeenKind, items: ReadonlyArray<Pick<HeldItem, 'id' | 'at'>>) => void
   /** An item's card was opened. */
   markItem: (item: Pick<HeldItem, 'id' | 'type' | 'at'>) => void
 }

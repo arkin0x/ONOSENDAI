@@ -75,6 +75,10 @@ export function lootOf(entries: readonly ChestEntry[], held: (e: ChestEntry) => 
       out.push({ key: `item:${e.id}`, kind: 'item', ids: [e.id] })
     } else if (body.type === 'chest' && body.chest) {
       out.push({ key: `chest:${e.id}`, kind: 'chest', ids: [e.id] })
+    } else if (body.type === 'blueprint' && body.blueprint) {
+      // A blueprint card (DECK-0010 §7.3): a scroll of its own, one per card, apart from the messages'
+      // scroll, since it is taken into BLUEPRINTS and not ITEMS.
+      out.push({ key: `blueprint:${e.id}`, kind: 'scroll', ids: [e.id] })
     }
   }
   return out.sort((a, b) => ORDER[a.kind] - ORDER[b.kind])

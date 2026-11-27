@@ -1,0 +1,306 @@
+/**
+ * blueprintCards.test.ts: blueprint cards in the hide-and-find machinery
+ * (DECK-0010 §7). A card is a kind 3343 item signed by its placer, whose
+ * content is the creator's whole signed record: it reads only when that
+ * record passes §5.4 with its signature, it counts as `blueprint` after
+ * `dna`, it goes into a bag or a chest as any item does now blueprints are
+ * live, never sent alone (blueprintCardsLocal.test.ts keeps the switch's
+ * other side), and taking it copies the
+ * record into BLUEPRINTS with who left it, removing nothing. Relays are
+ * mocked; nothing touches the network.
+ */
+
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+if (typeof localStorage === 'undefined') {
+  const mem = new Map<string, string>()
+  ;(globalThis as { localStorage?: unknown }).localStorage = {
+    getItem: (k: string) => mem.get(k) ?? null,
+    setItem: (k: string, v: string) => { mem.set(k, String(v)) },
+    removeItem: (k: string) => { mem.delete(k) },
+    clear: () => { mem.clear() },
+  }
+}
+
+const sent: Array<{ kind: number }> = []
+vi.mock('../../lib/relay', async () => ({
+  ...(await import('../../test/offlineRelay')).offlineRelay,
+  publishMany: vi.fn(async (_relays: string[], ev: { kind: number }) => { sent.push(ev); return { ok: true, accepted: ['wss://relay.test'] } }),
+  relaySet: () => ['wss://relay.test'],
+}))
+
+import { finalizeEvent, generateSecretKey, getPublicKey, verifyEvent } from 'nostr-tools/pure'
+import { publishMany } from '../../lib/relay'
+import type { NostrEvent } from '../../lib/events'
+import { BLUEPRINT_RELAY_READY, recordTemplate, sheetShape, type Arrangement } from '../../lib/blueprint/format'
+import type { BlueprintCard } from '../../lib/blueprint/blueprintDb'
+import {
+  BLUEPRINT_KIND, CHEST_KIND, CONTENTS_KINDS, bagContents, bagContentsTags, blueprintInnerTemplate, hiddenLabel, readItem, type Hidden,
+} from '../../lib/hidden'
+import { forgeKey, openWithSecret, readContents } from '../../lib/chests'
+import { lootOf } from '../../lib/lootObjects'
+import { holdsEntry } from '../../lib/inventory'
+import { takeContents } from '../../hud/ItemRows'
+import { startPlaceBlueprint } from '../../lib/blueprint/place'
+import { useCyberspace } from '../useCyberspace'
+import { useInventory } from '../useInventory'
+import { useBlueprints } from '../useBlueprints'
+import { CARDS_LOCAL_BAG, CARDS_LOCAL_NOTE, cardsStayLocal, useShards } from '../useShards'
+
+const S = () => useShards.getState()
+const B = () => useBlueprints.getState()
+
+const creatorKey = generateSecretKey()
+const creator = getPublicKey(creatorKey)
+const placerKey = generateSecretKey()
+const placer = getPublicKey(placerKey)
+
+/** A plus of Gridstone around a Ferrovein: the Compiler's base layer, every block revealed but one. */
+const ARRANGEMENT: Arrangement = { size: [3, 1, 3], cells: Uint16Array.from([0, 1, 0, 1, 40, 1, 0, 1, 0]) }
+
+function signedRecord(title = 'Ferro Plus'): NostrEvent {
+  const shape = sheetShape(ARRANGEMENT, (i) => i !== 4)
+  const t = recordTemplate({ lookup: 'ab'.repeat(32), sheet: { ...shape, lock: 'standard', prize: { reveal: 'description', text: 'A small lamp.' } }, sealed: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', title, createdAt: 1_790_000_000 })
+  return finalizeEvent(t, creatorKey) as unknown as NostrEvent
+}
+
+function signedCard(record: NostrEvent, key: Uint8Array = placerKey): NostrEvent {
+  return finalizeEvent(blueprintInnerTemplate(record, { x: 5n, y: 6n, z: 7n }, 0, 1_790_000_100), key) as unknown as NostrEvent
+}
+
+function cardOf(record: NostrEvent): BlueprintCard {
+  return { rowKey: `me/${record.id}`, owner: 'me', lookup: 'ab'.repeat(32), record, source: 'found', at: 1 }
+}
+
+beforeEach(() => {
+  sent.length = 0
+  vi.mocked(publishMany).mockClear()
+  useShards.setState({ mine: [], discovered: {}, deleted: {}, pending: null, placedLast: null, deployHeight: 0, deployStatus: 'idle', deployError: null })
+  useInventory.setState({ owner: useCyberspace.getState().identity.pubkey, items: {}, storage: 'memory' })
+  useBlueprints.setState({ owner: useCyberspace.getState().identity.pubkey, cards: [], fresh: new Set() })
+  useCyberspace.setState({ live: true })
+  vi.spyOn(console, 'warn').mockImplementation(() => { /* IndexedDB is absent here */ })
+})
+
+describe('reading a card (DECK-0010 §7.2)', () => {
+  it('reads a card whose record passes §5.4 with its signature: the record unchanged, its title', () => {
+    const record = signedRecord()
+    const card = signedCard(record)
+    expect(card.kind).toBe(BLUEPRINT_KIND)
+    expect(card.tags).toContainEqual(['-'])
+    expect(card.tags.some((t) => t[0] === 'C')).toBe(true)
+    const body = readItem(card, placer)
+    expect(body?.type).toBe('blueprint')
+    expect(body?.blueprint?.title).toBe('Ferro Plus')
+    expect(body?.blueprint?.record).toEqual(record)
+    expect(body?.blueprint?.record.pubkey).toBe(creator)
+    expect(hiddenLabel(body!)).toBe('Ferro Plus')
+  })
+
+  it('drops a card whose record was altered after its creator signed it', () => {
+    const record = signedRecord()
+    const tampered = { ...record, tags: record.tags.map((t) => (t[0] === 'title' ? ['title', 'Stolen'] : t)) }
+    expect(readItem(signedCard(tampered), placer)).toBeNull()
+    // Re-signed by someone else under the creator's pubkey: still not the creator's.
+    const forged = { ...finalizeEvent({ kind: record.kind, created_at: record.created_at, tags: record.tags, content: record.content }, placerKey), pubkey: creator } as unknown as NostrEvent
+    expect(readItem(signedCard(forged), placer)).toBeNull()
+    // A card whose content is not a record at all.
+    expect(readItem({ ...signedCard(record), content: '{"nope":1}' }, placer)).toBeNull()
+  })
+})
+
+describe('contents (DECK-0010 §7.6)', () => {
+  it('counts a card as `blueprint`, written after `dna`, a chest\'s cards included', () => {
+    expect(CONTENTS_KINDS.slice(-2)).toEqual(['dna', 'blueprint'])
+    const card = signedCard(signedRecord())
+    const chest = { id: 'c'.repeat(64), pubkey: placer, created_at: 1, kind: CHEST_KIND, tags: [['C', '0'.repeat(64)]], content: 'x', sig: '' }
+    expect(bagContents([card]).blueprint).toBe(1)
+    expect(bagContents([card, chest], undefined, new Map([[chest.id, 2]])).blueprint).toBe(3)
+    expect(bagContents([card, chest], undefined, new Map([[chest.id, 2]])).chest).toBe(1)
+    expect(bagContentsTags([card], { contents: true, money: false })).toEqual([['contents', 'blueprint', '1']])
+  })
+})
+
+describe('placing a card, blueprints live (cyberspace-relay #52, 2026-11-27)', () => {
+  /** Kinds sent alone: a card never is (DECK-0010 §7.1, §10). */
+  const alone = (): number[] => sent.map((e) => e.kind)
+
+  it('is live: a card goes the way any item goes', () => {
+    expect(BLUEPRINT_RELAY_READY).toBe(true)
+    expect(cardsStayLocal({ type: 'blueprint', card: cardOf(signedRecord()) })).toBe(false)
+    expect(CARDS_LOCAL_NOTE).toBe('Kept on this device until blueprints go live.')
+  })
+
+  it('LIVE: a card left here is a kind 3343 signed by you inside its bag, sent in the bag, never alone', async () => {
+    useCyberspace.setState({ live: true })
+    const record = signedRecord()
+    expect(startPlaceBlueprint(cardOf(record), 'here')).toBeNull()
+    await S().deploy()
+    expect(S().deployError).toBeNull()
+    expect(S().deployStatus).toBe('done')
+    const d = S().mine.find((x) => x.type === 'blueprint')!
+    expect(d.published).toBe(true)
+    expect(d.inner.kind).toBe(BLUEPRINT_KIND)
+    expect(verifyEvent(d.inner as NostrEvent)).toBe(true)
+    expect(JSON.parse(d.inner.content)).toEqual(JSON.parse(JSON.stringify(record)))
+    expect(alone()).toContain(33330)
+    expect(alone()).not.toContain(BLUEPRINT_KIND)
+  })
+
+  it('LIVE: a message, then a card in the same bag: both stay on the relays, and DELETE of the message reaches them', async () => {
+    useCyberspace.setState({ live: true })
+    S().startDeployMessage('on the relays')
+    await S().deploy()
+    const msg = S().mine.find((d) => d.type === 'message')!
+    expect(msg.published).toBe(true)
+    S().startDeployBlueprint(cardOf(signedRecord()))
+    await S().deploy()
+    expect(S().deployStatus).toBe('done')
+    // Never marked as not sent: every row of the bag is on the relays.
+    expect(S().mine.every((d) => d.published)).toBe(true)
+    sent.length = 0
+    await S().deleteInstance(msg.eventId)
+    expect(S().mine.some((d) => d.eventId === msg.eventId)).toBe(false)
+    expect(alone()).toContain(33330)
+    expect(alone()).not.toContain(BLUEPRINT_KIND)
+  })
+
+  it('LOCAL, where your things are already on the relays: refused in words, nothing changes', async () => {
+    useCyberspace.setState({ live: true })
+    S().startDeployMessage('on the relays')
+    await S().deploy()
+    useCyberspace.setState({ live: false })
+    vi.mocked(publishMany).mockClear()
+    S().startDeployBlueprint(cardOf(signedRecord()))
+    await S().deploy()
+    expect(S().deployStatus).toBe('error')
+    expect(S().deployError).toBe(CARDS_LOCAL_BAG)
+    expect(publishMany).not.toHaveBeenCalled()
+    expect(S().mine.some((d) => d.type === 'blueprint')).toBe(false)
+    expect(S().mine.every((d) => d.published)).toBe(true)
+  })
+
+  it('LIVE, and no relay takes the bag: the card is not left, and the bag\'s rows still read as on the relays', async () => {
+    useCyberspace.setState({ live: true })
+    S().startDeployMessage('on the relays')
+    await S().deploy()
+    vi.mocked(publishMany).mockImplementation(async () => ({ ok: false, reason: 'down' }))
+    try {
+      S().startDeployBlueprint(cardOf(signedRecord()))
+      await S().deploy()
+      expect(S().deployStatus).toBe('error')
+      expect(S().deployError).toMatch(/No relay took the bag with the blueprint card/)
+      expect(S().mine.some((d) => d.type === 'blueprint')).toBe(false)
+      expect(S().mine.every((d) => d.published)).toBe(true)
+    } finally {
+      vi.mocked(publishMany).mockImplementation(async (_relays: string[], ev: { kind: number }) => { sent.push(ev); return { ok: true, accepted: ['wss://relay.test'] } })
+    }
+  })
+
+  it('a chest holding a card seals it to the lock, goes LIVE in its bag, and opens to the same card', async () => {
+    useCyberspace.setState({ live: true })
+    const lock = forgeKey('Vault Key')
+    const record = signedRecord('In the vault')
+    S().startDeployChest({ name: 'Vault', lock: { pubkey: lock.itemPubkey, label: 'Vault Key' }, requires: 'the Vault Key', contents: [{ kind: 'blueprint', card: cardOf(record) }, { kind: 'message', text: 'build it in open air' }] })
+    await S().deploy()
+    expect(S().deployError).toBeNull()
+    const d = S().mine.find((x) => x.type === 'chest')!
+    expect(d.published).toBe(true)
+    expect(alone()).not.toContain(BLUEPRINT_KIND)
+    const contents = readContents(openWithSecret(d.chest!, lock.secretHex), d.inner.pubkey)
+    expect(contents.map((c) => c.body.type)).toEqual(['blueprint', 'message'])
+    expect(contents[0].verified).toBe(true)
+    expect(contents[0].body.blueprint?.record).toEqual(record)
+    expect(lootOf(contents, () => false).map((o) => [o.kind, o.ids])).toEqual([['scroll', [contents[0].id]], ['scroll', [contents[1].id]]])
+  })
+
+  it('LIVE: an EDIT of a chest holding a card goes LIVE too, never flipped to LOCAL, and a later DELETE still reaches the relay', async () => {
+    useCyberspace.setState({ live: true })
+    const lock = forgeKey('Edit Key')
+    const card = { kind: 'blueprint' as const, card: cardOf(signedRecord('In the chest')) }
+    S().startDeployChest({ name: 'Edited', lock: { pubkey: lock.itemPubkey, label: 'Edit Key' }, requires: 'the Edit Key', contents: [card] })
+    await S().deploy()
+    const d = S().mine.find((x) => x.type === 'chest')!
+    expect(d.published).toBe(true)
+    sent.length = 0
+    const why = await S().resealChest(d.eventId, { name: 'Edited', lock: { pubkey: lock.itemPubkey, label: 'Edit Key' }, requires: 'the Edit Key', contents: [card, { kind: 'message', text: 'and a note' }] })
+    expect(why).toBeNull()
+    expect(alone()).toContain(33330)
+    expect(alone()).not.toContain(BLUEPRINT_KIND)
+    const after = S().mine.find((x) => x.type === 'chest' && x.goneFrom === undefined)!
+    expect(after.published).toBe(true)
+    sent.length = 0
+    await S().deleteInstance(after.eventId)
+    expect(sent.length).toBeGreaterThan(0)
+  })
+
+  it('BROADCAST of a bag holding a chest with a card sends the bag, never a card alone', async () => {
+    useCyberspace.setState({ live: false })
+    const lock = forgeKey('Crate Key')
+    S().startDeployChest({ name: 'Crate', lock: { pubkey: lock.itemPubkey, label: 'Crate Key' }, requires: 'the Crate Key', contents: [{ kind: 'blueprint', card: cardOf(signedRecord('In the crate')) }] })
+    await S().deploy()
+    const d = S().mine.find((x) => x.type === 'chest')!
+    expect(d.published).toBe(false)
+    sent.length = 0
+    expect(await S().broadcast(d.lookupId)).toBe(true)
+    expect(alone()).toContain(33330)
+    expect(alone()).not.toContain(BLUEPRINT_KIND)
+  })
+
+  it('PUT IN CHEST lines up a new chest with the card inside', () => {
+    const card = cardOf(signedRecord())
+    expect(startPlaceBlueprint(card, 'chest')).toBeNull()
+    const p = S().pending
+    expect(p?.type).toBe('chest')
+    expect(p?.type === 'chest' && p.contents).toEqual([{ kind: 'blueprint', card }])
+    expect(startPlaceBlueprint(card, 'here')).toMatch(/lined up/)
+  })
+})
+
+describe('taking a card (DECK-0010 §7.4)', () => {
+  it('TAKE copies the record into BLUEPRINTS with who left it, never into ITEMS, and the card stays found', () => {
+    const record = signedRecord()
+    const card = signedCard(record)
+    const find: Hidden = { eventId: card.id, inner: card, keyHex: 'aa'.repeat(32), bagId: 'bag', lookupId: 'lookup', author: placer, at: { x: 5n, y: 6n, z: 7n }, plane: 0, height: 4, createdAt: card.created_at, ...readItem(card, placer)! }
+    S().addDiscovered([find])
+    expect(S().takeFound([card.id])).toEqual([])
+    expect(B().cards).toHaveLength(1)
+    expect(B().cards[0].record.id).toBe(record.id)
+    expect(B().cards[0].leftBy).toBe(placer)
+    expect(B().cards[0].source).toBe('found')
+    expect(Object.keys(useInventory.getState().items)).toEqual([])
+    // Still there for the next finder.
+    expect(S().discovered[card.id]).toBeDefined()
+    // Taking again holds it once.
+    S().takeFound([card.id])
+    expect(B().cards).toHaveLength(1)
+  })
+
+  it('TAKE ALL on a chest puts its cards in BLUEPRINTS, left by the card\'s signer, and the rest in ITEMS', () => {
+    const record = signedRecord()
+    const message = { kind: 1, created_at: 1, tags: [['-']], content: 'hello', pubkey: placer }
+    const entries = readContents([signedCard(record), message as never], placer)
+    expect(entries.map((e) => e.body.type)).toEqual(['blueprint', 'message'])
+    expect(holdsEntry({}, entries[0])).toBe(false)
+    takeContents(entries, { chestId: 'chest', chestName: 'Vault' }, null)
+    expect(B().cards.map((c) => [c.record.id, c.leftBy])).toEqual([[record.id, placer]])
+    expect(Object.values(useInventory.getState().items).map((i) => i.type)).toEqual(['message'])
+    // Held now: the chest lists it as taken.
+    expect(holdsEntry({}, entries[0])).toBe(true)
+  })
+
+  it('in a chest, "left here by" is the chest\'s signer (§7.2), even for a card the creator signed', () => {
+    const record = signedRecord()
+    const chestSigner = 'd'.repeat(64)
+    const place = { lookupId: 'e'.repeat(64), bagId: 'f'.repeat(64), at: { x: 0n, y: 0n, z: 0n }, plane: 0 as const, height: 0, author: chestSigner }
+    const entries = readContents([signedCard(record, creatorKey)], creator)
+    takeContents(entries, { chestId: 'chest', chestName: 'Vault' }, place as never)
+    expect(B().cards.map((c) => c.leftBy)).toEqual([chestSigner])
+  })
+
+  it('a card its own creator left has no "left here by"', () => {
+    const record = signedRecord()
+    B().addFound(record, creator)
+    expect(B().cards[0].leftBy).toBeUndefined()
+  })
+})

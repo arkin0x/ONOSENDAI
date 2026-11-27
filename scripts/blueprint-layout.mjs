@@ -53,6 +53,8 @@ for (const size of SIZES) {
     const T = (await import('/src/store/useBlueprintTool.ts')).useBlueprintTool
     T.getState().openTool()
   })
+  // A cold dev server may still be bringing the app up: wait for the tool itself.
+  await page.waitForSelector('.bpt', { timeout: 60000 }).catch(() => {})
   await page.waitForTimeout(800)
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/layout-${size.w}-dpr${size.dpr}-list.png` })
   const list = await page.evaluate(() => {

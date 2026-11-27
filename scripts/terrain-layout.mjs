@@ -8,7 +8,10 @@
  * boxes of the hotbar, SURVEY (with its hold bar), PLACE, CHAT, the walk
  * pad, the menu button, JUMP and DOWN, the LOOK ball, the commit block, the
  * carried block, the first-visit hint and the ghost block's distance stepper (its slot is always kept, so it is measured
- * shown, as when the ghost block is out) do not intersect. With the bag open on a phone (375 and 430 portrait) it
+ * shown, as when the ghost block is out) do not intersect. SURVEY is measured by its slot, kept whether it is offered or
+ * not. The tools stand two by two on every screen (owner, 2026-11-27: "place distance adjustment should be under place
+ * button; survey can go to the right of it under smash"): PLACE and SMASH on top, level, the stepper under PLACE and
+ * SURVEY under SMASH, level, each column lined up. With the bag open on a phone (375 and 430 portrait) it
  * covers everything as the menu does: every point of its card is the card's own, and none of the HUD (the boxes above,
  * the carried block, the instruments and the tutorial card) is left showing under it. With the menu closed, the stack
  * round the cross is measured too (review of #948): the smash preview's line, the message (two and three lines), the
@@ -39,7 +42,7 @@ const SIZES = [
 ]
 const BOXES = {
   hotbar: '.terrain-hotbar',
-  survey: '.terrain-act--survey',
+  survey: '.terrain-tools__slot--survey',
   place: '.terrain-act--place',
   smash: '.terrain-act--smash',
   chat: '.chatdock__chip',
@@ -53,7 +56,7 @@ const BOXES = {
   airhint: '.terrain-air__hint',
 }
 /** TERRAIN's own HUD: with the menu open none may stand over its columns (hidden under it on a phone, as WALK's pad is). */
-const TERRAIN = { hotbar: '.terrain-hotbar', survey: '.terrain-act--survey', place: '.terrain-act--place', hint: '.terrain-hint__box', cross: '.terrain-crosshair', air: '.terrain-air' }
+const TERRAIN = { hotbar: '.terrain-hotbar', survey: '.terrain-tools__slot--survey', place: '.terrain-act--place', hint: '.terrain-hint__box', cross: '.terrain-crosshair', air: '.terrain-air' }
 // The carried block (.terrain-held) is under everything by design, menu included, so it is not measured.
 
 /** What stands round the cross: the smash preview's line, the message's text, the hold ring and its name plate. */
@@ -174,6 +177,14 @@ for (const size of SIZES) {
     }
     if (hits.length) { bad++; console.log(`${label}: OVERLAP ${hits.join('; ')}`) }
     else console.log(`${label}: clear (${keys.join(', ')})`)
+    // Two by two: PLACE over the stepper, SMASH over SURVEY, each row level, each column lined up, nothing skewed.
+    const { place: p, smash: m, air: a, survey: v } = rects
+    if (!menu || size.w >= 1101) {
+      const near = (x, y) => Math.abs(x - y) < 0.5
+      const grid = p && m && a && v && near(p.t, m.t) && near(a.t, v.t) && near(p.l, a.l) && near(m.l, v.l) && m.l > p.r && v.l > a.r && a.t > p.b && v.t > m.b
+      if (!grid) { bad++; console.log(`${label}: NOT TWO BY TWO ${JSON.stringify({ p, m, a, v })}`) }
+      else console.log(`${label}: two by two (${Math.round(p.r - p.l)}px tiles)`)
+    }
     if (!menu) bad += await crossStack(page, label)
     await ctx.close()
   }

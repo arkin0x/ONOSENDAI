@@ -94,6 +94,22 @@ describe('the wheel while the ghost block shows (no block in reach, one in hand)
   })
 })
 
+describe('the wheel with air placing switched off (owner, 2026-11-27)', () => {
+  it('never touches the distance: where the ghost would stand (hidden) it picks slots, as with a block at the cross', () => {
+    const canvas = new FakeCanvas()
+    stop = terrainWheel(canvas)
+    useAirPlace.setState({ ghost: 'hidden', distance: AIR_DEFAULT })
+    wheel(canvas, -100)
+    wheel(canvas, -100)
+    expect(useAirPlace.getState().distance).toBe(AIR_DEFAULT)
+    wheel(canvas, 100)
+    wheel(canvas, 100)
+    wheel(canvas, 100)
+    expect(useAirPlace.getState().distance).toBe(AIR_DEFAULT)
+    expect(slot()).toBe(1)
+  })
+})
+
 describe('the chosen slot', () => {
   it('is clearly green: mint over its ground at about a third, a brighter mint edge, its number in mint', () => {
     const css = readFileSync(resolve(__dirname, '../../styles.css'), 'utf8')

@@ -25,7 +25,7 @@ import { Backpack, Box, Hammer, HandFist, Radar } from 'lucide-react'
 import { HINT_DONE, headNow, offsetOf, surveyTarget as targetNow, terrainSession, useTerrain } from '../store/useTerrain'
 import { useWalk } from '../store/useWalk'
 import { terrainCursor } from '../scene/TerrainLayer'
-import { SURVEY_HOLD_MS, cancelSurveyHold, startSurveyHold, useSurveyHold } from './surveyHold'
+import { SURVEY_HOLD_MS, cancelSurveyHold, flashSurvey, startSurveyHold, useSurveyHold } from './surveyHold'
 import { HoldRing } from './HoldRing'
 import { walkLookBy } from '../lib/walkLook'
 import { topEscape } from '../hooks/useEscape'
@@ -138,8 +138,9 @@ export const WHEEL_STEP = 40
  * Over a menu or a panel the wheel scrolls as ever. The scene's own wheel
  * zoom is already off while walking (scene/Scene.tsx enableZoom), so nothing
  * else hears it here. While the ghost block shows (no block in reach, one in
- * hand: lib/terrain/airPlace.ts), the wheel sets how far along the look it
- * stands instead: up farther, down nearer, a block a notch. Returns what stops it.
+ * hand, air placing on: lib/terrain/airPlace.ts, store/airSwitch.ts), the
+ * wheel sets how far along the look it stands instead: up farther, down
+ * nearer, a block a notch. Returns what stops it.
  */
 export function terrainWheel(on: EventTarget): () => void {
   let acc = 0
@@ -151,9 +152,10 @@ export function terrainWheel(on: EventTarget): () => void {
     const d = e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1)
     // A mouse's notch is one slot, however many pixels it says; a trackpad's small deltas add up to one.
     acc = Math.abs(d) >= WHEEL_STEP ? Math.sign(d) * WHEEL_STEP : acc + d
-    // The ghost at arm's length showing: the wheel moves it along the look.
+    // The ghost at arm's length showing: the wheel moves it along the look. Air placing switched off (store/airSwitch.ts,
+    // ghost 'hidden'), it never touches the distance: it picks slots, as it does when the look meets a block.
     const air = useAirPlace.getState()
-    if (air.ghost !== 'off') {
+    if (air.ghost === 'ok' || air.ghost === 'bad') {
       if (acc >= WHEEL_STEP) { air.nudge(-1); acc = 0 }
       else if (acc <= -WHEEL_STEP) { air.nudge(1); acc = 0 }
       return
@@ -469,22 +471,36 @@ export function terrainPointer(on: EventTarget): () => void {
   }
 }
 
-/** Survey the chunk SURVEY offers now (the one you stand in, else the one ahead), or say there is none. */
-export function surveyNow(): void {
-  const key = surveyTarget()
-  if (key) void useTerrain.getState().survey(key)
-  else useTerrain.getState().say('Everything here is surveyed.')
+/**
+ * Survey the chunk `key`, or say there is none to survey. Returns whether the
+ * survey took the chunk: store/useTerrain.ts survey checks the chunk before
+ * its first wait and marks it `surveying` only when it goes ahead (past the
+ * edge, out of reach, already yours or under way, it says why or does nothing).
+ */
+export function surveyChunk(key: string | null): boolean {
+  const st = useTerrain.getState()
+  if (!key) { st.say('Everything here is surveyed.'); return false }
+  const before = st.surveying.includes(key)
+  void st.survey(key)
+  return !before && useTerrain.getState().surveying.includes(key)
 }
 
-/** Start the 5 second hold that surveys when it completes (surveyHold.ts). */
+/**
+ * Start the 5 second hold that surveys when it completes (surveyHold.ts), on
+ * the chunk SURVEY offers as it starts: that chunk is lit while it is held
+ * (scene/SurveyGlow.tsx) and is the one surveyed, whatever the look does meanwhile.
+ */
 export function holdSurvey(): void {
-  startSurveyHold(surveyNow)
+  if (useSurveyHold.getState().since !== null) return
+  // The glow flashes only once the survey has taken the chunk, never over one it turned down.
+  startSurveyHold((key) => { if (surveyChunk(key) && key) flashSurvey(key) }, performance.now(), surveyTarget())
 }
 
 /**
  * TERRAIN's own keys, heard on `on` (the window, in capture) ahead of the rest:
  * the tools, T and Esc; G is a hold (surveyHold.ts), its repeats ignored and its
- * release before the end a cancel. Returns what stops them.
+ * release before the end a cancel. H is not TERRAIN's: it goes to HOP, as everywhere
+ * (hooks/useKeyboard.ts). Returns what stops them.
  */
 export function terrainKeys(on: EventTarget): () => void {
   const down = (ev: Event): void => {
@@ -593,9 +609,13 @@ function TerrainScreen({ covered }: { covered: boolean }): JSX.Element {
         )}
       </div>
 
-      {/* PLACE beside FORWARD, and SURVEY (a hold) beside the row under it, while one is offered: just right of WALK's
-          walk pad (owner, 2026-11-24), clear of the right column the menu opens over. Mining is a tap on the scene. */}
-      <div className="terrain-tools" aria-label="Smash, place and survey">
+      {/* The tools in two by two (owner, 2026-11-27: "place distance adjustment should be under place button; survey can
+          go to the right of it under smash"): PLACE level with FORWARD and SMASH beside it, the ghost block's distance
+          under PLACE, SURVEY (a hold, while one is offered) under SMASH, the bottom row level with the pad's row under
+          FORWARD: just right of WALK's walk pad (owner, 2026-11-24), clear of the right column the menu opens over. Every
+          slot is always kept, so nothing moves. Mining is a tap on the scene. */}
+      <div className="terrain-tools" aria-label="Place, smash and survey">
+        <button className="terrain-act terrain-act--place" {...noCallout} onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); terrainInput.action = { kind: 'place', at: null } }} title="Place the chosen block on the face at the cross, or at the ghost block in open air (E, or right click)" aria-label="Place (E)"><Box size={15} strokeWidth={2.25} aria-hidden />PLACE<Key>E</Key></button>
         {/* SMASH, a hold (smashHold.ts; the times are lib/blueprint/smash.ts COMPILER_HOLD_MS and BARE_HOLD_MS). A hammer
             with the Compiler in hand, a fist with a bare hand (owner, 2026-11-27). Its slot is always there. */}
         <span className="terrain-tools__slot terrain-tools__slot--smash">
@@ -618,9 +638,8 @@ function TerrainScreen({ covered }: { covered: boolean }): JSX.Element {
             <span className="terrain-act__bar" aria-hidden />
           </button>
         </span>
-        <button className="terrain-act terrain-act--place" {...noCallout} onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); terrainInput.action = { kind: 'place', at: null } }} title="Place the chosen block on the face at the cross, or at the ghost block in open air (E, or right click)" aria-label="Place (E)"><Box size={15} strokeWidth={2.25} aria-hidden />PLACE<Key>E</Key></button>
         <AirStepper />
-        <span className="terrain-tools__slot">
+        <span className="terrain-tools__slot terrain-tools__slot--survey">
           {(target || surveying || holding) && (
             <button
               className={`terrain-act terrain-act--survey${holding ? ' is-holding' : ''}`}

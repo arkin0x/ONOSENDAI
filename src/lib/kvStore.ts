@@ -116,6 +116,8 @@ export const MOVED_PREFIXES: readonly string[] = [
   'onosendai:nearby-new:',
   // MINING's stats per player (store/miningStats.ts): this device's id, the counts, and the salted chunk hashes.
   'onosendai:mining:',
+  // TERRAIN's air placing (the ghost block) on or off per player (store/airSwitch.ts).
+  'onosendai:air-place:',
 ]
 
 /**

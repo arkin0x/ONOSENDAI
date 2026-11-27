@@ -1,9 +1,12 @@
 /**
- * airStepper.test.tsx - the ghost block's distance beside PLACE
- * (terrain/AirStepper.tsx): its slot is always there, hidden while the ghost
- * is off, so nothing round it moves; while the ghost shows, − and + move it
- * a block nearer or farther, stopping at the ends; and the tools keep the
- * stepper's slot in their grid on every screen.
+ * airStepper.test.tsx - the ghost block's distance under PLACE
+ * (terrain/AirStepper.tsx): its slot is always there, hidden while no ghost
+ * belongs, so nothing round it moves; while the ghost shows, − and + move it
+ * a block nearer or farther, stopping at the ends; a tap on the number turns
+ * air placing off (an eye struck through, − and + dimmed and dead) and the
+ * next on again (owner, 2026-11-27), Enter and Space too, never twice for one
+ * tap, and no letter key (H is HOP's); and the tools stand two by two on every
+ * screen, the stepper under PLACE and SURVEY under SMASH.
  */
 
 import { readFileSync } from 'node:fs'
@@ -14,6 +17,7 @@ import { mount, settled, textOf, type Host } from '../../test/elementRoot'
 import { AirStepper } from '../AirStepper'
 import { useAirPlace } from '../../store/useAirPlace'
 import { AIR_DEFAULT, AIR_MAX, AIR_MIN } from '../../lib/terrain/airPlace'
+import { airPlacing, forgetAirSwitch, setAirPlacing } from '../../store/airSwitch'
 
 const slotOf = (all: Host[]): Host => all.find((h) => String(h.props.className ?? '').includes('terrain-tools__slot--air'))!
 const btn = (all: Host[], label: string): Host => all.find((h) => h.type === 'button' && h.props['aria-label'] === label)!
@@ -22,7 +26,8 @@ const tap = async (b: Host): Promise<void> => {
   await settled()
 }
 
-afterEach(() => useAirPlace.setState({ ghost: 'off', distance: AIR_DEFAULT }))
+afterEach(() => { useAirPlace.setState({ ghost: 'off', distance: AIR_DEFAULT }); setAirPlacing(true); forgetAirSwitch() })
+const middle = (all: Host[]): Host => all.find((h) => h.type === 'button' && String(h.props.className) === 'terrain-air__value')!
 
 describe('the ghost block\'s distance', () => {
   it('keeps its slot while the ghost is off, hidden, its buttons out of reach', async () => {
@@ -56,7 +61,7 @@ describe('the ghost block\'s distance', () => {
   it('keeps the wheel\'s hint out of the number\'s cell (a mouse there read as a zero: review of #949)', async () => {
     useAirPlace.setState({ ghost: 'ok', distance: 3 })
     const m = await mount(createElement(AirStepper))
-    const value = m.all().find((h) => h.props.className === 'terrain-air__value')!
+    const value = middle(m.all())
     expect(textOf(value)).toBe('3')
     expect(value.children.every((c) => typeof c === 'string' || c.type === '#text')).toBe(true)
     const hint = m.all().find((h) => h.props.className === 'terrain-air__hint')!
@@ -66,9 +71,13 @@ describe('the ghost block\'s distance', () => {
     expect(m.all().filter((h) => h === hint).length).toBe(1)
     const inFrame = (h: Host): boolean => h.children.some((c) => c === hint || (typeof c !== 'string' && inFrame(c)))
     expect(inFrame(frame)).toBe(false)
+    // Under the frame (SURVEY stands beside it now), the wheel's alone: no letter key (H is HOP's, review of #950).
     const css = readFileSync(resolve(__dirname, '../../styles.css'), 'utf8')
-    expect(css).toMatch(/\.terrain-air__hint \{\n  position: absolute;\n  left: calc\(100% \+ 8px\);/)
+    expect(css).toMatch(/\.terrain-air__hint \{\n  position: absolute;\n  left: 0;\n  top: calc\(100% \+ 6px\);/)
     expect(css).toContain('color: rgba(255, 255, 255, 0.6);')
+    expect(textOf(hint)).toContain('WHEEL')
+    expect(m.all().some((h) => h.type === 'kbd')).toBe(false)
+    expect(textOf(hint)).not.toMatch(/HIDE|SHOW/)
     await m.unmount()
   })
 
@@ -80,14 +89,85 @@ describe('the ghost block\'s distance', () => {
     await m.unmount()
   })
 
-  it('has a slot of its own in the tools\' grid on every screen, so PLACE, SMASH and SURVEY keep theirs', () => {
+  it('the tools stand two by two on every screen: PLACE and SMASH, the stepper under PLACE, SURVEY under SMASH', () => {
     const css = readFileSync(resolve(__dirname, '../../styles.css'), 'utf8')
-    expect(css).toContain('.terrain-tools > .terrain-tools__slot--air { grid-column: 2; grid-row: 2; height: 38px; }')
+    expect(css).toContain('.terrain-tools { --tool-w: 86px; display: grid; grid-template-columns: var(--tool-w) var(--tool-w); grid-template-rows: 54px 38px; column-gap: 4px; row-gap: 4px; }')
+    expect(css).toContain('.terrain-tools > .terrain-act--place { grid-column: 1; grid-row: 1; }')
+    expect(css).toContain('.terrain-tools > .terrain-tools__slot--smash { grid-column: 2; grid-row: 1; height: 54px; }')
+    expect(css).toContain('.terrain-tools > .terrain-tools__slot--air { grid-column: 1; grid-row: 2; height: 38px; }')
+    expect(css).toContain('.terrain-tools > .terrain-tools__slot--survey { grid-column: 2; grid-row: 2; }')
     expect(css).toContain('.terrain-tools__slot--air.is-off { visibility: hidden; }')
-    expect(css).toContain('.terrain-tools > .terrain-tools__slot--air { position: absolute; grid-area: auto; top: 0; right: calc(100% + 8px); height: 28px; }')
-    // A short screen: over PLACE, above the cross's line, clear of the ring's plate under the cross (over SMASH it reached
-    // the plate in a 700 by 500 window: review of #949); its WHEEL hint stays in the tooltip there.
-    expect(css).toContain('.terrain-tools > .terrain-tools__slot--air { position: absolute; grid-area: auto; bottom: calc(100% + 4px); left: 0; height: 28px; }')
+    // No screen moves a tool out of the two by two any more (the stepper's old places left of SMASH and over PLACE).
+    expect(css).not.toContain('right: calc(100% + 8px); height: 28px;')
+    expect(css).not.toContain('bottom: calc(100% + 4px); left: 0; height: 28px;')
+    expect(css).not.toContain('grid-template-rows: 54px 54px 38px')
+    // A phone held upright: the same two by two, as tiles between the pad and JUMP, never wider than on a desktop.
+    expect(css).toMatch(/--tool-w: clamp\(40px, calc\([^;]*\), 86px\);/)
     expect(css).toMatch(/@media \(hover: hover\) and \(pointer: fine\) and \(max-height: 520px\) \{\s*\.terrain-air__hint \{ display: none; \}/)
+  })
+
+  it('a tap on the number turns air placing off: an eye struck through over the number, − and + dimmed and dead', async () => {
+    useAirPlace.setState({ ghost: 'ok', distance: 4 })
+    const m = await mount(createElement(AirStepper))
+    expect(middle(m.all()).props['aria-pressed']).toBe(true)
+    await tap(middle(m.all()))
+    expect(airPlacing()).toBe(false)
+    // The scene hides the ghost and says so (scene/TerrainLayer.tsx): the stepper stays, in its off state.
+    useAirPlace.setState({ ghost: 'hidden' })
+    await settled()
+    expect(String(slotOf(m.all()).props.className)).not.toContain('is-off')
+    expect(m.all().some((h) => String(h.props.className ?? '').includes('terrain-air is-paused'))).toBe(true)
+    expect(middle(m.all()).props['aria-pressed']).toBe(false)
+    expect(m.all().some((h) => h.props['data-icon'] === 'eye-off')).toBe(true)
+    const struck = m.all().find((h) => h.type === 's')!
+    expect(textOf(struck)).toBe('4')
+    expect(btn(m.all(), 'Nearer').props.disabled).toBe(true)
+    expect(btn(m.all(), 'Farther').props.disabled).toBe(true)
+    // − and + do nothing while off, even pressed.
+    await tap(btn(m.all(), 'Farther'))
+    expect(useAirPlace.getState().distance).toBe(4)
+    expect(airPlacing()).toBe(false)
+    // No wheel hint while off (the wheel leaves the distance alone), and no key offered: the number is the way back.
+    const hint = m.all().find((h) => h.props.className === 'terrain-air__hint')!
+    expect(textOf(hint)).toBe('')
+    expect(String(middle(m.all()).props['aria-label'])).not.toContain('(H)')
+    // Tap again: on, as before.
+    await tap(middle(m.all()))
+    expect(airPlacing()).toBe(true)
+    useAirPlace.setState({ ghost: 'ok' })
+    await settled()
+    expect(m.says('4')).toBe(true)
+    expect(btn(m.all(), 'Farther').props.disabled).toBe(false)
+    await m.unmount()
+  })
+
+  it('hidden with no ghost to show, on or off, its middle out of reach too', async () => {
+    setAirPlacing(false)
+    useAirPlace.setState({ ghost: 'off' })
+    const m = await mount(createElement(AirStepper))
+    expect(String(slotOf(m.all()).props.className)).toContain('is-off')
+    expect(middle(m.all()).props.disabled).toBe(true)
+    expect(middle(m.all()).props.tabIndex).toBe(-1)
+    await m.unmount()
+  })
+
+  it('the number answers Enter and Space (the click a keyboard makes), and a tap turns it once, not twice', async () => {
+    useAirPlace.setState({ ghost: 'ok', distance: 4 })
+    const m = await mount(createElement(AirStepper))
+    const click = async (detail: number): Promise<void> => {
+      ;(middle(m.all()).props.onClick as (e: unknown) => void)({ detail, stopPropagation: () => {} })
+      await settled()
+    }
+    // Enter or Space on the focused button: a click with no pointer (detail 0).
+    await click(0)
+    expect(airPlacing()).toBe(false)
+    await click(0)
+    expect(airPlacing()).toBe(true)
+    // A tap: the press turns it, and the click the browser sends after it (detail 1) leaves it be.
+    await tap(middle(m.all()))
+    await click(1)
+    expect(airPlacing()).toBe(false)
+    expect(String(middle(m.all()).props['aria-label'])).not.toContain('(H)')
+    await m.unmount()
   })
 })

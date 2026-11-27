@@ -35,7 +35,8 @@
  * the walker are WALK's. Here are only its marks, in the field's frame: the
  * block cursor on what the cross (or the mouse, or a tap) points at within
  * CURSOR_REACH (a plain outline, no glow), what a smash there would take
- * (SmashPreview.tsx), the chunks in reach and the chunk SURVEY would fill;
+ * (SmashPreview.tsx), the chunks in reach and the chunk SURVEY would fill
+ * (lit while SURVEY is held: SurveyGlow.tsx);
  * and a press waiting from the HUD is done here, where the camera is.
  */
 
@@ -69,8 +70,11 @@ import { SmashPreview } from './SmashPreview'
 import { pickToy } from './toySpots'
 import { usePrizePick } from '../store/usePrizePick'
 import { useAirPlace } from '../store/useAirPlace'
+import { airPlacing } from '../store/airSwitch'
+import { SurveyGlow } from './SurveyGlow'
 import { airCellInto, type Cell } from '../lib/terrain/airPlace'
 import { isCompiler } from '../lib/terrain/terrainDb'
+import { useSurveyHold } from '../terrain/surveyHold'
 import { edgeSegments, outlineLines, outlineMaterial as sharedOutline, sizeOutline } from './hiddenParts'
 
 /** Chunks meshing at once. */
@@ -464,11 +468,11 @@ const pressAir: AirScratch = { cell: [0, 0, 0], eye: [0, 0, 0] }
 
 /**
  * The ghost along a ray in the field's frame (`from`, `toward`, as Marks
- * casts them), written into `out`: none when a block was hit or none is in
- * hand (lib/terrain/airPlace.ts).
+ * casts them), written into `out`: none when a block was hit, none is in
+ * hand, or air placing is switched off (store/airSwitch.ts; lib/terrain/airPlace.ts).
  */
 function airAimInto(out: AirScratch, hit: RayHit | null, origin: Vector3, dir: Vector3, distance: number): AirAim | null {
-  if (hit || heldPlaceable() === null) return null
+  if (hit || heldPlaceable() === null || !airPlacing()) return null
   out.eye[0] = origin.x - 0.5; out.eye[1] = origin.y - 0.5; out.eye[2] = origin.z - 0.5
   return airCellInto(out.cell, out.eye[0], out.eye[1], out.eye[2], dir.x, dir.y, dir.z, distance) ? out : null
 }
@@ -593,7 +597,11 @@ function Marks({ axes }: { axes: ViewAxes }): JSX.Element {
       }
       sizeOutline(ghost.line, state.size)
       useAirPlace.getState().setGhost(bad ? 'bad' : 'ok')
-    } else useAirPlace.getState().setGhost('off')
+    } else {
+      // Switched off where a ghost would stand (no block at the cross, one in hand): none drawn, and the stepper shows
+      // its off state there, so a tap on it turns air placing back on (store/airSwitch.ts).
+      useAirPlace.getState().setGhost(!terrainCursor.hit && !hidden.current && !airPlacing() && heldPlaceable() !== null ? 'hidden' : 'off')
+    }
     o.visible = !!hit
     if (hit) {
       o.position.set(hit.cell[0] + 0.5, hit.cell[1] + 0.5, hit.cell[2] + 0.5)
@@ -616,7 +624,8 @@ function Marks({ axes }: { axes: ViewAxes }): JSX.Element {
     for (let i = n; i < rg.children.length; i++) rg.children[i].visible = false
     const key = surveyTarget(s)
     const sl = key ? s.world.slotByKey(key) : null
-    sv.visible = !!sl
+    // While SURVEY is held, its own chunk glows instead (SurveyGlow.tsx).
+    sv.visible = !!sl && useSurveyHold.getState().since === null
     if (sl) sv.position.set(32 * sl.off[0] + 16, 32 * sl.off[1] + 16, 32 * sl.off[2] + 16)
   })
   return (
@@ -640,6 +649,8 @@ function Marks({ axes }: { axes: ViewAxes }): JSX.Element {
       <lineSegments ref={survey} geometry={UNIT_EDGES} scale={32} visible={false}>
         <lineBasicMaterial color="#7cffc4" transparent opacity={0.5} {...NO_BLOOM_BLEND} />
       </lineSegments>
+      {/* The chunk a SURVEY hold will fill, lit while it is held, flashing as it completes. */}
+      <SurveyGlow />
     </group>
   )
 }

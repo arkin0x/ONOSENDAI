@@ -16783,12 +16783,12 @@ div.bpt-tile__hit { cursor: default; }
   content: '';
   position: absolute;
   width: calc(var(--mt-cut) * 1.42);
-  height: 2px;
-  background: var(--accent);
+  height: 1px;
+  background: rgba(0, 229, 255, 0.28); /* the same colour and weight as the tile's border */
   transform-origin: 0 0;
 }
 .mining__tile::before { left: 0; top: var(--mt-cut); transform: rotate(-45deg); }
-.mining__tile::after { right: 0; bottom: var(--mt-cut); transform: rotate(-45deg); transform-origin: 100% 0; }
+.mining__tile::after { right: 0; bottom: var(--mt-cut); transform: rotate(-45deg); transform-origin: 100% 100%; }
 .mining__grid--pairs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .mining__tile--wide { grid-column: span 2; }
 .mining__num {

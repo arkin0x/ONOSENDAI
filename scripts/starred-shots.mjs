@@ -70,7 +70,9 @@ for (const size of SIZES) {
     const b = here.blocks
     const lx = hx - 32 * here.off[0], ly = hy - 32 * here.off[1], lz = hz - 32 * here.off[2]
     const set = (x, y, z, id) => { if (x >= 0 && x < 32 && y >= 0 && y < 32 && z >= 0 && z < 32) b[x | (z << 5) | (y << 10)] = id }
-    set(lx + 1, ly - 2, lz + 4, 42); set(lx - 2, ly - 2, lz + 6, 42)
+    // On the floor in view ahead, kept inside the chunk whatever gibson you stand on.
+    const fy = Math.max(0, Math.min(31, ly - 2)), fx = Math.max(2, Math.min(29, lx)), fz = Math.max(0, Math.min(25, lz))
+    set(fx + 1, fy, fz + 4, 42); set(fx - 2, fy, fz + 6, 42)
     let n = 0
     for (let x = 0; x < 32 && n < 40; x += 3) for (let z = 0; z < 32 && n < 40; z += 5) { set(x, Math.max(0, ly - 3), z, 7); n++ }
     s.world.setBlocks(here.key, b.slice(), b)

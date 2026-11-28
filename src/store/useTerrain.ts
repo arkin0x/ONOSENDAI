@@ -69,6 +69,7 @@ import { loadBuilder, releaseBuilderDb } from '../lib/terrain/builderKey'
 import { quarryHooks } from './quarryHooks'
 import './terrainShareLive'
 import { noteMining } from './miningStats'
+import { noteDug, stayWallFor } from '../terrain/stayLock'
 
 /** The first-visit hint's steps: mine one, place one, open the inventory; then done. */
 export const HINT_DONE = 3
@@ -421,6 +422,7 @@ export const useTerrain = create<TerrainState>((set, get) => ({
     const change = s.world.setCs(dx, dy, dz, EMPTY)
     if (!change) return false
     record(s, change)
+    noteDug(s.owner, change.chunk)
     advanceHint(0)
     count('mined')
     noteMining({ type: 'mine', kind: kindId(id) }, s.owner)
@@ -537,6 +539,7 @@ export const useTerrain = create<TerrainState>((set, get) => ({
       const change = s.world.setCs(c[0], c[1], c[2], EMPTY)
       if (!change) continue
       changes.push(change)
+      noteDug(s.owner, change.chunk)
       const carry = yours > EMPTY ? kindId(yours) : 0
       out.push({ at: [c[0], c[1], c[2]], id, carry: carry === 255 ? 0 : carry })
     }
@@ -553,7 +556,7 @@ export const useTerrain = create<TerrainState>((set, get) => ({
     const changes: Change[] = []
     for (const [dx, dy, dz] of cells) {
       const change = s.world.setCs(dx, dy, dz, EMPTY)
-      if (change) changes.push(change)
+      if (change) { changes.push(change); noteDug(s.owner, change.chunk) }
     }
     recordMany(s, changes)
     return null
@@ -888,8 +891,14 @@ async function syncOnce(): Promise<TerrainSession | null> {
 const dist = (a: readonly number[], b: readonly number[]): number => Math.max(Math.abs(a[0] - b[0]), Math.abs(a[1] - b[1]), Math.abs(a[2] - b[2]))
 
 let wallMemo: { world: TerrainWorld | null; stamp: string; items: ReturnType<typeof terrainWallItems> } = { world: null, stamp: '', items: [] }
+/** The blocks' walls with STAY IN THIS CHUNK's wall after them (terrain/stayLock.ts), kept while neither changed. */
+let stayMemo: { items: ReturnType<typeof terrainWallItems>; stay: ReturnType<typeof stayWallFor>; out: ReturnType<typeof terrainWallItems> } | null = null
 
-/** WALK's walls hear of the field's chunks (lib/terrain/walls.ts), so WALK walks on blocks: the same list while nothing changed. */
+/**
+ * WALK's walls hear of the field's chunks (lib/terrain/walls.ts), so WALK walks on blocks: the same list while nothing
+ * changed. While STAY IN THIS CHUNK is on, the chunk's own faces join them (lib/terrain/chunkWall.ts stayHull), so
+ * WALK is held at its edge by the walls' own rules, however it moves.
+ */
 function publishWalls(): void {
   setTerrainWalls((plane) => {
     const s = terrainSession
@@ -898,7 +907,10 @@ function publishWalls(): void {
     for (const sl of s.world.chunks.values()) if (sl.blocks) stamp += `${sl.key}:${sl.version};`
     // Keyed by the field too: another identity's field has its own blocks under the same keys and versions (review of #916).
     if (stamp !== wallMemo.stamp || wallMemo.world !== s.world) wallMemo = { world: s.world, stamp, items: terrainWallItems(s.world) }
-    return wallMemo.items
+    const stay = useTerrain.getState().active ? stayWallFor(s.owner, plane) : null
+    if (!stay) return wallMemo.items
+    if (stayMemo?.items !== wallMemo.items || stayMemo.stay !== stay) stayMemo = { items: wallMemo.items, stay, out: [...wallMemo.items, stay] }
+    return stayMemo.out
   })
 }
 

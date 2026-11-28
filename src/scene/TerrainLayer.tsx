@@ -38,7 +38,8 @@
  * block cursor on what the cross (or the mouse, or a tap) points at within
  * CURSOR_REACH (a plain outline, no glow), what a smash there would take
  * (SmashPreview.tsx), the chunks in reach and the chunk SURVEY would fill
- * (lit while SURVEY is held: SurveyGlow.tsx);
+ * (lit while SURVEY is held: SurveyGlow.tsx), the edge of the chunk you
+ * stand in as you near it (ChunkWall.tsx);
  * and a press waiting from the HUD is done here, where the camera is.
  */
 
@@ -75,6 +76,7 @@ import { usePrizePick } from '../store/usePrizePick'
 import { useAirPlace } from '../store/useAirPlace'
 import { airPlacing } from '../store/airSwitch'
 import { SurveyGlow } from './SurveyGlow'
+import { ChunkWall } from './ChunkWall'
 import { airCellInto, type Cell } from '../lib/terrain/airPlace'
 import { isQuarry, placeable } from '../lib/terrain/terrainDb'
 import { ITEM_ORANGE } from '../lib/blueprint/itemMark'
@@ -692,6 +694,8 @@ function Marks({ axes }: { axes: ViewAxes }): JSX.Element {
       </lineSegments>
       {/* The chunk a SURVEY hold will fill, lit while it is held, flashing as it completes. */}
       <SurveyGlow />
+      {/* The edge of the chunk you stand in, glowing as you near it, solid while STAY IN THIS CHUNK is on (ChunkWall.tsx). */}
+      <ChunkWall />
     </group>
   )
 }

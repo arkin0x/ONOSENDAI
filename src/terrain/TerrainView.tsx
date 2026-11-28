@@ -260,11 +260,22 @@ function InventorySync(): JSX.Element {
   const syncedAt = /^[0-9a-f]{64}$/.test(me) ? inventoryLocalFor(me, undefined, false).syncedAt : 0
   const line = inventorySyncLine({ me, enabled, live, status, syncedAt, note })
   const Icon = line.synced ? Cloud : CloudOff
+  // Why it is not synced, as words a tap shows (a phone has no hover).
+  const [asked, setAsked] = useState(false)
+  const why = !line.synced && line.why ? line.why : ''
   return (
-    <p className="terrain-sheet__foot terrain-invsync" role="status" title={line.why || undefined}>
-      <Icon size={13} strokeWidth={2} aria-hidden />
-      <span>{line.words}</span>
-    </p>
+    <div className="terrain-sheet__foot terrain-invsync-wrap" role="status">
+      <p className="terrain-invsync" title={line.why || undefined}>
+        <Icon size={13} strokeWidth={2} aria-hidden />
+        <span>{line.words}</span>
+        {why && (
+          <button type="button" className="terrain-invsync__why" aria-expanded={asked} onClick={() => setAsked((a) => !a)}>
+            Why?
+          </button>
+        )}
+      </p>
+      {why && asked && <p className="terrain-invsync__reason">{why}</p>}
+    </div>
   )
 }
 

@@ -8,7 +8,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   CHARGE, COMPILER, INVENTORY_D, INVENTORY_KIND, collectedKinds, decodeRecord, deltaFromInventory, deltaOf, emptyRecord, encodeRecord, heldOf, inventoryFrom,
-  mergeRecords, newestRecord, planRecord, recordTemplate, sameRecord, totalsOf, validRecord, withDelta, type InventoryRecord,
+  RETIRE_AT, RETIRE_IDLE_S, RETIRE_TO, foldIdle, isRetired, mergeRecords, newestRecord, planRecord, recordTemplate, sameRecord, totalsOf, validRecord, withDelta, type InventoryRecord,
 } from '../inventoryRecord'
 import { COMPILER_ID, QUARRY_ID, emptyInventory, tidyInventory, withCharges, withCompiler, type Inventory } from '../terrain/terrainDb'
 import type { NostrEvent } from '../events'
@@ -198,5 +198,69 @@ describe('what a newer client adds is carried through', () => {
     const r = validRecord({ v: 1, devices: { [A]: { a: { 3: -1, 4: 1.5, 5: 2, 999: 3, 'Bad Key': 1 }, s: { 5: 'x' }, u: 'later' } }, tools: { compiler: -4 } })
     expect(r.devices[A]).toEqual({ a: { 5: 2 }, s: {}, u: 0 })
     expect(r.tools).toEqual({})
+  })
+})
+
+describe('retired devices: the record kept under the size limit', () => {
+  /** A record of `n` devices, each with its own scattered counts (so deflate cannot shrink it much), last changed at u0 + i. */
+  function crowd(n: number, u0: number): InventoryRecord {
+    let seed = 7
+    const rnd = (): number => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed }
+    const r: InventoryRecord = { devices: {}, tools: { compiler: T0 } }
+    for (let i = 0; i < n; i++) {
+      const a: Record<string, number> = {}
+      const sp: Record<string, number> = {}
+      for (let k = 1; k <= 40; k++) { a[String((rnd() % 254) + 1)] = rnd() % 100_000; if (k % 3 === 0) sp[String((rnd() % 254) + 1)] = rnd() % 1000 }
+      a[CHARGE] = rnd() % 500
+      r.devices[(0x1000000000000000n + BigInt(i)).toString(16)] = { a, s: sp, u: u0 + i }
+    }
+    return r
+  }
+
+  it('folding the idlest devices keeps every total the same, never the device writing, never a recent one', () => {
+    const now = T0 + 400 * 86_400
+    const r = crowd(60, T0)
+    // Two recent devices: never folded.
+    const keep = Object.keys(r.devices)[0]
+    const recent = Object.keys(r.devices)[59]
+    r.devices[recent].u = now - 60
+    const folded = foldIdle(r, keep, now, 4000)
+    expect(totalsOf(folded)).toEqual(totalsOf(r))
+    expect(Object.keys(folded.devices).length).toBeLessThan(60)
+    expect(folded.devices[keep]).toBeDefined()
+    expect(folded.devices[recent]).toBeDefined()
+    expect(isRetired(folded, keep)).toBe(false)
+    // The idlest went first.
+    const gone = Object.keys(r.devices).filter((id) => !folded.devices[id])
+    for (const id of gone) expect(isRetired(folded, id)).toBe(true)
+    expect(gone).toContain(Object.keys(r.devices)[1])
+    // Read back from its text, the same.
+    expect(totalsOf(decodeRecord(encodeRecord(folded)))).toEqual(totalsOf(r))
+  })
+
+  it('merging a folded copy with an unfolded one counts nothing twice; a retired device showing up again is dropped', () => {
+    const now = T0 + 400 * 86_400
+    const r = crowd(30, T0)
+    const folded = foldIdle(r, '', now, 2500)
+    expect(sameRecord(folded, r)).toBe(false)
+    expect(totalsOf(mergeRecords(r, folded))).toEqual(totalsOf(r))
+    expect(totalsOf(mergeRecords(folded, r))).toEqual(totalsOf(r))
+    const gone = Object.keys(r.devices).find((id) => isRetired(folded, id))!
+    const back = mergeRecords(folded, { devices: { [gone]: { a: { 3: 999 }, s: {}, u: now } }, tools: {} })
+    expect(back.devices[gone]).toBeUndefined()
+    expect(totalsOf(back)).toEqual(totalsOf(r))
+  })
+
+  it('a record past RETIRE_AT is folded when planned, instead of failing as too large', () => {
+    const now = T0 + 400 * 86_400
+    const r = crowd(420, T0)
+    expect(encodeRecord(r).length).toBeGreaterThan(RETIRE_AT)
+    const plan = planRecord(r, Object.keys(r.devices)[0], now)
+    expect(plan.text.length).toBeLessThanOrEqual(RETIRE_TO)
+    expect(totalsOf(plan.rec)).toEqual(totalsOf(r))
+    expect(totalsOf(decodeRecord(plan.text))).toEqual(totalsOf(r))
+    // Devices changed within RETIRE_IDLE_S are never folded, so a crowd of fresh ones still fails loudly.
+    const fresh = crowd(420, now - RETIRE_IDLE_S / 2)
+    expect(() => planRecord(fresh, '', now)).toThrow()
   })
 })

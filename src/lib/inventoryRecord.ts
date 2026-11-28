@@ -35,6 +35,25 @@
  * earliest date stands (the Compiler's crafted date). Quarry Charges are an
  * item like the blocks (`charge`), gained 7 a compile and spent 1 a placing.
  *
+ * ITEM NAMES. An item is named by a string, the same in `a` and `s`:
+ *   - a block kind: its DECK id in decimal, "1" to "255", no leading zero;
+ *   - a named item: a lowercase letter, then up to 31 lowercase letters,
+ *     digits or underscores (`charge` is the Quarry Charges).
+ * A tool is named the same way as a named item (`compiler`). Anything else
+ * is dropped as read. At most MAX_ITEMS items per number per device, and
+ * MAX_ITEMS tools.
+ *
+ * RETIRED DEVICES. Every device keeps an entry forever, so a record could in
+ * time outgrow one event. Before it would (RETIRE_AT), the entries of the
+ * devices idle longest (nothing changed for RETIRE_IDLE_S), never the device
+ * writing, are folded into one `retired` entry: their ids (with when each
+ * last changed) and their added and spent summed, so every total stays the
+ * same. A device listed there is dropped from `devices` wherever it shows up
+ * again. Two copies whose `retired` differ keep the one whose ids include
+ * the other's; two folds made apart (only near the size limit, on two
+ * devices at once) keep the one with more ids. A device that finds itself
+ * retired takes a new id and starts its entry afresh.
+ *
  * WHAT A NEWER CLIENT ADDS is carried through, never dropped: an item this
  * version does not know merges as a PN-counter like the rest, a tool by the
  * earlier date, and any other field (at the top or in a device's entry) is
@@ -71,13 +90,29 @@ export interface DeviceInventory {
   x?: Extra
 }
 
+/** Devices folded together (RETIRED DEVICES above): their ids, each with when it last changed, and their numbers summed. */
+export interface RetiredDevices {
+  ids: Record<string, number>
+  a: Record<string, number>
+  s: Record<string, number>
+}
+
 export interface InventoryRecord {
   devices: Record<string, DeviceInventory>
   /** Tools owned, by name, with the earliest date any device recorded (unix seconds). */
   tools: Record<string, number>
+  /** Devices folded together; absent until a record first nears the size limit. */
+  retired?: RetiredDevices
   /** Any other top-level field, carried through. */
   x?: Extra
 }
+
+/** A record's text past this many characters folds the idlest devices (RETIRED DEVICES above), */
+export const RETIRE_AT = 36_000
+/** down to this many, */
+export const RETIRE_TO = 30_000
+/** folding only devices with nothing changed in this long (seconds). */
+export const RETIRE_IDLE_S = 30 * 86_400
 
 export function emptyRecord(): InventoryRecord { return { devices: {}, tools: {} } }
 export function emptyDevice(): DeviceInventory { return { a: {}, s: {}, u: 0 } }
@@ -87,7 +122,7 @@ const BLOCK_KEY = /^(?:[1-9]\d?|1\d\d|2[0-4]\d|25[0-5])$/
 const NAME_KEY = /^[a-z][a-z0-9_]{0,31}$/
 /** The most items kept per device and number, and tools per record, so a record never swells. */
 const MAX_ITEMS = 512
-const RECORD_FIELDS = new Set(['v', 'devices', 'tools'])
+const RECORD_FIELDS = new Set(['v', 'devices', 'tools', 'retired'])
 const DEVICE_FIELDS = new Set(['a', 's', 'u'])
 
 export const isItem = (k: string): boolean => BLOCK_KEY.test(k) || NAME_KEY.test(k)
@@ -104,6 +139,40 @@ function countsOf(o: unknown): Record<string, number> {
     out[k] = v
   }
   return out
+}
+
+function validRetired(o: unknown): RetiredDevices | undefined {
+  if (!o || typeof o !== 'object') return undefined
+  const v = o as Record<string, unknown>
+  const ids: Record<string, number> = {}
+  if (v.ids && typeof v.ids === 'object') for (const [id, t] of Object.entries(v.ids as Record<string, unknown>)) if (isDeviceId(id) && okCount(t)) ids[id] = t
+  if (!Object.keys(ids).length) return undefined
+  return { ids, a: countsOf(v.a), s: countsOf(v.s) }
+}
+
+/** `devices` without the retired ones. */
+function withoutRetired(devices: Record<string, DeviceInventory>, retired: RetiredDevices | undefined): Record<string, DeviceInventory> {
+  if (!retired) return devices
+  const out: Record<string, DeviceInventory> = {}
+  for (const [id, d] of Object.entries(devices)) if (retired.ids[id] === undefined) out[id] = d
+  return out
+}
+
+const idsWithin = (a: RetiredDevices, b: RetiredDevices): boolean => Object.keys(a.ids).every((id) => b.ids[id] !== undefined)
+const sumOf = (r: RetiredDevices): number => Object.values(r.a).reduce((n, x) => n + x, 0) + Object.values(r.s).reduce((n, x) => n + x, 0)
+
+/** Two copies' retired devices as one (RETIRED DEVICES above). */
+export function mergeRetired(a: RetiredDevices | undefined, b: RetiredDevices | undefined): RetiredDevices | undefined {
+  if (!a || !b) return a ?? b
+  const aInB = idsWithin(a, b)
+  const bInA = idsWithin(b, a)
+  // The same devices: the same fold (each number the larger, should two copies ever differ).
+  if (aInB && bInA) return { ids: maxCounts(a.ids, b.ids), a: maxCounts(a.a, b.a), s: maxCounts(a.s, b.s) }
+  if (aInB) return b
+  if (bInA) return a
+  const na = Object.keys(a.ids).length
+  const nb = Object.keys(b.ids).length
+  return na !== nb ? (na > nb ? a : b) : sumOf(a) >= sumOf(b) ? a : b
 }
 
 /** A device's entry as read, or null: one malformed number is dropped alone. */
@@ -134,6 +203,8 @@ export function validRecord(o: unknown): InventoryRecord {
     if (++n > MAX_ITEMS) break
     out.tools[name] = t
   }
+  const retired = validRetired(v.retired)
+  if (retired) { out.retired = retired; out.devices = withoutRetired(out.devices, retired) }
   const x = extrasOf(v, RECORD_FIELDS)
   if (x) out.x = x
   return out
@@ -169,15 +240,48 @@ export function mergeRecords(a: InventoryRecord, b: InventoryRecord): InventoryR
     const tb = b.tools[name]
     out.tools[name] = ta === undefined ? tb : tb === undefined ? ta : Math.min(ta, tb)
   }
+  const retired = mergeRetired(a.retired, b.retired)
+  if (retired) { out.retired = retired; out.devices = withoutRetired(out.devices, retired) }
   const x = mergeExtra(a.x, b.x)
   if (x) out.x = x
   return out
 }
 
+/**
+ * Fold the idlest devices into `retired` until the record's text is at most
+ * `to` characters (RETIRED DEVICES above): never `keep` (the device writing),
+ * never one changed within RETIRE_IDLE_S of `nowS`. Every total stays the
+ * same. The record back unchanged when it already fits.
+ */
+export function foldIdle(r: InventoryRecord, keep: string, nowS: number, to = RETIRE_TO): InventoryRecord {
+  if (encodeRecord(r).length <= to) return r
+  const idle = Object.entries(r.devices).filter(([id, d]) => id !== keep && nowS - d.u >= RETIRE_IDLE_S).sort((x, y) => x[1].u - y[1].u || (x[0] < y[0] ? -1 : 1))
+  let out = r
+  // A few at a time: each text costs a deflate.
+  const step = Math.max(1, Math.ceil(idle.length / 16))
+  for (let i = 0; i < idle.length; i += step) {
+    const retired: RetiredDevices = out.retired ? { ids: { ...out.retired.ids }, a: { ...out.retired.a }, s: { ...out.retired.s } } : { ids: {}, a: {}, s: {} }
+    const devices = { ...out.devices }
+    for (const [id, d] of idle.slice(i, i + step)) {
+      retired.ids[id] = d.u
+      for (const [k, n] of Object.entries(d.a)) retired.a[k] = (retired.a[k] ?? 0) + n
+      for (const [k, n] of Object.entries(d.s)) retired.s[k] = (retired.s[k] ?? 0) + n
+      delete devices[id]
+    }
+    out = { ...out, devices, retired }
+    if (encodeRecord(out).length <= to) break
+  }
+  return out
+}
+
+/** Whether this device's id was folded into `retired` (it then takes a new one). */
+export const isRetired = (r: InventoryRecord, id: string): boolean => r.retired?.ids[id] !== undefined
+
 function canonical(r: InventoryRecord): string {
   const sorted = (o: Record<string, unknown> | undefined): Array<[string, unknown]> => (o ? Object.keys(o).sort().map((k) => [k, o[k]]) : [])
   const devices = Object.keys(r.devices).sort().map((id) => [id, sorted(r.devices[id].a), sorted(r.devices[id].s), r.devices[id].u, JSON.stringify(sorted(r.devices[id].x))])
-  return JSON.stringify([devices, sorted(r.tools), JSON.stringify(sorted(r.x))])
+  const retired = r.retired ? [sorted(r.retired.ids), sorted(r.retired.a), sorted(r.retired.s)] : null
+  return JSON.stringify([devices, sorted(r.tools), retired, JSON.stringify(sorted(r.x))])
 }
 
 /** Whether two records say the same thing. */
@@ -188,7 +292,7 @@ export function sameRecord(a: InventoryRecord, b: InventoryRecord): boolean { re
 /** Every item's sum over the devices: added less spent. Below zero is a debt (THE HONOR SYSTEM above). */
 export function totalsOf(r: InventoryRecord): Record<string, number> {
   const out: Record<string, number> = {}
-  for (const d of Object.values(r.devices)) {
+  for (const d of [...Object.values(r.devices), ...(r.retired ? [r.retired] : [])]) {
     for (const [k, n] of Object.entries(d.a)) out[k] = (out[k] ?? 0) + n
     for (const [k, n] of Object.entries(d.s)) out[k] = (out[k] ?? 0) - n
   }
@@ -200,13 +304,13 @@ export function heldOf(totals: Readonly<Record<string, number>>, item: string): 
 
 /** Whether any device ever added or spent the item. */
 export function knowsItem(r: InventoryRecord, item: string): boolean {
-  return Object.values(r.devices).some((d) => (d.a[item] ?? 0) > 0 || (d.s[item] ?? 0) > 0)
+  return [...Object.values(r.devices), ...(r.retired ? [r.retired] : [])].some((d) => (d.a[item] ?? 0) > 0 || (d.s[item] ?? 0) > 0)
 }
 
 /** Every block kind ever collected, on any device, and how many: what the game's own blueprints are granted by (gameBlueprint.ts). */
 export function collectedKinds(r: InventoryRecord): Record<number, number> {
   const out: Record<number, number> = {}
-  for (const d of Object.values(r.devices)) for (const [k, n] of Object.entries(d.a)) if (BLOCK_KEY.test(k)) out[Number(k)] = (out[Number(k)] ?? 0) + n
+  for (const d of [...Object.values(r.devices), ...(r.retired ? [r.retired] : [])]) for (const [k, n] of Object.entries(d.a)) if (BLOCK_KEY.test(k)) out[Number(k)] = (out[Number(k)] ?? 0) + n
   return out
 }
 
@@ -311,7 +415,7 @@ export function encodeRecord(r: InventoryRecord): string {
     const { x, ...d } = r.devices[id]
     return [id, { ...x, ...d }]
   }))
-  return toBase64(deflateSync(strToU8(JSON.stringify({ ...r.x, v: 1, devices, tools: r.tools })), { level: 9 }))
+  return toBase64(deflateSync(strToU8(JSON.stringify({ ...r.x, v: 1, devices, tools: r.tools, ...(r.retired ? { retired: r.retired } : {}) })), { level: 9 }))
 }
 
 /** The record's text, read back. Throws when it is not an inventory record at all. */
@@ -325,11 +429,17 @@ export class InventoryTooLarge extends Error {
   constructor() { super('Your inventory is too large to save to the relay.') }
 }
 
-/** The record's text, checked against MAX_RECORD_CHARS. */
-export function planRecord(r: InventoryRecord): string {
-  const text = encodeRecord(r)
+/**
+ * The record's text to write, and the record it says: past RETIRE_AT, the
+ * idlest devices folded first (never `keep`, the device writing). Throws only
+ * when even then it is past MAX_RECORD_CHARS.
+ */
+export function planRecord(r: InventoryRecord, keep = '', nowS = Math.floor(Date.now() / 1000)): { text: string; rec: InventoryRecord } {
+  let rec = r
+  let text = encodeRecord(rec)
+  if (text.length > RETIRE_AT) { rec = foldIdle(rec, keep, nowS); text = encodeRecord(rec) }
   if (text.length > MAX_RECORD_CHARS) throw new InventoryTooLarge()
-  return text
+  return { text, rec }
 }
 
 /** The record's event, unsigned. Only the `d`: nothing else about it is public. */

@@ -108,6 +108,37 @@ export interface Inventory {
   slot: number
   compiler?: 'made' | 'granted'
   charges?: number
+  /**
+   * This device's own entry in the synced inventory (store/inventorySync.ts):
+   * its id for this identity and what it added and spent, kept beside the
+   * counts it produced. It is the mark that what this bag holds is already
+   * counted in the record: losing the sync record never counts it again
+   * under a new device id (review of #972); the entry comes back under its
+   * own id instead.
+   */
+  own?: OwnEntry
+}
+
+/** A device's entry in the synced inventory, as the TERRAIN row keeps it (lib/inventoryRecord.ts DeviceInventory). */
+export interface OwnEntry {
+  d: string
+  a: Record<string, number>
+  s: Record<string, number>
+  u: number
+}
+
+const OWN_ITEM = /^(?:[1-9]\d?|1\d\d|2[0-4]\d|25[0-5]|[a-z][a-z0-9_]{0,31})$/
+
+/** A kept entry as read, or undefined when it is not one. */
+export function tidyOwn(v: unknown): OwnEntry | undefined {
+  const o = v as Partial<OwnEntry> | null
+  if (!o || typeof o !== 'object' || typeof o.d !== 'string' || !/^[0-9a-f]{16}$/.test(o.d)) return undefined
+  const counts = (x: unknown): Record<string, number> => {
+    const out: Record<string, number> = {}
+    if (x && typeof x === 'object') for (const [k, n] of Object.entries(x as Record<string, unknown>)) if (OWN_ITEM.test(k) && Number.isSafeInteger(n) && (n as number) > 0) out[k] = n as number
+    return out
+  }
+  return { d: o.d, a: counts(o.a), s: counts(o.s), u: Number.isInteger(o.u) && (o.u as number) > 0 ? o.u as number : 0 }
 }
 
 export const HOTBAR_SLOTS = 9
@@ -262,7 +293,10 @@ export function tidyInventory(v: unknown): Inventory {
   const kept = v.compiler !== 'made' && v.compiler !== 'granted' ? tidy
     : withCompiler({ ...tidy, hotbar: v.hotbar.slice(0, HOTBAR_SLOTS).map((id, i) => (i === 0 && isCompiler(id) ? id : hotbar[i])) }, v.compiler)
   // And the charges after it (withCharges).
-  return charges === null ? kept : withCharges(kept, charges)
+  const out = charges === null ? kept : withCharges(kept, charges)
+  // The synced inventory's entry for this device, when kept.
+  const own = tidyOwn(v.own)
+  return own ? { ...out, own } : out
 }
 
 /**

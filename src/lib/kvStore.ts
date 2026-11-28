@@ -209,6 +209,58 @@ export function kvRemove(key: string): void {
   try { ls()?.removeItem(key) } catch { /* private mode */ }
 }
 
+/**
+ * Change a record in one step that no other tab can interleave with: `fn` is
+ * handed the record as stored now (never this tab's copy in memory, which
+ * another tab may have written past) and returns what to store, or null to
+ * remove it. For records several tabs raise at once (store/inventorySync.ts:
+ * one writer per counter, owner review of #972). Held under a Web Lock named
+ * for the record; in the database, the read and the write are also one
+ * readwrite transaction, which IndexedDB never runs beside another tab's.
+ * Where there is no database (localStorage, or `blind`), it reads and writes
+ * localStorage under the lock. Resolves to what was stored. Every write of
+ * such a record goes through here, never kvSet, or a delayed kvSet would
+ * land over it.
+ */
+export function kvUpdate(key: string, fn: (stored: string | null) => string | null): Promise<string | null> {
+  const run = async (): Promise<string | null> => {
+    if (!heldHere(key)) {
+      const next = fn(kvGet(key))
+      if (next === null) kvRemove(key)
+      else kvSet(key, next)
+      return next
+    }
+    // This tab's queued writes land first, so the stored copy is the newest of this tab's too.
+    await kvFlush()
+    const d = db ?? (db = watch(await withTimeout(openKv(), REOPEN_WAIT_MS)))
+    const next = await new Promise<string | null>((resolve, reject) => {
+      const tx = d.transaction([ENTRIES], 'readwrite')
+      const entries = tx.objectStore(ENTRIES)
+      let out: string | null = null
+      const req = entries.get(key)
+      req.onsuccess = () => {
+        const row = req.result as { value?: unknown; pending?: boolean } | undefined
+        let stored: string | null = row && !row.pending && typeof row.value === 'string' ? row.value : null
+        // Not in the database yet: where reads find it (kvGet).
+        if (stored === null) { try { stored = ls()?.getItem(key) ?? null } catch { stored = null } }
+        out = fn(stored)
+        if (out === null) entries.delete(key)
+        else entries.put({ key, value: out, at: Date.now() })
+      }
+      tx.oncomplete = () => resolve(out)
+      tx.onerror = () => reject(tx.error ?? new Error('IndexedDB write failed'))
+      tx.onabort = () => reject(tx.error ?? new Error('IndexedDB write aborted'))
+    })
+    if (next === null) mirror.delete(key)
+    else mirror.set(key, next)
+    seen.delete(key)
+    channel?.postMessage({ keys: [key] })
+    return next
+  }
+  const locks = typeof navigator !== 'undefined' ? (navigator as Navigator & { locks?: LockManager }).locks : undefined
+  return locks?.request ? locks.request(`onosendai:kv:${key}`, run) as unknown as Promise<string | null> : run()
+}
+
 /** The names of the records starting with `prefix`, in either store. */
 export function kvKeys(prefix: string): string[] {
   const out = new Set<string>()

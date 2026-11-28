@@ -18,12 +18,30 @@
  *   - Only once the field's saved inventory is read (#960's fieldLoaded): a
  *     change before that is the field before's, and the read overwrites it.
  *   - The first time a device's field loads for an identity, what it already
- *     held becomes its first gains (MIGRATION), once: the mark is kept with the
- *     device id, so loading again never counts it twice.
+ *     held becomes its first gains (MIGRATION), once.
  *   - A merge that brings in another device's numbers puts the new totals in
  *     the bag (onInventoryMerged), the hotbar left as it is. Every change made
  *     here is in the record before any merge sees it, and the merge loses
  *     nothing, so a read landing mid-play never overwrites a change.
+ *
+ * TWO TABS, ONE DEVICE (review of #972). Every tab of a device shares its
+ * device id, so two tabs raising "their own" numbers from their own copies
+ * would write over each other. So the stored record is only ever changed in
+ * one step (kvStore kvUpdate: a Web Lock, and one IndexedDB transaction):
+ * each change is a function of the record as stored at that moment, never of
+ * this tab's copy. This tab shows the stored record with its own changes not
+ * yet stored applied on top (`pending`), so the bag answers at once. The
+ * throttle's times live in the same record, and a write runs under a Web
+ * Lock per identity that reads them again first, so the device's tabs ask
+ * the signer once between them, not once each.
+ *
+ * NEVER COUNTED TWICE (review of #972). TERRAIN's inventory row keeps this
+ * device's own entry beside the counts (`own`). It is the mark that the bag
+ * is already counted: if the sync record is lost (cleared, or this load is
+ * kvStore's `blind`), the entry comes back under its own id, never migrated
+ * again under a new one, and the bag stays as kept until the relay answers.
+ * The entry also brings back a change the record missed. While `blind`,
+ * nothing is migrated and nothing is written to the relay.
  *
  * THE SIGNER'S COST. A remote signer (Amber on a tablet) asks for every
  * signature, and the inventory changes with every block mined, so:
@@ -39,30 +57,34 @@
  *   - reads (never a signature) on load, when the field is ready, when the
  *     page comes back into view or focus, and when the bag opens, no more
  *     than once a READ_FLOOR_MS.
- * One write is one sign, plus one encrypt only the first time ever (to wrap a
- * new record key). A load costs one decrypt, at its first read of a record.
+ * So six signatures an hour, plus one for each Compiler made or compile; a
+ * write that loses a race to another device asks the signer again at most twice. One
+ * encrypt only the first time ever (to wrap a new record key). A load costs
+ * one decrypt, at its first read of a record.
  *
  * WRITING. Every write reads the relays first and merges. Nothing is written:
  *   - in LOCAL (nothing is read then either);
  *   - while a tutorial run is going (nor read: the run's bag stays as it is);
+ *   - while kvStore runs `blind` (this load cannot see the stored record);
  *   - when the canonical relay did not answer, or the record on it did not
  *     open with your signer;
  *   - with Settings' "Sync inventory" off, or a signer without NIP-44.
  * After signing, the relays are read again, and if another device wrote
- * meanwhile, nothing is sent and the sync runs again.
+ * meanwhile, nothing is sent and the sync runs again. A read that finds the
+ * relay behind on this device's own entry marks it dirty again.
  */
 
 import { create } from 'zustand'
 import { verifyEvent } from 'nostr-tools/pure'
 import type { Filter } from 'nostr-tools/filter'
 import { bytesToHex, hexToBytes, type EventTemplate, type NostrEvent } from '../lib/events'
-import { kvStorage } from '../lib/kvStore'
+import { kvMode, kvStorage, kvUpdate } from '../lib/kvStore'
 import {
-  INVENTORY_D, INVENTORY_KIND, collectedKinds, decodeRecord, deltaFromInventory, deltaOf, emptyDelta, emptyRecord, heldAfter, inventoryFrom, isDeviceId, mergeRecords,
-  newDeviceId, newRecordKey, newestRecord, openRecord, planRecord, recordContent, recordTemplate, sameRecord, sealRecord, validRecord, withDelta,
-  type InventoryDelta, type InventoryRecord,
+  INVENTORY_D, INVENTORY_KIND, collectedKinds, decodeRecord, deltaFromInventory, deltaOf, emptyDelta, emptyRecord, heldAfter, inventoryFrom, isDeviceId, isRetired,
+  mergeRecords, newDeviceId, newRecordKey, newestRecord, openRecord, planRecord, recordContent, recordTemplate, sameRecord, sealRecord, validRecord, withDelta,
+  type DeviceInventory, type InventoryDelta, type InventoryRecord,
 } from '../lib/inventoryRecord'
-import { emptyInventory, type Inventory } from '../lib/terrain/terrainDb'
+import { emptyInventory, type Inventory, type OwnEntry } from '../lib/terrain/terrainDb'
 import type { PublishResult } from '../lib/relay'
 
 /** At most one write in this long, however much changes. */
@@ -83,6 +105,8 @@ export const READ_FLOOR_MS = 60_000
 export const MAX_AHEAD_S = 60
 /** How long after a write it is read back, in case another device wrote over it. */
 const VERIFY_MS = 9000
+/** A write that lost a race to another device's is tried again at most this many times. */
+export const RACE_RETRIES = 2
 
 const SETTING_KEY = 'onosendai:inventory-sync'
 export const INVENTORY_PREFIX = 'onosendai:inventory:'
@@ -107,7 +131,14 @@ export interface InventoryDeps {
   publish: (event: NostrEvent) => Promise<PublishResult>
   /** Milliseconds. */
   now: () => number
+  /** This tab's copy of the stored records, read at once (kvStore's memory). */
   storage: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> | null
+  /** A stored record changed in one step no other tab interleaves with, from the record as stored (kvStore kvUpdate). */
+  update: (key: string, fn: (stored: string | null) => string | null) => Promise<string | null>
+  /** A Web Lock held across the device's tabs while `fn` runs (navigator.locks), or `fn` run as it is where there are none. */
+  lock: <T>(name: string, fn: () => Promise<T>) => Promise<T>
+  /** kvStore runs `blind`: this load cannot see what the database holds. */
+  blind: () => boolean
   /** The device's own switch (localStorage, like MINING's). */
   prefs: Pick<Storage, 'getItem' | 'setItem'> | null
   verify: (ev: NostrEvent) => boolean
@@ -124,6 +155,8 @@ export interface InventoryLocal {
   rec: InventoryRecord
   /** What this device held before it ever synced is in its entry (MIGRATION). */
   migrated: boolean
+  /** This device's entry came back from TERRAIN's row after the record was lost: the bag stays as kept until the relay answers. */
+  restored: boolean
   /** Bumped on every change here. */
   real: number
   /** The `real` the relay holds: dirty while it is behind `real`. */
@@ -134,7 +167,7 @@ export interface InventoryLocal {
   syncedOwn: number
   /** The `own` when a write was last tried: one fast try per change of it. */
   ownTried: number
-  /** When a write was last tried (ms): the throttle. */
+  /** When a write was last tried (ms): the throttle, shared by the device's tabs. */
   triedAt: number
   /** When the relay last answered a read or took a write (ms), or 0. */
   syncedAt: number
@@ -174,51 +207,114 @@ function flip(): void { useInventorySync.setState((s) => ({ flips: s.flips + 1 }
 
 // -- this device's side --------------------------------------------------------
 
-/** Parsed once per text. */
-const cache = new Map<string, { raw: string | null; local: InventoryLocal }>()
+type Change = (l: InventoryLocal) => InventoryLocal
 
 function fresh(): InventoryLocal {
-  return { v: 1, device: newDeviceId(), rec: emptyRecord(), migrated: false, real: 0, syncedReal: 0, own: 0, syncedOwn: 0, ownTried: 0, triedAt: 0, syncedAt: 0, wroteAt: 0 }
+  return { v: 1, device: newDeviceId(), rec: emptyRecord(), migrated: false, restored: false, real: 0, syncedReal: 0, own: 0, syncedOwn: 0, ownTried: 0, triedAt: 0, syncedAt: 0, wroteAt: 0 }
 }
 
-/** This identity's side, made (with a new device id) the first time it is asked for; with `create` false, an unsaved empty one. */
-export function localFor(me: string, D: InventoryDeps = deps, create = true): InventoryLocal {
+function parse(raw: string | null): InventoryLocal | null {
+  if (!raw) return null
+  try {
+    const v = JSON.parse(raw) as Partial<InventoryLocal>
+    if (!isDeviceId(v.device)) return null
+    const num = (n: unknown): number => (typeof n === 'number' && Number.isFinite(n) && n >= 0 ? n : 0)
+    return {
+      v: 1, device: v.device, rec: validRecord(v.rec), migrated: v.migrated === true, restored: v.restored === true, real: num(v.real), syncedReal: num(v.syncedReal),
+      own: num(v.own), syncedOwn: num(v.syncedOwn), ownTried: num(v.ownTried), triedAt: num(v.triedAt), syncedAt: num(v.syncedAt), wroteAt: num(v.wroteAt),
+    }
+  } catch { return null }
+}
+
+/** The stored record as this tab last read it, parsed once per text. */
+const stored = new Map<string, { raw: string | null; local: InventoryLocal | null }>()
+/** An identity with nothing stored yet: one fresh record (one device id) until the first change stores it. */
+const unstored = new Map<string, InventoryLocal>()
+/** This tab's changes not stored yet, in order, per identity. */
+const pending = new Map<string, Change[]>()
+/** The stored record with them applied, while it and they are the same. */
+const view = new Map<string, { base: InventoryLocal; n: number; local: InventoryLocal }>()
+/** Each identity's stores, one after another. */
+const chains = new Map<string, Promise<unknown>>()
+
+function storedFor(me: string, D: InventoryDeps): InventoryLocal | null {
   let raw: string | null = null
   try { raw = D.storage?.getItem(recordKey(me)) ?? null } catch { /* unreadable: as new */ }
-  const was = cache.get(me)
+  const was = stored.get(me)
   if (was && was.raw === raw) return was.local
-  let local: InventoryLocal | null = null
-  if (raw) {
-    try {
-      const v = JSON.parse(raw) as Partial<InventoryLocal>
-      if (isDeviceId(v.device)) {
-        const num = (n: unknown): number => (typeof n === 'number' && Number.isFinite(n) && n >= 0 ? n : 0)
-        local = {
-          v: 1, device: v.device, rec: validRecord(v.rec), migrated: v.migrated === true, real: num(v.real), syncedReal: num(v.syncedReal), own: num(v.own), syncedOwn: num(v.syncedOwn),
-          ownTried: num(v.ownTried), triedAt: num(v.triedAt), syncedAt: num(v.syncedAt), wroteAt: num(v.wroteAt),
-        }
-      }
-    } catch { /* not a record: as new */ }
-  }
-  if (!local && !create) return fresh()
-  if (!local) {
-    // A record that does not read is kept aside, never written over.
-    if (raw) try { D.storage?.setItem(`${recordKey(me)}:unread:${D.now()}`, raw) } catch { /* full */ }
-    local = fresh()
-    saveLocal(me, local, D)
-    return local
-  }
-  cache.set(me, { raw, local })
+  const local = parse(raw)
+  stored.set(me, { raw, local })
   return local
 }
 
-function saveLocal(me: string, local: InventoryLocal, D: InventoryDeps = deps): void {
-  if (!D.storage) { cache.set(me, { raw: null, local }); return }
-  const raw = JSON.stringify(local)
-  try { D.storage?.setItem(recordKey(me), raw) } catch { /* quota: kept in memory below */ }
-  let back: string | null = raw
-  try { back = D.storage?.getItem(recordKey(me)) ?? raw } catch { back = raw }
-  cache.set(me, { raw: back, local })
+function baseFor(me: string, D: InventoryDeps): InventoryLocal {
+  const s = storedFor(me, D)
+  if (s) return s
+  let u = unstored.get(me)
+  if (!u) { u = fresh(); unstored.set(me, u) }
+  return u
+}
+
+/** This identity's side: the stored record with this tab's changes not stored yet applied. The third argument is kept for callers; nothing is stored by reading. */
+export function localFor(me: string, D: InventoryDeps = deps, _create = true): InventoryLocal {
+  const base = baseFor(me, D)
+  const list = pending.get(me)
+  if (!list?.length) return base
+  const v = view.get(me)
+  if (v && v.base === base && v.n === list.length) return v.local
+  const local = list.reduce((l, f) => f(l), base)
+  view.set(me, { base, n: list.length, local })
+  return local
+}
+
+/**
+ * Change this identity's record: shown at once, and stored in one step from
+ * the record as stored then (TWO TABS above). Resolves once stored. A store
+ * that fails keeps the change in this tab and tries it again with the next.
+ */
+function change(me: string, f: Change, D: InventoryDeps = deps): Promise<void> {
+  const list = pending.get(me) ?? []
+  list.push(f)
+  pending.set(me, list)
+  flip()
+  const run = async (): Promise<void> => {
+    const seen = stored.get(me)?.raw ?? null
+    let other = false
+    let unread: string | null = null
+    const fallback = baseFor(me, D)
+    // Every change still waiting (a store that failed before, and this one), applied to the record as stored now.
+    const upto = list.indexOf(f) + 1
+    const todo = list.slice(0, upto)
+    await D.update(recordKey(me), (raw) => {
+      other = raw !== seen
+      const read = parse(raw)
+      // A record that does not read is kept aside, never written over.
+      if (raw && !read) unread = raw
+      const start = read ?? (raw === null ? { ...fallback } : fresh())
+      return JSON.stringify(todo.reduce((l, g) => g(l), start))
+    })
+    if (unread) try { D.storage?.setItem(`${recordKey(me)}:unread:${D.now()}`, unread) } catch { /* full */ }
+    list.splice(0, upto)
+    unstored.delete(me)
+    view.delete(me)
+    flip()
+    // Another tab changed it meanwhile: its numbers in this tab's bag too.
+    if (other) tellMerged(me)
+  }
+  const p = (chains.get(me) ?? Promise.resolve()).then(run, run)
+  chains.set(me, p.catch(() => undefined))
+  return p.catch(() => undefined)
+}
+
+/** Every store asked for so far has landed (tests, and before a write). */
+export async function inventorySettled(me?: string): Promise<void> {
+  const list = me ? [chains.get(me)] : [...chains.values()]
+  await Promise.all(list)
+}
+
+/** The record as stored now, read in one step (another tab may have written since this one read it). */
+function refresh(me: string, D: InventoryDeps): Promise<void> {
+  return change(me, (l) => l, D)
 }
 
 /** Whether this identity has changes the relay does not hold yet. */
@@ -230,6 +326,14 @@ export function isDirty(me: string, D: InventoryDeps = deps): boolean {
 
 /** Whether the Compiler made or charges gained wait for a write, and have not had their fast try yet. */
 function ownDue(l: InventoryLocal): boolean { return l.own > l.syncedOwn && l.own > l.ownTried }
+
+/** Too soon after the last try (by any tab of this device) for a throttled write. */
+function tooSoon(l: InventoryLocal, now: number): boolean {
+  return now - l.triedAt < (ownDue(l) ? OWN_FLOOR_MS : WRITE_EVERY_MS)
+}
+
+/** Whether the record says what the bag holds (migrated, and not waiting on the relay after a restore). */
+const drives = (l: InventoryLocal): boolean => l.migrated && !l.restored
 
 /** Everything known for this identity: every device's numbers. */
 export function inventoryRecordFor(me: string): InventoryRecord {
@@ -247,59 +351,95 @@ export function onInventoryMerged(f: (owner: string) => void): () => void {
   merged.add(f)
   return () => { merged.delete(f) }
 }
+function tellMerged(me: string): void {
+  for (const f of merged) { try { f(me) } catch { /* one listener failing never stops the sync */ } }
+}
 
-function record(me: string, local: InventoryLocal, delta: InventoryDelta, D: InventoryDeps, madeAt?: number): InventoryLocal {
-  const nowS = Math.floor(D.now() / 1000)
+/** `delta` on this device's entry: only ever raising its numbers. */
+function recordInto(l: InventoryLocal, delta: InventoryDelta, nowS: number, madeAt?: number): InventoryLocal {
   const important = delta.compiler || (delta.add.charge ?? 0) > 0
-  const next: InventoryLocal = { ...local, rec: withDelta(local.rec, local.device, delta, nowS, madeAt ?? nowS), real: local.real + 1, own: local.own + (important ? 1 : 0) }
-  saveLocal(me, next, D)
-  flip()
-  if (useInventorySync.getState().enabled && me === D.self()) schedule(important ? OWN_QUIET_MS : QUIET_MS)
-  return next
+  return { ...l, rec: withDelta(l.rec, l.device, delta, nowS, madeAt ?? nowS), real: l.real + 1, own: l.own + (important ? 1 : 0) }
+}
+
+const sameCounts = (a: Record<string, number>, b: Record<string, number>): boolean => Object.keys(a).length === Object.keys(b).length && Object.entries(a).every(([k, n]) => b[k] === n)
+
+/** The inventory carrying this device's entry (NEVER COUNTED TWICE above), once it has one; the same inventory when it already does. */
+function withOwn(l: InventoryLocal, inv: Inventory): Inventory {
+  if (!l.migrated) return inv
+  const e: DeviceInventory = l.rec.devices[l.device] ?? { a: {}, s: {}, u: 0 }
+  const was = inv.own
+  if (was && was.d === l.device && was.u === e.u && sameCounts(was.a, e.a) && sameCounts(was.s, e.s)) return inv
+  const own: OwnEntry = { d: l.device, a: { ...e.a }, s: { ...e.s }, u: e.u }
+  return { ...inv, own }
 }
 
 /**
  * A change TERRAIN saved, from `prev` to `next`, for the field's `owner`:
  * recorded as this device's gains and spends, and the inventory to keep back,
- * what it touched shown as the record's totals (a debt shows 0). Before this device
- * migrated (a field kept in memory only), it records and keeps `next` as it is.
+ * what it touched shown as the record's totals (a debt shows 0), carrying
+ * this device's entry. Before this device migrated (a field kept in memory
+ * only), it records and keeps `next` as it is.
  */
 export function noteInventory(owner: string, prev: Inventory, next: Inventory): Inventory {
   const D = deps
   if (!isPubkey(owner)) return next
   const delta = deltaOf(prev, next)
   if (emptyDelta(delta)) return next
-  const local = record(owner, localFor(owner, D), delta, D)
-  return local.migrated ? heldAfter(next, local.rec, delta) : next
+  const nowS = Math.floor(D.now() / 1000)
+  void change(owner, (l) => recordInto(l, delta, nowS), D)
+  const important = delta.compiler || (delta.add.charge ?? 0) > 0
+  if (useInventorySync.getState().enabled && owner === D.self()) schedule(important ? OWN_QUIET_MS : QUIET_MS)
+  const local = localFor(owner, D)
+  return withOwn(local, drives(local) ? heldAfter(next, local.rec, delta) : next)
 }
 
 /**
  * The field's saved inventory is read (`kept`), or could not be (null: no
  * storage on this device). The first time for this device and identity, what
- * it holds becomes its first gains (MIGRATION, once: the mark is kept beside
- * the device id). Returns the inventory to show, its counts the record's
- * totals; null to leave the inventory as it is (no storage, not migrated).
+ * it holds becomes its first gains (MIGRATION, once). A row carrying this
+ * device's entry is never migrated again (NEVER COUNTED TWICE above): the
+ * entry comes back instead. Returns the inventory to show, its counts the
+ * record's totals; null to leave the inventory as it is (no storage, not
+ * migrated).
  */
 export function loadedInventory(owner: string, kept: Inventory | null): Inventory | null {
   const D = deps
   if (!isPubkey(owner)) return kept
-  let local = localFor(owner, D)
-  if (!kept) return local.migrated ? inventoryFrom(emptyInventory(), local.rec) : null
-  if (!local.migrated) {
+  const l0 = localFor(owner, D)
+  if (!kept) return drives(l0) ? withOwn(l0, inventoryFrom(emptyInventory(), l0.rec)) : null
+  const own = kept.own && isDeviceId(kept.own.d) ? kept.own : null
+  const nowS = Math.floor(D.now() / 1000)
+  const crafted = D.crafted(owner)
+  if (own && (!l0.migrated || own.d === l0.device)) {
+    const entry: InventoryRecord = { devices: { [own.d]: { a: own.a, s: own.s, u: own.u } }, tools: kept.compiler === 'made' ? { compiler: Math.min(crafted ?? nowS, nowS) } : {} }
+    void change(owner, (l) => {
+      // The record already knows this device: the row's entry only brings back what a lost store missed.
+      if (l.migrated) return l.device === own.d ? { ...l, rec: mergeRecords(l.rec, entry) } : l
+      // The record was lost (or this load cannot see it): the entry back under its own id, and the bag as kept until the relay answers.
+      return { ...l, device: own.d, rec: mergeRecords(l.rec, entry), migrated: true, restored: true }
+    }, D)
+  } else if (!l0.migrated) {
+    // Nothing migrated while this load cannot see the stored record: it may hold this device's entry already.
+    if (D.blind()) return kept
     const delta = deltaFromInventory(kept)
-    // A Compiler made before sync keeps the date MINING has for it, when it has one.
-    local = emptyDelta(delta) ? local : record(owner, local, delta, D, D.crafted(owner))
-    local = { ...local, migrated: true }
-    saveLocal(owner, local, D)
+    void change(owner, (l) => {
+      // Another tab migrated first: counted once.
+      if (l.migrated) return l
+      return { ...(emptyDelta(delta) ? l : recordInto(l, delta, nowS, crafted)), migrated: true }
+    }, D)
+    if (!emptyDelta(delta) && useInventorySync.getState().enabled && owner === D.self()) schedule()
   }
-  return inventoryFrom(kept, local.rec)
+  const l = localFor(owner, D)
+  if (!l.migrated) return kept
+  return withOwn(l, drives(l) ? inventoryFrom(kept, l.rec) : kept)
 }
 
-/** The inventory with the record's totals, for a field already loaded; unchanged before this device migrated. */
+/** The inventory with the record's totals, for a field already loaded; unchanged before this device migrated (or while a restore waits on the relay). */
 export function syncedInventory(owner: string, inv: Inventory): Inventory {
   if (!isPubkey(owner)) return inv
-  const local = localFor(owner, deps, false)
-  return local.migrated ? inventoryFrom(inv, local.rec) : inv
+  const l = localFor(owner, deps, false)
+  if (!l.migrated) return inv
+  return withOwn(l, drives(l) ? inventoryFrom(inv, l.rec) : inv)
 }
 
 // -- the relay's side ------------------------------------------------------------
@@ -369,10 +509,28 @@ async function readRemote(me: string, crypto: SelfNip44, D: InventoryDeps): Prom
 type Outcome = { wrote: boolean; raced?: boolean }
 
 function mayWrite(D: InventoryDeps, me: string): boolean {
-  return D.self() === me && D.live() && !D.tutorial(me) && useInventorySync.getState().enabled
+  return D.self() === me && D.live() && !D.tutorial(me) && !D.blind() && useInventorySync.getState().enabled
 }
 
-async function syncOnce(D: InventoryDeps, write: boolean): Promise<Outcome> {
+const sameDevice = (a: DeviceInventory | undefined, b: DeviceInventory | undefined): boolean =>
+  (!a && !b) || (!!a && !!b && sameCounts(a.a, b.a) && sameCounts(a.s, b.s))
+
+/** The relay's record folded into this device's (a function of the record as stored: TWO TABS above). */
+function mergeIn(remote: InventoryRecord, now: number): Change {
+  return (l) => {
+    const rec = mergeRecords(l.rec, remote)
+    // Folded into `retired` by another device (it was idle long enough): a new id, its entry afresh (RETIRED DEVICES, lib/inventoryRecord.ts).
+    const device = isRetired(rec, l.device) ? newDeviceId() : l.device
+    const out: InventoryLocal = { ...l, device, rec, syncedAt: now, restored: false, migrated: l.migrated || l.restored }
+    if (sameRecord(rec, remote)) return { ...out, syncedReal: l.real, syncedOwn: l.own }
+    // The relay behind on this device's own entry (another device wrote over its write, or a restore): dirty again.
+    if (!sameDevice(rec.devices[device], remote.devices[device]) && l.real <= l.syncedReal) return { ...out, real: l.syncedReal + 1 }
+    return out
+  }
+}
+
+/** `throttled`: a write the timer or the page going asked for, held to the throttle by the record as stored (another tab may have just written). */
+async function syncOnce(D: InventoryDeps, write: boolean, throttled: boolean): Promise<Outcome> {
   const me = D.self()
   const none: Outcome = { wrote: false }
   if (!me || !isPubkey(me)) return none
@@ -382,34 +540,38 @@ async function syncOnce(D: InventoryDeps, write: boolean): Promise<Outcome> {
   if (D.tutorial(me)) return done('idle')
   const crypto = D.crypto()
   if (!crypto.nip44Decrypt) return done('unsupported', NO_NIP44)
+  if (write) {
+    await refresh(me, D)
+    if (throttled && tooSoon(localFor(me, D), D.now())) write = false
+  }
   useInventorySync.setState({ status: 'syncing' })
   const remote = await readRemote(me, crypto, D)
   if (D.self() !== me) return none
   if (remote.unsupported) return done('unsupported', NO_NIP44)
   if (remote.trouble) return done('error', NOT_ANSWERED)
   if (remote.why) return done('error', remote.why)
-  // Every other device's numbers, folded in. Read again after the wait: a change made meanwhile is in it.
+  // Every other device's numbers, folded in, into the record as stored: a change made meanwhile, here or in another tab, is in it.
+  const before = localFor(me, D)
+  await change(me, mergeIn(remote.rec, D.now()), D)
   let local = localFor(me, D)
-  const mergedRec = mergeRecords(local.rec, remote.rec)
-  const gained = !sameRecord(mergedRec, local.rec)
-  const behind = !sameRecord(mergedRec, remote.rec)
-  local = { ...local, rec: mergedRec, syncedAt: D.now(), ...(behind ? {} : { syncedReal: local.real, syncedOwn: local.own }) }
-  saveLocal(me, local, D)
-  flip()
-  if (gained) for (const f of merged) { try { f(me) } catch { /* one listener failing never stops the sync */ } }
-  if (!behind) return done('synced')
+  if (!sameRecord(local.rec, before.rec) || before.restored) tellMerged(me)
+  if (sameRecord(local.rec, remote.rec)) return done('synced')
   if (local.real <= local.syncedReal) return done('synced')
   if (!write || !mayWrite(D, me)) return done('idle')
   const nowS = Math.floor(D.now() / 1000)
   const ahead = remote.createdAt + 1 > nowS + MAX_AHEAD_S
   if (ahead && remote.id && aheadOf.has(remote.id)) return done('error', AHEAD)
   if (remote.createdAt < local.wroteAt && D.now() / 1000 - local.wroteAt < STALE_PATIENCE_S) return done('error', STALE)
-  let text: string
-  try { text = planRecord(mergedRec) } catch (err) { return done('error', err instanceof Error ? err.message : String(err)) }
+  let plan: { text: string; rec: InventoryRecord }
+  try { plan = planRecord(local.rec, local.device, nowS) } catch (err) { return done('error', err instanceof Error ? err.message : String(err)) }
+  // The idlest devices folded to fit (RETIRED DEVICES): kept that way here too.
+  const folded = plan.rec !== local.rec ? plan.rec : null
   const real = local.real
   const own = local.own
   // The throttle counts tries, so a refusal is not asked again until the next window (and the fast one is spent).
-  saveLocal(me, { ...local, triedAt: D.now(), ownTried: Math.max(local.ownTried, own) }, D)
+  const triedAt = D.now()
+  await change(me, (l) => ({ ...l, ...(folded ? { rec: mergeRecords(l.rec, folded) } : {}), triedAt, ownTried: Math.max(l.ownTried, own) }), D)
+  local = localFor(me, D)
   let key = remote.key
   if (!key && made && made.me === me) key = { wrapped: made.wrapped, key: made.key }
   if (!key) {
@@ -427,7 +589,7 @@ async function syncOnce(D: InventoryDeps, write: boolean): Promise<Outcome> {
   const createdAt = ahead ? nowS : Math.max(nowS, remote.createdAt + 1)
   if (ahead && remote.id) aheadOf.add(remote.id)
   let ev: NostrEvent
-  try { ev = await D.sign(recordTemplate(sealRecord(text, key.key, key.wrapped), createdAt)) } catch (err) {
+  try { ev = await D.sign(recordTemplate(sealRecord(plan.text, key.key, key.wrapped), createdAt)) } catch (err) {
     return done('error', `Your inventory was not signed: ${err instanceof Error ? err.message : String(err)}`)
   }
   if (ev.pubkey !== me || !mayWrite(D, me)) return none
@@ -438,9 +600,8 @@ async function syncOnce(D: InventoryDeps, write: boolean): Promise<Outcome> {
   if (!mayWrite(D, me)) return none
   const res = await D.publish(ev)
   if (!res.ok) return done('error', `Your inventory was not saved to the relay (${res.reason}).`)
-  const now = localFor(me, D)
-  saveLocal(me, { ...now, syncedReal: Math.max(now.syncedReal, real), syncedOwn: Math.max(now.syncedOwn, own), syncedAt: D.now(), wroteAt: ev.created_at }, D)
-  flip()
+  const syncedAt = D.now()
+  await change(me, (l) => ({ ...l, syncedReal: Math.max(l.syncedReal, real), syncedOwn: Math.max(l.syncedOwn, own), syncedAt, wroteAt: ev.created_at }), D)
   useInventorySync.setState({ status: 'synced', note: null })
   return { wrote: true }
 }
@@ -454,17 +615,24 @@ let verifyTimer: ReturnType<typeof setTimeout> | null = null
 /** When a read was last asked for (ms), whatever came of it: the read floor. */
 let readAt = 0
 
-/** One sync after any already running. `write` false only reads (and folds in the other devices). */
-export function syncInventory(write = true): Promise<Outcome> {
-  const once = (): Promise<Outcome> => syncOnce(deps, write).catch((err) => {
+/**
+ * One sync after any already running in this tab. `write` false only reads
+ * (and folds in the other devices). A write runs under a Web Lock for the
+ * identity, so the device's tabs write one at a time; `throttled` (the timer,
+ * the page going) holds it to the throttle by the record as stored then.
+ */
+export function syncInventory(write = true, throttled = false): Promise<Outcome> {
+  const D = deps
+  const once = (): Promise<Outcome> => syncOnce(D, write, throttled).catch((err) => {
     useInventorySync.setState({ status: 'error', note: err instanceof Error ? err.message : String(err) })
     return { wrote: false }
   })
-  const run = async (): Promise<Outcome> => {
+  const tries = async (): Promise<Outcome> => {
     let out = await once()
-    for (let n = 0; out.raced && n < 2; n++) out = await once()
+    for (let n = 0; out.raced && n < RACE_RETRIES; n++) out = await once()
     return out
   }
+  const run = (): Promise<Outcome> => (write && D.self() ? D.lock(`onosendai:inventory-write:${D.self()}`, tries) : tries())
   const p = queue.then(run, run)
   queue = p.catch(() => undefined)
   return p.then((out) => {
@@ -501,7 +669,7 @@ export function schedule(wait = QUIET_MS): void {
   if (timer && timerAt <= due) return
   cancelTimer()
   timerAt = due
-  timer = setTimeout(() => { timer = null; timerAt = 0; void syncInventory(true) }, due - now)
+  timer = setTimeout(() => { timer = null; timerAt = 0; void syncInventory(true, true) }, due - now)
 }
 
 /**
@@ -517,7 +685,7 @@ export function nudgeInventory(why: 'hide' | 'read'): void {
   const now = D.now()
   if (why === 'hide') {
     const l = localFor(me, D, false)
-    if (l.real > l.syncedReal && now - l.triedAt >= (ownDue(l) ? OWN_FLOOR_MS : HIDE_FLOOR_MS)) { cancelTimer(); void syncInventory(true) }
+    if (l.real > l.syncedReal && now - l.triedAt >= (ownDue(l) ? OWN_FLOOR_MS : HIDE_FLOOR_MS)) { cancelTimer(); void syncInventory(true, true) }
     return
   }
   if (D.tutorial(me) || now - readAt < READ_FLOOR_MS) return
@@ -539,6 +707,23 @@ export function identityChanged(): void {
 
 const ls = (): Storage | null => { try { return typeof localStorage !== 'undefined' ? localStorage : null } catch { return null } }
 
+/** A Web Lock across the device's tabs, where the browser has them. */
+function webLock<T>(name: string, fn: () => Promise<T>): Promise<T> {
+  const locks = typeof navigator !== 'undefined' ? (navigator as Navigator & { locks?: LockManager }).locks : undefined
+  return locks?.request ? locks.request(name, fn) as unknown as Promise<T> : fn()
+}
+
+/** `update` over a plain storage (tests, and storage handed in without one): read, change and write at once. */
+function updateOver(storage: InventoryDeps['storage']): InventoryDeps['update'] {
+  return async (key, fn) => {
+    let raw: string | null = null
+    try { raw = storage?.getItem(key) ?? null } catch { /* unreadable */ }
+    const next = fn(raw)
+    try { if (next === null) storage?.removeItem(key); else storage?.setItem(key, next) } catch { /* full: kept in this tab */ }
+    return next
+  }
+}
+
 const offline: InventoryDeps = {
   self: () => '',
   live: () => false,
@@ -549,6 +734,9 @@ const offline: InventoryDeps = {
   publish: async () => ({ ok: false, reason: 'not started' }),
   now: () => Date.now(),
   storage: kvStorage,
+  update: kvUpdate,
+  lock: webLock,
+  blind: () => kvMode() === 'blind',
   prefs: ls(),
   verify: (ev) => verifyEvent({ ...ev } as Parameters<typeof verifyEvent>[0]),
   crafted: () => undefined,
@@ -556,21 +744,25 @@ const offline: InventoryDeps = {
 
 let deps: InventoryDeps = offline
 
-/** Set the outside world (startInventorySync, and tests). Returns the previous deps. */
+/** Set the outside world (startInventorySync, and tests). Returns the previous deps. Storage handed in without `update` is changed through it directly. */
 export function setInventoryDeps(next: Partial<InventoryDeps> | null): InventoryDeps {
   const prev = deps
-  deps = next ? { ...offline, ...next } : offline
+  deps = next ? { ...offline, ...(next.storage !== undefined && !next.update ? { update: updateOver(next.storage) } : {}), ...next } : offline
   useInventorySync.setState({ enabled: loadEnabled(deps.prefs) })
   return prev
 }
 
-/** Tests only: forget keys opened, timers, the queue and the parse cache. */
+/** Tests only: forget keys opened, timers, the queue and the parse caches (a new load of the page). */
 export function resetInventorySync(): void {
   opened = { me: '', keys: new Map() }
   failed.clear()
   aheadOf.clear()
   made = null
-  cache.clear()
+  stored.clear()
+  unstored.clear()
+  pending.clear()
+  view.clear()
+  chains.clear()
   cancelTimer()
   if (verifyTimer) clearTimeout(verifyTimer)
   verifyTimer = null
@@ -582,11 +774,11 @@ export function resetInventorySync(): void {
 /** The bag's quiet line: synced, kept here, or failed, and a few words on why. */
 export function inventorySyncLine(o: { me: string; enabled: boolean; live: boolean; status: InventorySyncStatus; syncedAt: number; note: string | null }): { synced: boolean; words: string; why: string } {
   const here = 'Saved on this device only'
-  if (!o.me || !isPubkey(o.me)) return { synced: false, words: here, why: 'Sign in to sync it' }
-  if (!o.enabled) return { synced: false, words: here, why: 'Sync is off in Settings' }
-  if (!o.live) return { synced: false, words: here, why: 'Switch to LIVE to sync' }
-  if (o.status === 'unsupported') return { synced: false, words: here, why: o.note ?? 'Your signer cannot encrypt it' }
-  if (o.status === 'error') return { synced: false, words: 'Sync failed', why: o.note ?? '' }
-  if (o.syncedAt > 0) return { synced: true, words: 'Synced across your devices', why: `New changes save within ${WRITE_EVERY_MS / 60_000} min` }
-  return { synced: false, words: here, why: 'Not synced yet' }
+  if (!o.me || !isPubkey(o.me)) return { synced: false, words: here, why: 'Sign in to sync it.' }
+  if (!o.enabled) return { synced: false, words: here, why: 'Sync is off in Settings.' }
+  if (!o.live) return { synced: false, words: here, why: 'Switch to LIVE to sync.' }
+  if (o.status === 'unsupported') return { synced: false, words: here, why: o.note ?? 'Your signer cannot encrypt it.' }
+  if (o.status === 'error') return { synced: false, words: 'Sync failed', why: o.note ?? 'The relay did not take it this time.' }
+  if (o.syncedAt > 0) return { synced: true, words: 'Synced across your devices', why: `New changes save within ${WRITE_EVERY_MS / 60_000} min.` }
+  return { synced: false, words: here, why: 'Not synced yet.' }
 }

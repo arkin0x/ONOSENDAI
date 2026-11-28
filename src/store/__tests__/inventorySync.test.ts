@@ -9,12 +9,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { finalizeEvent, generateSecretKey, getPublicKey, verifyEvent } from 'nostr-tools/pure'
 import { matchFilter } from 'nostr-tools/filter'
 import { v2 as nip44 } from 'nostr-tools/nip44'
-import { hexToBytes, type NostrEvent } from '../../lib/events'
-import { CHARGE, COMPILER, INVENTORY_D, INVENTORY_KIND, decodeRecord, openRecord, recordContent, totalsOf } from '../../lib/inventoryRecord'
+import { bytesToHex, hexToBytes, type NostrEvent } from '../../lib/events'
+import { CHARGE, COMPILER, INVENTORY_D, INVENTORY_KIND, decodeRecord, encodeRecord, newRecordKey, openRecord, recordContent, recordTemplate, sealRecord, totalsOf, type InventoryRecord } from '../../lib/inventoryRecord'
 import { carriedInto, emptyInventory, withCharges, withCompiler, type Inventory } from '../../lib/terrain/terrainDb'
 import {
   HIDE_FLOOR_MS, OWN_FLOOR_MS, QUIET_MS, READ_FLOOR_MS, WRITE_EVERY_MS, inventoryRecordFor, inventorySyncLine, isDirty, loadedInventory, localFor, noteInventory, nudgeInventory,
-  onInventoryMerged, resetInventorySync, setInventoryDeps, syncInventory, syncedInventory, useInventorySync, type InventoryDeps,
+  inventorySettled, onInventoryMerged, resetInventorySync, setInventoryDeps, syncInventory, syncedInventory, useInventorySync, type InventoryDeps,
 } from '../inventorySync'
 
 function fakeRelay() {
@@ -50,6 +50,11 @@ interface Device {
   /** This device's TERRAIN inventory, as useTerrain holds it. */
   inv: Inventory
   duringSign?: () => Promise<void>
+  /** kvStore running blind on this load. */
+  blind: boolean
+  /** A tab of a device: the stored record changed in one step (kvUpdate), while `storage` is this tab's copy. */
+  update?: InventoryDeps['update']
+  lock?: InventoryDeps['lock']
 }
 
 const sk = generateSecretKey()
@@ -63,11 +68,13 @@ let current: Device | null = null
 let unhook: (() => void) | null = null
 
 function device(): Device {
-  return { storage: memStorage(), prefs: memStorage(), live: true, tutorial: false, signed: 0, encrypts: 0, decrypts: 0, inv: emptyInventory() }
+  return { storage: memStorage(), prefs: memStorage(), live: true, tutorial: false, signed: 0, encrypts: 0, decrypts: 0, inv: emptyInventory(), blind: false }
 }
 
 /** Run as device `d`: a new load of the app on it, its field loaded (loadedInventory) and merges put in its bag. */
-function as(d: Device, over: Partial<InventoryDeps> = {}, load = true): void {
+async function as(d: Device, over: Partial<InventoryDeps> = {}, load = true): Promise<void> {
+  // What the last load had not stored yet lands first: a reload never drops a change already made.
+  await inventorySettled()
   resetInventorySync()
   current = d
   setInventoryDeps({
@@ -82,11 +89,15 @@ function as(d: Device, over: Partial<InventoryDeps> = {}, load = true): void {
     sign: async (t) => { d.signed++; if (d.duringSign) { const f = d.duringSign; d.duringSign = undefined; await f() } return finalizeEvent(t, self === me ? sk : sk2) as unknown as NostrEvent },
     publish: (ev) => relay.publish(ev),
     storage: d.storage,
+    ...(d.update ? { update: d.update } : {}),
+    // Each simulated device is its own machine: no lock shared with another (a tab pair shares one: twoTabs).
+    lock: d.lock ?? ((_name, fn) => fn()),
+    blind: () => d.blind,
     prefs: d.prefs,
     verify: (ev) => verifyEvent({ ...ev } as Parameters<typeof verifyEvent>[0]),
     ...over,
   })
-  if (load) d.inv = loadedInventory(self, d.inv) ?? d.inv
+  if (load) { d.inv = loadedInventory(self, d.inv) ?? d.inv; await inventorySettled() }
 }
 
 /** Something done in TERRAIN on the current device: the change saved as useTerrain saveInventory does. */
@@ -126,7 +137,7 @@ afterEach(() => {
 describe('the record on the relay', () => {
   it('only the d tag is public; the content sealed: one encrypt a first write, one sign; the next write a signature only', async () => {
     const d = device()
-    as(d)
+    await as(d)
     mine(3, 4)
     await syncInventory()
     expect(d.signed).toBe(1)
@@ -149,25 +160,25 @@ describe('the record on the relay', () => {
 describe('two devices', () => {
   it('adding and spending at once: each write reads and merges first, and both bags end with the sum', async () => {
     const a = device()
-    as(a)
+    await as(a)
     mine(3, 10)
     await syncInventory()
     const b = device()
-    as(b)
+    await as(b)
     await syncInventory(false)
     expect(b.inv.counts[3]).toBe(10)
     // Concurrently: A places 4 and mines 2 of kind 7; B mines 5 and places 3.
-    as(a)
+    await as(a)
     for (let i = 0; i < 4; i++) place(3)
     mine(7, 2)
-    as(b)
+    await as(b)
     mine(3, 5)
     for (let i = 0; i < 3; i++) place(3)
     await syncInventory()
-    as(a)
+    await as(a)
     await syncInventory()
     expect(a.inv.counts).toEqual({ 3: 8, 7: 2 })
-    as(b)
+    await as(b)
     await syncInventory(false)
     expect(b.inv.counts).toEqual({ 3: 8, 7: 2 })
     expect(totalsOf(onRelay()!.rec)).toEqual({ 3: 8, 7: 2 })
@@ -175,15 +186,15 @@ describe('two devices', () => {
 
   it('both spend the same blocks before syncing: 0 shown, never blocked, the debt kept and paid off by later gains', async () => {
     const a = device()
-    as(a)
+    await as(a)
     mine(3, 5)
     await syncInventory()
     const b = device()
-    as(b)
+    await as(b)
     await syncInventory(false)
     for (let i = 0; i < 5; i++) place(3)
     await syncInventory()
-    as(a)
+    await as(a)
     for (let i = 0; i < 5; i++) place(3)
     await syncInventory()
     expect(totalsOf(inventoryRecordFor(me))['3']).toBe(-5)
@@ -197,20 +208,20 @@ describe('two devices', () => {
 
   it('another device writes while this one waits on its signer: nothing is sent over it; it reads, merges and asks the signer again', async () => {
     const a = device()
-    as(a)
+    await as(a)
     mine(3, 2)
     await syncInventory()
     const b = device()
-    as(b)
+    await as(b)
     await syncInventory(false)
     mine(9)
     b.duringSign = async () => {
       // A writes meanwhile, from its own load.
       const saved = current!
-      as(a)
+      await as(a)
       mine(4)
       await syncInventory()
-      as(saved, {}, false)
+      await as(saved, {}, false)
     }
     await syncInventory()
     expect(totalsOf(onRelay()!.rec)).toEqual({ 3: 2, 4: 1, 9: 1 })
@@ -221,13 +232,13 @@ describe('migration', () => {
   it('what a device held before sync becomes its first gains, once: loading again never counts it twice', async () => {
     const d = device()
     d.inv = withCharges(withCompiler(carriedInto(carriedInto(emptyInventory(), 3, 6), 40, 2), 'made'), 7)
-    as(d)
+    await as(d)
     expect(totalsOf(inventoryRecordFor(me))).toEqual({ 3: 6, 40: 2, [CHARGE]: 7 })
     expect(inventoryRecordFor(me).tools[COMPILER]).toBeGreaterThan(0)
     await syncInventory()
     // A reload, and another, and the field read again: still 6.
-    as(d)
-    as(d)
+    await as(d)
+    await as(d)
     d.inv = loadedInventory(me, d.inv)!
     await syncInventory()
     expect(totalsOf(onRelay()!.rec)).toEqual({ 3: 6, 40: 2, [CHARGE]: 7 })
@@ -238,33 +249,33 @@ describe('migration', () => {
   it('two devices each with blocks from before: both counted, each once', async () => {
     const a = device()
     a.inv = carriedInto(emptyInventory(), 3, 4)
-    as(a)
+    await as(a)
     await syncInventory()
     const b = device()
     b.inv = carriedInto(emptyInventory(), 3, 6)
-    as(b)
+    await as(b)
     await syncInventory()
-    as(a)
+    await as(a)
     await syncInventory()
     expect(a.inv.counts[3]).toBe(10)
-    as(b)
+    await as(b)
     await syncInventory(false)
     expect(b.inv.counts[3]).toBe(10)
   })
 
-  it('a migrated Compiler keeps the date MINING has for it', () => {
+  it('a migrated Compiler keeps the date MINING has for it', async () => {
     const d = device()
     d.inv = withCompiler(emptyInventory(), 'made')
-    as(d, { crafted: () => 1_700_000_123 })
+    await as(d, { crafted: () => 1_700_000_123 })
     expect(inventoryRecordFor(me).tools[COMPILER]).toBe(1_700_000_123)
   })
 
-  it('no storage for TERRAIN on this device: nothing migrated, the bag left as it is until the record holds it', () => {
+  it('no storage for TERRAIN on this device: nothing migrated, the bag left as it is until the record holds it', async () => {
     const d = device()
-    as(d, {}, false)
+    await as(d, {}, false)
     expect(loadedInventory(me, null)).toBeNull()
     d.inv = carriedInto(emptyInventory(), 3, 2)
-    as(d)
+    await as(d)
     expect(loadedInventory(me, null)?.counts).toEqual({ 3: 2 })
   })
 })
@@ -273,20 +284,20 @@ describe('never written', () => {
   it('in LOCAL, during a tutorial run, with the switch off, or when the relay did not answer; recorded here all the same', async () => {
     const d = device()
     d.live = false
-    as(d)
+    await as(d)
     mine(3)
     await syncInventory()
     expect(d.signed).toBe(0)
     expect(useInventorySync.getState().status).toBe('local')
     d.live = true
     d.tutorial = true
-    as(d)
+    await as(d)
     mine(3)
     await syncInventory()
     nudgeInventory('read')
     expect(d.signed + d.decrypts).toBe(0)
     d.tutorial = false
-    as(d)
+    await as(d)
     useInventorySync.getState().setEnabled(false)
     mine(3)
     await syncInventory()
@@ -307,11 +318,11 @@ describe('never written', () => {
 
   it('a record that does not open with the signer is never written over', async () => {
     const a = device()
-    as(a)
+    await as(a)
     mine(3)
     await syncInventory()
     const b = device()
-    as(b, { crypto: () => ({ nip44Encrypt: async () => 'x', nip44Decrypt: async () => { throw new Error('refused') } }) })
+    await as(b, { crypto: () => ({ nip44Encrypt: async () => 'x', nip44Decrypt: async () => { throw new Error('refused') } }) })
     mine(4)
     await syncInventory()
     expect(b.signed).toBe(0)
@@ -322,16 +333,17 @@ describe('never written', () => {
 describe('per identity', () => {
   it('each npub its own record and device id on one device; a switch deletes nothing', async () => {
     const d = device()
-    as(d)
+    await as(d)
     mine(3, 2)
     const mineDevice = localFor(me).device
     self = other
     d.inv = emptyInventory()
-    as(d)
+    await as(d)
     mine(9)
     expect(localFor(other).device).not.toBe(mineDevice)
     expect(totalsOf(inventoryRecordFor(other))).toEqual({ 9: 1 })
     expect(totalsOf(inventoryRecordFor(me))).toEqual({ 3: 2 })
+    await inventorySettled()
     expect(d.storage.m.has(`onosendai:inventory:${me}`)).toBe(true)
     expect(d.storage.m.has(`onosendai:inventory:${other}`)).toBe(true)
     await syncInventory()
@@ -339,9 +351,9 @@ describe('per identity', () => {
     expect(onRelay(me)).toBeNull()
   })
 
-  it('TERRAIN with no identity (its field is "local") never touches a record', () => {
+  it('TERRAIN with no identity (its field is "local") never touches a record', async () => {
     const d = device()
-    as(d)
+    await as(d)
     const inv = carriedInto(emptyInventory(), 3)
     expect(noteInventory('local', emptyInventory(), inv)).toBe(inv)
     expect(d.storage.m.has('onosendai:inventory:local')).toBe(false)
@@ -352,7 +364,7 @@ describe('the signer\'s cost', () => {
   it('at most one write in ten minutes however much changes; hiding writes too, no sooner than HIDE_FLOOR_MS after the last try', async () => {
     vi.useFakeTimers({ now: 1_790_000_000_000 })
     const d = device()
-    as(d)
+    await as(d)
     mine(3)
     await vi.advanceTimersByTimeAsync(QUIET_MS + 100)
     expect(d.signed).toBe(1)
@@ -376,7 +388,7 @@ describe('the signer\'s cost', () => {
   it('the Compiler made or charges gained writes within a minute of the last try, not ten', async () => {
     vi.useFakeTimers({ now: 1_790_000_000_000 })
     const d = device()
-    as(d)
+    await as(d)
     mine(3)
     await vi.advanceTimersByTimeAsync(QUIET_MS + 100)
     expect(d.signed).toBe(1)
@@ -398,7 +410,7 @@ describe('the signer\'s cost', () => {
     vi.useFakeTimers({ now: 1_790_000_000_000 })
     const d = device()
     let refuse = true
-    as(d, { sign: async (t) => { d.signed++; if (refuse) throw new Error('rejected'); return finalizeEvent(t, sk) as unknown as NostrEvent } })
+    await as(d, { sign: async (t) => { d.signed++; if (refuse) throw new Error('rejected'); return finalizeEvent(t, sk) as unknown as NostrEvent } })
     act((inv) => withCompiler(inv, 'made'))
     await vi.advanceTimersByTimeAsync(OWN_FLOOR_MS)
     expect(d.signed).toBe(1)
@@ -413,11 +425,11 @@ describe('the signer\'s cost', () => {
   it('an hour of heavy play: mining every 4 s, placing, two compiles, charges placed, the app switched every 90 s, the bag opened every 70 s: at most 8 signatures (6 for the ten-minute writes, one more for each Compiler or compile that lands just after one)', async () => {
     vi.useFakeTimers({ now: 1_790_000_000_000 })
     const e = device()
-    as(e)
+    await as(e)
     mine(5)
     await syncInventory()
     const d = device()
-    as(d)
+    await as(d)
     const HOUR = 3600
     for (let t = 1; t <= HOUR; t++) {
       if (t % 4 === 0) mine(3)
@@ -446,7 +458,7 @@ describe('the signer\'s cost', () => {
   it('an hour of mining and placing alone, the app switched and the bag opened as above: six signatures at most', async () => {
     vi.useFakeTimers({ now: 1_790_000_000_000 })
     const d = device()
-    as(d)
+    await as(d)
     for (let t = 1; t <= 3600; t++) {
       if (t % 4 === 0) mine(3)
       if (t % 25 === 0) place(3)
@@ -461,12 +473,12 @@ describe('the signer\'s cost', () => {
   it('reads never sign, at most once a minute, one decrypt a load', async () => {
     vi.useFakeTimers({ now: 1_790_000_000_000 })
     const e = device()
-    as(e)
+    await as(e)
     mine(5)
     await syncInventory()
     const d = device()
     let fetches = 0
-    as(d, { fetch: (f) => { fetches++; return relay.fetch(f) } })
+    await as(d, { fetch: (f) => { fetches++; return relay.fetch(f) } })
     nudgeInventory('read')
     await vi.advanceTimersByTimeAsync(100)
     expect(d.inv.counts[5]).toBe(1)
@@ -486,12 +498,12 @@ describe('the signer\'s cost', () => {
     vi.useFakeTimers({ now: 1_790_000_000_000 })
     const d = device()
     d.live = false
-    as(d)
+    await as(d)
     mine(3)
     await vi.advanceTimersByTimeAsync(WRITE_EVERY_MS * 3)
     expect(d.signed + d.decrypts + d.encrypts).toBe(0)
     const e = device()
-    as(e)
+    await as(e)
     expect(isDirty(me)).toBe(false)
     await vi.advanceTimersByTimeAsync(WRITE_EVERY_MS * 3)
     expect(e.signed + e.encrypts).toBe(0)
@@ -501,11 +513,11 @@ describe('the signer\'s cost', () => {
 describe('local changes during a read are never overwritten', () => {
   it('blocks mined while the relay is answering are in the merge, and in the bag after it', async () => {
     const a = device()
-    as(a)
+    await as(a)
     mine(7, 3)
     await syncInventory()
     const b = device()
-    as(b, {
+    await as(b, {
       fetch: async (f) => {
         // Mining on while the read is out.
         mine(3, 2)
@@ -529,5 +541,222 @@ describe('the bag\'s line', () => {
     expect(inventorySyncLine({ ...base, me: '' }).words).toBe('Saved on this device only')
     expect(inventorySyncLine({ ...base, status: 'unsupported' }).words).toBe('Saved on this device only')
     expect(inventorySyncLine({ ...base, status: 'error' }).words).toBe('Sync failed')
+  })
+})
+
+/**
+ * Two tabs of one device: one stored record (the database kvStore writes),
+ * and each tab's own copy of it, which goes stale when the other tab writes
+ * (kvStore's memory between its broadcasts). Changes go through `update`, one
+ * step on the stored record, as kvUpdate does; a write takes one lock shared
+ * by both tabs, as a Web Lock is.
+ */
+function twoTabs(): { a: Device; b: Device; durable: Map<string, string> } {
+  const durable = new Map<string, string>()
+  let held: Promise<unknown> = Promise.resolve()
+  const lock: InventoryDeps['lock'] = (_name, fn) => { const p = held.then(fn, fn); held = p.catch(() => undefined); return p }
+  const tab = (): Device => {
+    const d = device()
+    d.update = async (key, fn) => {
+      const next = fn(durable.get(key) ?? null)
+      if (next === null) { durable.delete(key); d.storage.m.delete(key) } else { durable.set(key, next); d.storage.m.set(key, next) }
+      return next
+    }
+    d.lock = lock
+    return d
+  }
+  return { a: tab(), b: tab(), durable }
+}
+
+/** A tab's copy brought up to the stored record (as kvStore's broadcast does), or left as it was. */
+function catchUp(d: Device, durable: Map<string, string>): void {
+  for (const [k, v] of durable) d.storage.m.set(k, v)
+}
+
+describe('two tabs on one device (review of #972)', () => {
+  it('both tabs mining from stale copies: every gain is kept, the relay ends at the sum (10 + 5 + 3 = 18)', async () => {
+    const { a, b, durable } = twoTabs()
+    await as(a)
+    mine(3, 10)
+    await syncInventory()
+    // Tab B opens now: its copy says 10.
+    catchUp(b, durable)
+    b.inv = { ...a.inv }
+    // Tab A mines 5; tab B, its copy never caught up, mines 3.
+    await as(a, {}, false)
+    mine(3, 5)
+    await as(b, {}, false)
+    expect(localFor(me).rec.devices[localFor(me).device].a['3']).toBe(10)
+    mine(3, 3)
+    await inventorySettled()
+    expect(totalsOf(inventoryRecordFor(me))['3']).toBe(18)
+    // B's bag shows A's gains too, once its change is stored.
+    expect(b.inv.counts[3]).toBe(18)
+    await syncInventory()
+    expect(totalsOf(onRelay()!.rec)['3']).toBe(18)
+    // One device entry, never two.
+    expect(Object.keys(onRelay()!.rec.devices)).toHaveLength(1)
+  })
+
+  it('a tab\'s first change and another\'s, with nothing stored yet, keep one device id', async () => {
+    const { a, b } = twoTabs()
+    await as(a, {}, false)
+    mine(3, 2)
+    await as(b, {}, false)
+    mine(4, 1)
+    await inventorySettled()
+    expect(Object.keys(inventoryRecordFor(me).devices)).toHaveLength(1)
+    expect(totalsOf(inventoryRecordFor(me))).toEqual({ 3: 2, 4: 1 })
+  })
+
+  it('one signer prompt per device: a tab whose copy is stale holds back when the other tab has just written', async () => {
+    vi.useFakeTimers({ now: 1_790_000_000_000 })
+    const { a, b, durable } = twoTabs()
+    catchUp(b, durable)
+    await as(a)
+    mine(3)
+    await vi.advanceTimersByTimeAsync(QUIET_MS + 100)
+    expect(a.signed).toBe(1)
+    // Tab B's copy is from before A's write: it thinks nothing was tried yet.
+    await as(b, {}, false)
+    mine(3)
+    await vi.advanceTimersByTimeAsync(QUIET_MS + 100)
+    expect(b.signed).toBe(0)
+    // Its write waits for the device's ten minutes, counted from A's try.
+    let waited = 0
+    while (b.signed < 1 && waited < WRITE_EVERY_MS) { await vi.advanceTimersByTimeAsync(1000); waited += 1000 }
+    expect(b.signed).toBe(1)
+    expect(waited).toBeGreaterThan(WRITE_EVERY_MS - 2 * QUIET_MS - 2000)
+    expect(totalsOf(onRelay()!.rec)['3']).toBe(2)
+  })
+
+  it('a hidden tab\'s page-hide write never clobbers the other tab\'s unsynced gains', async () => {
+    vi.useFakeTimers({ now: 1_790_000_000_000 })
+    const { a, b, durable } = twoTabs()
+    await as(a)
+    mine(3, 4)
+    await syncInventory()
+    catchUp(b, durable)
+    b.inv = { ...a.inv }
+    await vi.advanceTimersByTimeAsync(HIDE_FLOOR_MS + 1000)
+    // Tab B mines 3 and has not written; tab A, its copy older than that, mines 1 and goes hidden.
+    await as(b, {}, false)
+    mine(3, 3)
+    await as(a, {}, false)
+    mine(7)
+    const signed = a.signed
+    nudgeInventory('hide')
+    await vi.advanceTimersByTimeAsync(100)
+    expect(a.signed).toBe(signed + 1)
+    await syncInventory(false)
+    expect(totalsOf(onRelay()!.rec)).toEqual({ 3: 7, 7: 1 })
+    expect(totalsOf(inventoryRecordFor(me))).toEqual({ 3: 7, 7: 1 })
+    // B mines on after A's write: still dirty, and written in turn.
+    await as(b, {}, false)
+    mine(3)
+    expect(isDirty(me)).toBe(true)
+    await syncInventory()
+    expect(totalsOf(onRelay()!.rec)['3']).toBe(8)
+  })
+})
+
+describe('the sync record lost (review of #972)', () => {
+  it('sync 10, wipe only the sync record, reload, mine 1: the relay ends at 11, under the same device id', async () => {
+    const d = device()
+    d.inv = carriedInto(emptyInventory(), 3, 10)
+    await as(d)
+    await syncInventory()
+    const id = localFor(me).device
+    expect(totalsOf(onRelay()!.rec)['3']).toBe(10)
+    expect(d.inv.own?.d).toBe(id)
+    // Only the sync record goes; TERRAIN's row (d.inv) stays.
+    d.storage.m.delete(`onosendai:inventory:${me}`)
+    await as(d)
+    expect(d.inv.counts[3]).toBe(10)
+    mine(3)
+    expect(d.inv.counts[3]).toBe(11)
+    await syncInventory()
+    expect(totalsOf(onRelay()!.rec)['3']).toBe(11)
+    expect(Object.keys(onRelay()!.rec.devices)).toEqual([id])
+    expect(d.inv.counts[3]).toBe(11)
+  })
+
+  it('wiped before it ever reached the relay: the row\'s entry is written then, counted once', async () => {
+    const d = device()
+    d.live = false
+    d.inv = carriedInto(emptyInventory(), 3, 6)
+    await as(d)
+    d.storage.m.delete(`onosendai:inventory:${me}`)
+    d.live = true
+    await as(d)
+    await syncInventory()
+    expect(totalsOf(onRelay()!.rec)['3']).toBe(6)
+  })
+
+  it('kvStore blind: nothing migrated, nothing written to the relay; a row already counted comes back as it was', async () => {
+    const d = device()
+    d.blind = true
+    d.inv = carriedInto(emptyInventory(), 3, 5)
+    await as(d)
+    expect(totalsOf(inventoryRecordFor(me))['3']).toBeUndefined()
+    expect(d.inv.counts[3]).toBe(5)
+    await syncInventory()
+    expect(d.signed).toBe(0)
+    // A device that synced before, loading blind (its record unseen): restored from the row, never counted again.
+    const e = device()
+    e.inv = carriedInto(emptyInventory(), 4, 3)
+    await as(e)
+    await syncInventory()
+    const row = e.inv
+    const blind = device()
+    blind.blind = true
+    blind.inv = row
+    await as(blind)
+    expect(totalsOf(inventoryRecordFor(me))).toEqual({ 4: 3 })
+    expect(blind.inv.counts[4]).toBe(3)
+    await syncInventory()
+    expect(blind.signed).toBe(0)
+  })
+})
+
+describe('after a read-back', () => {
+  it('a relay copy behind on this device\'s own entry marks it dirty again, and the next write brings it back', async () => {
+    const d = device()
+    await as(d)
+    mine(3, 5)
+    await syncInventory()
+    expect(isDirty(me)).toBe(false)
+    const id = localFor(me).device
+    // A newer copy on the relay that holds less of this device (written over by another device's stale write).
+    const rk = newRecordKey()
+    const wrapped = nip44.encrypt(bytesToHex(rk), selfKey)
+    const older: InventoryRecord = { devices: { [id]: { a: { 3: 2 }, s: {}, u: 1 } }, tools: {} }
+    const ev = finalizeEvent(recordTemplate(sealRecord(encodeRecord(older), rk, wrapped), onRelay()!.ev.created_at + 5), sk) as unknown as NostrEvent
+    await relay.publish(ev)
+    await syncInventory(false)
+    expect(isDirty(me)).toBe(true)
+    await syncInventory()
+    expect(totalsOf(onRelay()!.rec)['3']).toBe(5)
+  })
+})
+
+describe('a device folded into retired by another', () => {
+  it('takes a new id on its next read; every total stays the same, and its next gains count under the new id', async () => {
+    const d = device()
+    await as(d)
+    mine(3, 5)
+    await syncInventory()
+    const id = localFor(me).device
+    const rk = newRecordKey()
+    const wrapped = nip44.encrypt(bytesToHex(rk), selfKey)
+    const folded: InventoryRecord = { devices: {}, tools: {}, retired: { ids: { [id]: 1 }, a: { 3: 5 }, s: {} } }
+    await relay.publish(finalizeEvent(recordTemplate(sealRecord(encodeRecord(folded), rk, wrapped), onRelay()!.ev.created_at + 5), sk) as unknown as NostrEvent)
+    await syncInventory(false)
+    expect(localFor(me).device).not.toBe(id)
+    expect(totalsOf(inventoryRecordFor(me))['3']).toBe(5)
+    mine(3, 2)
+    await syncInventory()
+    expect(totalsOf(onRelay()!.rec)['3']).toBe(7)
+    expect(d.inv.counts[3]).toBe(7)
   })
 })

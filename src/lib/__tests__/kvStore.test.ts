@@ -16,7 +16,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
-  hydrateKv, kvFlush, kvGet, kvKeys, kvMode, kvRemove, kvSaved, kvSet, kvSuperseded, KV_DB, moveOne, MOVED_MARK, movesToKv, resetKvForTests,
+  hydrateKv, kvFlush, kvGet, kvKeys, kvMode, kvRemove, kvSaved, kvSet, kvSuperseded, kvUpdate, KV_DB, moveOne, MOVED_MARK, movesToKv, resetKvForTests,
 } from '../kvStore'
 
 /** A localStorage with a quota, in characters, as a phone's is: a write past it throws. */
@@ -358,6 +358,26 @@ describe('reading and writing', () => {
     resetKvForTests()
     await hydrateKv()
     expect(kvGet('onosendai:seen')).toBeNull()
+  })
+
+  it('kvUpdate changes the record as stored, never this tab\'s stale copy: another tab\'s write is kept (review of #972)', async () => {
+    await hydrateKv()
+    const key = `onosendai:inventory:${ME}`
+    await kvUpdate(key, () => '10')
+    expect(kvGet(key)).toBe('10')
+    // Another tab writes 15 straight to the database; this tab's copy still says 10.
+    const d = await new Promise<IDBDatabase>((resolve, reject) => { const r = indexedDB.open(KV_DB); r.onsuccess = () => resolve(r.result); r.onerror = () => reject(r.error) })
+    await new Promise<void>((resolve, reject) => { const tx = d.transaction(['entries'], 'readwrite'); tx.objectStore('entries').put({ key, value: '15', at: Date.now() }); tx.oncomplete = () => resolve(); tx.onerror = () => reject(tx.error) })
+    d.close()
+    expect(kvGet(key)).toBe('10')
+    expect(await kvUpdate(key, (v) => String(Number(v) + 3))).toBe('18')
+    expect(kvGet(key)).toBe('18')
+    // Many at once from this tab: each from the one before.
+    await Promise.all(Array.from({ length: 5 }, () => kvUpdate(key, (v) => String(Number(v) + 1))))
+    expect(kvGet(key)).toBe('23')
+    resetKvForTests()
+    await hydrateKv()
+    expect(kvGet(key)).toBe('23')
   })
 
   it('lists records by prefix in either store', async () => {

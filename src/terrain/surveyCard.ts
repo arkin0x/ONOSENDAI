@@ -19,7 +19,7 @@ import { groundFor, groundRevisionFor, terrainSession, useTerrain } from '../sto
 import { explicitCells } from '../store/terrainShare'
 import { firstSurveyedAt } from '../store/terrainShare'
 import { useTutorial } from '../store/useTutorial'
-import { assayBlocks, chunkAssay, chunkMined, neighbourBlocks, surveyCard, type SurveyCardData } from '../lib/terrain/assay'
+import { chunkAssay, chunkMined, surveyCard, type SurveyCardData } from '../lib/terrain/assay'
 import { NEIGHBOURS } from '../lib/terrain/world'
 import type { GroundRevision } from '../lib/terrain/groundRevision'
 
@@ -67,27 +67,25 @@ export interface CardFor { card: SurveyCardData; at: number | null; revision: Gr
  * The card for a loaded chunk, at the ground revision you see it at
  * (store/useTerrain.ts groundRevisionFor), its ground and that ground's type
  * and K read through groundFor, so the card never counts a revision the chunk
- * is not. What it counts is what stands: the chunk's blocks with every layer
- * merged over them (kept per version: lib/terrain/assay.ts chunkAssay) when
- * they are drawn over that same revision, as they are once built; in the
- * moment before a chunk is built again at another revision, that revision's
- * ground itself. Null when the chunk is not loaded or has no blocks.
+ * is not. LEFT is what stands now, the view the scene draws: the chunk's
+ * blocks with every layer merged over them, your own at its revision too
+ * (kept per version: lib/terrain/assay.ts chunkAssay), even where your blocks
+ * stand on another revision's ground than the one shown (a home whose owner
+ * surveyed at the other revision), so it drops as you mine there. Null when
+ * the chunk is not loaded or has no blocks.
  *
- * What you mined is your own blocks against that same ground at that same
- * revision (lib/terrain/assay.ts chunkMined), so it is what mining there gave
- * you (#958). `keep` names kinds to list even at 0 (the rows the open card has
- * shown already).
+ * What you mined is your own blocks against the ground shown at its revision
+ * (lib/terrain/assay.ts chunkMined), so it is what mining there gave you
+ * (#958), and LEFT and MINED agree with the screen. `keep` names kinds to list
+ * even at 0 (the rows the open card has shown already).
  */
 export async function cardFor(key: string, keep?: Iterable<number>): Promise<CardFor | null> {
   const s = terrainSession
   const slot = s?.world.slotByKey(key)
   if (!s || !slot?.blocks) return null
-  const revision = groundRevisionFor(key, s)
   const ground = await groundFor(key)
   if (terrainSession !== s || !slot.blocks) return null
-  const assay = (slot.revision ?? 2) === revision && ground.revision === revision
-    ? chunkAssay(s.world, slot)
-    : assayBlocks(ground.blocks, neighbourBlocks(s.world, slot))
+  const assay = chunkAssay(s.world, slot)
   if (!assay) return null
   // Your explicit cells matter only where your blocks stand on another revision's ground than the one shown.
   const explicit = (slot.revision ?? 2) !== ground.revision ? explicitCells(key) : null

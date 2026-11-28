@@ -100,11 +100,6 @@ export function assayBlocks(blocks: Uint8Array, around: ReadonlyArray<Uint8Array
   return { counts, seen, strata }
 }
 
-/** The six neighbours' blocks of a loaded chunk, in NEIGHBOURS order: null where none is held. */
-export function neighbourBlocks(world: TerrainWorld, slot: ChunkSlot): Array<Uint8Array | null> {
-  return NEIGHBOURS.map(([dx, dy, dz]) => world.slotAt(slot.off[0] + dx, slot.off[1] + dy, slot.off[2] + dz)?.blocks ?? null)
-}
-
 /**
  * Kept passes, by the chunk's own slot (never its key: a chunk dropped and
  * loaded again is a new slot whose versions start over, review of #956): the

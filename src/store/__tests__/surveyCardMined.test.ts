@@ -5,7 +5,9 @@
  * placing and a Quarry Charge's blast write your own blocks, and the card
  * (terrain/surveyCard.ts cardFor) counts what you took out of the chunk's
  * ground at the revision it shows. A block you placed and mined again is not
- * mined from the ground; every block a blast took is.
+ * mined from the ground; every block a blast took is. In a home whose owner
+ * surveyed at the other revision, LEFT is still what stands and drops as you
+ * mine, and MINED counts the shown ground's kind.
  */
 
 import 'fake-indexeddb/auto'
@@ -21,6 +23,13 @@ if (typeof localStorage === 'undefined') {
   }
 }
 
+// A home whose owner surveyed at another revision: the base you are shown there (store/terrainShare.ts shownRevision).
+const home = vi.hoisted(() => ({ key: null as string | null, revision: 2 as 2 | 3 }))
+vi.mock('../terrainShare', async (orig) => {
+  const real = await orig<typeof import('../terrainShare')>()
+  return { ...real, shownRevision: (key: string) => (key === home.key ? home.revision : real.shownRevision(key)) }
+})
+
 vi.mock('../../lib/relay', () => ({
   publishMany: vi.fn(async () => ({ ok: true })),
   publish: vi.fn(async () => ({ ok: true })),
@@ -30,7 +39,8 @@ vi.mock('../../lib/relay', () => ({
 
 import { useCyberspace } from '../useCyberspace'
 import { useWalk } from '../useWalk'
-import { groundFor, setTerrainSession, terrainSession, useTerrain } from '../useTerrain'
+import { groundFor, groundRevisionFor, setTerrainSession, terrainSession, useTerrain } from '../useTerrain'
+import { generate } from '../../lib/terrain/generate'
 import { chunkKey, chunkOf } from '../../lib/terrain/coords'
 import { EMPTY } from '../../lib/terrain/blocks'
 import { forgetAssays } from '../../lib/terrain/assay'
@@ -70,6 +80,7 @@ beforeEach(async () => {
   useTerrain.setState({ active: false, loading: false })
   useCyberspace.setState({ walking: false })
   forgetAssays()
+  home.key = null
   run++
   useWalk.setState({ gravity: false })
   as(run.toString(16).padStart(64, 'd'))
@@ -123,5 +134,41 @@ describe('MINED through the real store', () => {
     expect(minedOf(card)).toEqual(want)
     expect(card.card.minedTotal).toBe(1 + taken.length)
     expect(card.card.total).toBe(left0 - 1 - taken.length)
+  })
+})
+
+describe('in a home surveyed at the other revision', () => {
+  it('LEFT is what stands and drops as you mine; MINED counts the shown ground\'s kind; both agree with the screen', async () => {
+    const key = await openSurveyed()
+    const s = terrainSession!
+    const slot = s.world.slotByKey(key)!
+    const yours = slot.revision ?? 2
+    const theirs = yours === 3 ? 2 : 3
+    home.key = key
+    home.revision = theirs
+    expect(groundRevisionFor(key)).toBe(theirs)
+    const shown = generate(slot.base, null, theirs).blocks
+    const standing = (): number => slot.blocks!.reduce((n, id) => n + (id ? 1 : 0), 0)
+
+    const before = (await cardFor(key))!
+    expect(before.revision).toBe(theirs)
+    expect(before.card.total).toBe(standing())
+    expect(before.card.minedTotal).toBe(0)
+
+    // A ground cell that holds a block at both revisions, in reach.
+    let g: [number, number, number] | null = null
+    for (let x = 4; x < 28 && !g; x++) for (let z = 4; z < 28 && !g; z++) {
+      const c = groundAt(x, z)
+      if (shown[s.world.locate(c[0], c[1], c[2]).cell] !== EMPTY) g = c
+    }
+    expect(g).not.toBeNull()
+    const cell = s.world.locate(g![0], g![1], g![2]).cell
+    expect(T().mine({ cell: g!, normal: [0, 1, 0], distance: 1 })).toBe(true)
+
+    const after = (await cardFor(key))!
+    expect(after.card.total).toBe(before.card.total - 1)
+    expect(after.card.total).toBe(standing())
+    expect(minedOf(after)).toEqual(new Map([[shown[cell], 1]]))
+    expect(after.card.minedTotal).toBe(1)
   })
 })

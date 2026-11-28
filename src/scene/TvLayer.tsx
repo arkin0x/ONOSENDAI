@@ -40,6 +40,9 @@ import { SpawnMarker } from './SpawnMarker'
 import { TvJump } from './TvJump'
 import { TvTrail } from './TvTrail'
 import { TvFinds } from './TvFinds'
+import { TvTerrain } from './TvTerrain'
+import { terrainOn } from '../store/useTvTerrain'
+import { TERRAIN_ORBIT_SPEED, terrainCameraDirection } from './tvTerrainCamera'
 
 const REACH = GRID_RADIUS * 8
 /** The orbit's turn, radians a second: a full circle in a little under two minutes. */
@@ -291,8 +294,11 @@ function TvCamera({ axes }: { axes: ViewAxes }): null {
     // A shot that follows straight on keeps its camera and eases to any change.
     const kc = 1 - Math.exp(-dt / TV_CAMERA_TAU)
     dist.current = (dist.current ?? wantDist) + (wantDist - (dist.current ?? wantDist)) * kc
-    theta.current += dt * TV_ORBIT_SPEED * tv.framing.spin
-    framingDirection(tv.framing, theta.current, sunDir, want)
+    // A TERRAIN shot has a camera of its own (scene/tvTerrainCamera.ts): the seam the chase camera plugs into.
+    const terrain = terrainOn(tv) ? tv.terrain : null
+    theta.current += dt * (terrain ? TERRAIN_ORBIT_SPEED : TV_ORBIT_SPEED) * tv.framing.spin
+    if (terrain) terrainCameraDirection(terrain, tv.framing, theta.current, want)
+    else framingDirection(tv.framing, theta.current, sunDir, want)
     if (!look.current) look.current = want.clone()
     else look.current.lerp(want, kc).normalize()
     // A bag's box or a ride's two blocks on a portrait screen: stand back so
@@ -353,6 +359,8 @@ export function TvLayer({ axes }: { axes: ViewAxes }): JSX.Element {
     <>
       <TvCamera axes={axes} />
       <TvBoxes />
+      {/* TERRAIN's blocks round the avatar of a TERRAIN shot, as of the tape's time (store/useTvTerrain.ts). */}
+      <TvTerrain axes={axes} />
       {/* What TV's own scan opened where its avatars stood (lib/tv/scan.ts). */}
       <TvFinds axes={axes} />
       {/* Each avatar's spawn point, where it is in range (SpawnMarker culls

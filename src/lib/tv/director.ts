@@ -81,6 +81,12 @@ export interface Beat {
    * shot of its own, from where that stretch left the avatar.
    */
   afterHidden?: true
+  /**
+   * A TERRAIN move (lib/tv/terrainShot.ts): a small step into a chunk with a
+   * counted survey at or before its tape time. Set by store/useTvTerrain.ts
+   * once the TV terrain reader has the chunk, before the shot plays.
+   */
+  terrain?: true
 }
 
 /**

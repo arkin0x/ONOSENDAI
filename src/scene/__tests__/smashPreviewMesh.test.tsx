@@ -14,9 +14,11 @@ let reducedMotion = false
 import { createElement } from 'react'
 import { Color, type Mesh, type MeshBasicMaterial } from 'three'
 import { r3fRoot, type R3fRoot } from '../../test/r3fRoot'
-import { SmashPreview } from '../SmashPreview'
-import { setTerrainSession, useTerrain, type TerrainSession } from '../../store/useTerrain'
+import { SmashPreview, GLOW_FADE_IN_MS } from '../SmashPreview'
+import { headNow, setTerrainSession, useTerrain, type TerrainSession } from '../../store/useTerrain'
 import { useCyberspace } from '../../store/useCyberspace'
+import { terrainCursor } from '../TerrainLayer'
+import { COMPILER_ID } from '../../lib/terrain/terrainDb'
 import { useSmashHold } from '../../terrain/smashHold'
 import { FERROVEIN, GLOWCORE, RUSTBAND } from '../../lib/blueprint/recipes'
 import { PREVIEW_COMPILES, PREVIEW_DEBOUNCE_MS, PULSE_STEADY, useSmashPreview } from '../../lib/blueprint/smashPreview'
@@ -26,7 +28,7 @@ let reads = 0
 const field = {
   plane: useCyberspace.getState().plane,
   version: 1,
-  world: { blockCs: (x: number, y: number, z: number) => { reads++; return HAMMER.get(`${x},${y},${z}`) ?? 0 } },
+  world: { origin: headNow(), blockCs: (x: number, y: number, z: number) => { reads++; return HAMMER.get(`${x},${y},${z}`) ?? 0 } },
 } as unknown as TerrainSession
 
 const rest = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
@@ -103,5 +105,44 @@ describe('the smash preview in the scene', () => {
     await root.frame()
     expect(preview().visible).toBe(false)
     expect(useSmashPreview.getState().state).toBeNull()
+  })
+
+  const aimWithCompiler = (): void => {
+    const inv = useTerrain.getState().inventory
+    useTerrain.setState({ inventory: { ...inv, hotbar: [COMPILER_ID, ...inv.hotbar.slice(1)], slot: 0 } })
+    terrainCursor.hit = { cell: [1, 0, 0] } as typeof terrainCursor.hit
+  }
+
+  it('aiming with the Compiler: the label shows, no glow; the hold starts: glow fades in; release or cancel: gone', async () => {
+    useSmashHold.setState({ since: null, ms: 0, target: null, bare: false, swingAt: null })
+    aimWithCompiler()
+    root = await r3fRoot()
+    await root.render(createElement(SmashPreview))
+    await root.frame()
+    await rest(PREVIEW_DEBOUNCE_MS + 20)
+    await root.frame()
+    expect(useSmashPreview.getState()).toEqual({ state: 'compiles', count: 5, cause: null })
+    expect(preview().visible).toBe(false)
+    expect(preview().geometry.getAttribute('position')).toBeUndefined()
+    // The hold starts: the glow comes in.
+    useSmashHold.setState({ since: performance.now(), ms: 60_000, target: [1, 0, 0], bare: false })
+    await root.frame()
+    expect(preview().visible).toBe(true)
+    await rest(GLOW_FADE_IN_MS + 50)
+    await root.frame(); await root.frame()
+    expect((preview().material as MeshBasicMaterial).opacity).toBeGreaterThan(0.1)
+    // Released: the glow is gone, the label stays.
+    useSmashHold.setState({ since: null, target: null })
+    await root.frame()
+    expect(preview().visible).toBe(false)
+    expect(useSmashPreview.getState().state).toBe('compiles')
+    // A second hold fades in again from nothing, then a cancel (the same reset) hides it.
+    useSmashHold.setState({ since: performance.now(), ms: 60_000, target: [1, 0, 0], bare: false })
+    await root.frame()
+    expect((preview().material as MeshBasicMaterial).opacity).toBeLessThan(0.1)
+    useSmashHold.setState({ since: null, ms: 0, target: null })
+    await root.frame()
+    expect(preview().visible).toBe(false)
+    terrainCursor.hit = null
   })
 })

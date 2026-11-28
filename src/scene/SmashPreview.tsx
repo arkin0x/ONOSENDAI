@@ -9,8 +9,10 @@
  * faces: one mesh and one draw for the whole set, never one per cell. Depth
  * tested, so blocks in front hide it, and it never blooms.
  *
- * Shown with the Compiler in hand while you aim at a block in reach, and with
- * either hand while a SMASH hold is under way (at the hold's own block). The
+ * The glow shows only while a SMASH hold is under way, with either hand (at
+ * the hold's own block); it fades in quickly and is gone on release, cancel or
+ * the swing. While aiming at a block in reach with the Compiler in hand only
+ * the label (COMPILES / BREAKS N) shows, and the faces are not built. The
  * set is worked out again only when the aimed cell, the hand or the blocks
  * change, once the aim has rested a moment (PreviewTracker); a frame only
  * moves the pulse, which quickens with the hold's charge, and stays still
@@ -84,6 +86,9 @@ function holdCharge(now: number): number {
   return h.since === null || h.ms <= 0 ? 0 : Math.min(1, (now - h.since) / h.ms)
 }
 
+/** How long the glow takes to fade in once the hold starts, in milliseconds (none with reduced motion). */
+export const GLOW_FADE_IN_MS = 150
+
 export function SmashPreview(): JSX.Element {
   const reduced = useReducedMotion()
   const calm = useRef(reduced)
@@ -93,6 +98,7 @@ export function SmashPreview(): JSX.Element {
   const geometry = useRef<BufferGeometry | null>(null)
   const builtFor = useRef<Preview | null>(null)
   const phase = useRef(0)
+  const fade = useRef(-1) // when this hold's glow began, or -1 with none
   const aim = useRef<PreviewAim>({ field: {}, x: 0, y: 0, z: 0, bare: false, version: 0 })
   const tracker = useMemo(() => new PreviewTracker((a) => {
     const s = a.field as TerrainSession
@@ -110,7 +116,9 @@ export function SmashPreview(): JSX.Element {
     const now = performance.now()
     const shown = tracker.step(previewAim(aim.current, now), now)
     showPreview(shown)
-    if (!shown) { m.visible = false; return }
+    // The glow waits for the hold: aiming shows only the label (the HUD line above).
+    const holding = useSmashHold.getState().since !== null
+    if (!shown || !holding) { fade.current = -1; m.visible = false; return }
     if (builtFor.current !== shown) {
       // A new set: its faces are built once, here, and the old one freed.
       builtFor.current = shown
@@ -123,7 +131,9 @@ export function SmashPreview(): JSX.Element {
       material.color.set(previewColor(shown.state, previewCause(shown)))
     }
     phase.current = advancePhase(phase.current, Math.min(delta, 0.1) * 1000, holdCharge(now))
-    material.opacity = pulseOpacity(phase.current, calm.current)
+    if (fade.current < 0) fade.current = now
+    const level = calm.current ? 1 : Math.min(1, (now - fade.current) / GLOW_FADE_IN_MS)
+    material.opacity = pulseOpacity(phase.current, calm.current) * level
     m.visible = true
   })
   return <mesh ref={mesh} name="terrain-smash-preview" material={material} renderOrder={4} visible={false} frustumCulled={false} />

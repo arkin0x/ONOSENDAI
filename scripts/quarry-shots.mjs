@@ -2,11 +2,13 @@
  * quarry-shots.mjs: the Quarry Charge on screen (DECK-0010 §8.6), at a phone
  * (390x844) and a desktop (1440x900), with a short video of each: its
  * blueprint in BUILD > BLUEPRINT with the orange item mark, the charges in the
- * hotbar (with their count, and at 0 greyed out), the fuse blinking and
+ * hotbar (with their count, and at 0 greyed out) and the bag, the fuse blinking and
  * counting down, the blast, the floating drops, and a pickup.
  *
  * Nothing reaches a relay: every non-localhost request is refused and every
  * socket is answered here; LOCAL is set before load.
+ *
+ * NEAR=1 places the charge as near as it will go (3 blocks), for a close look at it.
  *
  * Usage: start the dev server (npx vite --port 5297), then
  *   node scripts/quarry-shots.mjs [http://localhost:5297/] [out dir]
@@ -110,10 +112,16 @@ for (const size of SIZES) {
   })
   await page.waitForTimeout(1200)
   await shot('2-hotbar-7')
+  // The bag, its Quarry Charge tile among the blocks.
+  await page.evaluate(async () => { (await import('/src/store/useTerrain.ts')).useTerrain.getState().setSheet(true) })
+  await page.waitForTimeout(900)
+  await shot('2-bag')
+  await page.evaluate(async () => { (await import('/src/store/useTerrain.ts')).useTerrain.getState().setSheet(false) })
+  await page.waitForTimeout(600)
   console.log(`${size.name}: hotbar`, await page.evaluate(async () => JSON.stringify((await import('/src/store/useTerrain.ts')).useTerrain.getState().inventory)), await page.evaluate(() => document.querySelectorAll('.terrain-hotbar > button')[1]?.outerHTML.slice(0, 300)))
 
   // 4. PLACE: on the face at the cross, else in the ground below the look.
-  const placed = await page.evaluate(async () => {
+  const placed = await page.evaluate(async (DISTANCES) => {
     const t = await import('/src/store/useTerrain.ts')
     const { terrainCursor } = await import('/src/scene/TerrainLayer.tsx')
     void terrainCursor
@@ -126,7 +134,7 @@ for (const size of SIZES) {
     const len = Math.hypot(f.x, f.z) || 1
     const fx = len > 0.05 ? f.x / len : 1, fz = len > 0.05 ? f.z / len : 0
     const why = []
-    for (const [dx, dz] of [[fx, fz], [1, 0], [0, 1], [-1, 0], [0, -1]]) for (const d of [5, 4, 6, 3, 8]) {
+    for (const [dx, dz] of [[fx, fz], [1, 0], [0, 1], [-1, 0], [0, -1]]) for (const d of DISTANCES) {
       const x = Math.round(w[0] + dx * d), z = Math.round(w[2] + dz * d)
       for (let y = w[1] + 4; y > w[1] - 24; y--) {
         if (solid(s.world.blockCs(x, y, z)) && !solid(s.world.blockCs(x, y + 1, z))) {
@@ -137,7 +145,7 @@ for (const size of SIZES) {
       }
     }
     return `nothing: ${[...new Set(why)].join(' | ')} (walker ${w.join(',')})`
-  })
+  }, process.env.NEAR ? [3, 4, 5, 6, 8] : [5, 4, 6, 3, 8])
   console.log(`${size.name}: placed ${placed}`)
   if (placed !== 'face' && placed !== 'air' && placed !== 'ahead') problems.push(`${size.name}: the charge was not placed (${placed})`)
   await page.waitForTimeout(500)

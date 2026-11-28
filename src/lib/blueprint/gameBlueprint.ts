@@ -68,6 +68,12 @@ export interface GameGift {
   types: readonly number[]
   found: string
   draw: () => Promise<Pictures>
+  /**
+   * When its pictures' look was made, as its record's created_at (unix
+   * seconds): a card whose record is older shows an older look, and is drawn
+   * again (redrawIfStale). The record's tags stay the spec's own.
+   */
+  lookAt?: number
 }
 
 /** The pictures of a model, as a render (empty where there is no canvas). */
@@ -88,7 +94,8 @@ export const COMPILER_GIFT: GameGift = {
 export const QUARRY_GIFT: GameGift = {
   cardId: QUARRY_CARD_ID, title: 'The Quarry Charge', text: 'Seven Quarry Charges: place one and it clears the blocks round it.',
   recipe: QUARRY_CHARGE_RECIPE, keyHex: QUARRY_KEY_HEX, lookup: QUARRY_LOOKUP, prize: { type: 'tool', tool: 'quarry-charge', count: QUARRY_CHARGE_COUNT },
-  types: QUARRY_TYPES, found: QUARRY_FOUND,
+  // The Tri-Pack (owner, 2026-11-28); the box of #952 was drawn at 1_795_000_000.
+  types: QUARRY_TYPES, found: QUARRY_FOUND, lookAt: 1_795_000_001,
   draw: () => drawModel(async () => (await import('./quarryModel')).quarryModel()),
 }
 
@@ -106,8 +113,13 @@ export async function giftRecord(gift: GameGift, views: Pictures): Promise<Recor
       : { reveal: 'description' as const, text: gift.text, name: gift.title },
   }
   const sealed = await sealPrize(hexToBytes(gift.keyHex), gift.prize)
-  const t = recordTemplate({ lookup: gift.lookup, sheet, sealed, title: gift.title, createdAt: 1_795_000_000 })
+  const t = recordTemplate({ lookup: gift.lookup, sheet, sealed, title: gift.title, createdAt: gift.lookAt ?? 1_795_000_000 })
   return { ...t, id: gift.cardId, pubkey: GAME_MAKER, sig: '' }
+}
+
+/** Whether a game card's record shows an older look of its prize than the gift's own (lookAt). */
+export function staleLook(gift: Pick<GameGift, 'lookAt'>, record: { created_at: number }): boolean {
+  return !!gift.lookAt && record.created_at < gift.lookAt
 }
 
 /** The Compiler's blueprint record. */
@@ -129,9 +141,11 @@ export async function grantGiftIfDue(gift: GameGift, owner: string, counts: Read
   const bp = useBlueprints.getState()
   const busy = `${gift.cardId}|${owner}`
   if (!owner || bp.owner !== owner || bp.loadedFor !== owner || granting.has(busy)) return false
-  if (!holdsTypeOf(gift, counts)) return false
   const rowKey = `${owner}/${gift.cardId}`
-  if (bp.cards.some((c) => c.rowKey === rowKey)) return false
+  const had = bp.cards.find((c) => c.rowKey === rowKey)
+  // Already granted: drawn again if its pictures show an older look, and never granted twice.
+  if (had) { if (staleLook(gift, had.record)) void redrawIfStale(gift, owner, draw); return false }
+  if (!holdsTypeOf(gift, counts)) return false
   granting.add(busy)
   try {
     const record = await giftRecord(gift, await draw())
@@ -140,6 +154,30 @@ export async function grantGiftIfDue(gift: GameGift, owner: string, counts: Read
     if (now.owner !== owner || now.cards.some((c) => c.rowKey === rowKey)) return false
     now.addGame({ lookup: gift.lookup, record: record as NostrEvent, secret: { cells: toBase64(bytesFromCells(gift.recipe.cells)), key: gift.keyHex, size: [...gift.recipe.size] as [number, number, number] } })
     try { useToast.getState().show({ label: 'BLUEPRINT', meta: gift.found, mark: 'build' }) } catch { /* no toast here */ }
+    return true
+  } finally {
+    granting.delete(busy)
+  }
+}
+
+/**
+ * A game card already granted, drawn with an older look of its prize (the
+ * Quarry Charge's box, before the Tri-Pack): its record is made again with
+ * the pictures of the look it has now, once, quietly. Returns whether it was.
+ */
+export async function redrawIfStale(gift: GameGift, owner: string, draw: () => Promise<Pictures> = gift.draw): Promise<boolean> {
+  const rowKey = `${owner}/${gift.cardId}`
+  const busy = `${gift.cardId}|${owner}|redraw`
+  const had = useBlueprints.getState().cards.find((c) => c.rowKey === rowKey)
+  if (!had || !staleLook(gift, had.record) || granting.has(busy)) return false
+  granting.add(busy)
+  try {
+    const views = await draw()
+    // No pictures (no canvas, WebGL lost): the card keeps the ones it has, and is tried again another time (review of #962).
+    if (!Object.keys(views).length) return false
+    const record = await giftRecord(gift, views)
+    if (useBlueprints.getState().owner !== owner) return false
+    useBlueprints.getState().redrawGame(rowKey, record as NostrEvent)
     return true
   } finally {
     granting.delete(busy)

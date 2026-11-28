@@ -43,7 +43,7 @@ import {
 } from '../../lib/blueprint/format'
 import { takeToy } from '../../lib/blueprint/smashRun'
 import { GAME_MAKER, gameNoDeploy, isGameCard, isQuarryPrize, toolWhat } from '../../lib/blueprint/gameCard'
-import { quarryModel } from '../../lib/blueprint/quarryModel'
+import { quarryModelNow, useQuarryModel } from '../../lib/blueprint/quarryModel'
 import { ITEM_ORANGE, isItemBlueprint } from '../../lib/blueprint/itemMark'
 import { startPlaceBlueprint } from '../../lib/blueprint/place'
 import { useBlueprints } from '../../store/useBlueprints'
@@ -291,7 +291,7 @@ export function BlueprintRow({ card, views, fresh = false, focused = false, onAr
 
 /** A prize's model, when it is a shard. */
 function prizeModel(toy: ToyRow): ReturnType<typeof fromPayload> | null {
-  if (isQuarryPrize(toy.prize)) return quarryModel()
+  if (isQuarryPrize(toy.prize)) return quarryModelNow()
   if (toy.prize.type !== 'sno') return null
   const s = fromPayload(toy.prize.payload, toy.rowKey)
   return s ? keepOwnTable(s, toy.maker) : null
@@ -299,7 +299,9 @@ function prizeModel(toy: ToyRow): ReturnType<typeof fromPayload> | null {
 
 /** A prize waiting to be taken: its picture, name, maker, and TAKE. */
 export function PrizeRow({ toy }: { toy: ToyRow }): JSX.Element {
-  const shard = useMemo(() => prizeModel(toy), [toy])
+  // The Quarry Charge's model is read on first use: drawn once it is in (quarryModel.ts).
+  const quarry = useQuarryModel(isQuarryPrize(toy.prize))
+  const shard = useMemo(() => prizeModel(toy), [toy, quarry])
   const [refusal, setRefusal] = useState<string | null>(null)
   const tool = toy.prize.type === 'tool'
   return (

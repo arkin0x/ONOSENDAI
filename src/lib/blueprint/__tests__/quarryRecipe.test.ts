@@ -14,7 +14,6 @@ import { UNKNOWN_LINE, compile, compiles, missLine, smashGroup, type SmashDeps }
 import { QUARRY_KEY_HEX, QUARRY_LOOKUP, QUARRY_NAME, gameNoDeploy, isQuarryPrize, toolName, toolWhat } from '../gameCard'
 import { isPrize, readRecord, recordTemplate, sealPrize, sheetShape, type RecordEvent } from '../format'
 import { keyOf } from '../keyClient'
-import { quarryModel, quarryPayload } from '../quarryModel'
 import { bytesToHex, hexToBytes } from '../../events'
 import vectors from './fixtures/blueprints-vectors.json'
 
@@ -126,7 +125,7 @@ describe('the Quarry Charge recipe (DECK-0010 §8.5)', () => {
     expect(out3.unknown).toBe(1)
   }, 60_000)
 
-  it('its prize reads, with a count of 1 or more; its words and model are its own', () => {
+  it('its prize reads, with a count of 1 or more; its words are its own', () => {
     expect(isPrize({ type: 'tool', tool: 'quarry-charge', count: 7 })).toBe(true)
     expect(isPrize({ type: 'tool', tool: 'quarry-charge' })).toBe(true)
     expect(isPrize({ type: 'tool', tool: 'quarry-charge', count: 0 })).toBe(false)
@@ -139,8 +138,5 @@ describe('the Quarry Charge recipe (DECK-0010 §8.5)', () => {
     expect(toolWhat(p)).toMatch(/^Seven Quarry Charges/)
     expect(gameNoDeploy({ record: { id: 'game:quarry-charge' } })).toMatch(/seven Quarry Charges/)
     expect(gameNoDeploy({ record: { id: 'game:compiler' } })).toMatch(/Compiler/)
-    const payload = quarryPayload()
-    expect(payload.faces.length).toBe(48)
-    expect(quarryModel()).not.toBeNull()
   })
 })

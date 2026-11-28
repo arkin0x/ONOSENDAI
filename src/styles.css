@@ -16925,7 +16925,15 @@ div.bpt-tile__hit { cursor: default; }
   height: 30px;
   overflow: hidden;
   border-radius: 9px;
+  /* A slide across the core picks its slices; the card scrolls everywhere else (SurveyCard.tsx Core). */
+  touch-action: none;
+  cursor: crosshair;
+  outline: none;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  -webkit-user-select: none;
 }
+.survey-card__core:focus-visible { box-shadow: 0 0 0 1px var(--sv-amber), 0 0 0 3px rgba(255, 181, 71, 0.22); }
 /* The core's roundness: lit from above, shaded under. */
 .survey-card__core::after {
   content: "";
@@ -16943,12 +16951,38 @@ div.bpt-tile__hit { cursor: default; }
 }
 /* A layer of mostly open space: a core's lost length, hatched. */
 .survey-band.is-open { background: repeating-linear-gradient(135deg, rgba(211, 154, 60, 0.22) 0 1px, transparent 1px 5px), #0a0704; }
-.survey-card__tray-caption {
-  display: block;
+/* The picked slice: lifted out of the core's shading, brighter, in a thin bright ring. */
+.survey-band.is-active {
+  position: relative;
+  z-index: 1;
+  opacity: 1;
+  filter: brightness(1.3) saturate(1.1);
+  box-shadow: inset 0 0 0 1px #ffe2a8, 0 0 8px rgba(255, 181, 71, 0.55);
+}
+/* The readout above the core: the caption, or the picked slice's swatch and line. One fixed height whatever it says,
+   so nothing below it moves. */
+.survey-card__readout {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 14px;
   margin: 0 0 5px;
+  overflow: hidden;
   font-size: 9px;
+  line-height: 14px;
   letter-spacing: 0.06em;
+  white-space: nowrap;
   color: var(--sv-ochre);
+}
+.survey-card__readout.is-active { font-size: 10px; font-weight: 700; letter-spacing: 0.08em; color: var(--sv-amber); }
+.survey-card__readout-line { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.survey-card__readout .terrain-swatch { clip-path: polygon(3px 0, 100% 0, 100% calc(100% - 3px), calc(100% - 3px) 100%, 0 100%, 0 3px); }
+.survey-card__readout-open {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  background: repeating-linear-gradient(135deg, rgba(211, 154, 60, 0.6) 0 1px, transparent 1px 4px), #0a0704;
+  box-shadow: inset 0 0 0 1px rgba(211, 154, 60, 0.45);
 }
 .survey-card__tray-labels {
   display: flex;

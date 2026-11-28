@@ -273,3 +273,40 @@ export function surveyCard(assay: Assay, facts: GroundFacts | null | undefined, 
     total,
   }
 }
+
+/**
+ * One slice of the core as the card reads it out (owner, 2026-11-28: "id like
+ * to tap or slide my finger across the core sample to see the name of the
+ * resource representing the layer"): layer 1 is the chunk's top, on the core's
+ * left, as a core log reads, down to layer 32 at the bottom. It says only what
+ * the slice's colour already shows: the kind the layer is mostly made of, or
+ * that it is mostly open space.
+ */
+export interface CoreLayer {
+  /** 1 (the chunk's top) to 32 (its bottom). */
+  layer: number
+  /** The kind the layer is mostly made of; 0 for a layer that is mostly open space. */
+  id: number
+  /** What the readout says: "Layer 7: Cinderrock", or "Layer 12: mostly open". */
+  line: string
+}
+
+/** The core's slices, top of the chunk first, from the card's strata (bottom to top). */
+export function coreLayers(strata: Uint8Array): CoreLayer[] {
+  const n = strata.length
+  return Array.from({ length: n }, (_, i) => {
+    const id = strata[n - 1 - i]
+    return { layer: i + 1, id, line: `Layer ${i + 1}: ${id ? blockName(id) : 'mostly open'}` }
+  })
+}
+
+/**
+ * The slice under a pointer at `x` on a core that starts at `left` and is
+ * `width` wide, 0 to slices - 1: a finger slid past either end keeps the end
+ * slice.
+ */
+export function coreSliceAt(x: number, left: number, width: number, slices: number): number {
+  if (!(width > 0) || slices < 1) return 0
+  const i = Math.floor(((x - left) / width) * slices)
+  return Math.min(slices - 1, Math.max(0, Number.isFinite(i) ? i : 0))
+}

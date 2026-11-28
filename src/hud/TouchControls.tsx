@@ -99,6 +99,7 @@ import { useCover } from '../hooks/useCover'
 import { ForwardArrow3D, ReverseArrow3D } from './ui/FlyArrows'
 import { WalkStickHome, WalkStickZone } from './WalkStick'
 import { useFingerInput } from '../hooks/useFingerInput'
+import { useMenuIsOpen } from '../hooks/useMenuOpen'
 import { regionAtOriginalSize, toggleRegion, useRegion } from '../store/useRegion'
 import { holdEnd, holdEndAll, holdStart } from '../store/walkHold'
 import { flyDir, useViewFly } from '../lib/viewFly'
@@ -298,6 +299,9 @@ export function TouchControls(): JSX.Element {
   const finger = useFingerInput()
   // The stick held: its resting ring steps back (hud/WalkStick.tsx).
   const [stickHeld, setStickHeld] = useState(false)
+  // The menu's panels open: on a phone they cover the pad (App hides it); on a wide screen they stand at the left
+  // edge, over the stick's zone, so the zone stands down until they close (review of #974).
+  const menuOpen = useMenuIsOpen((s) => s.open)
   const building = useBuilder((s) => s.active)
   // Region mode, a tool inside VIEW (store/useRegion.ts): the Region button
   // turns it on, RECALL becomes RESET once the region has grown, and the pad
@@ -555,7 +559,7 @@ export function TouchControls(): JSX.Element {
       </div>
 
       {/* The stick's zone: the lower left, under every button, a finger's only (hud/WalkStick.tsx). */}
-      {walking && atHead && finger && <WalkStickZone terrain={terrainOn} onHeld={setStickHeld} veil={veil('pad.arrows')} />}
+      {walking && atHead && finger && !menuOpen && <WalkStickZone terrain={terrainOn} onHeld={setStickHeld} veil={veil('pad.arrows')} />}
 
       {/* WALK's right: GRAVITY over the commit block, a gap, then JUMP and DOWN, round, on a thumb's arc (owner, 2026-11-28). */}
       {walking && (

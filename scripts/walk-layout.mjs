@@ -15,6 +15,7 @@
  * | the order | from the bottom: the commit block, GRAVITY directly over it (8px or less; in TERRAIN on a phone held upright the hotbar row stands between, and GRAVITY is directly over that), then 24px or more, then JUMP and DOWN (owner, 2026-11-28: "The gravity button should go directly above the mode buttons and then have a gap between it and the jump and down buttons") |
  * | the arc | DOWN lower than JUMP and further out (right), JUMP and DOWN round and not touching |
  * | a mouse | no zone; the walk pad's box prints W A S D |
+ * | the menu open on a wide touch screen | no zone while the panels stand at the left edge (1366x1024) |
  *
  * On a touch screen it also drives the stick with real touches (Input.dispatchTouchEvent, so the browser does its own
  * hit testing and pointer capture): a finger landing at the zone's far left walks nothing, a drag up walks forward, a
@@ -233,6 +234,27 @@ for (const size of SIZES) {
       if (after[0] !== stopped[0] || after[2] !== stopped[2]) fail(`${label}: walked on after the lift`)
       if (!bad) console.log(`${label}: the stick walks from where it lands, JUMP with it, stops on the lift`)
     }
+    await ctx.close()
+  }
+}
+
+// A wide touch screen with the menu's panels open (review of #974): they stand at the left edge, where the stick's
+// zone is, so the zone stands down while they are open and comes back when they close.
+if (!ONLY || ONLY.split(',').includes('1366x1024 menu')) {
+  for (const mode of ['walk', 'terrain']) {
+    const label = `1366x1024 touch, menu open, ${mode.toUpperCase()}`
+    const { ctx, page } = await open(browser, { name: '1366x1024', w: 1366, h: 1024, touch: true }, mode)
+    const zoneUp = () => page.evaluate(() => !!document.querySelector('.walkstick'))
+    if (!await zoneUp()) fail(`${label}: no zone with the menu closed`)
+    await page.evaluate(async () => { (await import('/src/hooks/useMenuOpen.ts')).setMenuOpen(true) })
+    await page.waitForTimeout(1200)
+    const cols = await page.evaluate(() => [...document.querySelectorAll('.hud__col')].filter((e) => e.getBoundingClientRect().width > 0).length)
+    if (cols === 0) fail(`${label}: the menu's panels did not open`)
+    if (await zoneUp()) fail(`${label}: the stick's zone is up under the open panels`)
+    await page.evaluate(async () => { (await import('/src/hooks/useMenuOpen.ts')).setMenuOpen(false) })
+    await page.waitForTimeout(1200)
+    if (!await zoneUp()) fail(`${label}: the zone did not come back when the panels closed`)
+    if (!bad) console.log(`${label}: the zone stands down under the panels and comes back`)
     await ctx.close()
   }
 }

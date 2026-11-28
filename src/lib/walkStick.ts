@@ -13,7 +13,7 @@
  * | Part | Rule | Where it comes from |
  * |---|---|---|
  * | origin | where the thumb lands is the stick's centre: a touch anywhere in the zone starts at no movement | DRONE RUN's floating sticks (owner, 2026-11-16); Unity's ExactPositionWithDynamicOrigin; nipplejs `dynamic` |
- * | dead zone | STICK_DEAD (12%) of the reach, radial, so no direction is favoured | DRONE RUN's STICK_DEAD; Josh Sutphin, "Doing Thumbstick Dead Zones Right" (scaled radial) |
+ * | dead zone | STICK_DEAD (12%) of the reach, radial, so no direction is favoured; once out, the stick stays pushed until it is back inside STICK_RELEASE (8%), so a thumb on the edge never flickers in and out | DRONE RUN's STICK_DEAD; Josh Sutphin, "Doing Thumbstick Dead Zones Right" (scaled radial) |
  * | magnitude | rescaled from 0 at the dead zone's edge to 1 at the ring, linear, so movement never kicks in with a jump | the same (scaled radial); DRONE RUN's MOVE stick, linear |
  * | the ring | the knob is drawn inside it; past it the push stays 1 | every stick library |
  * | follow | a thumb past the ring drags the centre behind it, so reversing is instant | nipplejs `follow`, Joystick Pack "Dynamic", Godot FOLLOWING |
@@ -27,6 +27,14 @@
 
 /** The dead zone, as a share of the reach: a resting thumb moves nothing. The DRONE RUN's MOVE stick's. */
 export const STICK_DEAD = 0.12
+
+/**
+ * Once pushed past STICK_DEAD the stick stays pushed until it comes back
+ * inside this share of the reach (hysteresis): a thumb resting on the dead
+ * zone's edge wobbles a pixel or two either way, and without it every wobble
+ * out was a new push, a new step (review of #974).
+ */
+export const STICK_RELEASE = 0.08
 
 /** How far past a direction's edge (radians, about 7 degrees) the stick keeps it before taking the next one: no flicker on a boundary. */
 export const STICK_SECTOR_HOLD = (7 * Math.PI) / 180
@@ -130,6 +138,8 @@ export interface StickState {
   /** The step WALK's direction and its sector (kept with STICK_SECTOR_HOLD); null inside the dead zone. */
   dir: Dir8 | null
   sector: number | null
+  /** Pushed: out past STICK_DEAD, and not yet back inside STICK_RELEASE. */
+  pushed: boolean
 }
 
 /**
@@ -145,7 +155,7 @@ export class StickTracker {
   down(id: number, x: number, y: number): boolean {
     if (this.s) return false
     const p = { x, y }
-    this.s = { id, origin: p, at: p, knob: { dx: 0, dy: 0 }, vec: { fwd: 0, strafe: 0, mag: 0 }, dir: null, sector: null }
+    this.s = { id, origin: p, at: p, knob: { dx: 0, dy: 0 }, vec: { fwd: 0, strafe: 0, mag: 0 }, dir: null, sector: null, pushed: false }
     return true
   }
 
@@ -160,7 +170,11 @@ export class StickTracker {
     const dy = y - s.origin.y
     s.vec = stickVector(dx, dy, radius)
     s.knob = knobAt(dx, dy, radius)
-    const q = quantize8(s.vec, s.sector)
+    const r = Math.hypot(dx, dy)
+    // Out past STICK_DEAD to push; back inside STICK_RELEASE to let go. Between the two a push already on stays on,
+    // its direction from the thumb's (its speed 0 there, so fluid WALK coasts and the step WALK keeps its slowest pace).
+    s.pushed = radius > 0 && (s.pushed ? r >= STICK_RELEASE * radius : r > STICK_DEAD * radius)
+    const q = s.pushed && r > 0 ? quantize8({ fwd: -dy / r, strafe: dx / r, mag: 1 }, s.sector) : null
     s.dir = q?.dir ?? null
     s.sector = q?.sector ?? null
     return s

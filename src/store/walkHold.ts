@@ -75,6 +75,8 @@ let timer: ReturnType<typeof setTimeout> | null = null
 /** When the loop last pressed (or started), and when its next beat is due (Date.now ms), so a harder push can bring the beat forward. */
 let lastBeat = 0
 let nextAt = 0
+/** When the stick last made a step WALK step (Date.now ms): a push let go and taken again sooner than a beat waits for the beat. */
+let lastStickStep = -Infinity
 
 /**
  * The phone's stick (hud/WalkStick.tsx), held while it is pushed past its
@@ -179,6 +181,7 @@ function schedule(delay: number): void {
 function tick(): void {
   timer = null
   lastBeat = Date.now()
+  if (held.has(STICK_SOURCE) && !fluidOn()) lastStickStep = lastBeat
   beat()
   // A beat can let go of everything (the input closed): then the loop is over.
   if (held.size > 0 && timer === null) schedule(period())
@@ -234,7 +237,7 @@ export function holdStart(source: string, dir: HeldDir): void {
  *
  * | Moment | What happens |
  * |---|---|
- * | the push leaves the dead zone | held as STICK_SOURCE; the step WALK takes one step at once, as a key going down does |
+ * | the push leaves the dead zone | held as STICK_SOURCE; the step WALK takes one step at once, as a key going down does, unless the stick stepped less than a beat ago: then at the end of that beat |
  * | pushed on | the step WALK steps each beat the nearest of 8 ways, at the stick's pace (period); fluid WALK reads the reading every frame (heldLevel) |
  * | the direction or the push changes | no extra step: the next beat goes the new way, brought forward when a harder push makes it due sooner |
  * | back in the dead zone, or let go | no longer held; with nothing else held the loop stops |
@@ -254,8 +257,20 @@ export function stickHold(vec: { fwd: number; strafe: number; mag: number }, dir
   held.set(STICK_SOURCE, d)
   if (!was) {
     // Fluid WALK reads the stick every frame: nothing to press, and no nudge.
-    if (!fluidOn()) levelPress(heldNow())
-    restart()
+    if (fluidOn()) { restart(); return }
+    // A step at once, unless the stick stepped less than a beat ago (a thumb on the dead zone's edge, out and in
+    // again): then the first step waits out the rest of that beat, so wobbling never walks faster than holding.
+    const now = Date.now()
+    // (A last step in the future is a clock that went back: no wait.)
+    const wait = lastStickStep > now ? 0 : lastStickStep + period() - now
+    if (wait <= 0) {
+      levelPress(heldNow())
+      lastStickStep = now
+      restart()
+    } else {
+      lastBeat = now - (period() - wait)
+      schedule(wait)
+    }
     return
   }
   // A harder push: the next beat comes when the new pace says, if that is sooner.
@@ -279,6 +294,8 @@ export function holdEndAll(prefix: string): void {
 export function holdReleaseAll(): void {
   held.clear()
   stopLoop()
+  // Everything let go (a STOP, WALK ending or beginning): the next push is a fresh one, a step at once.
+  lastStickStep = -Infinity
   // A tap's push goes too (fluid WALK): a STOP, a step that did not land or leaving WALK is never nudged on.
   fluidNudge.until = 0
 }

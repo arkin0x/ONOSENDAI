@@ -121,6 +121,10 @@ export function WalkStickZone({ terrain, onHeld, veil = '' }: { terrain: boolean
   const knob = useRef<HTMLDivElement>(null)
   const tracker = useMemo(() => new StickTracker(() => STICK_REACH), [])
   const pushed = useRef(false)
+  // The zone's box, read once as the finger lands (the ring is placed from it on every move).
+  const rect = useRef<DOMRect | null>(null)
+  // Whether the finger's pointer was captured; without it, its moves come from the window (below).
+  const captured = useRef(false)
 
   const draw = (s: Readonly<StickState> | null): void => {
     const z = zone.current
@@ -128,7 +132,7 @@ export function WalkStickZone({ terrain, onHeld, veil = '' }: { terrain: boolean
     const k = knob.current
     if (!z || !b || !k) return
     if (!s) { b.classList.remove('is-on'); return }
-    const box = z.getBoundingClientRect()
+    const box = rect.current ?? z.getBoundingClientRect()
     const w = typeof window !== 'undefined' ? window.innerWidth : Infinity
     const h = typeof window !== 'undefined' ? window.innerHeight : Infinity
     const m = RING_HALF + RING_MARGIN
@@ -149,20 +153,44 @@ export function WalkStickZone({ terrain, onHeld, veil = '' }: { terrain: boolean
     if (id !== null ? !tracker.up(id) : !tracker.state) return
     tracker.clear()
     pushed.current = false
+    captured.current = false
+    rect.current = null
     stickHold({ fwd: 0, strafe: 0, mag: 0 }, null)
     draw(null)
     onHeld(false)
   }
 
-  // Whatever takes the page away lets go: WALK ending unmounts this, a lost focus or a hidden page.
+  /** The stick's finger moved to (x, y): true when it was the stick's. */
+  const moveTo = (id: number, x: number, y: number): boolean => {
+    const s = tracker.move(id, x, y)
+    if (!s) return false
+    if (s.dir && !pushed.current) buzzGate(['walkstick:go'], performance.now(), 120, TICK_MS)
+    pushed.current = s.dir !== null
+    stickHold(s.vec, s.dir)
+    draw(s)
+    return true
+  }
+
+  // Whatever takes the page away lets go: WALK ending unmounts this, a lost focus or a hidden page. The window also
+  // hears the stick's finger lift (and, if its pointer could not be captured, move) wherever it is, so a lift off
+  // the zone with no capture never leaves the stick held.
   useEffect(() => {
     const away = (): void => release(null)
     const hidden = (): void => { if (document.visibilityState !== 'visible') away() }
+    const lifted = (e: PointerEvent): void => { if (tracker.state?.id === e.pointerId) release(e.pointerId) }
+    const moved = (e: PointerEvent): void => { if (!captured.current && tracker.state?.id === e.pointerId) moveTo(e.pointerId, e.clientX, e.clientY) }
+    const opts = { capture: true, passive: true }
     window.addEventListener('blur', away)
     document.addEventListener('visibilitychange', hidden)
+    window.addEventListener('pointerup', lifted, opts)
+    window.addEventListener('pointercancel', lifted, opts)
+    window.addEventListener('pointermove', moved, opts)
     return () => {
       window.removeEventListener('blur', away)
       document.removeEventListener('visibilitychange', hidden)
+      window.removeEventListener('pointerup', lifted, opts)
+      window.removeEventListener('pointercancel', lifted, opts)
+      window.removeEventListener('pointermove', moved, opts)
       away()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -171,22 +199,18 @@ export function WalkStickZone({ terrain, onHeld, veil = '' }: { terrain: boolean
   const onDown = (e: ReactPointerEvent<HTMLDivElement>): void => {
     // A mouse walks with WASD; only a finger or a pen takes the stick.
     if (e.pointerType === 'mouse') return
+    // A second finger while one holds the stick is not taken, and goes on as if the zone were not there.
+    if (!tracker.down(e.pointerId, e.clientX, e.clientY)) return
     e.preventDefault()
     e.stopPropagation()
-    if (!tracker.down(e.pointerId, e.clientX, e.clientY)) return
-    try { e.currentTarget.setPointerCapture(e.pointerId) } catch { /* no capture here: moves still come while over the zone */ }
+    rect.current = e.currentTarget.getBoundingClientRect()
+    try { e.currentTarget.setPointerCapture(e.pointerId); captured.current = true } catch { captured.current = false /* the window hears its moves and lift */ }
     buzzGate(['walkstick:down'], performance.now(), 60, TICK_MS)
     draw(tracker.move(e.pointerId, e.clientX, e.clientY))
     onHeld(true)
   }
   const onMove = (e: ReactPointerEvent<HTMLDivElement>): void => {
-    const s = tracker.move(e.pointerId, e.clientX, e.clientY)
-    if (!s) return
-    e.preventDefault()
-    if (s.dir && !pushed.current) buzzGate(['walkstick:go'], performance.now(), 120, TICK_MS)
-    pushed.current = s.dir !== null
-    stickHold(s.vec, s.dir)
-    draw(s)
+    if (moveTo(e.pointerId, e.clientX, e.clientY)) e.preventDefault()
   }
   const onUp = (e: ReactPointerEvent<HTMLDivElement>): void => release(e.pointerId)
 

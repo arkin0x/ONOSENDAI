@@ -308,6 +308,8 @@ describe('the stick (hud/WalkStick.tsx; owner, 2026-11-28)', () => {
     vi.advanceTimersByTime(WALK_HOLD_MS * 4)
     expect(moved(start)).toEqual([0, 0, -5])
     f.lift()
+    // Past the slowest beat since the last step, so the next push is a fresh one.
+    vi.advanceTimersByTime(400)
     const at = moved(start)[2]
     const g = finger()
     const s = g.to(0, -(0.12 * R + 0.25 * (R - 0.12 * R)))
@@ -337,12 +339,39 @@ describe('the stick (hud/WalkStick.tsx; owner, 2026-11-28)', () => {
     vi.advanceTimersByTime(WALK_HOLD_MS)
     expect(moved(start)).toEqual([2, 0, -1])
     f.lift()
+    vi.advanceTimersByTime(400)
     // Facing 90 degrees right (+X), up the screen is +X.
     face(90)
     const at = moved(start)
     const g = finger()
     g.to(0, -R)
     expect(moved(start)[0] - at[0]).toBe(1)
+    g.lift()
+  })
+
+  it('a thumb wobbling on the dead zone\'s edge takes one step, not a burst (review of #974: 6.5 and 5px, 20 moves in 160ms, took 10)', () => {
+    walk()
+    face(0)
+    const f = finger()
+    for (let k = 0; k < 20; k++) { f.to(0, k % 2 === 0 ? -6.5 : -5); vi.advanceTimersByTime(8) }
+    expect(Math.abs(moved(start)[2])).toBeLessThanOrEqual(2)
+    expect(Math.abs(moved(start)[2])).toBeGreaterThanOrEqual(1)
+    f.lift()
+  })
+
+  it('in and out across the whole dead zone faster than a beat: still no faster than holding', () => {
+    walk()
+    face(0)
+    const f = finger()
+    for (let k = 0; k < 20; k++) { f.to(0, k % 2 === 0 ? -6.5 : -2); vi.advanceTimersByTime(8) }
+    expect(Math.abs(moved(start)[2])).toBeLessThanOrEqual(2)
+    f.lift()
+    // A fresh push a beat later steps at once again.
+    vi.advanceTimersByTime(WALK_HOLD_MS * 4)
+    const at = moved(start)[2]
+    const g = finger()
+    g.to(0, -48)
+    expect(moved(start)[2]).toBe(at - 1)
     g.lift()
   })
 

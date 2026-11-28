@@ -6,7 +6,7 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { STICK_DEAD, STICK_SECTOR_HOLD, STICK_SLOW_SHARE, StickTracker, followCentre, knobAt, quantize8, stickPeriod, stickVector } from '../walkStick'
+import { STICK_DEAD, STICK_RELEASE, STICK_SECTOR_HOLD, STICK_SLOW_SHARE, StickTracker, followCentre, knobAt, quantize8, stickPeriod, stickVector } from '../walkStick'
 
 const R = 48
 
@@ -72,6 +72,25 @@ describe('the dead zone and the push', () => {
     expect(diag.fwd).toBeCloseTo(-Math.SQRT1_2, 9)
     expect(diag.strafe).toBeCloseTo(Math.SQRT1_2, 9)
     expect(Math.hypot(diag.fwd, diag.strafe)).toBeCloseTo(1, 9)
+  })
+})
+
+describe('the dead zone\'s edge holds (review of #974: a resting thumb took a burst of steps)', () => {
+  it('pushed past STICK_DEAD, it stays pushed until back inside STICK_RELEASE; then it takes STICK_DEAD again', () => {
+    expect(STICK_RELEASE).toBeLessThan(STICK_DEAD)
+    const t = new StickTracker(() => R)
+    t.down(1, 100, 500)
+    // 6.5px is past 12% of 48 (5.76): pushed, forward.
+    expect(t.move(1, 100, 500 - 6.5)!.dir).toEqual({ fwd: 1, strafe: 0 })
+    // 5px is inside 12% but outside 8% (3.84): still pushed, the same way, at no speed.
+    const held = t.move(1, 100, 500 - 5)!
+    expect(held.dir).toEqual({ fwd: 1, strafe: 0 })
+    expect(held.vec.mag).toBe(0)
+    // Back inside 8%: let go.
+    expect(t.move(1, 100, 500 - 3)!.dir).toBeNull()
+    // 5px again is not enough to push from rest.
+    expect(t.move(1, 100, 500 - 5)!.dir).toBeNull()
+    expect(t.move(1, 100, 500 - 6)!.dir).toEqual({ fwd: 1, strafe: 0 })
   })
 })
 

@@ -13,7 +13,7 @@
  * | the fluid pause | 21 events ahead of the chain fluid WALK switches itself off and the walk goes on as the step WALK; at 15 or fewer it comes back on (store/fluidSwitch.ts fluidPauseCheck, checked here whenever the count can change) |
  * | the anchor | when the smooth position passes half a step from its gibson's middle, the walk takes one legal step there (store/useWalk.ts fluidCross): a straight step, or a diagonal near a corner; the step goes to the chain as a press's would, so the chain only ever sees whole gibsons |
  * | walls | a step a wall holds keeps the smooth position in its gibson, FLUID_WALL_REACH from the middle at most (and FLUID_FACE_GAP short of a nearer face), and stops its speed that way only: the rest goes on, which is sliding along the wall |
- * | floors, stairs, gravity | the step does what a press does (stair step-up and step-down, the fall off a ledge, the bounce pads); the anchor's change of height is eased into the eye, and the ground (below) stands the drawn walker on the surface itself; jumps, double jumps and falls are the walk's own arcs (store/useWalk.ts), unchanged |
+ * | floors, stairs, gravity | the step does what a press does (under GRAVITY the stair step-up and step-down, the fall off a ledge, the bounce pads; with it off the walls alone, at your height); the anchor's change of height is eased into the eye, and the ground (below) stands the drawn walker on the surface itself; jumps, double jumps and falls are the walk's own arcs (store/useWalk.ts), unchanged |
  * | the eye | the camera and your avatar are drawn at the anchor plus `frac` (lib/walkEye.ts walkGlide), every frame, never snapped to the grid while in WALK |
  * | the ground | after the fall's frame (groundFluid), the drawn walker's height is the surface under it, wherever it is between gibsons (store/walkWalls.ts groundUnder), never the gibson's: it stands on the geometry, and its feet are never drawn below it |
  * | leaving WALK, a STOP, a step that did not land | the anchor moves without the smooth position: the eye glides from where it was to the new anchor (GLIDE_TAU_S) and the speed is dropped |
@@ -377,7 +377,7 @@ export function footHeight(): number | null {
  *
  * | Case | The drawn height |
  * |---|---|
- * | standing (a face less than a gibson under the anchor's middle) | the highest walkable ground under the footprint at the drawn point (store/walkWalls.ts groundUnder, then footGround), followed exactly up a slope and down one; a riser it passes over is stood on at once, and the camera follows it up over GLIDE_TAU_S (lib/walkEye.ts walkRise); under GRAVITY ground that drops away faster than a slope (a ledge, a riser, a dip) is fallen to at WALK_GRAVITY (dropTo, FOOT_SNAP), and with gravity off a drop is eased down at FOOT_DROP_SPEED at least |
+ * | standing (a face less than a gibson under the anchor's middle) | the highest walkable ground under the footprint at the drawn point (store/walkWalls.ts groundUnder, then footGround), followed exactly up a slope and down one; a riser it passes over is stood on at once, and the camera follows it up over GLIDE_TAU_S (lib/walkEye.ts walkRise); under GRAVITY ground that drops away faster than a slope (a ledge, a riser, a dip) is fallen to at WALK_GRAVITY (dropTo, FOOT_SNAP); with gravity off the walker flies and keeps its height (store/walkStep.ts), so the feet never go below the ground under the anchor's own middle, and a drop of that ground (a new anchor) is eased down at FOOT_DROP_SPEED at least |
  * | gravity off, rising off the floor | from the surface to the anchor's own height by the time the walker is half a step up, where it leaves the gibson, so the hand-over is seamless |
  * | in the air (a jump, a fall) | the fall's own arc, from where the feet were when it began, easing onto the arc's point (GLIDE_TAU_S) |
  * | a shard in reach still being built | where the feet were, until it is |
@@ -472,7 +472,9 @@ export function groundFluid(now: number = performance.now()): void {
       let target = base - REST_FLOOR * stepG
       if (standing) {
         // Past a rim with nothing near under the drawn point: still on the rim the anchor stands on. Else on the highest ground under the footprint (footAt).
-        const s = col === null || col < under - stepG ? under : footAt(cs.cursor, lead, col, items, g, downKey)
+        const ground = col === null || col < under - stepG ? under : footAt(cs.cursor, lead, col, items, g, downKey)
+        // Gravity off, the walk keeps its height (store/walkStep.ts): the feet never go down past the rim into a hole the anchor will not settle into.
+        const s = gravity ? ground : Math.max(ground, under)
         // Gravity off, pushing up off the floor: up to the next gibson's floor by half a step up, where it leaves this one.
         const r = gravity ? 0 : Math.max(0, st.frac[ui] * up.dir * stepG)
         const off = r - REST_FLOOR * stepG

@@ -46,7 +46,9 @@
  * (JUMP and DOWN) are pressed when they go down; held, they repeat only
  * when no level direction is held, except under GRAVITY, where they make no
  * level segment (a jump, a bounce's Up or Down) and a level press goes on
- * beside them: a running jump.
+ * beside them: a running jump. With gravity off, a held level press that a
+ * wall holds (a riser: the walk keeps its height) makes the held Up or Down
+ * instead, so forward with Space held climbs a stair a gibson a beat.
  */
 
 import { useCyberspace } from './useCyberspace'
@@ -100,6 +102,10 @@ function levelPress(d: HeldDir): boolean {
   return false
 }
 
+function samePlace(a: { x: bigint; y: bigint; z: bigint }, b: { x: bigint; y: bigint; z: bigint }): boolean {
+  return a.x === b.x && a.y === b.y && a.z === b.z
+}
+
 /** The up or down press `vert` makes, if any: along the view's up when `view` (Space, C, the pad), else the camera's (R, F). */
 function verticalPress(vert: -1 | 0 | 1, view = false): void {
   if (vert !== 0) useWalk.getState().press(vert > 0 ? 'up' : 'down', 0, view)
@@ -114,12 +120,16 @@ function beat(): void {
     if (held.size === 0) return
   }
   const d = heldNow()
+  // Gravity off a held level step a wall holds (the walk keeps its height, store/walkStep.ts)
+  // makes the Up or Down held with it instead, so forward and Space held climb a stair.
+  const before = useCyberspace.getState().cursor
+  const blockedNow = (): boolean => samePlace(before, useCyberspace.getState().cursor)
   // Fluid WALK (store/walkFluid.ts): what is held accelerates, read every
   // frame; nothing is pressed, except under GRAVITY Up and Down, which are
   // still a jump and Down as they were.
   if (fluidOn()) { if (useWalk.getState().gravity) verticalPress(d.vert, d.view); return }
   if (useWalk.getState().gravity) { verticalPress(d.vert, d.view); levelPress(d) }
-  else if (!levelPress(d)) verticalPress(d.vert, d.view)
+  else if (!levelPress(d) || blockedNow()) verticalPress(d.vert, d.view)
 }
 
 function restart(): void {

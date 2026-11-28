@@ -6,8 +6,10 @@
  * not; a ceiling or a lintel holds the lift; a rail with nothing beyond it
  * holds you; a shard without collision is never climbed, stood on or
  * stepped down onto; step-down settles only onto a collision floor, only 1
- * or 2 down, and only from one; and everything else (up and down, floating,
- * a press past a tile, a flat floor) is the plain stepLimit.
+ * or 2 down, and only from one; all of that only under GRAVITY: with it
+ * off you fly and keep your height (no settle, no hole, no climb; walls and
+ * floors still hold); and everything else (up and down, floating, a press
+ * past a tile, a flat floor) is the plain stepLimit.
  * Then a random walk among closed boxes that never ends inside one.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -67,6 +69,9 @@ const FLOOR: [V3, V3] = [[-10, -1, -10], [10, 0, 10]]
 
 beforeEach(() => clearWalls())
 
+/** A press under GRAVITY: the step-up and step-down are gravity's. */
+const walkStepG = (from: Position, axis: AxisName, dir: 1 | -1, length: bigint, items: readonly WallItem[]) => walkStep(from, axis, dir, length, items, true)
+
 describe('a riser', () => {
   /** The floor, and a riser `h` high from z 2 on. */
   const riser = (h: number, c: Constrain = 'all', floor: Constrain = 'all'): WallItem[] => [
@@ -80,7 +85,7 @@ describe('a riser', () => {
       const items = riser(h)
       const from = rel(0, 1, 1)
       expect(standing(from, items)).toBe(true)
-      const s = walkStep(from, 'z', 1, 1n, items)
+      const s = walkStepG(from, 'z', 1, 1n, items)
       expect(s.by).toBeNull()
       expect(off(s.to)[2]).toBe(2)
       // A riser under your line is walked onto; one whose top is at your line or
@@ -95,7 +100,7 @@ describe('a riser', () => {
     for (const h of [3, 4, 8]) {
       clearWalls()
       const items = riser(h)
-      const s = walkStep(rel(0, 1, 1), 'z', 1, 1n, items)
+      const s = walkStepG(rel(0, 1, 1), 'z', 1, 1n, items)
       expect(s.to).toEqual(rel(0, 1, 1))
       expect(s.by?.shard.name).toBe(`Riser ${h}`)
     }
@@ -103,18 +108,18 @@ describe('a riser', () => {
 
   it('without collision is passed through as before, and is never stood on', () => {
     const items = riser(2, 'off')
-    const s = walkStep(rel(0, 1, 1), 'z', 1, 1n, items)
+    const s = walkStepG(rel(0, 1, 1), 'z', 1, 1n, items)
     expect(s).toEqual({ to: rel(0, 1, 2), by: null })
     // A see-through riser set to OPAQUE: the same.
     clearWalls()
     const glass = [item(boxes('Floor', 'all', [FLOOR])), item(boxes('Glass', 'opaque', [[[-10, 0, 2], [10, 2, 10]]], { opacity: 50 }))]
-    expect(walkStep(rel(0, 1, 1), 'z', 1, 1n, glass)).toEqual({ to: rel(0, 1, 2), by: null })
+    expect(walkStepG(rel(0, 1, 1), 'z', 1, 1n, glass)).toEqual({ to: rel(0, 1, 2), by: null })
   })
 
   it('is never climbed off a floor without collision: you are not standing, so the step is the plain one', () => {
     const items = riser(1, 'all', 'off')
     expect(standing(rel(0, 1, 1), items)).toBe(false)
-    const s = walkStep(rel(0, 1, 1), 'z', 1, 1n, items)
+    const s = walkStepG(rel(0, 1, 1), 'z', 1, 1n, items)
     expect(s.to).toEqual(rel(0, 1, 1))
     expect(s.by?.shard.name).toBe('Riser 1')
   })
@@ -125,14 +130,14 @@ describe('a riser', () => {
     const from = rel(0, 3, 1)
     expect(standing(from, items)).toBe(false)
     // The riser's top is below the walker's line: the plain step goes on.
-    expect(walkStep(from, 'z', 1, 1n, items)).toEqual({ ...stepOf(from, 'z', 1, 1n, items) })
+    expect(walkStepG(from, 'z', 1, 1n, items)).toEqual({ ...stepOf(from, 'z', 1, 1n, items) })
   })
 })
 
 describe('a ceiling', () => {
   it('right over you holds the lift', () => {
     const items = [item(boxes('Floor', 'all', [FLOOR])), item(boxes('Riser', 'all', [[[-10, 0, 2], [10, 1, 10]]])), item(boxes('Ceiling', 'all', [[[-10, 2, -10], [10, 3, 10]]]))]
-    const s = walkStep(rel(0, 1, 1), 'z', 1, 1n, items)
+    const s = walkStepG(rel(0, 1, 1), 'z', 1, 1n, items)
     expect(s.to).toEqual(rel(0, 1, 1))
     expect(s.by?.shard.name).toBe('Riser')
   })
@@ -141,7 +146,7 @@ describe('a ceiling', () => {
     for (const bottom of [1.75, 2]) {
       clearWalls()
       const items = [item(boxes('Floor', 'all', [FLOOR])), item(boxes('Riser', 'all', [[[-10, 0, 2], [10, 1.5, 10]]])), item(boxes('Lintel', 'all', [[[-10, bottom, 2], [10, bottom + 2, 10]]]))]
-      const s = walkStep(rel(0, 1, 1), 'z', 1, 1n, items)
+      const s = walkStepG(rel(0, 1, 1), 'z', 1, 1n, items)
       expect(s.to).toEqual(rel(0, 1, 1))
       expect(s.by?.shard.name).toBe('Riser')
     }
@@ -149,7 +154,7 @@ describe('a ceiling', () => {
 
   it('with room under it lets you climb, and you land under it, never in or past it', () => {
     const items = [item(boxes('Floor', 'all', [FLOOR])), item(boxes('Riser', 'all', [[[-10, 0, 2], [10, 2, 10]]])), item(boxes('Ceiling', 'all', [[[-10, 3.5, -10], [10, 4.5, 10]]]))]
-    const s = walkStep(rel(0, 1, 1), 'z', 1, 1n, items)
+    const s = walkStepG(rel(0, 1, 1), 'z', 1, 1n, items)
     expect(s.by).toBeNull()
     expect(off(s.to)).toEqual([0, 3, 2])
   })
@@ -158,14 +163,14 @@ describe('a ceiling', () => {
 describe('a rail', () => {
   it('with nothing to stand on beyond it holds you: no climbing into the air', () => {
     const items = [item(boxes('Floor', 'all', [[[-10, -1, -10], [10, 0, 2.5]]])), item(boxes('Rail', 'all', [[[-10, 0, 2.2], [10, 1, 2.4]]]))]
-    const s = walkStep(rel(0, 1, 2), 'z', 1, 1n, items)
+    const s = walkStepG(rel(0, 1, 2), 'z', 1, 1n, items)
     expect(s.to).toEqual(rel(0, 1, 2))
     expect(s.by?.shard.name).toBe('Rail')
   })
 
   it('too thin to stand on holds you even with floor beyond it', () => {
     const items = [item(boxes('Floor', 'all', [FLOOR])), item(boxes('Rail', 'all', [[[-10, 0, 2.2], [10, 1, 2.4]]]))]
-    expect(walkStep(rel(0, 1, 2), 'z', 1, 1n, items).to).toEqual(rel(0, 1, 2))
+    expect(walkStepG(rel(0, 1, 2), 'z', 1, 1n, items).to).toEqual(rel(0, 1, 2))
   })
 })
 
@@ -180,7 +185,7 @@ describe('step-down', () => {
     for (const d of [1, 2, 0.5, 1.75]) {
       clearWalls()
       const items = ledge(d)
-      const s = walkStep(rel(0, 1, 2), 'z', 1, 1n, items)
+      const s = walkStepG(rel(0, 1, 2), 'z', 1, 1n, items)
       expect(off(s.to)[2]).toBe(3)
       expect(off(s.to)[1]).toBe(1 - Math.ceil(d))
       expect(standing(s.to, items)).toBe(true)
@@ -190,17 +195,114 @@ describe('step-down', () => {
   it('does not settle 3 down, or onto a floor without collision: you stay at your height', () => {
     for (const items of [ledge(3), ledge(1, 'off')]) {
       clearWalls()
-      expect(walkStep(rel(0, 1, 2), 'z', 1, 1n, items)).toEqual({ to: rel(0, 1, 3), by: null })
+      expect(walkStepG(rel(0, 1, 2), 'z', 1, 1n, items)).toEqual({ to: rel(0, 1, 3), by: null })
     }
   })
 
   it('does not settle when you were not standing', () => {
     const items = ledge(1)
     // 2 above the upper floor: floating. Over the lower floor, 3 above it.
-    expect(walkStep(rel(0, 2, 2), 'z', 1, 1n, items)).toEqual({ to: rel(0, 2, 3), by: null })
+    expect(walkStepG(rel(0, 2, 2), 'z', 1, 1n, items)).toEqual({ to: rel(0, 2, 3), by: null })
     // 1.5 over a floor that is not a shard's at all: nothing to settle onto.
     clearWalls()
-    expect(walkStep(rel(0, 1, 2), 'z', 1, 1n, [])).toEqual({ to: rel(0, 1, 3), by: null })
+    expect(walkStepG(rel(0, 1, 2), 'z', 1, 1n, [])).toEqual({ to: rel(0, 1, 3), by: null })
+  })
+})
+
+describe('gravity off: you fly, and keep your height (arkinox, 2026-11-28: "I seem to stick to them and I fall into holes, even though gravity is off")', () => {
+  const ledge = (d: number): WallItem[] => [
+    item(boxes('Upper', 'all', [[[-10, -1, -10], [10, 0, 2]]])),
+    item(boxes('Lower', 'all', [[[-10, -d - 1, 2], [10, -d, 10]]])),
+  ]
+
+  it('hovering a gibson over a floor, a level press keeps the height: no snap', () => {
+    const items = [item(boxes('Floor', 'all', [FLOOR]))]
+    for (const from of [rel(0, 1, 0), rel(0, 2, 0), rel(0, 3, 0)]) {
+      for (const len of [1n, 2n, 4n, 16n]) {
+        const s = walkStep(from, 'z', 1, len, items)
+        expect(s).toEqual({ to: { ...from, z: from.z + len }, by: null })
+        expect(walkStep(from, 'x', -1, len, items).to.y).toBe(from.y)
+      }
+    }
+  })
+
+  it('over a hole 1 or 2 deep, no descent: you stay at your height', () => {
+    for (const d of [1, 2, 0.5, 1.75]) {
+      clearWalls()
+      const items = ledge(d)
+      expect(standing(rel(0, 1, 2), items)).toBe(true)
+      // Under gravity this settles (step-down, above); with it off it does not.
+      expect(off(walkStepG(rel(0, 1, 2), 'z', 1, 1n, items).to)[1]).toBe(1 - Math.ceil(d))
+      for (const len of [1n, 4n, 8n]) {
+        expect(walkStep(rel(0, 1, 2), 'z', 1, len, items)).toEqual({ to: rel(0, 1, 2 + Number(len)), by: null })
+      }
+    }
+  })
+
+  it('a riser of 1 or 2 in the way is not climbed: it holds you at its face, named, and Up takes you over it', () => {
+    for (const h of [1, 2, 1.5]) {
+      clearWalls()
+      const items = [item(boxes('Floor', 'all', [FLOOR])), item(boxes(`Riser ${h}`, 'all', [[[-10, 0, 2], [10, h, 10]]]))]
+      // Under gravity this climbs (a riser, above).
+      expect(walkStepG(rel(0, 1, 1), 'z', 1, 1n, items).by).toBeNull()
+      const s = walkStep(rel(0, 1, 1), 'z', 1, 1n, items)
+      expect(s.to).toEqual(rel(0, 1, 1))
+      expect(s.by?.shard.name).toBe(`Riser ${h}`)
+      // Up by enough to clear it, then the same press goes over it at that height.
+      const lift = Math.ceil(h + 1e-9)
+      const up = walkStep(rel(0, 1, 1), 'y', 1, BigInt(lift), items)
+      expect(up.to).toEqual(rel(0, 1 + lift, 1))
+      expect(walkStep(up.to, 'z', 1, 1n, items)).toEqual({ to: rel(0, 1 + lift, 2), by: null })
+    }
+  })
+
+  it('a riser under your line is passed over at your height, never stood on', () => {
+    const items = [item(boxes('Floor', 'all', [FLOOR])), item(boxes('Low', 'all', [[[-10, 0, 2], [10, 0.5, 10]]]))]
+    expect(walkStep(rel(0, 1, 1), 'z', 1, 4n, items)).toEqual({ to: rel(0, 1, 5), by: null })
+  })
+
+  it('walls and floors still hold: a level press stops at a wall, a press down stops on the floor', () => {
+    const items = [item(boxes('Floor', 'all', [FLOOR])), item(boxes('Wall', 'all', [[[-10, 0, 4.5], [10, 9, 5]]]))]
+    const s = walkStep(rel(0, 3, 0), 'z', 1, 8n, items)
+    expect(s).toEqual(stepOf(rel(0, 3, 0), 'z', 1, 8n, items))
+    expect(s.to.y).toBe(rel(0, 3, 0).y)
+    expect(off(s.to)[2]).toBeLessThan(4.5)
+    expect(s.by?.shard.name).toBe('Wall')
+    const fall = walkStep(rel(0, 4, 0), 'y', -1, 16n, items)
+    expect(fall.to).toEqual(rel(0, 1, 0))
+    expect(fall.by?.shard.name).toBe('Floor')
+  })
+
+  it('a random level walk among blocks never changes height and never ends inside one', () => {
+    let seed = 0xf1a7
+    const rnd = (): number => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x80000000 }
+    const q = (lo: number, hi: number): number => Math.floor(lo + rnd() * (hi - lo)) + [0.25, 0.5, 0.75][Math.floor(rnd() * 3)]
+    const list: Array<[V3, V3]> = [[[-12.25, -1.5, -12.25], [12.25, -0.25, 12.25]]]
+    for (let b = 0; b < 40; b++) {
+      const lo: V3 = [q(-12, 10), -0.5, q(-12, 10)]
+      list.push([lo, [lo[0] + q(0, 3) + 0.25, q(0, 4), lo[2] + q(0, 3) + 0.25]])
+    }
+    const items = [item(boxes('Maze', 'all', list))]
+    const inside = (p: Position): boolean => {
+      const [x, y, z] = off(p)
+      return list.some(([lo, hi]) => x > lo[0] && x < hi[0] && y > lo[1] && y < hi[1] && z > lo[2] && z < hi[2])
+    }
+    let at = rel(0, 0, 0)
+    for (let t = 0; t < 50 && inside(at); t++) at = rel(Math.floor(rnd() * 20) - 10, Math.floor(rnd() * 4), Math.floor(rnd() * 20) - 10)
+    expect(inside(at)).toBe(false)
+    let held = 0
+    for (let k = 0; k < 600; k++) {
+      const axis: AxisName = rnd() < 0.5 ? 'x' : 'z'
+      const dir: 1 | -1 = rnd() < 0.5 ? 1 : -1
+      const len = [1n, 1n, 2n, 4n][Math.floor(rnd() * 4)]
+      const s = walkStep(at, axis, dir, len, items)
+      expect(s.to.y).toBe(at.y)
+      expect(inside(s.to)).toBe(false)
+      if (s.by) held++
+      at = s.to
+    }
+    // The walk did meet blocks.
+    expect(held).toBeGreaterThan(20)
   })
 })
 
@@ -250,7 +352,7 @@ describe('the Maze Kit stairs', () => {
         const dir = (z1 > z0 ? 1 : -1) as 1 | -1
         const presses = Math.abs(z1 - z0)
         for (let k = 0; k < presses; k++) {
-          const s = walkStep(at, 'z', dir, 1n, items)
+          const s = walkStepG(at, 'z', dir, 1n, items)
           // Every press goes one gibson along, rising or falling at most 2.
           expect(s.by).toBeNull()
           expect(Number(s.to.z - at.z)).toBe(dir)
@@ -267,7 +369,7 @@ describe('the Maze Kit stairs', () => {
       for (const len of [2n, 4n, 16n]) {
         let at = rel(st.x, st.foot, st.z0)
         const dir = (st.z1 > st.z0 ? 1 : -1) as 1 | -1
-        for (let k = 0; k < 16 && off(at)[2] !== st.z1; k++) at = walkStep(at, 'z', dir, len, items).to
+        for (let k = 0; k < 16 && off(at)[2] !== st.z1; k++) at = walkStepG(at, 'z', dir, len, items).to
         expect(off(at)).toEqual([st.x, st.head, st.z1])
       }
     })
@@ -276,7 +378,7 @@ describe('the Maze Kit stairs', () => {
       const items = [item(withConstrain(st.shard(), 'off'))]
       const from = rel(st.x, st.foot, st.z0)
       const dir = (st.z1 > st.z0 ? 1 : -1) as 1 | -1
-      const s = walkStep(from, 'z', dir, 4n, items)
+      const s = walkStepG(from, 'z', dir, 4n, items)
       expect(s).toEqual({ to: { ...from, z: from.z + BigInt(dir) * 4n }, by: null })
     })
   }
@@ -323,7 +425,7 @@ describe('never into geometry', () => {
       for (let k = 0; k < 600; k++) {
         const [axis, dir, fixed] = moves[Math.floor(rnd() * moves.length)]
         const len = fixed ?? [1n, 1n, 1n, 2n, 4n][Math.floor(rnd() * 5)]
-        const s = walkStep(at, axis, dir, len, items)
+        const s = walkStepG(at, axis, dir, len, items)
         if (s.to.y > at.y && axis !== 'y') climbs++
         expect(inside(s.to)).toBe(false)
         // Along the press no further than it asked; up or down no more than 2 a gibson.

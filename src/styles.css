@@ -16956,6 +16956,13 @@ div.bpt-tile__hit { cursor: default; }
 }
 /* A layer of mostly open space: a core's lost length, hatched. */
 .survey-band.is-open { background: repeating-linear-gradient(135deg, rgba(211, 154, 60, 0.22) 0 1px, transparent 1px 5px), #0a0704; }
+.survey-card__tray-caption {
+  display: block;
+  margin: 0 0 5px;
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  color: var(--sv-ochre);
+}
 .survey-card__tray-labels {
   display: flex;
   justify-content: space-between;
@@ -16975,7 +16982,8 @@ div.bpt-tile__hit { cursor: default; }
 .survey-card__ground { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .survey-card .chamfer { --chamfer-cut: 8px; --chamfer-line: rgba(211, 154, 60, 0.6); --chamfer-fill: #140d07; }
 .survey-card .chamfer__in { display: grid; place-items: center; }
-.survey-card__fact { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.survey-card__fact { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 6px; row-gap: 2px; min-width: 0; }
+.survey-card__fact .survey-card__label { font-size: 10px; letter-spacing: 0.08em; }
 .survey-card__label { font-size: 9px; letter-spacing: 0.2em; color: var(--sv-ochre); }
 .survey-card__value { font-size: 16px; font-weight: 700; color: var(--sv-ink); }
 .survey-card__value--num { font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -16998,7 +17006,7 @@ div.bpt-tile__hit { cursor: default; }
   text-transform: uppercase;
   mix-blend-mode: screen;
 }
-.survey-card__stamp-word { font-size: 15px; font-weight: 800; letter-spacing: 0.32em; margin-right: -0.32em; line-height: 1; }
+.survey-card__stamp-word { font-size: 13px; font-weight: 800; letter-spacing: 0.2em; margin-right: -0.2em; line-height: 1; }
 .survey-card__stamp-date { font-size: 9px; letter-spacing: 0.14em; line-height: 1.2; }
 
 /* Hardness: terrain K out of 16, as a heat bar from copper to pale gold; a tick under the average. */
@@ -17049,7 +17057,8 @@ div.bpt-tile__hit { cursor: default; }
   color: var(--sv-amber);
 }
 .survey-card__rule { flex: 1 1 auto; height: 1px; background: var(--sv-rule); }
-.survey-card__section-n { color: var(--sv-dim); font-weight: 400; letter-spacing: 0.06em; }
+/* The column header over the counts. */
+.survey-card__section-n { color: var(--sv-dim); font-size: 8px; font-weight: 400; letter-spacing: 0.16em; }
 .survey-card__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
 .survey-card__empty { margin: 0; font-size: 11px; color: var(--sv-dim); }
 

@@ -15,7 +15,7 @@ import { KINDS } from '../blocks'
 import { TerrainWorld } from '../world'
 import { encodeLayer, applyLayer } from '../layer'
 import {
-  COMMON, RARITY, STRATA_MIN, assayBlocks, assayRuns, chunkAssay, forgetAssays, recipeNotes, surveyCard, type GroundFacts,
+  AVERAGE_HARDNESS, COMMON, RARITY, hardnessLine, STRATA_MIN, assayBlocks, assayRuns, chunkAssay, forgetAssays, recipeNotes, surveyCard, type GroundFacts,
 } from '../assay'
 
 const GRIDSTONE = 1, UMBERSLATE = 2, RUSTBAND = 5, CINDERROCK = 7, PRISMITE = 8, RIMEGLASS = 10, TIDEWATER = 11, FERROVEIN = 40, COBALTINE = 41, GLOWCORE = 42, VOIDPEARL = 193
@@ -142,6 +142,15 @@ describe('the card', () => {
     expect(card.ground).toEqual({ family: 'mire', name: 'Mire', rock: 4 })
     expect(surveyCard(assayBlocks(solid()), null).ground).toBeNull()
     expect(surveyCard(assayBlocks(solid()), null).hardness).toBeNull()
+  })
+})
+
+describe('the hardness line', () => {
+  it('the average chunk\'s hardness is 10, from the measured shares; a chunk is richer, about the same or leaner', () => {
+    expect(AVERAGE_HARDNESS).toBe(10)
+    expect(hardnessLine(12)).toBe('Richer than the average hardness of 10.')
+    expect(hardnessLine(10)).toBe('About the average hardness of 10.')
+    expect(hardnessLine(7)).toBe('Leaner than the average hardness of 10.')
   })
 })
 

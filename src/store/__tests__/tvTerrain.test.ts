@@ -36,9 +36,9 @@ import { generate } from '../../lib/terrain/generate'
 import { LAYER_KIND, encodePlane, layerTags, plaintextJson } from '../../lib/terrain/blockLayer'
 import { encryptForRegion } from '../../lib/shardCrypto'
 import type { NostrEvent } from '../../lib/events'
-import { tvRegionKey, tvRegionKeysHeld, type TvTerrainDeps } from '../../lib/tv/terrainReader'
+import { chunkRegionKeyOf, type TvTerrainDeps } from '../../lib/tv/terrainReader'
 import type { Beat, Shot } from '../../lib/tv/director'
-import { MAX_DRAWN, setTvTerrainDeps, startTvTerrain, stopTvTerrain, terrainOn, tvLighting, tvTerrainIdle, tvTerrainLightsKept, tvTerrainMeshesKept, tvTerrainTick, useTvTerrain, type TvTerrainFrame } from '../useTvTerrain'
+import { MAX_DRAWN, readRing, tvRegionKeysHeld, tvTerrainReader, setTvTerrainDeps, startTvTerrain, stopTvTerrain, terrainOn, tvLighting, tvTerrainIdle, tvTerrainLightsKept, tvTerrainMeshesKept, tvTerrainTick, useTvTerrain, type TvTerrainFrame } from '../useTvTerrain'
 import { setBroadcastForTest } from '../../lib/tv/broadcast'
 import { useLayers } from '../useLayers'
 import { LIGHT_BYTES } from '../../lib/terrain/light'
@@ -62,7 +62,7 @@ const builderPk = getPublicKey(builder)
 async function surveyLayer(base: ChunkBase, createdAt: number): Promise<NostrEvent> {
   const g = generate(base, null, 2).blocks
   const plane = encodePlane(0, true, g, g, { revision: 2, surveyed: createdAt })
-  const { key, lookupId } = tvRegionKey(base)
+  const { key, lookupId } = chunkRegionKeyOf(base)
   return finalizeEvent({ kind: LAYER_KIND, created_at: createdAt, tags: layerTags({ lookupId, author: pk, encrypted: await encryptForRegion(key, plaintextJson({ planes: [plane], cobuilders: [] })) }), content: '' }, builder) as unknown as NostrEvent
 }
 
@@ -207,6 +207,33 @@ describe('the TV terrain engine', () => {
     const shot = tripOf([beat(1100, 1, 2)])
     expect(terrainOn({ shot, terrain: { mode: 'orbit', shot: 'another' } })).toBe(false)
     expect(terrainOn({ shot: null, terrain: { mode: 'orbit', shot: shot.id } })).toBe(false)
+  })
+})
+
+describe('what is read round a TERRAIN shot', () => {
+  it('on the stream, only the drawn ring and its face neighbours (81); on the site, lit, every neighbour and the rows over the sky (175)', () => {
+    expect(readRing(BASE, false)).toHaveLength(81)
+    expect(readRing(BASE, true)).toHaveLength(175)
+  })
+
+  it('stopping TV mid-read leaves no region key and asks nothing more', async () => {
+    let release: () => void = () => {}
+    const held = new Promise<void>((res) => { release = res })
+    let asked = 0
+    const m = mockDeps([await surveyLayer(BASE, 1000)])
+    setTvTerrainDeps({ ...m.deps, query: async (f) => { asked++; await held; return m.deps.query!(f) } })
+    startTvTerrain()
+    const reader = tvTerrainReader()!
+    tvTerrainTick({ shot: null, tapeTime: null, avatars: {}, terrain: null }, [tripOf([beat(1100, 4, 5)])])
+    await settle(10)
+    const before = asked
+    expect(before).toBeGreaterThan(0)
+    stopTvTerrain()
+    release()
+    await settle(50)
+    expect(asked).toBe(before)
+    expect(reader.keysHeld()).toBe(0)
+    expect(tvRegionKeysHeld()).toBe(0)
   })
 })
 

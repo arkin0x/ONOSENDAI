@@ -46,7 +46,7 @@ import { borderSlab, type Borders, type ChunkMesh } from '../lib/terrain/mesh'
 import { FOOT, aroundIndex, lightTables, shadedColumns } from '../lib/terrain/light'
 import { chunkInSpace, chunkKey, chunkOf, type ChunkBase } from '../lib/terrain/coords'
 import { isBroadcast } from '../lib/tv/broadcast'
-import { TvTerrainReader, forgetTvRegionKeys, type ChunkAsOf, type TvTerrainDeps } from '../lib/tv/terrainReader'
+import { TvTerrainReader, type ChunkAsOf, type TvTerrainDeps } from '../lib/tv/terrainReader'
 import { beatChunk, flagTerrainBeats, isTerrainShot, mayBeTerrain, neighbourhood, terrainStep, type TerrainCamera } from '../lib/tv/terrainShot'
 import type { Shot } from '../lib/tv/director'
 import type { Position } from '../lib/space'
@@ -57,12 +57,18 @@ import { useLayers } from './useLayers'
 export const TERRAIN_AHEAD = 2
 /** The chunks drawn: the avatar's and its neighbours out to this ring (27). */
 export const DRAW_RING = 1
-/** The chunks read round a TERRAIN shot's beats: the drawn ones and their neighbours, for the borders. */
+/**
+ * The chunks read round a TERRAIN shot's beat chunk (readRing): the drawn
+ * 27, and what their meshes and light read. On the stream, only the drawn
+ * ring's face neighbours (81: borders only, no light there). On the site,
+ * lit, every neighbour of the drawn ring (125) and the two rows over each
+ * drawn chunk's sky (SKY), up to 4 chunks over the beat's (175).
+ */
 export const BORDER_RING = 2
 /** The most chunks drawn at once. */
 export const MAX_DRAWN = 27
 /** The most chunks read for one shot. */
-export const SHOT_READ_MAX = 250
+export const SHOT_READ_MAX = 350
 /** Meshes kept: the chunks drawn and the next shot's opening ones. */
 export const MESHES_KEPT = 54
 /** A chunk job not asked for again in this long is dropped (ms). */
@@ -169,11 +175,12 @@ export function stopTvTerrain(): void {
   run++
   client?.release('TV ended')
   client = null
+  // Its region keys go with it, and anything it still has under way stops asking relays.
+  reader?.end()
   reader = null
   namedAt = new Map()
   meshes.clear()
   lights.clear()
-  forgetTvRegionKeys()
   newTapeTvTerrain()
 }
 
@@ -186,6 +193,11 @@ export function newTapeTvTerrain(): void {
   shown = new Map()
   lastWant = ''
   if (useTvTerrain.getState().drawn.length) useTvTerrain.setState({ drawn: [] })
+}
+
+/** How many region keys TV holds now: the reader's own, none once TV ends (tests). */
+export function tvRegionKeysHeld(): number {
+  return reader?.keysHeld() ?? 0
 }
 
 /** The reader of this TV run (tests, and the scene's probe). */
@@ -238,9 +250,10 @@ async function prepareShot(shot: Shot, r: TvTerrainReader, id: number): Promise<
   if (id !== run) return
   flagTerrainBeats(shot.beats, (b, t) => r.surveyedAsOf(b, t))
   if (!isTerrainShot(shot)) return
-  // The drawn ring first, then the ring beyond (borders only).
+  // The drawn ring first, then what its meshes (and on the site its light) read.
+  const lit = tvLighting()
   const near = distinct(beatBases.flatMap((b) => neighbourhood(b, DRAW_RING)))
-  const far = distinct(beatBases.flatMap((b) => neighbourhood(b, BORDER_RING)))
+  const far = distinct(beatBases.flatMap((b) => readRing(b, lit)))
   await r.prepare(distinct([...near, ...far]).slice(0, SHOT_READ_MAX))
   if (id !== run) return
   // Where it opens: meshed ahead, behind whatever is on screen now.
@@ -248,7 +261,6 @@ async function prepareShot(shot: Shot, r: TvTerrainReader, id: number): Promise<
   const at = terrainStep(first) ? first.from.position : first.action.position
   const plane = terrainStep(first) ? first.from.plane : first.action.plane
   const centre = chunkOf(at.x, at.y, at.z, plane)
-  const lit = tvLighting()
   for (const b of neighbourhood(centre, DRAW_RING)) {
     const a = r.asOf(b, shot.start)
     if (!a || (!a.surveyed && !a.cells)) continue
@@ -256,6 +268,30 @@ async function prepareShot(shot: Shot, r: TvTerrainReader, id: number): Promise<
     if (lit) queueLight(r, a, shot.start, 10 + far1(b, centre))
   }
   pump()
+}
+
+/**
+ * The chunks read round a drawn ring's centre: the ring, and its face
+ * neighbours (unlit, 81), or every neighbour of it and the rows over each
+ * drawn chunk's sky (lit, 175).
+ */
+export function readRing(centre: ChunkBase, lit: boolean): ChunkBase[] {
+  const out = new Map<string, ChunkBase>()
+  const add = (o: readonly [number, number, number]): void => {
+    const b = step(centre, o)
+    if (chunkInSpace(b)) out.set(chunkKey(b), b)
+  }
+  for (let dy = -2; dy <= 2; dy++) for (let dz = -2; dz <= 2; dz++) for (let dx = -2; dx <= 2; dx++) {
+    const far = [dx, dy, dz].filter((v) => Math.abs(v) === 2).length
+    if (lit || far <= 1) add([dx, dy, dz])
+  }
+  if (lit) for (const dy of [3, 4]) for (let dz = -2; dz <= 2; dz++) for (let dx = -2; dx <= 2; dx++) add([dx, dy, dz])
+  return [...out.values()]
+}
+
+/** The chunks a drawn chunk's mesh and light read: its face neighbours (unlit), or its 26 neighbours and its sky (lit). */
+function readsOf(b: ChunkBase, lit: boolean): ChunkBase[] {
+  return (lit ? [...AROUND, ...SKY] : FACES).map((o) => step(b, o)).filter(chunkInSpace)
 }
 
 /** The six face neighbours, in mesh.ts Borders order: -x, +x, -y, +y, -z, +z. */
@@ -313,8 +349,13 @@ function queueMesh(r: TvTerrainReader, a: ChunkAsOf, t: number, pri: number): st
   return key
 }
 
-/** The chunks above whose columns shade a chunk's sky (TerrainWorld lightInputs): two up, and the eight round that. */
-const SKY: ReadonlyArray<readonly [number, number, number]> = [-1, 0, 1].flatMap((dz) => [-1, 0, 1].map((dx) => [dx, 2, dz] as const))
+/**
+ * The chunks above whose columns shade a chunk's sky (as TerrainWorld
+ * lightInputs takes every held chunk 2 or more up within one across): the
+ * rows 2 and 3 up, and the eight round each. All must be read before the
+ * light is worked out: one not read is unknown, never taken for open sky.
+ */
+const SKY: ReadonlyArray<readonly [number, number, number]> = [2, 3].flatMap((dy) => [-1, 0, 1].flatMap((dz) => [-1, 0, 1].map((dx) => [dx, dy, dz] as const)))
 const AROUND: ReadonlyArray<readonly [number, number, number]> = [-1, 0, 1].flatMap((dz) => [-1, 0, 1].flatMap((dy) => [-1, 0, 1].map((dx) => [dx, dy, dz] as const)))
 let passTable: Uint8Array | null = null
 
@@ -333,7 +374,8 @@ export function lightKeyOf(r: TvTerrainReader, a: ChunkAsOf, t: number): string 
 /** Ask for a chunk's light as of tape time `t`: from its blocks and its 26 neighbours', and the columns above, worked out in the worker. */
 function queueLight(r: TvTerrainReader, a: ChunkAsOf, t: number, pri: number): string {
   const key = lightKeyOf(r, a, t)
-  if (lights.has(key)) return key
+  // A neighbour or a chunk over the sky not read yet: unknown, so no light until it is (drawFor reads it).
+  if (lights.has(key) || key.includes('#?')) return key
   const now = performance.now()
   const had = jobs.get(key)
   if (had) { had.pri = Math.min(had.pri, pri); had.touched = now; return key }
@@ -418,6 +460,7 @@ function drawFor(s: TvTerrainFrame, r: TvTerrainReader): void {
     if (shown.size || useTvTerrain.getState().drawn.length) {
       shown = new Map()
       lastWant = ''
+      r.pin([])
       useTvTerrain.setState({ drawn: [] })
     }
     return
@@ -431,11 +474,16 @@ function drawFor(s: TvTerrainFrame, r: TvTerrainReader): void {
   lastMuted = muted
   const next: DrawnChunk[] = []
   const unread: ChunkBase[] = []
-  for (const b of neighbourhood(centre, DRAW_RING)) {
+  const ring = neighbourhood(centre, DRAW_RING)
+  // The drawn set and what its meshes and light read: never let go while it is drawn.
+  const reads = distinct([...ring, ...ring.flatMap((b) => readsOf(b, lit))])
+  r.pin(reads)
+  for (const b of ring) {
     if (next.length >= MAX_DRAWN) break
     const asOf = r.asOf(b, s.tapeTime)
     if (!asOf) unread.push(b)
     if (!asOf || (!asOf.surveyed && !asOf.cells)) continue
+    for (const n of readsOf(b, lit)) if (!r.has(n)) unread.push(n)
     const key = asOf.key
     const mk = queueMesh(r, asOf, s.tapeTime, far1(b, centre))
     const lk = lit ? queueLight(r, asOf, s.tapeTime, far1(b, centre)) : null
@@ -451,7 +499,7 @@ function drawFor(s: TvTerrainFrame, r: TvTerrainReader): void {
     if (old) next.push(old)
   }
   // Not read (let go to make room, or never read ahead): read now; the drawing is worked out again when it lands.
-  if (unread.length) void r.prepare(unread)
+  if (unread.length) void r.prepare(distinct(unread))
   const was = useTvTerrain.getState().drawn
   shown = new Map(next.map((d) => [d.key, d]))
   if (was.length !== next.length || was.some((d, i) => d.meshKey !== next[i].meshKey || d.lightKey !== next[i].lightKey)) useTvTerrain.setState({ drawn: next })

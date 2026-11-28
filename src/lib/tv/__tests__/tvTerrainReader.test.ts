@@ -32,7 +32,7 @@ import { encryptForRegion, regionKeyAt } from '../../shardCrypto'
 import { NO_BROADCAST } from '../../noBroadcast'
 import type { NostrEvent } from '../../events'
 import type { KeyStatus } from '../../terrain/layerReader'
-import { TV_READ_AGAIN_MS, TvTerrainReader, forgetTvRegionKeys, layersAsOf, tvRegionKey, tvRegionKeysHeld, tvStackView, type TvTerrainDeps } from '../terrainReader'
+import { NB_LOOKBACK_S, TV_READ_AGAIN_MS, TV_RELAY_CAP, TvTerrainReader, chunkRegionKeyOf, layerBytes, layersAsOf, tvStackView, type TvTerrainDeps } from '../terrainReader'
 import { flagTerrainBeats, isTerrainShot, neighbourhood, terrainStep, TERRAIN_STEP_GIBSONS } from '../terrainShot'
 import type { Beat, Shot } from '../director'
 
@@ -61,7 +61,7 @@ async function layerOf(w: Who, o: { createdAt: number; survey?: boolean; surveye
   const values = survey ? g.slice() : new Uint8Array(CELLS)
   for (const [c, v] of o.set ?? []) values[c] = v
   const plane = encodePlane(base.plane as 0 | 1, survey, values, g, { revision, surveyed: o.surveyed ?? o.createdAt })
-  const { key, lookupId } = tvRegionKey(base)
+  const { key, lookupId } = chunkRegionKeyOf(base)
   const encrypted = await encryptForRegion(key, plaintextJson({ planes: [plane], cobuilders: [] }))
   return finalizeEvent({ kind: LAYER_KIND, created_at: o.createdAt, tags: [...layerTags({ lookupId, author: w.pk, encrypted }), ...(o.tags ?? [])], content: '' }, w.builder) as unknown as NostrEvent
 }
@@ -174,21 +174,45 @@ describe('as of tape time', () => {
 })
 
 describe('region keys stay out of the keyring', () => {
-  it('derives each chunk key from its public corner into TV\'s own cache, opens no secrets database, and lets them go', async () => {
-    forgetTvRegionKeys()
+  it('derives each chunk key from its public corner into the reader\'s own cache, opens no secrets database, and lets them go with the reader', async () => {
     const a = who()
     const r = relay([await layerOf(a, { createdAt: 1000 }), moveOf(a, 900)])
     r.valid.add(a.builderPk)
     const reader = new TvTerrainReader(r.deps)
+    const other = new TvTerrainReader(r.deps)
     await reader.prepare(neighbourhood(BASE))
-    expect(tvRegionKeysHeld()).toBe(27)
+    expect(reader.keysHeld()).toBe(27)
+    expect(other.keysHeld()).toBe(0)
     // The same key any reader derives from the coordinate: public, held nowhere else.
     const rk = regionKeyAt(BASE, 5, 5)
-    expect(tvRegionKey(BASE).lookupId).toBe(rk.lookupId)
+    expect(reader.regionKey(BASE).lookupId).toBe(rk.lookupId)
     const dbs = await indexedDB.databases()
     expect(dbs.map((d) => d.name)).not.toContain('onosendai:secrets')
-    forgetTvRegionKeys()
-    expect(tvRegionKeysHeld()).toBe(0)
+    reader.end()
+    expect(reader.keysHeld()).toBe(0)
+    expect(() => reader.regionKey(BASE)).toThrow()
+  })
+
+  it('stopped mid-batch: no key is left and no further question goes out', async () => {
+    const a = who()
+    const r = relay([await layerOf(a, { createdAt: 1000 }), moveOf(a, 900)])
+    r.valid.add(a.builderPk)
+    let release: () => void = () => {}
+    const held = new Promise<void>((res) => { release = res })
+    let asked = 0
+    const reader = new TvTerrainReader({ ...r.deps, query: async (f) => { asked++; await held; return r.deps.query(f) } })
+    const job = reader.prepare(neighbourhood(BASE))
+    await new Promise((res) => setTimeout(res, 10))
+    const before = asked
+    expect(before).toBeGreaterThan(0)
+    expect(reader.keysHeld()).toBeGreaterThan(0)
+    reader.end()
+    release()
+    await job
+    await reader.prepare([BASE])
+    expect(asked).toBe(before)
+    expect(reader.keysHeld()).toBe(0)
+    expect(reader.has(BASE)).toBe(false)
   })
 
   it('never imports the keyring, the secrets store or the viewer\'s own TERRAIN reader', () => {
@@ -206,8 +230,8 @@ describe('no-broadcast stretches', () => {
     const T1 = await layerOf(tutorial, { createdAt: 1000, set: [[airCells[0], 8]] })
     const L = await layerOf(later, { createdAt: 1000, survey: false, set: [[airCells[1], 9]] })
     const S = await layerOf(self, { createdAt: 1000, survey: false, set: [[airCells[2], 10]], tags: [[NO_BROADCAST]] })
-    // The tutorial's player: tagged at 990, the newest before the publish. The other: tagged long before, untagged since.
-    const r = relay([T1, L, S, moveOf(tutorial, 400), moveOf(tutorial, 990, true), moveOf(later, 500, true), moveOf(later, 990), moveOf(self, 990)])
+    // The tutorial's player: tagged at 990, just before the publish. The other: tagged long before the look-back, untagged since.
+    const r = relay([T1, L, S, moveOf(tutorial, 400), moveOf(tutorial, 990, true), moveOf(later, 50, true), moveOf(later, 990), moveOf(self, 990)])
     r.valid.add(tutorial.builderPk).add(later.builderPk).add(self.builderPk)
     const reader = new TvTerrainReader(r.deps)
     await reader.prepare([BASE])
@@ -219,6 +243,45 @@ describe('no-broadcast stretches', () => {
     expect(g[airCells[0]]).toBe(0)
     expect(g[airCells[1]]).toBe(9)
     expect(g[airCells[2]]).toBe(0)
+  })
+
+  it('hides a layer when ANY action in its look-back carries the tag, not only the newest', async () => {
+    const a = who()
+    const L = await layerOf(a, { createdAt: 5000, survey: false, set: [[airCells[0], 9]] })
+    const r = relay([L, moveOf(a, 5000 - 600, true), moveOf(a, 4999)])
+    r.valid.add(a.builderPk)
+    const reader = new TvTerrainReader(r.deps)
+    await reader.prepare([BASE])
+    expect(reader.asOf(BASE, 6000)!.layers).toHaveLength(0)
+  })
+
+  it('leaves a layer out when its author has no action at all to judge it by, and reads it again later', async () => {
+    const a = who()
+    const L = await layerOf(a, { createdAt: 5000 })
+    const events = [L]
+    let now = 1_800_000_000_000
+    const r = relay(events)
+    r.valid.add(a.builderPk)
+    const reader = new TvTerrainReader({ ...r.deps, now: () => now })
+    await reader.prepare([BASE])
+    expect(reader.surveyedAsOf(BASE, 6000)).toBe(false)
+    // The action comes in later (a long build without a move falls back to the newest few before the publish).
+    events.push(moveOf(a, 5000 - NB_LOOKBACK_S - 100))
+    now += TV_READ_AGAIN_MS
+    await reader.prepare([BASE])
+    expect(reader.surveyedAsOf(BASE, 6000)).toBe(true)
+  })
+
+  it('asks for the actions once per author for a whole batch of chunks', async () => {
+    const a = who()
+    const other = { ...BASE, x: BASE.x + 32n }
+    const r = relay([await layerOf(a, { createdAt: 1000 }), await layerOf(a, { createdAt: 1100, base: other }), moveOf(a, 950)])
+    r.valid.add(a.builderPk)
+    const reader = new TvTerrainReader(r.deps)
+    await reader.prepare([BASE, other])
+    expect(reader.surveyedAsOf(BASE, 2000)).toBe(true)
+    expect(reader.surveyedAsOf(other, 2000)).toBe(true)
+    expect(r.asked.filter((f) => f.kinds?.[0] === 3333)).toHaveLength(1)
   })
 
   it('leaves a layer out when the relay cannot say, and reads the chunk again later', async () => {
@@ -299,6 +362,53 @@ describe('per-chunk caching', () => {
     // The 26 not read yet, in questions of 25 at most (the relay sends 500 a filter): two more.
     await reader.prepare(neighbourhood(BASE))
     expect(r.asked.filter((f) => f.kinds?.includes(LAYER_KIND))).toHaveLength(3)
+  })
+})
+
+describe('the relay\'s 500-event cap', () => {
+  it('asks a batch that may be cut off again in halves, and keeps a single chunk that still is as partial', async () => {
+    const a = who()
+    const r = relay([await layerOf(a, { createdAt: 1000 }), moveOf(a, 900)])
+    r.valid.add(a.builderPk)
+    const flood = (n: number): NostrEvent[] => Array.from({ length: n }, (_, i) => ({ id: i.toString(16).padStart(64, '0'), pubkey: '0'.repeat(64), created_at: 1, kind: LAYER_KIND, tags: [], content: '', sig: '' }))
+    const singles: number[] = []
+    let now = 1_800_000_000_000
+    const reader = new TvTerrainReader({ ...r.deps, now: () => now, query: async (f) => {
+      const d = (f as { '#d'?: string[] })['#d']
+      const got = await r.deps.query(f)
+      if (!d) return got
+      if (d.length > 1) return [...got, ...flood(TV_RELAY_CAP)]
+      singles.push(1)
+      return got
+    } })
+    const ring = neighbourhood(BASE)
+    await reader.prepare(ring)
+    expect(singles.length).toBe(ring.length)
+    expect(reader.surveyedAsOf(BASE, 2000)).toBe(true)
+    // One chunk alone still cut off: kept, but read again later.
+    const capped = new TvTerrainReader({ ...r.deps, now: () => now, query: async (f) => [...await r.deps.query(f), ...((f as { '#d'?: string[] })['#d'] ? flood(TV_RELAY_CAP) : [])] })
+    await capped.prepare([BASE])
+    const asks = () => r.asked.filter((f) => f.kinds?.[0] === LAYER_KIND).length
+    const n = asks()
+    await capped.prepare([BASE])
+    expect(asks()).toBe(n)
+    now += TV_READ_AGAIN_MS
+    await capped.prepare([BASE])
+    expect(asks()).toBe(n + 1)
+  })
+})
+
+describe('memory', () => {
+  it('counts both planes and their changed cells', async () => {
+    const a = who()
+    const r = relay([await layerOf(a, { createdAt: 1000, set: [[airCells[0], 8], [airCells[1], 8]] }), moveOf(a, 900)])
+    r.valid.add(a.builderPk)
+    const reader = new TvTerrainReader(r.deps)
+    await reader.prepare([BASE])
+    const l = reader.asOf(BASE, 2000)!.layers[0]
+    const twoPlanes = { ...l, planes: [...l.planes, { ...l.planes[0], plane: 1 as const }] }
+    expect(layerBytes([l])).toBe(CELLS * 4 + 8 * l.planes[0].changed.length)
+    expect(layerBytes([twoPlanes])).toBe(2 * layerBytes([l]))
   })
 })
 

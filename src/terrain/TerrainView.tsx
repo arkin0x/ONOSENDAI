@@ -182,6 +182,28 @@ function Key({ children }: { children: ReactNode }): JSX.Element {
   return <kbd className="terrain-key">{children}</kbd>
 }
 
+/** A count's bump, ms (styles.css terrain-count-bump). */
+const BUMP_MS = 280
+
+/**
+ * A slot's count, bumping up a moment each time it grows (a block mined, a
+ * drop carried: owner, 2026-11-28, the drops flying to you), so a stream of
+ * pickups is seen landing (one bump at a time, each played out). A slot given another kind starts again, unbumped.
+ */
+export function SlotCount({ id, n }: { id: number; n: number | null }): JSX.Element {
+  const was = useRef({ id, n })
+  const [bump, setBump] = useState(0)
+  /** When the last bump began: a stream of pickups bumps once each BUMP_MS, so each bump plays out and is seen. */
+  const bumpedAt = useRef(-Infinity)
+  useEffect(() => {
+    const w = was.current
+    const t = performance.now()
+    if (w.id === id && n !== null && w.n !== null && n > w.n && t - bumpedAt.current >= BUMP_MS) { bumpedAt.current = t; setBump((b) => b + 1) }
+    was.current = { id, n }
+  }, [id, n])
+  return <span key={bump} className={`terrain-slot__count${bump ? ' is-bump' : ''}`}>{n ?? ''}</span>
+}
+
 function Hotbar(): JSX.Element {
   const inv = useTerrain((s) => s.inventory)
   return (
@@ -235,7 +257,7 @@ function Hotbar(): JSX.Element {
           >
             <span className="terrain-slot__num">{i + 1}</span>
             {id ? <Swatch id={id} /> : null}
-            <span className="terrain-slot__count">{id ? n : ''}</span>
+            <SlotCount id={id} n={id ? n : null} />
           </button>
         )
       })}

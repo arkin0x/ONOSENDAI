@@ -14,7 +14,9 @@
  * - DROPS. Every block the blast took that mining would have carried floats
  *   in its own cell as a small copy of itself for ten minutes, then
  *   evaporates. Walking into its cell (the walk's gibson and the cell over
- *   it, along the whole step) collects it, with a soft sound. Drops are this
+ *   it, along the whole step) collects it, with a soft sound, and so does
+ *   coming within 7 gibsons of it: it flies to you (store/quarryHoming.ts;
+ *   owner, 2026-11-28). Either way it is carried once (collectDrops). Drops are this
  *   device's alone: never published, never seen by anyone else. They are kept
  *   per npub in IndexedDB (lib/terrain/terrainDb.ts readDrops), so a reload
  *   within the ten minutes finds them with the time they had left; a switch
@@ -64,6 +66,14 @@ export interface QuarryState {
   detonate: (id: number) => void
   /** Collect the drops in these cells (cyberspace cells, `x,y,z,plane` keys): carried, and gone. Returns how many. */
   collect: (keys: ReadonlySet<string>) => number
+  /**
+   * Collect these drops themselves (store/quarryHoming.ts, as each arrives): carried, and gone. Only those still among
+   * the drops count, so a drop already taken by the walk is never carried twice. `flying`: one pickup sound at most every
+   * PICKUP_GAP_MS, for a stream. Returns how many. Each call writes the inventory and the drops left in one transaction,
+   * never one without the other: mining saves the inventory on its own, so a later write of the drops could leave a
+   * crash with a drop both carried and kept.
+   */
+  collectDrops: (drops: readonly Drop[], flying?: boolean) => number
   /** Evaporate the drops past their time. */
   prune: (now?: number) => void
 }
@@ -107,6 +117,45 @@ function schedulePrune(): void {
   let soonest = Infinity
   for (const d of drops) soonest = Math.min(soonest, d.expires)
   pruneTimer = setTimeout(() => useQuarry.getState().prune(), Math.max(50, soonest - Date.now() + 20))
+}
+
+/** The last pickup sound of a stream of flying drops (performance.now()): one at most every PICKUP_GAP_MS. */
+let lastPickup = -Infinity
+const PICKUP_GAP_MS = 90
+/**
+ * Carry the drops `match` picks, and let them go, in one step: whatever asks
+ * second finds them gone, so each is carried once. Nothing until the field's
+ * saved inventory is read: the read would overwrite what was carried, and the
+ * drop would stay gone (review of #960).
+ */
+function take(match: (d: Drop) => boolean, flying: boolean): number {
+  const st = useQuarry.getState()
+  const s = terrainSession
+  if (!st.drops.length || !s || s.owner !== st.owner || !fieldLoaded(s)) return 0
+  const now = Date.now()
+  const got = new Map<number, number>()
+  const left: Drop[] = []
+  const taken: Drop[] = []
+  for (const d of st.drops) {
+    if (d.expires > now && match(d)) { got.set(d.id, (got.get(d.id) ?? 0) + 1); taken.push(d) }
+    else left.push(d)
+  }
+  if (!got.size) return 0
+  let n = 0
+  let inv = useTerrain.getState().inventory
+  for (const [id, count] of got) { inv = carriedInto(inv, id, count); n += count }
+  const gone = collected.get(st.owner) ?? new Map<string, number>()
+  for (const d of taken) gone.set(dropId(d), d.expires)
+  collected.set(st.owner, gone)
+  useTerrain.setState({ inventory: inv })
+  useQuarry.setState({ drops: left, version: st.version + 1 })
+  // Carried and gone in one transaction (terrainDb.ts writeInventoryAndDrops), so a crash never leaves a drop both. A
+  // stream of flying drops is carried a frame's arrivals at a time, so it writes at most once a frame.
+  if (s.db) void writeInventoryAndDrops(s.db, st.owner, inv, left).catch(() => { /* kept in memory */ })
+  const t = performance.now()
+  if (!flying || t - lastPickup >= PICKUP_GAP_MS) { lastPickup = t; pickupSound() }
+  schedulePrune()
+  return n
 }
 
 export const useQuarry = create<QuarryState>((set, get) => ({
@@ -166,34 +215,13 @@ export const useQuarry = create<QuarryState>((set, get) => ({
     collectWhereYouAre(null)
   },
 
-  collect: (keys) => {
-    const st = get()
-    const s = terrainSession
-    // Nothing until the field's saved inventory is read: the read would overwrite what was carried, and the drop would
-    // stay gone (review of #960).
-    if (!keys.size || !st.drops.length || !s || s.owner !== st.owner || !fieldLoaded(s)) return 0
-    const now = Date.now()
-    const got = new Map<number, number>()
-    const left: Drop[] = []
-    const taken: Drop[] = []
-    for (const d of st.drops) {
-      if (d.expires > now && keys.has(d.key)) { got.set(d.id, (got.get(d.id) ?? 0) + 1); taken.push(d) }
-      else left.push(d)
-    }
-    if (!got.size) return 0
-    let n = 0
-    let inv = useTerrain.getState().inventory
-    for (const [id, count] of got) { inv = carriedInto(inv, id, count); n += count }
-    const gone = collected.get(st.owner) ?? new Map<string, number>()
-    for (const d of taken) gone.set(dropId(d), d.expires)
-    collected.set(st.owner, gone)
-    useTerrain.setState({ inventory: inv })
-    set({ drops: left, version: st.version + 1 })
-    // Carried and gone in one transaction (terrainDb.ts writeInventoryAndDrops), so a crash never leaves a drop both.
-    if (s.db) void writeInventoryAndDrops(s.db, st.owner, inv, left).catch(() => { /* kept in memory */ })
-    pickupSound()
-    schedulePrune()
-    return n
+  collect: (keys) => (keys.size ? take((d) => keys.has(d.key), false) : 0),
+
+  collectDrops: (drops, flying = false) => {
+    if (!drops.length) return 0
+    if (drops.length === 1) { const one = drops[0]; return take((d) => d === one, flying) }
+    const these = new Set(drops)
+    return take((d) => these.has(d), flying)
   },
 
   prune: (now = Date.now()) => {

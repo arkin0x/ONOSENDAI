@@ -68,12 +68,16 @@ describe('gather (DECK-0010 §4)', () => {
     expect(gather(world([...compilerAt(0, 0, 0), [2, 2, 2, GRIDSTONE]]), [1, 0, 1]).cells.length).toBe(7)
   })
 
-  it('a block in the grown box that touches nothing leaves it not isolated, and is not taken', () => {
+  it('a block in the grown box that touches nothing is not taken and leaves it isolated (the owner\'s rule: only touching counts)', () => {
     const diagonal: Array<[number, number, number, number]> = [[0, 0, 0, 1], [1, 0, 1, 1], [2, 0, 2, 1]]
     expect(gather(world(diagonal), [0, 0, 0]).isolated).toBe(true)
     const g = gather(world([...diagonal, [3, 0, -1, 1]]), [0, 0, 0])
     expect(g.cells.length).toBe(3)
-    expect(g.isolated).toBe(false)
+    expect(g.isolated).toBe(true)
+    expect(g.arrangement?.size).toEqual([3, 1, 3])
+    // One at a corner of it does touch: taken into the group, so the group is no longer the diagonal.
+    const touching = gather(world([...diagonal, [3, 1, 3, 1]]), [0, 0, 0])
+    expect(touching.cells.length).toBe(4)
   })
 
   it('a construction of at most 16 on every axis comes away whole wherever it is struck (owner, 2026-11-27); 17 never compiles', () => {

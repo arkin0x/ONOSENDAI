@@ -101,6 +101,7 @@ const ROWS: Array<[string, string, string]> = [
   ['view-hx-boxes', '<span class="view__hx">h</span>X boxes', 'The math barriers where moving costs increase.'],
   ['view-walk-avatar', 'Hide avatar in WALK', 'Walk without your own avatar around the camera.'],
   ['view-walk-look', 'Look sphere in WALK', 'A ball in the bottom right to drag and look around.'],
+  ['view-smash-ask', 'Ask before a wasted smash', 'In TERRAIN, asks first when a smash will not compile and would break rare blocks.'],
   ['view-walk-gravity', 'Gravity in WALK', 'Fall, land and jump.'],
   ['view-walk-gravity-hard', 'Hard Mode Gravity', 'Gravity will not turn off if there is nothing to catch your fall.'],
   ['view-walk-fluid', 'Fluid WALK', 'Hold to glide. Moves still land on whole gibsons.'],
@@ -120,7 +121,7 @@ const ROWS: Array<[string, string, string]> = [
 const GROUPS: Array<[string, string[]]> = [
   ['Protocol visualization', ['view-chain-trail', 'view-terrain-dots', 'view-hx-boxes', 'view-region-keys', 'view-spatial-audio']],
   ['Movement', ['view-walk-gravity', 'view-walk-gravity-hard', 'view-walk-fluid', 'view-walk-limits']],
-  ['Interface', ['view-walk-look']],
+  ['Interface', ['view-walk-look', 'view-smash-ask']],
   ['Effects', ['view-headlamp', 'view-glow', 'view-block-shading', 'view-walk-avatar', 'view-sfx']],
   ['Sync', ['view-hides-sync', 'view-mining-sync']],
 ]

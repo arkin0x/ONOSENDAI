@@ -1,5 +1,5 @@
 /**
- * AirStepper.tsx - how far the ghost block stands along your look, under
+ * AirStepper.tsx - how far the ghost block is along your look, under
  * PLACE (lib/terrain/airPlace.ts, store/useAirPlace.ts): a compact − and +
  * round the distance in blocks, for touch, where there is no wheel. It shows
  * only while the ghost does, or would (your look meets no block in reach, a
@@ -16,7 +16,7 @@
  * Enter and Space on a keyboard (no letter key: H is HOP's).
  *
  * On a desktop the wheel sets the distance while the ghost shows
- * (TerrainView.tsx terrainWheel); the wheel's hint stands under it, never in
+ * (TerrainView.tsx terrainWheel); the wheel's hint sits under it, never in
  * the number's cell, where a mouse read as a zero (review of #949), so the
  * distance is always in sight while it matters.
  */
@@ -46,7 +46,7 @@ export function AirStepper(): JSX.Element {
         className={`terrain-air${ghost === 'bad' && on ? ' is-bad' : ''}${on ? '' : ' is-paused'}`}
         role="group"
         aria-label={on ? `Ghost block distance: ${distance} blocks` : 'Air placing is off'}
-        title={on ? 'How far the ghost block stands: scroll the wheel, or tap − and +. Tap the number to turn air placing off' : 'Air placing is off: tap the number to turn it on'}
+        title={on ? 'How far away the ghost block is: scroll the wheel, or tap − and +. Tap the number to turn air placing off' : 'Air placing is off: tap the number to turn it on'}
       >
         <button className="terrain-air__btn" {...noCallout} disabled={!live || distance <= AIR_MIN} tabIndex={live ? 0 : -1} onPointerDown={nudge(-1)} aria-label="Nearer"><Minus size={13} strokeWidth={2.5} aria-hidden /></button>
         <button

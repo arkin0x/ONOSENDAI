@@ -63,7 +63,7 @@ export const BLUEPRINTS_ICON = DraftingCompass
 export const NO_BLUEPRINTS = 'No blueprints yet.'
 export const NO_MINE = 'None of your own yet. Make one in BUILD with the BLUEPRINT tool.'
 export const NO_HELD = 'None found yet. Blueprints wait in the world, in chests and behind doors.'
-export const NO_BUILT = 'Nothing built yet. Build a blueprint and smash it with the Compiler.'
+export const NO_BUILT = 'Nothing built yet. Build a blueprint and smash it.'
 
 /** Whether BLUEPRINTS is open, and the row a tile was tapped for. A store, so a tile, the tutorial or a test can open it. */
 export const useBlueprintsModal = create<{ open: boolean; focus: string | null }>(() => ({ open: false, focus: null }))
@@ -100,19 +100,19 @@ export function cardViews(card: BlueprintCard): CardViews | null {
  * A card's summary as a finder sees it, in the sheet's words and order:
  * MATERIALS, CONSTRUCTION, PRIZE.
  */
-export function settingsParts(v: Pick<CardViews, 'record' | 'finder'>): Array<[string, string]> {
+export function settingsParts(v: Pick<CardViews, 'record' | 'finder'>, game = false): Array<[string, string]> {
   const total = v.finder.occupied.reduce((n, o) => n + (o ? 1 : 0), 0)
   const known = v.finder.revealed.size
   return [
     ['MATERIALS', materialsWords(known, total - known)],
-    ['CONSTRUCTION', constructionWords(v.record.sheet.lock, v.record.sheet.height)],
+    ['CONSTRUCTION', constructionWords(v.record.sheet.lock, v.record.sheet.height, game)],
     ['PRIZE', prizeShort(v.record.sheet.prize.reveal, !!v.record.prizeName)],
   ]
 }
 
 /** The summary in one line: "MATERIALS 45 known / 2 unknown · CONSTRUCTION May be built anywhere. · PRIZE Hints only". */
-export function settingsLine(v: Pick<CardViews, 'record' | 'finder'>): string {
-  return settingsParts(v).map(([k, w]) => `${k} ${w}`).join(' · ')
+export function settingsLine(v: Pick<CardViews, 'record' | 'finder'>, game = false): string {
+  return settingsParts(v, game).map(([k, w]) => `${k} ${w}`).join(' · ')
 }
 
 /** Which tab a card is listed under. */
@@ -194,6 +194,7 @@ export function BlueprintExamine({ card, views, onClose }: { card: BlueprintCard
         name: views.record.title,
         maker: makerLabel(card.record.pubkey, me, makerName),
         item: isItemBlueprint(card),
+        game: isGameCard(card),
         description: prize.text ?? '',
         view: views.finder,
         prize: { reveal: prize.reveal, text: prize.text, views: views.record.views, name: views.record.prizeName },
@@ -243,7 +244,7 @@ export function BlueprintRow({ card, views, fresh = false, focused = false, onAr
       <button className="chest__act" onClick={() => setExamining(true)} title="Every clue on one drafting sheet">EXAMINE</button>
       {/* The game's own is never placed: a plain line where PLACE HERE and PUT IN A CHEST would be. */}
       {!card.archived && game && <span className="bp-items__gameline">{gameNoDeploy(card)}</span>}
-      {!card.archived && !game && <button className="chest__act" onClick={() => place('here')} title="Leave it where you stand, for others to find. They each take a copy">PLACE HERE</button>}
+      {!card.archived && !game && <button className="chest__act" onClick={() => place('here')} title="Leave it where you are, for others to find. They each take a copy">PLACE HERE</button>}
       {!card.archived && !game && <button className="chest__act" onClick={() => place('chest')} title="Put a copy in one of your chests">PUT IN A CHEST</button>}
       {card.archived
         ? <button className="chest__act" onClick={() => archive(false)} title="Back to its list">UNARCHIVE</button>
@@ -265,7 +266,7 @@ export function BlueprintRow({ card, views, fresh = false, focused = false, onAr
         {/* On a line of its own, so neither name is cut to make room for the other. */}
         {card.leftBy && <span className="item__meta held__meta"><span className="held__src">left here by <Who pubkey={card.leftBy} /></span></span>}
         <span className="bp-items__settings">
-          {settingsParts(views).map(([k, w], i) => (
+          {settingsParts(views, game).map(([k, w], i) => (
             <span className="bp-items__set" key={k}>{i > 0 && ' · '}<b>{k}</b> {w}</span>
           ))}
         </span>

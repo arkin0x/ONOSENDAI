@@ -14824,6 +14824,10 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
   text-shadow: 0 1px 3px #000, 0 0 2px #000;
   white-space: nowrap;
 }
+/* A smash that would waste recipe materials asks first (terrain/SmashConfirm.tsx). */
+.smash-ask__words { margin: 0 0 12px; color: #fff; }
+.smash-ask__dont { display: inline-flex; align-items: center; gap: 8px; min-height: 32px; color: var(--dim); }
+.smash-ask__dont label { cursor: pointer; }
 .terrain-smash-preview__mark {
   width: 7px;
   height: 7px;
@@ -16077,6 +16081,7 @@ body:has(.terrainview.is-folded) .terrain-held { visibility: hidden; }
 .bp-ex__name { margin: 0; font-family: var(--mono); font-weight: 700; font-size: 26px; line-height: 1.05; letter-spacing: 0.08em; text-transform: uppercase; overflow-wrap: anywhere; }
 .bp-ex__settings { margin: 0; display: grid; gap: 6px; }
 .bp-ex__settings div { display: grid; grid-template-columns: 92px 1fr; gap: 8px; align-items: baseline; }
+.bp-ex__air { display: block; margin-top: 4px; opacity: 0.8; }
 .bp-ex__settings dt { font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.08em; color: var(--bp-cyan); }
 .bp-ex__settings dd { margin: 0; font-size: 12.5px; line-height: 1.35; }
 .bp-ex__meter { border: 1px solid var(--bp-line); padding: 8px 10px; background: rgba(2, 10, 24, 0.25); }
@@ -17344,33 +17349,42 @@ div.bpt-tile__hit { cursor: default; }
   font-variant-numeric: tabular-nums;
   color: var(--sv-ink);
 }
+/* What "visible" means, once over the lists: it never changes, so it never moves the card. */
+.survey-card__key { margin: 4px 0 0; font-size: 9px; line-height: 1.4; letter-spacing: 0.04em; color: var(--sv-dim); }
 .survey-card__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
 .survey-card__empty { margin: 0; font-size: 11px; color: var(--sv-dim); }
 
-/* One kind: its block, its name, a dotted leader to its count, as an assay sheet's line. */
+/* One kind: its block, its name, a dotted leader to its count, as an assay sheet's line, and under the name how much of it shows. */
 .survey-row {
   display: grid;
-  /* Swatch, name, leader, mark, then MINED and LEFT in fixed widths: the numbers never move as they count. */
-  grid-template-columns: 34px minmax(0, auto) minmax(4px, 1fr) auto 40px 46px;
+  /* Swatch, name, leader, then MINED and LEFT in fixed widths: the numbers never move as they count. */
+  grid-template-columns: 34px minmax(0, auto) minmax(4px, 1fr) 40px 46px;
+  /* The name's line, then the visible and buried line, each one fixed height. */
+  grid-template-rows: 16px 13px;
   align-items: center;
-  gap: 8px;
+  column-gap: 8px;
+  row-gap: 1px;
   min-height: 38px;
   padding: 2px 4px 2px 2px;
 }
-.survey-row__name { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.survey-row__leader { align-self: end; margin-bottom: 13px; border-bottom: 1px dotted rgba(244, 230, 204, 0.28); }
-.survey-row__mark {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 6px;
+.survey-row > .chamfer { grid-row: 1 / span 2; }
+.survey-row__name { font-size: 12px; line-height: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.survey-row__leader { align-self: end; margin-bottom: 4px; border-bottom: 1px dotted rgba(244, 230, 204, 0.28); }
+/* "2 visible · 5 buried": one line under the name, out to the row's end, in tabular figures, so a count going up never moves it. */
+.survey-row__seen {
+  grid-column: 2 / -1;
+  grid-row: 2;
   font-size: 9px;
-  letter-spacing: 0.08em;
-  border: 1px solid currentColor;
+  line-height: 13px;
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-.survey-row__mark.is-visible { color: var(--sv-ink); opacity: 0.85; }
-.survey-row__mark.is-buried { color: var(--sv-copper); }
-.survey-row__mark.is-gone { color: var(--sv-dim); }
+.survey-row__seen.is-visible, .survey-row__seen.is-some { color: var(--sv-ink); opacity: 0.8; }
+.survey-row__seen.is-buried { color: var(--sv-copper); }
+.survey-row__seen.is-gone { color: var(--sv-dim); }
 .survey-row__mined { text-align: right; font-size: 11px; font-variant-numeric: tabular-nums; color: var(--sv-amber); white-space: nowrap; }
 .survey-row__mined.is-none { color: var(--sv-dim); opacity: 0.6; }
 .survey-row__count { text-align: right; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--sv-ink); white-space: nowrap; }

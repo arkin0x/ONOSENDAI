@@ -118,6 +118,8 @@ export const MOVED_PREFIXES: readonly string[] = [
   'onosendai:mining:',
   // TERRAIN's air placing (the ghost block) on or off per player (store/airSwitch.ts).
   'onosendai:air-place:',
+  // TERRAIN's "Don't ask again" for a smash that would waste recipe materials, per player (lib/blueprint/smashConfirm.ts).
+  'onosendai:smash-ask-off:',
 ]
 
 /**

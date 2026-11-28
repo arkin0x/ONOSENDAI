@@ -9,9 +9,22 @@
  * round the hit), worked out by the same function, so the preview never
  * shows one thing and the smash takes another. Its colour tells the outcome:
  * mint when the set is a construction the smash compiles, the Compiler's
- * orange when it only breaks. A bare hand compiles the Compiler's recipe and
- * nothing else (smash.ts compile), so bare-handed any other build only
- * breaks, even one taken whole.
+ * orange when it only breaks. A bare hand compiles any construction that fits
+ * its reach of 3 (owner, 2026-11-28; smash.ts compiles); a longer isolated
+ * build says TOO BIG FOR A BARE HAND.
+ *
+ * A set that is one of the game's own recipes built wrong (nearMiss.ts:
+ * touching the ground or a block, or turned the wrong way) says why in the
+ * warning red: "BREAKS 5 · TOUCHING THE
+ * GROUND" (owner's lost Glowcore, 2026-11-28). An isolated turned recipe
+ * still compiles, in either hand, as the shape it is, so it says "COMPILES ·
+ * TURNED THE WRONG WAY": it will be compiled, but it is not the recipe
+ * (review of #969).
+ *
+ * COMPILES means the set is a construction the smash will compile: its key is
+ * made and its lookup checked. It never says whether a blueprint matches:
+ * that takes the key (PBKDF2, 500,000 rounds) and the relay, and the Compiler
+ * tells you nothing about prizes before a smash (smash.ts).
  *
  * The scene draws it (scene/SmashPreview.tsx) and the HUD prints its line
  * (terrain/TerrainView.tsx SmashPreviewLabel). Here are the rules, without
@@ -24,6 +37,7 @@
 import { create } from 'zustand'
 import type { Cell } from './arrangement'
 import { compiles, smashGroup } from './smash'
+import { CAUSE_WORDS, missCause, nearMiss, tooBigBare, type MissCause, type NearMiss } from './nearMiss'
 
 /** What the smash would do with the set: compile it (a construction), or only break it. */
 export type PreviewState = 'compiles' | 'breaks'
@@ -32,6 +46,8 @@ export type PreviewState = 'compiles' | 'breaks'
 export const PREVIEW_COMPILES = '#7cffc4'
 /** The Compiler's orange: the set only breaks. */
 export const PREVIEW_BREAKS = '#f47000'
+/** The warning red (styles.css --danger): a game recipe built wrong, which only breaks. */
+export const PREVIEW_NEAR_MISS = '#ff3b6b'
 
 /** How long the aim rests on a new cell before the set is worked out again (a 31 by 31 by 31 gather with the Compiler). */
 export const PREVIEW_DEBOUNCE_MS = 80
@@ -51,6 +67,10 @@ export interface Preview {
   bare: boolean
   cells: Array<[number, number, number]>
   state: PreviewState
+  /** A game recipe built wrong (nearMiss.ts); null otherwise. */
+  miss: NearMiss | null
+  /** Bare-handed, an isolated build longer than the bare reach of 3 (nearMiss.ts tooBigBare). */
+  tooBig: boolean
   /** The cells packed relative to `hit` (packCell), to ask whether a cell is in the set without making strings (inSet). */
   keys: Set<number>
 }
@@ -75,25 +95,37 @@ export function inSet(p: Pick<Preview, 'hit' | 'keys'>, x: number, y: number, z:
   return p.keys.has(packCell(dx, dy, dz))
 }
 
-/** What a smash at `hit` would do, by the smash's own function (smash.ts smashGroup); null when nothing is there. */
-export function smashPreview(read: (x: number, y: number, z: number) => number, hit: Cell, bare: boolean): Preview | null {
+/**
+ * What a smash at `hit` would do, by the smash's own function (smash.ts smashGroup); null when nothing is there.
+ * `natural` tells natural ground (nearMiss.ts), for TOUCHING THE GROUND beside a build as well as under it.
+ */
+export function smashPreview(read: (x: number, y: number, z: number) => number, hit: Cell, bare: boolean, natural?: (x: number, y: number, z: number) => boolean): Preview | null {
   const g = smashGroup(read, hit, bare)
   if (!g.smash.length) return null
-  // A construction compiles with the Compiler; a bare hand compiles only the Compiler's own recipe (smash.ts compiles).
-  const compiled = compiles(g.arrangement, bare)
+  // A construction compiles in either hand; the reach decided what was gathered (smash.ts compiles).
+  const compiled = compiles(g.arrangement)
   const keys = new Set<number>()
   for (const c of g.smash) keys.add(packCell(c[0] - hit[0], c[1] - hit[1], c[2] - hit[2]))
-  return { hit: [hit[0], hit[1], hit[2]], bare, cells: g.smash, state: compiled ? 'compiles' : 'breaks', keys }
+  // Built wrong: touching or in the wrong hand only breaks; turned may compile, as another shape (nearMiss.ts).
+  const miss = nearMiss(read, hit, natural)
+  const tooBig = !compiled && !miss && tooBigBare(read, hit, bare, g.arrangement)
+  return { hit: [hit[0], hit[1], hit[2]], bare, cells: g.smash, state: compiled ? 'compiles' : 'breaks', miss, tooBig, keys }
 }
 
-/** The colour of a state. */
-export function previewColor(state: PreviewState): string {
-  return state === 'compiles' ? PREVIEW_COMPILES : PREVIEW_BREAKS
+/** Why the preview warns: a recipe built wrong, or a build too big for a bare hand; null when it does not. */
+export function previewCause(p: Pick<Preview, 'miss' | 'tooBig'> | null): MissCause | null {
+  return p?.miss ? missCause(p.miss) : p?.tooBig ? 'big' : null
 }
 
-/** The line by the cross: COMPILES, or BREAKS and how many blocks. */
-export function previewLine(state: PreviewState, count: number): string {
-  return state === 'compiles' ? 'COMPILES' : `BREAKS ${count}`
+/** The colour of a state: the warning red when the set is a recipe built wrong or too big for a bare hand. */
+export function previewColor(state: PreviewState, cause: MissCause | null = null): string {
+  return cause ? PREVIEW_NEAR_MISS : state === 'compiles' ? PREVIEW_COMPILES : PREVIEW_BREAKS
+}
+
+/** The line by the cross: COMPILES, or BREAKS and how many blocks, and why a recipe built wrong will not make its prize. */
+export function previewLine(state: PreviewState, count: number, cause: MissCause | null = null): string {
+  const head = state === 'compiles' ? 'COMPILES' : `BREAKS ${count}`
+  return cause ? `${head} · ${CAUSE_WORDS[cause]}` : head
 }
 
 /** How long one pulse lasts for a hold `charge` of 0 (none, or not holding) to 1 (about to swing). */
@@ -223,15 +255,18 @@ export class PreviewTracker {
 export interface SmashPreviewShown {
   state: PreviewState | null
   count: number
+  /** Why a game recipe built wrong will not compile (nearMiss.ts), or null. */
+  cause: MissCause | null
 }
 
 /** The preview on screen, for the HUD's line: set by the scene only when it changes, never per frame. */
-export const useSmashPreview = create<SmashPreviewShown>(() => ({ state: null, count: 0 }))
+export const useSmashPreview = create<SmashPreviewShown>(() => ({ state: null, count: 0, cause: null }))
 
 /** Tell the HUD what is shown, only when that changed. */
 export function showPreview(p: Preview | null): void {
   const state = p?.state ?? null
   const count = p?.cells.length ?? 0
+  const cause = previewCause(p)
   const now = useSmashPreview.getState()
-  if (now.state !== state || now.count !== count) useSmashPreview.setState({ state, count })
+  if (now.state !== state || now.count !== count || now.cause !== cause) useSmashPreview.setState({ state, count, cause })
 }

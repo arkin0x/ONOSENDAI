@@ -54,6 +54,7 @@ import { useFluidWalk } from '../store/fluidSwitch'
 import { useHidesSync } from '../store/hidesSync'
 import { useMiningStats } from '../store/miningStats'
 import { setSfxOn, useSfxOn } from '../store/sfxSwitch'
+import { setSmashAsking, useSmashAsking } from '../lib/blueprint/smashConfirm'
 import { Field, Switch } from './ui/Switch'
 import { Explanation } from './Explanation'
 import { WALK_LIMITS_ROW } from './settingsLink'
@@ -95,10 +96,14 @@ export const HARD_GRAVITY_HINT = 'Gravity will not turn off if there is nothing 
  * same day). Every row in the panel is in exactly one group; a row added to
  * the panel but to no group shows under Other at the end, never nowhere.
  */
+/** The Settings row for TERRAIN's confirm before a wasted smash. */
+export const SMASH_ASK_TITLE_ROW = 'Ask before a wasted smash'
+export const SMASH_ASK_HINT = 'In TERRAIN, asks first when a smash will not compile and would break rare blocks.'
+
 export const SETTINGS_GROUPS: ReadonlyArray<{ id: string; title: string; rows: readonly string[] }> = [
   { id: 'protocol', title: 'Protocol visualization', rows: ['view-chain-trail', 'view-terrain-dots', 'view-hx-boxes', 'view-region-keys', 'view-spatial-audio'] },
   { id: 'movement', title: 'Movement', rows: ['view-walk-gravity', 'view-walk-gravity-hard', 'view-walk-fluid', WALK_LIMITS_ROW] },
-  { id: 'interface', title: 'Interface', rows: ['view-walk-look'] },
+  { id: 'interface', title: 'Interface', rows: ['view-walk-look', 'view-smash-ask'] },
   { id: 'effects', title: 'Effects', rows: ['view-headlamp', 'view-glow', 'view-block-shading', 'view-walk-avatar', 'view-sfx'] },
   { id: 'sync', title: 'Sync', rows: ['view-hides-sync', 'view-mining-sync'] },
 ]
@@ -124,6 +129,7 @@ export function ViewPanel(): JSX.Element {
   const hidesNote = useHidesSync((s) => s.note)
   const miningSync = useMiningStats((s) => s.enabled)
   const sfxOn = useSfxOn()
+  const smashAsk = useSmashAsking()
   // The newcomer view shows Interface only: the screen's two ways and the look sphere (newcomer/reveal.ts).
   const plain = useNewcomerView()
 
@@ -277,6 +283,17 @@ export function ViewPanel(): JSX.Element {
       hint: SFX_HINT,
       on: sfxOn,
       set: (v) => setSfxOn(v),
+    },
+    // TERRAIN asks before a smash that will not compile and would break rare
+    // recipe materials or a game recipe built wrong (lib/blueprint/smashConfirm.ts;
+    // owner's lost Glowcore, 2026-11-28). On by default, kept per identity in
+    // IndexedDB; the confirm's "Don't ask again" turns it off.
+    {
+      id: 'view-smash-ask',
+      title: SMASH_ASK_TITLE_ROW,
+      hint: SMASH_ASK_HINT,
+      on: smashAsk,
+      set: (v) => setSmashAsking(v),
     },
     // Your list of hidden things, saved to the relay encrypted to you, so every
     // device signed in as you lists it (store/hidesSync.ts; owner ruling,

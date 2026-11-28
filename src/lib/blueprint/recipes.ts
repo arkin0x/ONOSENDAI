@@ -7,10 +7,10 @@
  * 2026-11-26): an upright T hammer. A handle of two Ferrovein standing on
  * each other, a Glowcore on top, and a Rustband either side of the Glowcore
  * along X: the head. In world axes (+Y up, TERRAIN's up): a box 3 wide (X),
- * 3 high (Y) and 1 deep (Z), 9 cells read with the empty ones. It is the only
- * recipe a bare hand can smash (a longer hold, and a reach of 3 on every
- * axis: it fits, so it compiles struck at any of its blocks), and the only
- * way to get a Compiler.
+ * 3 high (Y) and 1 deep (Z), 9 cells read with the empty ones. It fits a
+ * bare hand's reach of 3 on every axis, so it compiles bare-handed struck at
+ * any of its blocks, as anything that fits does (owner, 2026-11-28), and it
+ * is the only way to get a Compiler.
  *
  * The Quarry Charge (DECK-0010 §8.5) is the second game recipe: below.
  */
@@ -40,8 +40,9 @@ export const COMPILER_RECIPE: Arrangement = arrangementFrom([
  * the centre; Rustband on -X, -Z and +Z of it and a Cinderrock on +X; an
  * Umberslate below the centre and another above it. The Cinderrock sets its
  * facing: mirrored across X it is another arrangement and compiles nothing,
- * while mirrored across Y or Z it is the same. It compiles only with the
- * Compiler in hand (smash.ts compiles), and yields seven Quarry Charges.
+ * while mirrored across Y or Z it is the same. It fits a bare hand's reach,
+ * so it compiles in either hand (owner, 2026-11-28: smash.ts compiles), and
+ * yields seven Quarry Charges.
  */
 export const QUARRY_CHARGE_RECIPE: Arrangement = arrangementFrom([
   { at: [1, 0, 1], id: UMBERSLATE },

@@ -63,7 +63,7 @@ export function makeRefusal(m: Pick<MakeInput, 'arrangement' | 'reveal' | 'text'
   if (!connected(m.arrangement)) return 'Every block must touch the rest, at a face, an edge or a corner, or a smash would not take it all.'
   if (m.reveal === 'description' && !m.text?.trim()) return 'Write a few words about the prize.'
   if ((m.reveal === 'silhouette' || m.reveal === 'render') && !Object.keys(m.views ?? {}).length) return 'Pick at least one view of the prize.'
-  if (m.lock === 'location' && (!m.height || !m.regionKey)) return 'The build must stand inside one region of the chosen size for a location lock.'
+  if (m.lock === 'location' && (!m.height || !m.regionKey)) return 'The build must fit inside one region of the chosen size for a location lock.'
   return null
 }
 

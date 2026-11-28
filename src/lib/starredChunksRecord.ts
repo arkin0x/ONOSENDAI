@@ -274,6 +274,53 @@ export function planRecord(r: StarredRecord): string {
   return text
 }
 
+/** Tombstones younger than this are always written: long enough for every device to have heard of a removal. */
+export const TOMBSTONE_KEEP_S = 30 * 86_400
+
+/** What a record had to leave out to fit one event (the device keeps all of it). */
+export interface Fitted {
+  text: string
+  /** Tombstones left out, oldest first, never one younger than TOMBSTONE_KEEP_S. */
+  tombstones: number
+  /** Saved chunks written without their card (oldest starred first). */
+  folded: number
+  /** Saved chunks left out altogether (oldest starred first): kept on this device only. */
+  dropped: number
+}
+
+/**
+ * The record as one event, whatever its size, so a sync is never stuck (two
+ * devices' full lists merged can be twice what fits). Left out in this order,
+ * a tenth at a time, until it fits MAX_RECORD_CHARS: tombstones older than
+ * TOMBSTONE_KEEP_S (oldest first), then the oldest saved chunks' cards, then
+ * the oldest saved chunks themselves, then younger tombstones. Nothing is
+ * taken off the device: what is left out here is written again once there is room.
+ */
+export function fitRecord(r: StarredRecord, nowS: number): Fitted {
+  const out: Fitted = { text: encodeRecord(r), tombstones: 0, folded: 0, dropped: 0 }
+  if (out.text.length <= MAX_RECORD_CHARS) return out
+  const e = { ...r.e }
+  const x = { ...r.x }
+  const oldGone = Object.entries(x).filter(([, t]) => t < nowS - TOMBSTONE_KEEP_S).sort((p, q) => p[1] - q[1]).map(([c]) => c)
+  const oldest = entriesOf(r).reverse().map((v) => v.c)
+  const youngGone = Object.entries(x).filter(([, t]) => t >= nowS - TOMBSTONE_KEEP_S).sort((p, q) => p[1] - q[1]).map(([c]) => c)
+  const steps: Array<{ keys: string[]; take: (c: string) => void }> = [
+    { keys: oldGone, take: (c) => { delete x[c]; out.tombstones++ } },
+    { keys: oldest.slice(), take: (c) => { const v = e[c]; if (v?.s) { const { s: _s, st: _st, ...rest } = v; e[c] = rest; out.folded++ } } },
+    { keys: oldest.slice(), take: (c) => { if (e[c]) { delete e[c]; out.dropped++ } } },
+    { keys: youngGone, take: (c) => { delete x[c]; out.tombstones++ } },
+  ]
+  for (const step of steps) {
+    const batch = Math.max(1, Math.ceil(step.keys.length / 10))
+    for (let i = 0; i < step.keys.length; i += batch) {
+      for (const c of step.keys.slice(i, i + batch)) step.take(c)
+      out.text = encodeRecord({ e, x })
+      if (out.text.length <= MAX_RECORD_CHARS) return out
+    }
+  }
+  return out
+}
+
 /** The record's event, unsigned. Only the `d`: nothing else about it is public. */
 export function recordTemplate(content: string, createdAt: number): EventTemplate {
   return { kind: STARRED_KIND, created_at: createdAt, tags: [['d', STARRED_D]], content }

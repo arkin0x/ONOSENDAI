@@ -49,12 +49,14 @@ import { AVERAGE_HARDNESS, HARDNESS_MAX, coreLayers, coreSliceAt, hardnessLine, 
 import { cardFor, closeSurveyCard, stampDate, useSurveyCard, watchCard, type CardFor } from './surveyCard'
 import { Swatch } from './Swatch'
 import { findsHere, promptFinds, snapshotOf } from '../lib/terrain/starredChunk'
-import { refreshSnapshot, starChunk, undoRemove, unstarChunk, useStarredChunks } from '../store/starredChunks'
+import { refreshSnapshot, starChunkWhy, undoRemove, unstarChunk, useStarredChunks } from '../store/starredChunks'
 import { openSavedChunks } from './savedChunksUi'
-import { MAX_STARRED_CHUNKS } from '../lib/starredChunksRecord'
 import { BRIEF_TOAST_MS, useToast } from '../store/useToast'
 
 const count = (n: number): string => n.toLocaleString('en-US')
+
+/** While a saved chunk's card is open and you mine, its kept card is brought up to date at most this often (and as it closes). */
+export const SNAPSHOT_EVERY_MS = 10_000
 
 /** The line over the lists: "You've mined 214 blocks here · 31,902 left". */
 export function tallyLine(mined: number, left: number): string {
@@ -236,6 +238,13 @@ export function SurveyCard(): JSX.Element | null {
     let again = false
     // Every kind the open card has listed stays listed, at 0 once it is all gone, so no row jumps off it.
     const shown = new Set<number>()
+    let latest: CardFor | null = null
+    let keptAt = 0
+    const keep = (): void => {
+      keptAt = Date.now()
+      if (latest && useStarredChunks.getState().keys.has(key)) refreshSnapshot(key, snapshotOf(latest.card, latest.at))
+      latest = null
+    }
     const recount = (): void => {
       if (busy) { again = true; return }
       busy = true
@@ -246,15 +255,16 @@ export function SurveyCard(): JSX.Element | null {
       void cardFor(key, shown).then((card) => {
         if (!live) return
         if (card) for (const r of [...card.card.finds, ...card.card.common]) shown.add(r.id)
-        // A saved chunk keeps its card as you see it now (only what changed is kept; never a write by itself).
-        if (card && useStarredChunks.getState().keys.has(key)) refreshSnapshot(key, snapshotOf(card.card, card.at))
+        // A saved chunk keeps its card as you see it now: at most once every SNAPSHOT_EVERY_MS while you mine
+        // (never the whole list per block), and the last count as the card closes. Never a write to the relay by itself.
+        if (card) { latest = card; if (Date.now() - keptAt >= SNAPSHOT_EVERY_MS) keep() }
         setGot(card ? { key, card } : null)
         done()
       }, () => { if (live) setGot(null); done() })
     }
     recount()
     const stop = watchCard(key, recount)
-    return () => { live = false; stop() }
+    return () => { live = false; stop(); keep() }
   }, [key, owns])
   // On the Escape stack only while the card is drawn: one that could not be read never swallows Esc (review of #956).
   const shown = !!key && !!got && got.key === key
@@ -267,7 +277,11 @@ export function SurveyCard(): JSX.Element | null {
   const rare = rareRows.length ? findsHere(rareRows) : null
   const toggleStar = (): void => {
     if (starred) unstarChunk(key)
-    else if (!starChunk(key, snapshotOf(card, at))) useToast.getState().show({ label: 'Your saved chunks are full', meta: `${MAX_STARRED_CHUNKS} at most. Remove one in MINING, SAVED CHUNKS, to star this one.`, mark: 'star', ms: BRIEF_TOAST_MS })
+    else {
+      const why = starChunkWhy(key, snapshotOf(card, at))
+      if (why === 'full') useToast.getState().show({ label: 'No room left in your saved chunks', meta: 'They fill one private record. Remove one in MINING, SAVED CHUNKS, to star this one.', mark: 'star', ms: BRIEF_TOAST_MS })
+      else if (why === 'no-identity') useToast.getState().show({ label: 'Sign in to save chunks', meta: 'A saved chunk is kept for the identity you are signed in as.', mark: 'star', ms: BRIEF_TOAST_MS })
+    }
   }
   return (
     <Stacked>

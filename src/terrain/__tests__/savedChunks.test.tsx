@@ -35,12 +35,12 @@ if (typeof localStorage === 'undefined') {
 import { createElement } from 'react'
 import { mount, textOf, type Host, type Mounted } from '../../test/elementRoot'
 import { mountHook } from '../../test/hookRoot'
-import { SurveyCard } from '../SurveyCard'
+import { SNAPSHOT_EVERY_MS, SurveyCard } from '../SurveyCard'
 import { SavedChunks } from '../SavedChunks'
 import { MiningPanel } from '../../hud/MiningPanel'
 import { openSavedChunks, closeSavedChunks, useSavedChunksUi } from '../savedChunksUi'
-import { openSurveyCard, resetSurveyCards } from '../surveyCard'
-import { setTerrainSession, useTerrain, type TerrainSession } from '../../store/useTerrain'
+import { CARD_WATCH_MS, closeSurveyCard, openSurveyCard, resetSurveyCards } from '../surveyCard'
+import { setTerrainSession, terrainSession, useTerrain, type TerrainSession } from '../../store/useTerrain'
 import { useCyberspace } from '../../store/useCyberspace'
 import { useGoal } from '../../store/useGoal'
 import { emptyInventory } from '../../lib/terrain/terrainDb'
@@ -129,6 +129,34 @@ describe('the survey card\'s star', () => {
       expect(find(m, 'survey-star')).toHaveLength(1)
     } finally {
       await m.unmount()
+    }
+  })
+
+  it('while you mine with a saved chunk\'s card open, its kept card is updated at most every ten seconds, and as the card closes', async () => {
+    const key = field(true)
+    starChunk(key, undefined)
+    openSurveyCard(key)
+    const m = await mount(createElement(SurveyCard))
+    let unmounted = false
+    try {
+      await new Promise((r) => setTimeout(r, 20))
+      // Kept as the card first counts.
+      const first = localFor(ME).rec.e[key].s
+      expect(first?.r[0][1]).toBe(2)
+      // You mine both Glowcore: the card counts again (four times a second at most), the kept card waits.
+      const slot = terrainSession!.world.slotByKey(key)!
+      slot.blocks![idx(10, 10, 10)] = 0; slot.blocks![idx(12, 10, 10)] = 0; slot.version++
+      await new Promise((r) => setTimeout(r, CARD_WATCH_MS + 120))
+      expect(m.all().filter((h) => cls(h).split(' ').includes('survey-row')).map(textOf)[0]).toMatch(/^Glowcore/)
+      expect(localFor(ME).rec.e[key].s?.r[0][1]).toBe(2)
+      expect(SNAPSHOT_EVERY_MS).toBe(10_000)
+      // Closing the card keeps its last count.
+      closeSurveyCard()
+      await m.unmount()
+      unmounted = true
+      expect(localFor(ME).rec.e[key].s?.r[0][1]).toBe(0)
+    } finally {
+      if (!unmounted) await m.unmount()
     }
   })
 

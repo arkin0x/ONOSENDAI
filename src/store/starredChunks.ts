@@ -50,10 +50,10 @@ import { create } from 'zustand'
 import { verifyEvent } from 'nostr-tools/pure'
 import type { Filter } from 'nostr-tools/filter'
 import { bytesToHex, hexToBytes, type EventTemplate, type NostrEvent } from '../lib/events'
-import { kvStorage } from '../lib/kvStore'
+import { kvStorage, kvUpdate } from '../lib/kvStore'
 import {
-  MAX_STARRED_CHUNKS, STARRED_D, STARRED_KIND, cleanNote, decodeRecord, emptyRecord, entriesOf, mergeRecords, newRecordKey, newestRecord, openRecord,
-  planRecord, recordContent, recordTemplate, sameRecord, sealRecord, validEntry,
+  MAX_STARRED_CHUNKS, STARRED_D, STARRED_KIND, cleanNote, decodeRecord, emptyRecord, entriesOf, fitRecord, mergeRecords, newRecordKey, newestRecord, openRecord,
+  recordContent, recordTemplate, sameRecord, sealRecord, validEntry,
   type ChunkSnapshot, type StarEntry, type StarredRecord,
 } from '../lib/starredChunksRecord'
 import { sameSnapshot } from '../lib/terrain/starredChunk'
@@ -96,6 +96,10 @@ export interface StarredDeps {
   /** Milliseconds. */
   now: () => number
   storage: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> | null
+  /** A stored record changed in one step no other tab interleaves with, from the record as stored (kvStore kvUpdate). */
+  update: (key: string, fn: (stored: string | null) => string | null) => Promise<string | null>
+  /** A lock across the device's tabs (a Web Lock), so one tab syncs at a time and the throttle is shared. */
+  lock: <T>(name: string, fn: () => Promise<T>) => Promise<T>
   /** The device's own switch (localStorage, like the hidden list's). */
   prefs: Pick<Storage, 'getItem' | 'setItem'> | null
   verify: (ev: NostrEvent) => boolean
@@ -197,35 +201,87 @@ function readRecord(o: unknown): StarredRecord {
   return mergeRecords(out, emptyRecord())
 }
 
-/** This identity's list as kept here; an empty one (unsaved) when there is none yet. */
+/** A stored list as text, read; an empty one when there is none. A record that does not read is kept aside, never written over. */
+function parseLocal(raw: string | null, me: string, D: StarredDeps): StarredLocal {
+  if (!raw) return fresh()
+  try {
+    const v = JSON.parse(raw) as Partial<StarredLocal>
+    const num = (n: unknown): number => (typeof n === 'number' && Number.isFinite(n) && n >= 0 ? n : 0)
+    return { v: 1, rec: readRecord(v.rec), rev: num(v.rev), real: num(v.real), syncedReal: num(v.syncedReal), triedAt: num(v.triedAt), syncedAt: num(v.syncedAt), wroteAt: num(v.wroteAt) }
+  } catch {
+    try { D.storage?.setItem(`${recordKey(me)}:unread:${D.now()}`, raw) } catch { /* full */ }
+    return fresh()
+  }
+}
+
+/** This identity's list as this tab knows it: the stored copy (refreshed when another tab writes it), with this tab's changes on their way. */
 export function localFor(me: string, D: StarredDeps = deps): StarredLocal {
   let raw: string | null = null
   try { raw = D.storage?.getItem(recordKey(me)) ?? null } catch { /* unreadable: as new */ }
   const was = cache.get(me)
   if (was && was.raw === raw) return was.local
-  let local: StarredLocal | null = null
-  if (raw) {
-    try {
-      const v = JSON.parse(raw) as Partial<StarredLocal>
-      const num = (n: unknown): number => (typeof n === 'number' && Number.isFinite(n) && n >= 0 ? n : 0)
-      local = { v: 1, rec: readRecord(v.rec), rev: num(v.rev), real: num(v.real), syncedReal: num(v.syncedReal), triedAt: num(v.triedAt), syncedAt: num(v.syncedAt), wroteAt: num(v.wroteAt) }
-    } catch {
-      // A record that does not read is kept aside, never written over.
-      try { D.storage?.setItem(`${recordKey(me)}:unread:${D.now()}`, raw) } catch { /* full */ }
-    }
-  }
-  local ??= fresh()
-  cache.set(me, { raw, local })
+  const local = parseLocal(raw, me, D)
+  cache.set(me, { raw: D.storage ? raw : null, local })
   return local
 }
 
-function saveLocal(me: string, local: StarredLocal, D: StarredDeps = deps): void {
-  if (!D.storage) { cache.set(me, { raw: null, local }); return }
-  const raw = JSON.stringify(local)
-  try { D.storage.setItem(recordKey(me), raw) } catch { /* quota: kept in memory below */ }
-  let back: string | null = raw
-  try { back = D.storage.getItem(recordKey(me)) ?? raw } catch { back = raw }
-  cache.set(me, { raw: back, local })
+/**
+ * Another tab wrote the stored list (kvStore re-reads it and raises a
+ * `storage` event, store/starredChunksLive.ts): the list on screen again,
+ * and this tab's timer moved to the device's shared window.
+ */
+export function heardElsewhere(key: string | null): void {
+  const me = deps.self()
+  if (!me || (key !== null && key !== recordKey(me))) return
+  publishList()
+  if (isDirty(me)) schedule()
+}
+
+/** This tab's writes to the stored list, in order. */
+let writes: Promise<unknown> = Promise.resolve()
+
+/** For tests: every write this tab has queued, landed. */
+export function starredWrites(): Promise<unknown> {
+  return writes
+}
+
+/**
+ * Change this identity's list (review of #968: two tabs lost each other's
+ * stars). `fn` is applied to this tab's copy at once, for the screen, and
+ * again to the copy as stored, in one step no other tab interleaves with
+ * (kvStore kvUpdate: a Web Lock and one IndexedDB transaction), so a change
+ * another tab made is never written over by this tab's older copy. Returns
+ * what this tab now shows, or null when `fn` changed nothing.
+ */
+function commit(me: string, D: StarredDeps, fn: (l: StarredLocal) => StarredLocal | null): StarredLocal | null {
+  const cur = localFor(me, D)
+  const next = fn(cur)
+  if (!next) return null
+  cache.set(me, { raw: cache.get(me)?.raw ?? null, local: next })
+  // No storage at all: this tab's memory is the only copy.
+  if (!D.storage) return next
+  const key = recordKey(me)
+  const p = writes.then(() => D.update(key, (stored) => {
+    const l = fn(parseLocal(stored, me, D))
+    return l ? JSON.stringify(l) : stored
+  })).then((raw) => {
+    // What is stored now is this tab's copy from here on.
+    cache.set(me, { raw, local: parseLocal(raw, me, D) })
+    if (me === D.self()) publishList()
+  }, () => { /* storage refused: this tab keeps its copy, and the next change tries again */ })
+  writes = p
+  return next
+}
+
+/** The list as stored now (another tab's last write included), once this tab's own writes have landed. */
+async function readStored(me: string, D: StarredDeps): Promise<StarredLocal> {
+  await writes
+  if (!D.storage) return localFor(me, D)
+  const raw = await D.update(recordKey(me), (stored) => stored).catch(() => undefined)
+  if (raw === undefined) return localFor(me, D)
+  const local = parseLocal(raw, me, D)
+  cache.set(me, { raw: D.storage ? raw : null, local })
+  return local
 }
 
 /** Whether this identity has stars, renames or removals the relay does not hold yet. */
@@ -241,32 +297,35 @@ export function starredEntry(key: string): StarEntry | null {
   return me ? localFor(me).rec.e[key] ?? null : null
 }
 
-function changed(me: string, local: StarredLocal, D: StarredDeps, real: boolean): void {
-  saveLocal(me, local, D)
-  if (me === D.self()) publishList()
-  if (real && useStarredChunks.getState().enabled && me === D.self()) schedule()
-}
-
 /** One change to the identity on screen's record, through `edit`; `real` when it is worth a signature. */
 function edit(real: boolean, fn: (rec: StarredRecord, nowS: number) => StarredRecord | null): boolean {
   const D = deps
   const me = D.self()
   if (!me) return false
-  const local = localFor(me, D)
   const nowS = Math.floor(D.now() / 1000)
-  const next = fn(local.rec, nowS)
+  const next = commit(me, D, (l) => {
+    const rec = fn(l.rec, nowS)
+    return rec ? { ...l, rec, rev: l.rev + 1, real: l.real + (real ? 1 : 0) } : null
+  })
   if (!next) return false
-  changed(me, { ...local, rec: next, rev: local.rev + 1, real: local.real + (real ? 1 : 0) }, D, real)
+  publishList()
+  if (real && useStarredChunks.getState().enabled) schedule()
   return true
 }
 
+/** Why a star did or did not take: taken, no room left in the record, or nobody signed in. */
+export type StarResult = 'ok' | 'full' | 'no-identity'
+
 /**
- * Star the chunk `key`, with its card as it is now. Starring one already
- * starred keeps its date and note and takes the fresh snapshot. False when
- * the list is full (MAX_STARRED_CHUNKS) or there is no identity.
+ * Star the chunk `key`, with its card as it is now, and say why when it does
+ * not take. Starring one already starred keeps its date and note and takes
+ * the fresh snapshot. Refused when the list would no longer fit one event
+ * whole (lib/starredChunksRecord.ts fitRecord: old tombstones may be left out,
+ * never a saved chunk or its card) or reaches MAX_STARRED_CHUNKS.
  */
-export function starChunk(key: string, snapshot: ChunkSnapshot | undefined): boolean {
-  return edit(true, (rec, now) => {
+export function starChunkWhy(key: string, snapshot: ChunkSnapshot | undefined): StarResult {
+  if (!deps.self()) return 'no-identity'
+  const ok = edit(true, (rec, now) => {
     const was = rec.e[key]
     if (!was && Object.keys(rec.e).length >= MAX_STARRED_CHUNKS) return null
     // Newer than anything it replaces, even against a clock that ran ahead elsewhere.
@@ -276,10 +335,18 @@ export function starChunk(key: string, snapshot: ChunkSnapshot | undefined): boo
     const x = { ...rec.x }
     delete x[key]
     const next = { e: { ...rec.e, [key]: entry }, x }
-    // Never past what one event carries: refused here, at the star, never later at every write.
-    try { planRecord(next) } catch { return null }
-    return next
-  }) && clearUndoFor(key)
+    // Never past what one event carries whole: refused here, at the star, never later at every write.
+    const fit = fitRecord(next, now)
+    return fit.folded || fit.dropped ? null : next
+  })
+  if (!ok) return 'full'
+  clearUndoFor(key)
+  return 'ok'
+}
+
+/** starChunkWhy, as yes or no. */
+export function starChunk(key: string, snapshot: ChunkSnapshot | undefined): boolean {
+  return starChunkWhy(key, snapshot) === 'ok'
 }
 
 /** A chunk starred again: the UNDO for its removal is moot. Always true. */
@@ -295,7 +362,8 @@ export function unstarChunk(key: string): StarEntry | null {
   edit(true, (rec, now) => {
     const e = { ...rec.e }
     delete e[key]
-    return { e, x: { ...rec.x, [key]: Math.max(now, was.t + 1) } }
+    // Past the entry as stored (another tab may have renamed it since), so the tombstone stands.
+    return { e, x: { ...rec.x, [key]: Math.max(now, (rec.e[key]?.t ?? was.t) + 1, rec.x[key] ?? 0) } }
   })
   useStarredChunks.setState({ removed: { entry: was, until: deps.now() + UNDO_MS } })
   if (useStarredChunks.getState().guide?.key === key) useStarredChunks.setState({ guide: null })
@@ -436,10 +504,21 @@ function mayWrite(D: StarredDeps, me: string): boolean {
   return D.self() === me && D.live() && !D.tutorial(me) && useStarredChunks.getState().enabled
 }
 
-async function syncOnce(D: StarredDeps, write: boolean): Promise<Outcome> {
+/**
+ * One sync, under a lock across the device's tabs, so one tab syncs at a time
+ * and the 10-minute floor is the device's, not each tab's: `floor` (every
+ * write but a race's retry) writes only when the stored list's last try is
+ * WRITE_EVERY_MS old, else only reads.
+ */
+function syncOnce(D: StarredDeps, write: boolean, floor = true): Promise<Outcome> {
   const me = D.self()
+  if (!me) return Promise.resolve({ wrote: false })
+  return D.lock(`onosendai:starred-sync:${me}`, () => syncLocked(D, me, write, floor))
+}
+
+async function syncLocked(D: StarredDeps, me: string, write: boolean, floor: boolean): Promise<Outcome> {
   const none: Outcome = { wrote: false }
-  if (!me) return none
+  if (D.self() !== me) return none
   const done = (status: StarredStatus, note: string | null = null): Outcome => { useStarredChunks.setState({ status, note }); return none }
   if (!useStarredChunks.getState().enabled) return done('off')
   if (!D.live()) return done('local')
@@ -455,22 +534,31 @@ async function syncOnce(D: StarredDeps, write: boolean): Promise<Outcome> {
   if (remote.trouble) return done('error', NOT_ANSWERED)
   if (remote.why) return done('error', remote.why)
   const nowS = Math.floor(D.now() / 1000)
-  let local = localFor(me, D)
-  const merged = mergeRecords(local.rec, remote.rec, nowS)
+  // The list as stored, with every tab's changes: never this tab's copy alone.
+  const stored = await readStored(me, D)
+  if (D.self() !== me) return none
+  const merged = mergeRecords(stored.rec, remote.rec, nowS)
   const behind = !sameRecord(merged, remote.rec)
-  local = { ...local, rec: merged, syncedAt: D.now(), ...(behind ? {} : { syncedReal: local.real }) }
-  saveLocal(me, local, D)
+  const readReal = stored.real
+  const syncedAt = D.now()
+  // The relay's list folded in (a merge, so applying it to the stored copy again loses nothing another tab added).
+  const local = commit(me, D, (l) => ({ ...l, rec: mergeRecords(l.rec, remote.rec, nowS), syncedAt, ...(behind ? {} : { syncedReal: Math.max(l.syncedReal, readReal) }) })) ?? stored
   publishList()
   if (!behind) return done('synced')
   // Behind by fresh snapshots alone: they wait for a real change. Only reading: what is new waits for the write.
   if (local.real <= local.syncedReal) return done('synced')
   if (!write || !mayWrite(D, me)) return done('idle')
+  // Another tab tried within the window: its write stands for both, and this one waits.
+  if (floor && stored.triedAt > 0 && D.now() - stored.triedAt < WRITE_EVERY_MS) return done('idle')
   if (remote.createdAt < local.wroteAt && nowS - local.wroteAt < STALE_PATIENCE_S) return done('error', STALE)
-  let text: string
-  try { text = planRecord(merged) } catch (err) { return done('error', err instanceof Error ? err.message : String(err)) }
-  const real = local.real
-  // The throttle counts tries, so a refusal is not asked again until the next window.
-  saveLocal(me, { ...local, triedAt: D.now() }, D)
+  // Always one event: whatever does not fit is left out of this write and kept on the device (fitRecord).
+  const fit = fitRecord(merged, nowS)
+  const text = fit.text
+  const real = readReal
+  // The throttle counts tries, so a refusal is not asked again until the next window; stored, so every tab sees it.
+  const triedAt = D.now()
+  commit(me, D, (l) => ({ ...l, triedAt: Math.max(l.triedAt, triedAt) }))
+  await writes
   let key = remote.key
   if (!key && made && made.me === me) key = { wrapped: made.wrapped, key: made.key }
   if (!key) {
@@ -499,9 +587,10 @@ async function syncOnce(D: StarredDeps, write: boolean): Promise<Outcome> {
   if (!mayWrite(D, me)) return quit()
   const res = await D.publish(ev)
   if (!res.ok) return done('error', `Your saved chunks were not saved to the relay (${res.reason}).`)
-  const now = localFor(me, D)
-  saveLocal(me, { ...now, syncedReal: Math.max(now.syncedReal, real), syncedAt: D.now(), wroteAt: ev.created_at }, D)
-  useStarredChunks.setState({ status: 'synced', note: null })
+  const at = D.now()
+  commit(me, D, (l) => ({ ...l, syncedReal: Math.max(l.syncedReal, real), syncedAt: at, wroteAt: Math.max(l.wroteAt, ev.created_at) }))
+  await writes
+  useStarredChunks.setState({ status: 'synced', note: fit.dropped ? `${fit.dropped} saved ${fit.dropped === 1 ? 'chunk is' : 'chunks are'} too many for the relay and stay on this device.` : null })
   return { wrote: true }
 }
 
@@ -514,13 +603,14 @@ let verifyTimer: ReturnType<typeof setTimeout> | null = null
 
 /** One sync after any already running. `write` false only reads (and folds in the other devices). */
 export function syncStarred(write = true): Promise<Outcome> {
-  const once = (): Promise<Outcome> => syncOnce(deps, write).catch((err) => {
+  const once = (floor = true): Promise<Outcome> => syncOnce(deps, write, floor).catch((err) => {
     useStarredChunks.setState({ status: 'error', note: err instanceof Error ? err.message : String(err) })
     return { wrote: false }
   })
   const run = async (): Promise<Outcome> => {
     let out = await once()
-    for (let n = 0; out.raced && n < 2; n++) out = await once()
+    // A race's retry is the same try: it does not wait for the window again.
+    for (let n = 0; out.raced && n < 2; n++) out = await once(false)
     return out
   }
   const p = queue.then(run, run)
@@ -588,6 +678,23 @@ export function identityChanged(): void {
 
 const ls = (): Storage | null => { try { return typeof localStorage !== 'undefined' ? localStorage : null } catch { return null } }
 
+/** A Web Lock across the device's tabs, where the browser has them. */
+function webLock<T>(name: string, fn: () => Promise<T>): Promise<T> {
+  const locks = typeof navigator !== 'undefined' ? (navigator as Navigator & { locks?: LockManager }).locks : undefined
+  return locks?.request ? locks.request(name, fn) as unknown as Promise<T> : fn()
+}
+
+/** `update` over a plain storage (tests, and storage handed in without one): read, change and write at once. */
+function updateOver(storage: StarredDeps['storage']): StarredDeps['update'] {
+  return async (key, fn) => {
+    let raw: string | null = null
+    try { raw = storage?.getItem(key) ?? null } catch { /* unreadable */ }
+    const next = fn(raw)
+    try { if (next === null) storage?.removeItem(key); else storage?.setItem(key, next) } catch { /* full: kept in this tab */ }
+    return next
+  }
+}
+
 const offline: StarredDeps = {
   self: () => '',
   live: () => false,
@@ -598,6 +705,8 @@ const offline: StarredDeps = {
   publish: async () => ({ ok: false, reason: 'not started' }),
   now: () => Date.now(),
   storage: kvStorage,
+  update: kvUpdate,
+  lock: webLock,
   prefs: ls(),
   verify: (ev) => verifyEvent({ ...ev } as Parameters<typeof verifyEvent>[0]),
 }
@@ -607,7 +716,8 @@ let deps: StarredDeps = offline
 /** Set the outside world (startStarredChunks, and tests). Returns the previous deps. */
 export function setStarredDeps(next: Partial<StarredDeps> | null): StarredDeps {
   const prev = deps
-  deps = next ? { ...offline, ...next } : offline
+  // Storage handed in without its own update (tests): one over it, never kvStore's over the real database.
+  deps = next ? { ...offline, ...next, ...(next.storage !== undefined && !next.update ? { update: updateOver(next.storage) } : {}) } : offline
   useStarredChunks.setState({ enabled: loadEnabled(deps.prefs) })
   publishList()
   return prev
@@ -623,5 +733,6 @@ export function resetStarredChunks(): void {
   if (verifyTimer) clearTimeout(verifyTimer)
   verifyTimer = null
   queue = Promise.resolve()
+  writes = Promise.resolve()
   useStarredChunks.setState({ status: 'idle', note: null, entries: [], keys: new Set(), guide: null, removed: null })
 }

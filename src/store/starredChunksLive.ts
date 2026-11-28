@@ -11,6 +11,10 @@
  *   - a saved chunk you enter or leave has its card counted again (one count,
  *     kept per version: lib/terrain/assay.ts), so the list's finds are fresh
  *     from your last visit. Only a crossing does this, never a frame or a step.
+ *
+ * OTHER TABS. A star, rename or removal in another tab of this device lands in
+ * the stored list (store/starredChunks.ts commit); kvStore tells this tab with
+ * a `storage` event, and the list on screen follows (heardElsewhere).
  */
 
 import { CYBERSPACE_RELAY, publishMany, queryChecked, relaySet } from '../lib/relay'
@@ -22,7 +26,7 @@ import { cardFor } from '../terrain/surveyCard'
 import { chunkName, snapshotOf } from '../lib/terrain/starredChunk'
 import { chunkKey } from '../lib/terrain/coords'
 import {
-  endGuide, identityChanged, nudgeStarred, refreshSnapshot, schedule, setStarredDeps, starredEntry, useStarredChunks, type StarredDeps,
+  endGuide, heardElsewhere, identityChanged, nudgeStarred, refreshSnapshot, schedule, setStarredDeps, starredEntry, useStarredChunks, type StarredDeps,
 } from './starredChunks'
 
 const sameRelay = (a: string, b: string): boolean => a.trim().toLowerCase().replace(/\/+$/, '') === b.trim().toLowerCase().replace(/\/+$/, '')
@@ -101,6 +105,8 @@ export function startStarredChunks(): void {
     crossed(from, now)
   })
 
+  // Another tab starred, renamed or removed (kvStore raises `storage` for a record another tab wrote): this tab's list follows.
+  if (typeof window !== 'undefined') window.addEventListener('storage', (e: StorageEvent) => heardElsewhere(e.key))
   if (typeof document !== 'undefined') {
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') nudgeStarred('hide') })
   }

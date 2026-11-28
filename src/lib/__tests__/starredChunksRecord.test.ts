@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest'
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
 import { v2 as nip44 } from 'nostr-tools/nip44'
 import {
-  MAX_RECORD_CHARS, MAX_ROWS, MAX_STARRED_CHUNKS, STARRED_D, STARRED_KIND, cleanNote, decodeRecord, emptyRecord, encodeRecord, mergeRecords, newRecordKey,
+  MAX_RECORD_CHARS, MAX_ROWS, MAX_STARRED_CHUNKS, TOMBSTONE_KEEP_S, fitRecord, STARRED_D, STARRED_KIND, cleanNote, decodeRecord, emptyRecord, encodeRecord, mergeRecords, newRecordKey,
   newestRecord, openRecord, planRecord, recordContent, recordTemplate, sameRecord, sealRecord, validEntry,
   type ChunkSnapshot, type StarEntry, type StarredRecord,
 } from '../starredChunksRecord'
@@ -124,6 +124,36 @@ describe('reading', () => {
     }))
     expect(Object.keys(many.e)).toHaveLength(MAX_STARRED_CHUNKS)
     expect(planRecord(many).length).toBeLessThanOrEqual(MAX_RECORD_CHARS)
+  })
+})
+
+describe('fitting one event', () => {
+  it('leaves out the oldest tombstones first and keeps every one younger than 30 days, then cards, then the oldest chunks', () => {
+    let seed = 5
+    const rnd = (n: number): number => { seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) % n }
+    const hex = (n: number): string => Array.from({ length: n }, () => '0123456789abcdef'[rnd(16)]).join('')
+    const far = (): string => chunkKey({ x: BigInt(`0x${hex(20)}`) << 5n, y: BigInt(`0x${hex(20)}`) << 5n, z: BigInt(`0x${hex(20)}`) << 5n, plane: rnd(2) })
+    const now = 1_796_000_000
+    const card = (): ChunkSnapshot => ({ g: 'volcanic', k: 9, m: 7, r: [[42, rnd(9), 0, 1], [1, 9000, 0, 4000]], d: hex(64), v: 0 })
+    const e = Array.from({ length: 120 }, (_, i) => ({ c: far(), a: now - 1000 + i, t: now - 1000 + i, s: card(), st: now }))
+    const old = Array.from({ length: 400 }, (_, i) => [far(), now - TOMBSTONE_KEEP_S - 86_400 - i] as [string, number])
+    const young = Array.from({ length: 100 }, (_, i) => [far(), now - 86_400 - i] as [string, number])
+    const r = rec(e, [...old, ...young])
+    expect(encodeRecord(r).length).toBeGreaterThan(MAX_RECORD_CHARS)
+    const fit = fitRecord(r, now)
+    expect(fit.text.length).toBeLessThanOrEqual(MAX_RECORD_CHARS)
+    expect(fit.tombstones).toBeGreaterThan(0)
+    expect(fit.folded).toBe(0)
+    expect(fit.dropped).toBe(0)
+    const back = decodeRecord(fit.text)
+    // Every young tombstone and every chunk with its card; of the old tombstones, the newest kept.
+    for (const [c] of young) expect(back.x[c]).toBeDefined()
+    expect(Object.keys(back.e)).toHaveLength(120)
+    const keptOld = old.filter(([c]) => back.x[c] !== undefined).map(([, t]) => t)
+    const goneOld = old.filter(([c]) => back.x[c] === undefined).map(([, t]) => t)
+    if (keptOld.length) expect(Math.min(...keptOld)).toBeGreaterThan(Math.max(...goneOld))
+    // A record that fits is left whole.
+    expect(fitRecord(rec(e.slice(0, 10)), now)).toMatchObject({ tombstones: 0, folded: 0, dropped: 0 })
   })
 })
 

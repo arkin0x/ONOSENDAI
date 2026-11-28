@@ -22,7 +22,7 @@ import { STARRED_D, STARRED_KIND, decodeRecord, openRecord, planRecord, recordCo
 import { chunkKey } from '../../lib/terrain/coords'
 import {
   HIDE_FLOOR_MS, QUIET_MS, UNDO_MS, WRITE_EVERY_MS, endGuide, expireUndo, guideTo, identityChanged, isDirty, localFor, nudgeStarred, refreshSnapshot, renameChunk,
-  resetStarredChunks, setHudTarget, setStarredDeps, setWaypoint, starChunk, syncStarred, undoRemove, unstarChunk, useStarredChunks, type StarredDeps,
+  resetStarredChunks, setHudTarget, setStarredDeps, setWaypoint, starChunk, starredWrites, syncStarred, undoRemove, unstarChunk, useStarredChunks, type StarredDeps,
 } from '../starredChunks'
 import { crossed } from '../starredChunksLive'
 import { useToast } from '../useToast'
@@ -185,7 +185,7 @@ describe('starring', () => {
     expect(refreshSnapshot(K(2), snap())).toBe(false)
   })
 
-  it('keeps each identity\'s list on this device: switching never deletes', () => {
+  it('keeps each identity\'s list on this device: switching never deletes', async () => {
     const d = device()
     as(d, { live: () => false })
     starChunk(K(1), snap())
@@ -196,6 +196,7 @@ describe('starring', () => {
     self = me
     identityChanged()
     expect(useStarredChunks.getState().entries.map((e) => e.c)).toEqual([K(1)])
+    await starredWrites()
     // Kept per npub under its own name.
     expect([...d.storage.m.keys()].sort()).toEqual([`onosendai:starred-chunks:${me}`, `onosendai:starred-chunks:${other}`].sort())
     // A new load of the app on the device reads them back.

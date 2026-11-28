@@ -191,7 +191,7 @@ function WhereItIs({ w, plane }: { w: Where | null; plane: number }): JSX.Elemen
         ) : w.inside ? (
           <>
             <span className="saved-where__big">You are here</span>
-            <span className="saved-where__line">You stand in this chunk.</span>
+            <span className="saved-where__line">You are in this chunk.</span>
           </>
         ) : (
           <>

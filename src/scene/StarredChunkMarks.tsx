@@ -197,6 +197,8 @@ export function StarredChunkMarks({ axes }: { axes: ViewAxes }): JSX.Element {
   const target = useRef({ key: null as string | null, s: null as TerrainSession | null, base: null as ChunkBase | null, off: null as [number, number, number] | null })
   // The outlines in use, and each one's state, looked for every LOOK_MS.
   const near = useRef({ at: -Infinity, n: 0, here: -1, guided: -1 })
+  // The saved chunks' keys parsed once per list (a new list only when one is starred, renamed or removed), and each one's chunk steps.
+  const parsed = useRef({ from: null as unknown, list: [] as Array<{ key: string; c: ChunkBase; cx: bigint; cy: bigint; cz: bigint }> })
   const scratch = useMemo(() => ({ at: new Vector3(), pos: new Vector3() }), [])
 
   useFrame((state) => {
@@ -228,20 +230,28 @@ export function StarredChunkMarks({ axes }: { axes: ViewAxes }): JSX.Element {
       const head = headNow()
       const hx = head.x >> 5n, hy = head.y >> 5n, hz = head.z >> 5n
       const lim = BigInt(NEAR_CHUNKS)
+      const pl = parsed.current
+      if (pl.from !== st.entries) {
+        pl.from = st.entries
+        pl.list = []
+        for (const e of st.entries) {
+          const c = parseChunkKey(e.c)
+          if (c) pl.list.push({ key: e.c, c, cx: c.x >> 5n, cy: c.y >> 5n, cz: c.z >> 5n })
+        }
+      }
       let n = 0
       nr.here = -1; nr.guided = -1
-      for (const e of st.entries) {
+      for (const { key, c, cx, cy, cz } of pl.list) {
         if (n >= POOL) break
-        const c = parseChunkKey(e.c)
-        if (!c || c.plane !== s.plane) continue
-        const ax = (c.x >> 5n) - hx, ay = (c.y >> 5n) - hy, az = (c.z >> 5n) - hz
+        if (c.plane !== s.plane) continue
+        const ax = cx - hx, ay = cy - hy, az = cz - hz
         if (ax > lim || ax < -lim || ay > lim || ay < -lim || az > lim || az < -lim) continue
         const off = cornerOffset(s, c)
         if (!off) continue
         const slot = parts.slots[n]
         slot.group.position.set(off[0] + SIDE / 2, off[1] + SIDE / 2, off[2] + SIDE / 2)
         if (ax === 0n && ay === 0n && az === 0n && cs.headPlane === c.plane) nr.here = n
-        else if (e.c === guideKey) nr.guided = n
+        else if (key === guideKey) nr.guided = n
         n++
       }
       nr.n = n
@@ -270,8 +280,9 @@ export function StarredChunkMarks({ axes }: { axes: ViewAxes }): JSX.Element {
     if (!tg.off) { b.visible = false; return }
     // The middle of the chunk's floor, in render space: its face lowest on screen, whichever axis the view has as up.
     const up = axes.up.axis === 'x' ? 0 : axes.up.axis === 'y' ? 1 : 2
-    const foot = (i: number): number => tg.off![i] + (i !== up ? SIDE / 2 : axes.up.dir > 0 ? 0 : SIDE)
-    scratch.at.set(foot(0), foot(1), foot(2)).applyMatrix4(f.m)
+    const lift = axes.up.dir > 0 ? 0 : SIDE
+    const o = tg.off
+    scratch.at.set(o[0] + (up === 0 ? lift : SIDE / 2), o[1] + (up === 1 ? lift : SIDE / 2), o[2] + (up === 2 ? lift : SIDE / 2)).applyMatrix4(f.m)
     const unit = f.m.getMaxScaleOnAxis()
     const k = beaconPlacement(scratch.pos, scratch.at, state.camera.position, unit)
     b.position.copy(scratch.pos)

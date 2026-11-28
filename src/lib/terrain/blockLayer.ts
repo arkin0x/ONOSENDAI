@@ -136,12 +136,15 @@ export function canonicalNumbers(text: string): boolean {
 const CANONICAL = /^(0|-?[1-9][0-9]*)$/
 
 /**
- * Whether every number in each plane's `cells` and `pal` is written as §5.3
- * requires (canonicalNumbers' rule), the other numbers of the plaintext left
- * to their own readers: a `surveyed` that is not an integer reads as the
- * layer's created_at, and never drops the layer (§5.4). JSON.parse reads
- * `1.0` as `1`, so the text is walked: a number is checked when it sits in an
- * array under `cells` or `pal` of an object in the top-level `planes`.
+ * Whether every number in each plane's `cells` and `pal`, and its `plane` and
+ * `ground`, is written as §5.3 requires (canonicalNumbers' rule), the other
+ * numbers of the plaintext left to their own readers: a `surveyed` that is
+ * not an integer reads as the layer's created_at, and never drops the layer
+ * (§5.4). JSON.parse reads `1.0` as `1`, so the text is walked: a number is
+ * checked when it sits in an array under `cells` or `pal`, or right under
+ * `plane` or `ground`, of an object in the top-level `planes`. Each key is
+ * decoded as JSON.parse decodes it, so an escaped duplicate (`"cell\u0073"`,
+ * which JSON.parse reads as `cells` and lets win) is checked too.
  */
 export function canonicalCells(text: string): boolean {
   // Each open container: what it is, and the key (or '#' for an array element) it sits under.
@@ -154,13 +157,17 @@ export function canonicalCells(text: string): boolean {
     if (ch === '"') {
       let j = i + 1
       while (j < n && text[j] !== '"') j += text[j] === '\\' ? 2 : 1
-      const str = text.slice(i + 1, j)
+      const raw = text.slice(i, j + 1)
       i = j + 1
       const top = stack[stack.length - 1]
-      // A string in an object that a colon follows is a key.
+      // A string in an object that a colon follows is a key: read as JSON.parse reads it.
       let k = i
       while (k < n && /\s/.test(text[k])) k++
-      if (top && !top.arr && text[k] === ':') pendingKey = str
+      if (top && !top.arr && text[k] === ':') {
+        let key: unknown
+        try { key = JSON.parse(raw) } catch { return false }
+        pendingKey = typeof key === 'string' ? key : null
+      }
       continue
     }
     if (ch === '{' || ch === '[') {
@@ -177,7 +184,11 @@ export function canonicalCells(text: string): boolean {
       const tok = text.slice(i, j)
       i = j
       const top = stack[stack.length - 1]
-      const strict = stack.length === 4 && top.arr && (top.under === 'cells' || top.under === 'pal') && stack[1].arr && stack[1].under === 'planes' && stack[2].under === '#'
+      const inPlane = stack.length >= 3 && stack[1].arr && stack[1].under === 'planes' && !stack[2].arr && stack[2].under === '#'
+      const strict = inPlane && (
+        (stack.length === 4 && top.arr && (top.under === 'cells' || top.under === 'pal'))
+        || (stack.length === 3 && (pendingKey === 'plane' || pendingKey === 'ground'))
+      )
       if (strict && !CANONICAL.test(tok)) return false
       pendingKey = null
       continue

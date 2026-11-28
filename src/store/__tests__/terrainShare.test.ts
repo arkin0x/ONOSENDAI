@@ -979,7 +979,8 @@ describe('the ground\'s revision (DECK-0009 revision 3: a chunk keeps the revisi
   })
   afterEach(() => setGroundWriteRevisionForTests(null))
 
-  it('in this release a fresh survey is revision 2, and every surveyed plane names `surveyed`, its first version\'s created_at, carried forward', async () => {
+  it('at write revision 2 a fresh survey is revision 2, and every surveyed plane names `surveyed`, its first version\'s created_at, carried forward', async () => {
+    setGroundWriteRevisionForTests(2)
     await named(true, openPlace(K9))
     const key = await surveyHere()
     const slot = terrainSession!.world.slotByKey(key)!
@@ -1028,7 +1029,8 @@ describe('the ground\'s revision (DECK-0009 revision 3: a chunk keeps the revisi
   })
 
   it('a reload keeps your revision 2 and revision 3 chunks as they were, whichever revision this release writes', async () => {
-    // Revision 2, in this release.
+    setGroundWriteRevisionForTests(2)
+    // Revision 2, at write revision 2.
     await named(true, openPlace(K9))
     const k9 = await surveyHere()
     mineSome(3)
@@ -1159,6 +1161,7 @@ describe('the ground\'s revision (DECK-0009 revision 3: a chunk keeps the revisi
   }
 
   it('mining and the Quarry Charge carry the base you were shown: your revision 2 survey in a home whose owner surveyed at revision 3', async () => {
+    setGroundWriteRevisionForTests(2)
     // A home owner whose home chunk has cells where the revisions differ.
     let owner = stranger(), home: ChunkBase | null = null
     for (let i = 0; i < 40; i++) {
@@ -1243,6 +1246,7 @@ describe('the ground\'s revision (DECK-0009 revision 3: a chunk keeps the revisi
   })
 
   it('the mixed chunk: your revision 2 survey stays the base; a stranger\'s revision 3 layer mines one cell, read against its own ground', async () => {
+    setGroundWriteRevisionForTests(2)
     const X = BLOCKS.base_revision.mixed
     await named(true, openPlace(K9))
     const key = await surveyHere()

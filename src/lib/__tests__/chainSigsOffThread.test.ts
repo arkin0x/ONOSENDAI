@@ -119,18 +119,21 @@ describe('where it is used', () => {
     expect(relay.match(/deferChecks: true/g)).toHaveLength(1)
     // Checked in the worker, still asking a relay that hung (relayHang.test.ts), and
     // not also as they land: askOne is told, or every event is checked twice.
-    expect(relay).toMatch(/return mergeAnswers\(await checks\.kept\(await queryRelays\(readRelaySet\(\), filter, MAX_WAIT_MS, \{ evenHung: opts\.evenHung, perRelay: opts\.perRelay, written: opts\.written, deferChecks: true, onAnswer: checks\.onAnswer \}\)\)\)/)
+    // The same for a catch-up's pages (queryEach with offThread), and a list read's `stream` rides along.
+    expect(relay).toMatch(/answers = await checks\.kept\(await queryRelays\(relays, filter, maxWait, \{ evenHung: opts\.evenHung, perRelay: opts\.perRelay, written: opts\.written, stream: opts\.stream, deferChecks: true, onAnswer: checks\.onAnswer \}\)\)/)
     // A list read's `stream` rides along (ReadOptions.stream), and a tape read's `graceMs` stop
     // (relayGrace.test.ts); the checks are still only deferred when asked.
     // One relay's checked copies are shared with the rest of the question (relayShared.test.ts), never where the checks are deferred.
     expect(relay).toMatch(/\? signInWithin\(url, signInMs\)\.then\(\(signedIn\) => askOne\(url, filter, deadlineFor\(url, signedIn\), \{ decides: !!\(opts\.perRelay \|\| opts\.written\), deferChecks: opts\.deferChecks, shared: opts\.deferChecks \|\| opts\.written \|\| opts\.perRelay \? undefined : shared, stop: early\.signal, \.\.\.\(opts\.stream \? \{ quietMs: opts\.stream\.quietMs, capAt: Date\.now\(\) \+ opts\.stream\.capMs \} : \{\}\) \}\)\)\.then\(\(a\) => \{/)
     expect(relay).toMatch(/opts\.onAnswer\?\.\(a\)\n\s*return a\n/)
-    expect(relay).toMatch(/if \(!opts\.offThread\) return collect\(readRelaySet\(\), filter, MAX_WAIT_MS, opts\)/)
+    expect(relay).toMatch(/if \(!opts\.offThread\) \{\n\s*answers = await queryRelays\(relays, filter, maxWait, opts\)/)
     const chains = fs.readFileSync(path.join(SRC, 'lib/chains.ts'), 'utf8')
     // Both: every relay, even a hung one (CHAIN_READ, #556), and off the main thread.
     expect(chains).toMatch(/const CHAIN_READ = \{ evenHung: true, perRelay: true \}/)
-    expect(chains).toMatch(/gatherChain\(\(f\) => query\(f, \{ \.\.\.CHAIN_READ, offThread: true \}\)/)
-    expect(chains.match(/offThread: true/g)).toHaveLength(1)
+    expect(chains).toMatch(/gatherChain\(\(f\) => query\(f, \{ \.\.\.CHAIN_READ, offThread: true, onAnswers: heard \}\)/)
+    // The self-check's first question too, and a catch-up's pages on both paths (chains.ts ChainPageOptions).
+    expect(chains).toMatch(/await queryEach\(f, maxWait, \{ \.\.\.read, offThread: true, stream: FIRST_STREAM, onAnswers: opts\.onAnswers \}\)/)
+    expect(chains.match(/offThread: true/g)).toHaveLength(4)
   })
   it('the pool checks everything else as it lands', () => {
     const relay = fs.readFileSync(path.join(SRC, 'lib/relay.ts'), 'utf8')

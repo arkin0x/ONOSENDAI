@@ -190,6 +190,28 @@ describe('placing, the fuse and the blast', () => {
     expect(FUSE_MS).toBe(10_000)
   })
 
+  it('leaving TERRAIN while it burns: it still blasts at the fuse\'s end, in your layer, with its drops (ruled 2026-11-28: unchanged)', async () => {
+    await openSurveyed()
+    const g = groundAt(6, 6)
+    const s = terrainSession!
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    expect(Q().arm([g[0], g[1] + 1, g[2]])).toBe(true)
+    await vi.advanceTimersByTimeAsync(1000)
+    const left = T().exit()
+    await vi.advanceTimersByTimeAsync(500)
+    await left
+    expect(T().active).toBe(false)
+    expect(Q().charges).toHaveLength(1)
+    await vi.advanceTimersByTimeAsync(FUSE_MS - 1500 - 1)
+    expect(Q().charges).toHaveLength(1)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(Q().charges).toHaveLength(0)
+    // Blasted, not fizzled: the field it was placed in is cleared round it, and it left drops to collect.
+    expect(T().message).not.toBe(FIZZLED)
+    expect(s.world.blockCs(...g)).toBe(EMPTY)
+    expect(Q().drops.length).toBeGreaterThan(0)
+  })
+
   it('clears exactly the 7 by 7 by 7 cells centred on the charge, as mining would, in your own layer; the rest stands', async () => {
     await openSurveyed()
     const s = terrainSession!

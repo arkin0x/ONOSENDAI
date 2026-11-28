@@ -37,7 +37,8 @@ import { useCyberspace } from '../useCyberspace'
 import { useWalk } from '../useWalk'
 import { offsetOf, setTerrainSession, terrainSession, useTerrain } from '../useTerrain'
 import { useQuarry } from '../useQuarry'
-import { dropsFlying, flights, idleHoming, readBody, resetHoming, tickHoming } from '../quarryHoming'
+import { BATCH_MS, dropsFlying, flights, idleHoming, readBody, resetHoming, tickHoming } from '../quarryHoming'
+import { readDrops, readOwner } from '../../lib/terrain/terrainDb'
 import { chunkKey, chunkOf } from '../../lib/terrain/coords'
 import { HOME_RADIUS, HOME_REDUCED_MS, HOME_STAGGER_MS, flightMs, flightShare, flown, homeDelay, homesFrom, makeDrop, type Drop } from '../../lib/terrain/quarry'
 import { walkGlide } from '../../lib/walkEye'
@@ -301,6 +302,111 @@ describe('every frame', () => {
     const kb = await allocatedKb(() => { for (let i = 0; i < 3000; i++) frame() })
     expect((kb * 1024) / 3000).toBeLessThan(64)
     expect(Q().drops).toHaveLength(343)
+  })
+})
+
+describe('arrivals in batches (review of #977)', () => {
+  /** A cloud round you, set off now: its drops by when they arrive. */
+  function cloud(): { made: Drop[]; now: number; arrivals: number[] } {
+    const cells: Array<[number, number, number]> = []
+    for (let x = -3; x <= 3; x++) for (let z = -3; z <= 3; z++) if (x || z) cells.push([x, 0, z])
+    const made = dropsAt(cells)
+    const now = Date.now()
+    tickHoming(now, false, body())
+    const arrivals = made.map((d) => flights.get(d)!.arrive).sort((a, b) => a - b)
+    return { made, now, arrivals }
+  }
+
+  /** What storage holds: drops of kind 5 still floating, and kind 5 carried. */
+  async function stored(): Promise<{ floating: number; carried: number }> {
+    const s = terrainSession!
+    await settle(40)
+    const drops = (await readDrops(s.db!, s.owner)) as Drop[] | undefined
+    const inv = (await readOwner(s.db!, s.owner)).inventory
+    return { floating: (drops ?? []).filter((d) => d.id === 5).length, carried: inv.counts[5] ?? 0 }
+  }
+
+  it('the first arrival is carried at once; those after wait for BATCH_MS, kept flying (drawn as gone), then go together', () => {
+    const { made, arrivals } = cloud()
+    const first = arrivals[0]
+    expect(tickHoming(first, false, body())).toBe(1)
+    // Arrivals inside the window: none carried, all still among the drops and still flying, so the frame keeps running.
+    const inWindow = arrivals.filter((t) => t > first && t < first + BATCH_MS)
+    expect(inWindow.length).toBeGreaterThan(0)
+    const last = inWindow[inWindow.length - 1]
+    expect(tickHoming(last, false, body())).toBe(0)
+    expect(Q().drops).toHaveLength(made.length - 1)
+    expect(dropsFlying()).toBe(true)
+    // One batch at the window's end: every arrival since, in one change.
+    const v = Q().version
+    const due = arrivals.filter((t) => t > first && t <= first + BATCH_MS).length
+    expect(tickHoming(first + BATCH_MS, false, body())).toBe(due)
+    expect(Q().version).toBe(v + 1)
+    expect(carried()).toBe(1 + due)
+  })
+
+  it('the last flight ending carries what waits at once, without waiting out the window', () => {
+    const [a, b] = dropsAt([[2, 0, 0], [2, 0, 1]])
+    const now = Date.now()
+    tickHoming(now, false, body())
+    const fa = flights.get(a)!, fb = flights.get(b)!
+    const [early, late] = fa.arrive <= fb.arrive ? [fa, fb] : [fb, fa]
+    expect(tickHoming(early.arrive, false, body())).toBe(1)
+    // The other lands inside the window, but nothing else is in the air: carried now.
+    expect(late.arrive - early.arrive).toBeLessThan(BATCH_MS)
+    expect(tickHoming(late.arrive, false, body())).toBe(1)
+    expect(carried()).toBe(2)
+    expect(flights.size).toBe(0)
+  })
+
+  it('a crash inside the window loses nothing and doubles nothing: storage still holds the waiting drops as drops, uncarried', async () => {
+    const { made, arrivals } = cloud()
+    const first = arrivals[0]
+    tickHoming(first, false, body())
+    const inWindow = arrivals.filter((t) => t > first && t < first + BATCH_MS)
+    tickHoming(inWindow[inWindow.length - 1], false, body())
+    // In memory nothing changed for the waiting ones, and storage says the same: every drop is exactly one thing.
+    expect(carried()).toBe(1)
+    let st = await stored()
+    expect(st.carried).toBe(1)
+    expect(st.floating).toBe(made.length - 1)
+    // After the batch, carried and gone together, in storage too.
+    const n = tickHoming(first + BATCH_MS, false, body())
+    st = await stored()
+    expect(st.carried).toBe(1 + n)
+    expect(st.floating).toBe(made.length - 1 - n)
+    expect(st.carried + st.floating).toBe(made.length)
+  })
+
+  it('the walk passing over a drop waiting for its batch carries it once; the batch carries the rest, not it again', () => {
+    const { made, arrivals } = cloud()
+    const first = arrivals[0]
+    tickHoming(first, false, body())
+    const waiting = made.filter((d) => { const f = flights.get(d); return f && f.arrive > first && f.arrive < first + BATCH_MS })
+    expect(waiting.length).toBeGreaterThan(0)
+    const w = waiting[0]
+    tickHoming(first + 1, false, body())
+    tickHoming(flights.get(w)!.arrive, false, body())
+    expect(Q().drops).toContain(w)
+    const at = { x: BigInt(w.x), y: BigInt(w.y), z: BigInt(w.z) }
+    useCyberspace.setState({ position: at, cursor: at })
+    expect(Q().drops).not.toContain(w)
+    const afterWalk = carried()
+    tickHoming(first + 5000, false, body())
+    expect(Q().drops).toHaveLength(0)
+    // Every drop carried exactly once, the walked one included.
+    expect(carried()).toBe(made.length)
+    expect(afterWalk).toBeGreaterThanOrEqual(2)
+  })
+
+  it('another identity on screen: the flights are let go at once, so none keeps the frame driver busy', () => {
+    dropsAt([[3, 0, 0], [-2, 0, 1]])
+    tickHoming(Date.now(), false, body())
+    expect(flights.size).toBe(2)
+    as('f'.repeat(64))
+    tickHoming(Date.now(), false, body())
+    expect(flights.size).toBe(0)
+    expect(dropsFlying()).toBe(false)
   })
 })
 

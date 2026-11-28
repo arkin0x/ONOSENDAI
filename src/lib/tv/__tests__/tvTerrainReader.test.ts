@@ -32,7 +32,7 @@ import { encryptForRegion, regionKeyAt } from '../../shardCrypto'
 import { NO_BROADCAST } from '../../noBroadcast'
 import type { NostrEvent } from '../../events'
 import type { KeyStatus } from '../../terrain/layerReader'
-import { NB_LOOKBACK_S, TV_READ_AGAIN_MS, TV_RELAY_CAP, TvTerrainReader, chunkRegionKeyOf, layerBytes, layersAsOf, tvStackView, type TvTerrainDeps } from '../terrainReader'
+import { NB_LOOKBACK_S, TV_READ_AGAIN_MS, TV_RELAY_CAP, TvTerrainReader, chunkRegionKeyOf, cutOff, layerBytes, layersAsOf, tvStackView, type TvTerrainDeps } from '../terrainReader'
 import { flagTerrainBeats, isTerrainShot, neighbourhood, terrainStep, TERRAIN_STEP_GIBSONS } from '../terrainShot'
 import type { Beat, Shot } from '../director'
 
@@ -82,10 +82,11 @@ function relay(events: NostrEvent[], o: { failMoves?: boolean } = {}) {
       if (o.failMoves && f.kinds?.includes(3333)) throw new Error('not heard')
       const d = (f as { '#d'?: string[] })['#d']
       return events
-        .filter((e) => (!f.kinds || f.kinds.includes(e.kind)) && (!f.authors || f.authors.includes(e.pubkey)) && (f.until === undefined || e.created_at <= f.until))
+        .filter((e) => (!f.kinds || f.kinds.includes(e.kind)) && (!f.authors || f.authors.includes(e.pubkey)) && (f.since === undefined || e.created_at >= f.since) && (f.until === undefined || e.created_at <= f.until))
         .filter((e) => !d || e.tags.some((t) => t[0] === 'd' && d.includes(t[1])))
         .sort((a, b) => b.created_at - a.created_at)
-        .slice(0, f.limit ?? Infinity)
+        // As the canonical relay answers: the limit asked, never more than its max_limit of 500.
+        .slice(0, Math.min(f.limit ?? TV_RELAY_CAP, TV_RELAY_CAP))
     },
     keyStatus: async (_author, keys) => new Map(keys.map((k): [string, KeyStatus] => [k, valid.has(k) ? 'valid' : 'void'])),
     ground: async (b, r) => { grounds.push(`${chunkKey(b)}|${r}`); return generate(b, null, r).blocks },
@@ -366,6 +367,46 @@ describe('per-chunk caching', () => {
 })
 
 describe('the relay\'s 500-event cap', () => {
+  it('takes an answer for cut off when it fills the limit asked, or the relay\'s 500', () => {
+    expect(cutOff(new Array(500))).toBe(true)
+    expect(cutOff(new Array(5), 5)).toBe(true)
+    expect(cutOff(new Array(4), 5)).toBe(false)
+    expect(cutOff(new Array(500), 1000)).toBe(true)
+    expect(cutOff(new Array(499), 1000)).toBe(false)
+  })
+
+  it('keeps a tutorial layer hidden when its author\'s actions for the batch are cut off (the reviewer\'s probe)', async () => {
+    const a = who()
+    const T = 1_790_000_000
+    const other = { ...BASE, x: BASE.x + 32n }
+    // The tutorial: a tagged move 5 minutes before the publish, then 6 untagged ones, then the publish.
+    const L1 = await layerOf(a, { createdAt: T, set: [[airCells[0], 8]] })
+    const moves = [moveOf(a, T - 300, true), ...Array.from({ length: 6 }, (_, i) => moveOf(a, T - 250 + 40 * i))]
+    // A day later the same author builds in the next chunk, with 520 moves between.
+    const day = 86_400
+    for (let i = 1; i <= 520; i++) moves.push(moveOf(a, T + Math.floor((day * i) / 520)))
+    const L2 = await layerOf(a, { createdAt: T + day, base: other, set: [[airCells[1], 8]] })
+    const r = relay([L1, L2, ...moves])
+    r.valid.add(a.builderPk)
+    const reader = new TvTerrainReader(r.deps)
+    await reader.prepare([BASE, other])
+    expect(reader.asOf(BASE, T + 2 * day)!.layers).toHaveLength(0)
+    expect(reader.surveyedAsOf(BASE, T + 2 * day)).toBe(false)
+    expect(reader.asOf(other, T + 2 * day)!.layers.map((l) => l.id)).toEqual([L2.id])
+  }, 60_000)
+
+  it('leaves a layer undecided when even its own window is cut off', async () => {
+    const a = who()
+    const T = 1_790_000_000
+    const L = await layerOf(a, { createdAt: T })
+    const moves = Array.from({ length: TV_RELAY_CAP }, (_, i) => moveOf(a, T - 1 - (i % 800)))
+    const r = relay([L, ...moves])
+    r.valid.add(a.builderPk)
+    const reader = new TvTerrainReader(r.deps)
+    await reader.prepare([BASE])
+    expect(reader.surveyedAsOf(BASE, T + 10)).toBe(false)
+  }, 60_000)
+
   it('asks a batch that may be cut off again in halves, and keeps a single chunk that still is as partial', async () => {
     const a = who()
     const r = relay([await layerOf(a, { createdAt: 1000 }), moveOf(a, 900)])

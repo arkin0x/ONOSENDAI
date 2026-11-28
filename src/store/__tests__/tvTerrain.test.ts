@@ -38,7 +38,7 @@ import { encryptForRegion } from '../../lib/shardCrypto'
 import type { NostrEvent } from '../../lib/events'
 import { chunkRegionKeyOf, type TvTerrainDeps } from '../../lib/tv/terrainReader'
 import type { Beat, Shot } from '../../lib/tv/director'
-import { MAX_DRAWN, readRing, tvRegionKeysHeld, tvTerrainReader, setTvTerrainDeps, startTvTerrain, stopTvTerrain, terrainOn, tvLighting, tvTerrainIdle, tvTerrainLightsKept, tvTerrainMeshesKept, tvTerrainTick, useTvTerrain, type TvTerrainFrame } from '../useTvTerrain'
+import { MAX_DRAWN, liveTvTerrainDepsForTest, readRing, tvRegionKeysHeld, tvTerrainReader, setTvTerrainDeps, startTvTerrain, stopTvTerrain, terrainOn, tvLighting, tvTerrainIdle, tvTerrainLightsKept, tvTerrainMeshesKept, tvTerrainTick, useTvTerrain, type TvTerrainFrame } from '../useTvTerrain'
 import { setBroadcastForTest } from '../../lib/tv/broadcast'
 import { useLayers } from '../useLayers'
 import { LIGHT_BYTES } from '../../lib/terrain/light'
@@ -234,6 +234,18 @@ describe('what is read round a TERRAIN shot', () => {
     expect(asked).toBe(before)
     expect(reader.keysHeld()).toBe(0)
     expect(tvRegionKeysHeld()).toBe(0)
+  })
+})
+
+describe('the live deps once TV has ended', () => {
+  it('a builder key\'s status asks no relay once TV has ended', async () => {
+    const relay = await import('../../lib/relay')
+    const calls = (relay.queryAnyChecked as unknown as { mock: { calls: unknown[] } }).mock.calls
+    const before = calls.length
+    const deps = liveTvTerrainDepsForTest({ ended: true })
+    await expect(deps.keyStatus(pk, [builderPk])).rejects.toThrow('TV ended')
+    await expect(deps.query({ kinds: [LAYER_KIND] })).rejects.toThrow('TV ended')
+    expect(calls.length).toBe(before)
   })
 })
 

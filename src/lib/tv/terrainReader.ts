@@ -191,6 +191,15 @@ export function layerBytes(layers: readonly StackLayer[]): number {
   return n
 }
 
+/**
+ * Whether an answer may be cut off: it filled the limit asked, or the relay's
+ * own cap (the canonical relay's max_limit is 500, and a filter with no limit
+ * or a larger one gets 500 at most: checked 2026-11-28).
+ */
+export function cutOff(got: readonly unknown[], limit?: number): boolean {
+  return got.length >= Math.min(limit ?? TV_RELAY_CAP, TV_RELAY_CAP)
+}
+
 /** Thrown inside a reader that has ended: whatever it was doing stops there. */
 class ReaderEnded extends Error {
   constructor() { super('TV terrain reader ended') }
@@ -333,9 +342,10 @@ export class TvTerrainReader {
   private async readBatch(bases: ChunkBase[]): Promise<void> {
     const byLookup = new Map<string, ChunkBase>()
     for (const b of bases) byLookup.set(this.regionKey(b).lookupId, b)
-    const events = await this.ask({ kinds: [LAYER_KIND], '#d': [...byLookup.keys()] })
-    // Possibly cut off at the relay's cap: asked again in halves, down to one chunk, which is then kept as partial.
-    const cut = events.length >= TV_RELAY_CAP
+    const layerAsk = { kinds: [LAYER_KIND], '#d': [...byLookup.keys()], limit: TV_RELAY_CAP }
+    const events = await this.ask(layerAsk)
+    // Possibly cut off at the limit: asked again in halves, down to one chunk, which is then kept as partial.
+    const cut = cutOff(events, layerAsk.limit)
     if (cut && bases.length > 1) {
       const half = Math.ceil(bases.length / 2)
       await this.readBatch(bases.slice(0, half))
@@ -414,14 +424,16 @@ export class TvTerrainReader {
 
   /**
    * Judge whether layers may be shown on TV (spec §8.13: not published during
-   * the tutorial), into `broadcastable`. Per author, one question for the
-   * movement actions in the NB_LOOKBACK_S before each of their layers'
-   * publishes; a layer is hidden when ANY action fetched for it carries the
-   * tag. A layer with no action in its look-back (a long build held
-   * still) is asked about on its own: the newest few at or before its publish.
-   * No action at all, or no answer, leaves it undecided (left out, the chunk
-   * read again later). An answer that may be cut off at the relay's cap is
-   * not trusted for the look-back: each layer is asked about on its own.
+   * the tutorial), into `broadcastable`. A layer is hidden when ANY movement
+   * action fetched for it carries the tag. Per author, one question for the
+   * actions in the NB_LOOKBACK_S before each of their layers' publishes.
+   * When that answer may be cut off (it filled the limit asked), it is not
+   * trusted: each layer is asked about with its own window, the
+   * NB_LOOKBACK_S up to its publish, and a window that is cut off too leaves
+   * the layer undecided. A layer with no action in its window (a long build
+   * held still) is judged by the newest few before its publish. No action at
+   * all, or no answer, leaves it undecided (left out, the chunk read again
+   * later).
    */
   private async judgeBroadcast(events: NostrEvent[]): Promise<void> {
     const byAuthor = new Map<string, NostrEvent[]>()
@@ -436,25 +448,34 @@ export class TvTerrainReader {
       touch(this.broadcastable, ev.id, !fetched.some(noBroadcast))
       trim(this.broadcastable, TV_VERDICTS_KEPT)
     }
+    /** An answer, or null when the relay could not be heard (the reader ending is not swallowed). */
+    const tryAsk = async (f: Filter): Promise<NostrEvent[] | null> => {
+      try { return await this.ask(f) } catch (e) {
+        if (e instanceof ReaderEnded) throw e
+        return null
+      }
+    }
+    const inWindow = (ev: NostrEvent) => (m: NostrEvent): boolean => m.created_at <= ev.created_at && m.created_at >= ev.created_at - NB_LOOKBACK_S
     for (const [author, layers] of byAuthor) {
       const since = Math.min(...layers.map((l) => l.created_at)) - NB_LOOKBACK_S
       const until = Math.max(...layers.map((l) => l.created_at))
-      let moves: NostrEvent[] | null
-      try { moves = await this.ask({ kinds: [ACTION_KIND], authors: [author], since, until, limit: TV_RELAY_CAP }) } catch (e) {
-        if (e instanceof ReaderEnded) throw e
-        moves = null
-      }
-      const trusted = moves !== null && moves.length < TV_RELAY_CAP ? own(author, moves) : null
+      const batch = { kinds: [ACTION_KIND], authors: [author], since, until, limit: TV_RELAY_CAP }
+      const moves = await tryAsk(batch)
+      if (moves === null) continue
+      const trusted = cutOff(moves, batch.limit) ? null : own(author, moves)
       for (const ev of layers) {
-        const near = trusted?.filter((m) => m.created_at <= ev.created_at && m.created_at >= ev.created_at - NB_LOOKBACK_S) ?? []
-        if (near.length) { decide(ev, near); continue }
-        if (moves === null) continue
-        let before: NostrEvent[]
-        try { before = await this.ask({ kinds: [ACTION_KIND], authors: [author], until: ev.created_at, limit: 5 }) } catch (e) {
-          if (e instanceof ReaderEnded) throw e
-          continue
+        let near: NostrEvent[]
+        if (trusted) near = trusted.filter(inWindow(ev))
+        else {
+          // Cut off: this layer's own window, asked whole or not at all.
+          const own1 = { kinds: [ACTION_KIND], authors: [author], since: ev.created_at - NB_LOOKBACK_S, until: ev.created_at, limit: TV_RELAY_CAP }
+          const got = await tryAsk(own1)
+          if (got === null || cutOff(got, own1.limit)) continue
+          near = own(author, got).filter(inWindow(ev))
         }
-        decide(ev, own(author, before).filter((m) => m.created_at <= ev.created_at))
+        if (near.length) { decide(ev, near); continue }
+        const last = await tryAsk({ kinds: [ACTION_KIND], authors: [author], until: ev.created_at, limit: 5 })
+        if (last) decide(ev, own(author, last).filter((m) => m.created_at <= ev.created_at))
       }
     }
   }
@@ -522,10 +543,14 @@ export class TvTerrainReader {
     const had = this.blocks.get(a.signature)
     if (had) { touch(this.blocks, a.signature, had); return had.p }
     const made = this.compose(a)
-    const entry = { xyz: xyzKey(base), p: made }
+    const xyz = xyzKey(base)
+    const entry = { xyz, p: made }
     this.blocks.set(a.signature, entry)
     made.catch(() => { if (this.blocks.get(a.signature) === entry) this.blocks.delete(a.signature) })
-    trim(this.blocks, TV_BLOCKS_KEPT, (_k, v) => this.pinned.has(v.xyz))
+    // Pinned chunks keep only their newest stacking: an older one of the same chunk (before a layer's publish on tape) may go.
+    const newest = new Map<string, string>()
+    for (const [k, v] of this.blocks) newest.set(v.xyz, k)
+    trim(this.blocks, TV_BLOCKS_KEPT, (k, v) => this.pinned.has(v.xyz) && newest.get(v.xyz) === k)
     return made
   }
 

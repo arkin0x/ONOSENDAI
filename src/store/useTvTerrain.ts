@@ -118,6 +118,8 @@ let run = 0
 let reader: TvTerrainReader | null = null
 let client: BlocksClient | null = null
 let override: Partial<TvTerrainDeps> | null = null
+/** This TV run's: set when it ends (liveDeps). */
+let life = { ended: false }
 let namedAt = new Map<string, number>()
 /** Shots read for, this tape. */
 const prepared = new Set<string>()
@@ -140,8 +142,19 @@ export function setTvTerrainDeps(next: Partial<TvTerrainDeps> | null): void {
   override = next
 }
 
-function liveDeps(): TvTerrainDeps {
-  const ask = (f: Parameters<typeof queryAnyChecked>[1]): ReturnType<typeof queryAnyChecked> => queryAnyChecked([CYBERSPACE_RELAY], f)
+/**
+ * The reader's real deps. `life.ended` is set when TV ends: every relay
+ * question after that throws, before it is sent and when it comes back, so
+ * a builder key's paging (keyStatusOn, which can run to many pages) stops
+ * with the reader too.
+ */
+function liveDeps(life: { ended: boolean }): TvTerrainDeps {
+  const ask = async (f: Parameters<typeof queryAnyChecked>[1]): ReturnType<typeof queryAnyChecked> => {
+    if (life.ended) throw new Error('TV ended')
+    const r = await queryAnyChecked([CYBERSPACE_RELAY], f)
+    if (life.ended) throw new Error('TV ended')
+    return r
+  }
   return {
     query: async (f) => {
       const r = await ask(f)
@@ -163,16 +176,23 @@ function liveDeps(): TvTerrainDeps {
   }
 }
 
+/** The real deps for a TV run that has `life` (tests: what happens once it has ended). */
+export function liveTvTerrainDepsForTest(life: { ended: boolean }): TvTerrainDeps {
+  return liveDeps(life)
+}
+
 /** TV came on: a reader and a blocks worker of its own. */
 export function startTvTerrain(): void {
   stopTvTerrain()
   client = makeBlocksClient()
-  reader = new TvTerrainReader({ ...liveDeps(), ...override })
+  life = { ended: false }
+  reader = new TvTerrainReader({ ...liveDeps(life), ...override })
 }
 
 /** TV went off: everything let go, the worker and TV's region keys too. */
 export function stopTvTerrain(): void {
   run++
+  life.ended = true
   client?.release('TV ended')
   client = null
   // Its region keys go with it, and anything it still has under way stops asking relays.
@@ -192,6 +212,8 @@ export function newTapeTvTerrain(): void {
   run++
   shown = new Map()
   lastWant = ''
+  // Nothing drawn now: nothing held back from eviction either.
+  reader?.pin([])
   if (useTvTerrain.getState().drawn.length) useTvTerrain.setState({ drawn: [] })
 }
 

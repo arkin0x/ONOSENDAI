@@ -52,8 +52,8 @@ import { regionKeyAt, encryptForRegion } from '../lib/shardCrypto'
 import { reachDistance } from '../lib/terrain/world'
 import {
   LAYER_KIND, LAYER_MAX_BYTES, COBUILDERS_MAX, baseRevision, carriedPlane, changesOf, countedLayers, emptiedPlaintext, freeTextWithinBounds, groundsNeeded, inHome, layerShape, layerTags,
-  nextPlaintext, parsePlaintext, planeGroundRevision, plaintextJson, resolveStack, serializedBytes, startFrom, surveyedToWrite, surveysOf, withinRank,
-  type DecodedPlane, type GroundAt, type LayerPlaintext, type PlaneChanges, type StackLayer, type StackView,
+  nextPlaintext, ownRank, parsePlaintext, planeGroundRevision, plaintextJson, resolveStack, serializedBytes, startFrom, surveyedToWrite, surveysOf, withinRank,
+  type DecodedPlane, type GroundAt, type WriterView, type LayerPlaintext, type PlaneChanges, type StackLayer, type StackView,
 } from '../lib/terrain/blockLayer'
 import { readSurveyed, type GroundRevision } from '../lib/terrain/groundRevision'
 import { readLayer, type KeyStatus } from '../lib/terrain/layerReader'
@@ -149,7 +149,11 @@ export interface ShareSlot {
 
 export interface ShareHost {
   /** The identity whose field is open, its plane and its db, or null. */
-  field: () => { owner: string; plane: number; db: IDBDatabase | null; slot: (key: string) => ShareSlot | null; surveyed: (key: string) => boolean } | null
+  field: () => {
+    owner: string; plane: number; db: IDBDatabase | null; slot: (key: string) => ShareSlot | null; surveyed: (key: string) => boolean
+    /** When this device first surveyed a chunk (Unix seconds), if it did: the date its view and its first layer there both name. */
+    surveyedAt?: (key: string) => number | undefined
+  } | null
   /** Where you stand: the walk's gibson, else your head. */
   head: () => Position
   /** TERRAIN is open. */
@@ -658,6 +662,16 @@ export function publishedPlane(key: string): { revision: GroundRevision; surveye
   return s ? publishedPlaneOf(s, key) : null
 }
 
+/**
+ * Whether a cell of a chunk, as last drawn, shows the base (the ground at the
+ * base revision) because no counted layer changed it, yours included. False
+ * when the chunk has not been drawn.
+ */
+export function shownFromBase(key: string, cell: number): boolean {
+  const v = sessionFor()?.views.get(key)
+  return !!v && v.from[cell] < 0
+}
+
 /** The cells you set explicitly in a chunk (§5.4), as kept. */
 export function explicitCells(key: string): ReadonlySet<number> {
   return new Set(sessionFor()?.rows.get(key)?.explicit ?? [])
@@ -1075,7 +1089,9 @@ async function publishChunk(s: Session, key: string): Promise<void> {
   const revision = slot.revision ?? 2
   const createdAt = Math.max(Math.floor(d.now() / 1000), row.createdAt + 1)
   // The plane names the chunk's own revision and its first survey's date, carried forward; a first survey's date is this version's (§5.4).
-  const at = { revision, surveyed: surveyedToWrite(prev, plane, row.createdAt, createdAt) }
+  // One date for your survey, in your own view and in the layer: when this device first surveyed it, never later than this version.
+  const first = Math.min(createdAt, f.surveyedAt?.(key) ?? createdAt)
+  const at = { revision, surveyed: surveyedToWrite(prev, plane, row.createdAt, first) }
   if (row.builder === k.pub) {
     // The same key: this plane as the device holds it, the twin carried, the Crew. Nothing changed: nothing to publish.
     plain = nextPlaintext(prev, plane, slot.own, slot.generated, at, s.crew, explicit, row.createdAt)
@@ -1087,7 +1103,7 @@ async function publishChunk(s: Session, key: string): Promise<void> {
     const here = new Map<number, number>()
     for (let c = 0; c < CELLS; c++) if (slot.own[c] !== slot.generated[c] || explicit.has(c)) here.set(c, slot.own[c])
     mine.set(plane, { survey: true, cells: here, revision, surveyed: at.surveyed })
-    plain = startFrom(olds.filter((o) => o.valid).map((o) => ({ changes: changesOf(o.plaintext, groundAt, o.createdAt), createdAt: o.createdAt, builder: o.builder, id: o.id })), mine, groundAt, s.crew, { builder: k.pub, id: '' })
+    plain = startFrom(olds.filter((o) => o.valid).map((o) => ({ changes: changesOf(o.plaintext, groundAt, o.createdAt), createdAt: o.createdAt, builder: o.builder, id: o.id })), mine, groundAt, s.crew, { builder: k.pub, id: '' }, writerView(s, slot.base))
     newKey = { mine, groundAt }
   }
   if (plain) {
@@ -1107,6 +1123,24 @@ async function publishChunk(s: Session, key: string): Promise<void> {
   const left = (s.waiting.get(key) ?? 0) - waitingAtStart
   if (left > 0) { s.waiting.set(key, left); saveRow(s, key, { ...s.rows.get(key)!, dirty: true }) } else s.waiting.delete(key)
   s.failed = null
+}
+
+/**
+ * The rest of this writer's view of a chunk's plane (§5.6, §7.5), for a layer
+ * started from its other keys: its own rank there and everyone else's counted
+ * surveys, so that inside a home the layer names the home owner's base.
+ * Known for the plane this session reads; null for the twin.
+ */
+function writerView(s: Session, base: ChunkBase): (plane: 0 | 1) => WriterView | null {
+  return (plane) => {
+    if (plane !== s.plane) return null
+    const at = { ...base, plane }
+    const d = current()
+    const view = stackView(s.owner, at)
+    const theirs = (s.others.get(chunkKey(at))?.layers ?? []).filter((l) => l.author !== s.owner)
+    const counted = countedLayers(theirs, view, d.muted(), Math.floor(d.now() / 1000))
+    return { author: s.owner, rank: ownRank(s.owner, view), others: surveysOf(counted, plane, view) }
+  }
 }
 
 /**
@@ -1267,7 +1301,7 @@ async function republishRow(s: Session, store: IDBDatabase, k: { pub: string; se
     olds = await otherKeys(s, at, k.pub)
     const groundAt = await groundsFor(at, [prev, ...olds.map((o) => o.plaintext)])
     const mine = changesOf(prev, groundAt, pub.createdAt)
-    plain = startFrom(olds.filter((o) => o.valid).map((o) => ({ changes: changesOf(o.plaintext, groundAt, o.createdAt), createdAt: o.createdAt, builder: o.builder, id: o.id })), mine, groundAt, s.crew, { builder: k.pub, id: pub.eventId ?? '' })
+    plain = startFrom(olds.filter((o) => o.valid).map((o) => ({ changes: changesOf(o.plaintext, groundAt, o.createdAt), createdAt: o.createdAt, builder: o.builder, id: o.id })), mine, groundAt, s.crew, { builder: k.pub, id: pub.eventId ?? '' }, writerView(s, at))
     newKey = { mine, groundAt }
   }
   const createdAt = Math.max(Math.floor(d.now() / 1000), pub.createdAt + 1)

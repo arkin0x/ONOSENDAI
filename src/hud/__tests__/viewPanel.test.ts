@@ -101,7 +101,7 @@ const ROWS: Array<[string, string, string]> = [
   ['view-hx-boxes', '<span class="view__hx">h</span>X boxes', 'The math barriers where moving costs increase.'],
   ['view-walk-avatar', 'Hide avatar in WALK', 'Walk without your own avatar around the camera.'],
   ['view-walk-look', 'Look sphere in WALK', 'A ball in the bottom right to drag and look around.'],
-  ['view-smash-ask', 'Ask before a wasted smash', 'In TERRAIN, asks first when a smash will not compile and would break rare blocks.'],
+  ['view-smash-ask', 'Ask before a wasted smash', 'Asks first when a recipe is built wrong, or when a smash would break rare blocks you placed.'],
   ['view-walk-gravity', 'Gravity in WALK', 'Fall, land and jump.'],
   ['view-walk-gravity-hard', 'Hard Mode Gravity', 'Gravity will not turn off if there is nothing to catch your fall.'],
   ['view-walk-fluid', 'Fluid WALK', 'Hold to glide. Moves still land on whole gibsons.'],

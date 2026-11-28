@@ -99,7 +99,7 @@ export const HARD_GRAVITY_HINT = 'Gravity will not turn off if there is nothing 
  */
 /** The Settings row for TERRAIN's confirm before a wasted smash. */
 export const SMASH_ASK_TITLE_ROW = 'Ask before a wasted smash'
-export const SMASH_ASK_HINT = 'In TERRAIN, asks first when a smash will not compile and would break rare blocks.'
+export const SMASH_ASK_HINT = 'Asks first when a recipe is built wrong, or when a smash would break rare blocks you placed.'
 
 export const SETTINGS_GROUPS: ReadonlyArray<{ id: string; title: string; rows: readonly string[] }> = [
   { id: 'protocol', title: 'Protocol visualization', rows: ['view-chain-trail', 'view-terrain-dots', 'view-hx-boxes', 'view-region-keys', 'view-spatial-audio'] },

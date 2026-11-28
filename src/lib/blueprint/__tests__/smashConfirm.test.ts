@@ -31,7 +31,10 @@ import { useCyberspace } from '../../../store/useCyberspace'
 import { useWalk } from '../../../store/useWalk'
 import { setTerrainSession, terrainSession, useTerrain } from '../../../store/useTerrain'
 import { useBlueprints } from '../../../store/useBlueprints'
-import { holdSmash } from '../smashRun'
+import { holdSmash, strike } from '../smashRun'
+import { makeBlueprint } from '../make'
+import { arrangementFrom } from '../arrangement'
+import type { NostrEvent } from '../../events'
 import { cancelSmashHold, useSmashHold } from '../../../terrain/smashHold'
 import { terrainCursor } from '../../../scene/TerrainLayer'
 import { BARE_HOLD_MS, RESOLVE_AFTER_MS, SWING_MS } from '../smash'
@@ -241,4 +244,26 @@ describe('the confirm before a wasted smash, on the real smash path', () => {
     expect(useSmashConfirm.getState().ask).toBeNull()
     expect(present(t)).toBe(5)
   })
+
+  it('a bare hand compiles a player blueprint that fits its reach: strike() unseals it into a prize (owner, 2026-11-28)', async () => {
+    await openSurveyed()
+    const s = terrainSession!
+    // A two-block rail, someone's blueprint, and a record of it this device has seen.
+    const arrangement = arrangementFrom([{ at: [0, 0, 0], id: GRIDSTONE }, { at: [1, 0, 0], id: FERROVEIN }])!
+    const made = await makeBlueprint({ arrangement, shown: () => true, title: 'Rail', prize: { type: 'sno', payload: { v: 2, name: 'Rail piece' } }, reveal: 'hidden', lock: 'standard' },
+      async (tpl) => ({ ...tpl, id: 'f'.repeat(64), pubkey: 'b'.repeat(64), sig: 'c'.repeat(128) }))
+    if ('refused' in made) throw new Error(made.refused)
+    useBlueprints.getState().remember([made.record as NostrEvent])
+    // Built in cleared air with a gap all round.
+    const cells: Array<[number, number, number]> = []
+    for (let x = -2; x <= 4; x++) for (let y = -2; y <= 4; y++) for (let z = -2; z <= 2; z++) cells.push([O[0] + x, O[1] + y, O[2] + z])
+    expect(T().clear(cells)).toBeNull()
+    s.world.setCs(O[0], O[1], O[2], GRIDSTONE)
+    s.world.setCs(O[0] + 1, O[1], O[2], FERROVEIN)
+    await strike([O[0], O[1], O[2]], true)
+    expect(s.world.blockCs(O[0], O[1], O[2])).toBe(0)
+    expect(s.world.blockCs(O[0] + 1, O[1], O[2])).toBe(0)
+    const toys = useBlueprints.getState().toys.filter((toy) => toy.owner === A)
+    expect(toys.map((toy) => [toy.name, toy.maker])).toEqual([['Rail', 'b'.repeat(64)]])
+  }, 60_000)
 })

@@ -12,8 +12,9 @@
 import { describe, expect, it } from 'vitest'
 import { Matrix4, Vector3 } from 'three'
 import { CELLS, idx } from '../terrain/coords'
-import { aroundIndex, BRIGHT_BLOCK, brightness, computeLight, EMIT, lightAt, lightTables, type Around } from '../terrain/light'
-import { computeHeldLight, fillHeldPass, glowingKinds, heldAt, heldChunks, heldCorner, heldGlow, heldGlowLook, heldLightSource, heldShine, HELD_BYTES, HELD_REACH, HELD_SIDE } from '../terrain/heldLight'
+import { aroundIndex, BRIGHT_BLOCK, BRIGHT_MAX, brightness, computeLight, EMIT, LIGHT_SIDE, lightAt, lightTables, texelIndex, type Around } from '../terrain/light'
+import { computeHeldLight, fillHeldPass, glowingKinds, heldAt, heldChunks, heldCorner, heldGlow, heldGlowLook, heldLightSource, heldShine, heldValue, HELD_BYTES, HELD_REACH, HELD_SIDE } from '../terrain/heldLight'
+import { TerrainWorld } from '../terrain/world'
 import { COMPILER_ID, QUARRY_ID, type Inventory } from '../terrain/terrainDb'
 import { B, generate } from '../terrain/generate'
 import type { ChunkBase } from '../terrain/coords'
@@ -220,6 +221,109 @@ describe('the same light a placed block gives', () => {
   })
 })
 
+describe('a face just mined, before its chunk\'s light catches up', () => {
+  // Linear filtering of a cube of RGBA texels, as the GPU does it at a point (in cells; cell c spans c to c + 1), the edge clamped: [r, g, b, a], 0 to 1.
+  const filtered = (fetch: (x: number, y: number, z: number) => number, side: number, shift: number, p: readonly [number, number, number]): [number, number, number, number] => {
+    const out: [number, number, number, number] = [0, 0, 0, 0]
+    const u = p.map((v) => v + shift - 0.5)
+    const i0 = u.map(Math.floor), f = u.map((v, k) => v - i0[k])
+    const clamp = (v: number): number => Math.min(side - 1, Math.max(0, v))
+    for (let dz = 0; dz < 2; dz++) for (let dy = 0; dy < 2; dy++) for (let dx = 0; dx < 2; dx++) {
+      const w = (dx ? f[0] : 1 - f[0]) * (dy ? f[1] : 1 - f[1]) * (dz ? f[2] : 1 - f[2])
+      if (!w) continue
+      const o = fetch(clamp(i0[0] + dx), clamp(i0[1] + dy), clamp(i0[2] + dz))
+      for (let ch = 0; ch < 4; ch++) out[ch] += (w * fetchBytes[o + ch]) / 255
+    }
+    return out
+  }
+  let fetchBytes: Uint8Array = new Uint8Array(0)
+  /** The chunk's light at a point of the chunk (its texture holds the chunk and one cell round it). */
+  const chunkAt = (light: Uint8Array, p: readonly [number, number, number]): [number, number, number, number] => {
+    fetchBytes = light
+    return filtered((x, y, z) => 4 * texelIndex(x - 1, y - 1, z - 1), LIGHT_SIDE, 1, p)
+  }
+  /** The held light at a point of the chunk, the cube's corner at `corner`. */
+  const heldPoint = (light: Uint8Array, corner: readonly [number, number, number], p: readonly [number, number, number]): [number, number, number, number] => {
+    fetchBytes = light
+    return filtered((x, y, z) => 4 * (x + HELD_SIDE * (z + HELD_SIDE * y)), HELD_SIDE, 0, [p[0] - corner[0], p[1] - corner[1], p[2] - corner[2]])
+  }
+
+  // The sealed room of the tests above, the eye in it, and the wall cell beside it that is mined.
+  const solid = (): Uint8Array => new Uint8Array(CELLS).fill(STONE)
+  const room = (): Uint8Array => {
+    const b = solid()
+    for (let y = 10; y < 14; y++) for (let z = 8; z < 17; z++) for (let x = 8; x < 17; x++) b[idx(x, y, z)] = 0
+    return b
+  }
+  const around = (mid: Uint8Array): Around => Array.from({ length: 27 }, (_, i) => (i === aroundIndex(0, 0, 0) ? mid : solid()))
+  const eye: [number, number, number] = [12, 11, 12]
+  const corner = heldCorner(eye)
+  const mined: [number, number, number] = [7, 11, 12]
+  /** Points on the faces round the mined cell, half a block out from each, as the shader samples them. */
+  const facePoints = (): Array<[number, number, number]> => {
+    const out: Array<[number, number, number]> = []
+    const [mx, my, mz] = mined
+    for (let a = 0; a <= 4; a++) for (let b = 0; b <= 4; b++) {
+      const s = a / 4, t = b / 4
+      // The far wall (-x), the floor and ceiling, and the two side walls of the mined cell: each face's points lie half a block into the cell.
+      out.push([mx + 0.5, my + s, mz + t], [mx + s, my + 0.5, mz + t], [mx + s, my + t, mz + 0.5])
+    }
+    return out
+  }
+
+  it('never flashes: with the chunk\'s light from before the edit, the held light stays at most 1 (dividing by the chunk\'s share would not)', () => {
+    const before = room()
+    const after = before.slice(); after[idx(...mined)] = 0
+    const stale = computeLight(around(before), null, tables)
+    const pass = fillHeldPass((cx, cy, cz) => (cx === 0 && cy === 0 && cz === 0 ? after : solid()), corner, new Uint8Array(HELD_SIDE ** 3))
+    const held = computeHeldLight(pass, heldGlow(GLOWCORE)!.rgb)
+    let worst = 0, old = 0
+    for (const p of facePoints()) {
+      const h = heldPoint(held, corner, p)
+      const v = heldValue(h)
+      worst = Math.max(worst, ...v)
+      // What dividing by the chunk's old share gave: the chunk saw a solid cell there, so a share near nothing.
+      const a = Math.max(chunkAt(stale, p)[3], 1 / 255)
+      old = Math.max(old, h[2] / a)
+    }
+    expect(worst).toBeLessThanOrEqual(1)
+    expect(worst).toBeGreaterThan(0.5)
+    expect(old).toBeGreaterThan(5)
+  })
+
+  it('matches a placed block once the chunk\'s light is current, at every point of the faces round the room and the mined cell', () => {
+    const after = room(); after[idx(...mined)] = 0
+    const pass = fillHeldPass((cx, cy, cz) => (cx === 0 && cy === 0 && cz === 0 ? after : solid()), corner, new Uint8Array(HELD_SIDE ** 3))
+    const held = computeHeldLight(pass, heldGlow(MAGMAFLOW)!.rgb)
+    const placed = after.slice(); placed[idx(...eye)] = MAGMAFLOW
+    const theirs = computeLight(around(placed), null, tables)
+    const points = facePoints()
+    for (let y = 10; y <= 14; y += 0.5) for (let z = 8; z <= 17; z += 0.5) points.push([8.5, y, z], [16.5, y, z])
+    for (const p of points) {
+      const v = heldValue(heldPoint(held, corner, p))
+      const l = chunkAt(theirs, p)
+      const a = Math.max(l[3], 1 / 255)
+      for (let ch = 0; ch < 3; ch++) expect(v[ch] * v[ch] * BRIGHT_MAX).toBeCloseTo((l[ch] / a) ** 2 * BRIGHT_MAX, 6)
+    }
+  })
+
+  it('is what the block shader does: its own share, never past 1', () => {
+    const m = makeTerrainMaterial()
+    const frag = m.material.fragmentShader
+    expect(frag).toContain('vec3 hv = min(h.rgb / max(h.a, 1.0 / 255.0), vec3(1.0));')
+    expect(frag).not.toMatch(/texture\(held[^;]*\.rgb \/ max\(l\.a/)
+    m.dispose()
+  })
+
+  it('writes the open share into the held light: 255 where light passes, 0 where it stops', () => {
+    const pass = new Uint8Array(HELD_SIDE ** 3)
+    pass[5] = 1
+    const out = computeHeldLight(pass, heldGlow(GLOWCORE)!.rgb)
+    expect(out[4 * 5 + 3]).toBe(255)
+    expect(out[4 * 6 + 3]).toBe(0)
+  })
+})
+
 describe('on revision-3 ground', () => {
   // A chunk of revision 3 ground (DECK-0009 #128) that grows Glowcore, which revision 2 never placed there.
   const c = M.revision_3.chunks.find((v) => v.name === 'vent-glowcore-k9')!
@@ -275,6 +379,58 @@ describe('worked out only from the chunks round you', () => {
     const asked = new Set<string>()
     fillHeldPass((cx, cy, cz) => { asked.add(`${cx},${cy},${cz}`); return null }, heldCorner([31, 3, 40]), new Uint8Array(HELD_SIDE ** 3))
     expect(asked.size).toBe(8)
+  })
+
+  it('in the real field: a chunk arriving or changing inside the cube relights it, one outside does not, found by key with nothing made', () => {
+    const origin = { x: 0x249e0397002d8eb597a00n & ~31n, y: 0x1653481cb2996614f9e720n & ~31n, z: 0x16780c2d50019df765df00n & ~31n, plane: 0 }
+    const w = new TerrainWorld(origin, { right: { axis: 'x', dir: 1 }, up: { axis: 'y', dir: 1 }, out: { axis: 'z', dir: -1 } } as never)
+    const home = w.slotAt(0, 0, 0, true)!
+    w.setBlocks(home.key, new Uint8Array(CELLS), new Uint8Array(CELLS))
+    let sets = 0
+    const d = new HeldLightDriver({ setHeld: () => { sets++ } })
+    const glow = heldGlow(GLOWCORE)
+    let version = 1
+    // At a chunk's corner: the cube overlaps 8 chunks, 7 of them not yet here.
+    d.frame({ world: w, version, glow, shading: true, eye: [31, 31, 31] })
+    expect(sets).toBe(1)
+    // One far off arrives: no relight.
+    const far = w.slotAt(5, 0, 0, true)!
+    w.setBlocks(far.key, new Uint8Array(CELLS), new Uint8Array(CELLS).fill(STONE))
+    d.frame({ world: w, version: ++version, glow, shading: true, eye: [31, 31, 31] })
+    expect(sets).toBe(1)
+    // One the cube overlaps arrives: relit.
+    const near = w.slotAt(1, 1, 1, true)!
+    d.frame({ world: w, version: ++version, glow, shading: true, eye: [31, 31, 31] })
+    expect(sets).toBe(2)
+    w.setBlocks(near.key, new Uint8Array(CELLS), new Uint8Array(CELLS).fill(STONE))
+    d.frame({ world: w, version: ++version, glow, shading: true, eye: [31, 31, 31] })
+    expect(sets).toBe(3)
+    // An edit in it: relit; one in the far chunk: not.
+    w.setCs(33, 33, 33, 0)
+    d.frame({ world: w, version: ++version, glow, shading: true, eye: [31, 31, 31] })
+    expect(sets).toBe(4)
+    w.setCs(5 * 32 + 3, 3, 3, 0)
+    d.frame({ world: w, version: ++version, glow, shading: true, eye: [31, 31, 31] })
+    expect(sets).toBe(4)
+    // One it overlaps let go: relit.
+    w.drop(near)
+    d.frame({ world: w, version: ++version, glow, shading: true, eye: [31, 31, 31] })
+    expect(sets).toBe(5)
+  })
+
+  it('makes no key and no list to check the chunks round you between relights', () => {
+    const w = new TerrainWorld({ x: 0n, y: 0n, z: 0n, plane: 0 }, { right: { axis: 'x', dir: 1 }, up: { axis: 'y', dir: 1 }, out: { axis: 'z', dir: -1 } } as never)
+    const home = w.slotAt(0, 0, 0, true)!
+    w.setBlocks(home.key, new Uint8Array(CELLS), new Uint8Array(CELLS))
+    const d = new HeldLightDriver({ setHeld: () => {} })
+    const f = { world: w, version: 1, glow: heldGlow(GLOWCORE), shading: true, eye: [31, 31, 31] as [number, number, number] }
+    d.frame(f)
+    // A field change elsewhere: the check runs, finds nothing near changed, and never asks slotAt (which makes a key).
+    let asked = 0
+    const slotAt = w.slotAt.bind(w)
+    w.slotAt = ((...a: Parameters<TerrainWorld['slotAt']>) => { asked++; return slotAt(...a) }) as TerrainWorld['slotAt']
+    for (let v = 2; v < 50; v++) { f.version = v; expect(d.frame(f)).toBe(false) }
+    expect(asked).toBe(0)
   })
 
   it('is not worked out again for a change in a chunk outside its cube, and is for one inside it', () => {

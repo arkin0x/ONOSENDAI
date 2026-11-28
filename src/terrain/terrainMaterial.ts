@@ -129,9 +129,12 @@ void main() {
     vec3 lv = l.rgb / max(l.a, 1.0 / 255.0);
     shine = lv * lv * ${BRIGHT_MAX.toFixed(2)};
     if (heldOn > 0.5) {
-      // The same point in the cube round the eye; its solid cells hold 0 too, so over the chunk's share of open cells it is the open cells' light alone.
+      // The same point in the cube round the eye. Its solid cells hold 0 and its alpha is its own share of open cells, so over that it is the open
+      // cells' light alone. Its own share, never the chunk's: the chunk's light is worked out later than an edit, and a face just mined
+      // would read a fresh held light over an old share of nothing and flash white. Never past 1 either way.
       vec3 q = (chunkAt + vLocal + 0.5 * vNormal - heldAt) / ${HELD_SIDE.toFixed(1)};
-      vec3 hv = texture(held, vec3(q.x, q.z, q.y)).rgb / max(l.a, 1.0 / 255.0);
+      vec4 h = texture(held, vec3(q.x, q.z, q.y));
+      vec3 hv = min(h.rgb / max(h.a, 1.0 / 255.0), vec3(1.0));
       shine = max(shine, hv * hv * ${BRIGHT_MAX.toFixed(2)});
     }
     float near = clamp(1.0 - gib / eyeReach, 0.0, 1.0);

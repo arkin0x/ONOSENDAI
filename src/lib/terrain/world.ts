@@ -111,7 +111,8 @@ export interface Change {
 /** The axis index of a cyberspace axis name. */
 const AXIS_INDEX: Record<AxisName, 0 | 1 | 2> = { x: 0, y: 1, z: 2 }
 
-const offKey = (cx: number, cy: number, cz: number): string => `${cx},${cy},${cz}`
+/** A chunk's key in TerrainWorld.chunks, by chunk offset. */
+export const offKey = (cx: number, cy: number, cz: number): string => `${cx},${cy},${cz}`
 
 /** The six neighbours' offsets, in the order of mesh.ts Borders: -x, +x, -y, +y, -z, +z. */
 export const NEIGHBOURS: ReadonlyArray<readonly [number, number, number]> = [[-1, 0, 0], [1, 0, 0], [0, -1, 0], [0, 1, 0], [0, 0, -1], [0, 0, 1]]

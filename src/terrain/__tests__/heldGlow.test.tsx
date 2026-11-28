@@ -11,6 +11,7 @@ import { describe, expect, it } from 'vitest'
 import { createElement, type ReactElement } from 'react'
 import { mount, type Host } from '../../test/elementRoot'
 import { HeldHalo, HeldVignette, useHeldGlow } from '../HeldGlow'
+import { useLayers } from '../../store/useLayers'
 
 function Glow({ id }: { id: number }): ReactElement | null {
   const look = useHeldGlow(id)
@@ -35,6 +36,20 @@ describe('the glow in hand', () => {
   it('draws nothing for a block that does not glow', async () => {
     const m = await mount(createElement(Glow, { id: 1 }))
     expect(m.all()).toHaveLength(0)
+    await m.unmount()
+  })
+
+  it('draws nothing with Block shading off, as the blocks are not lit by it then, and comes back with it on', async () => {
+    useLayers.setState({ blockShading: false })
+    try {
+      const m = await mount(createElement(Glow, { id: 42 }))
+      expect(m.all()).toHaveLength(0)
+      await m.unmount()
+    } finally {
+      useLayers.setState({ blockShading: true })
+    }
+    const m = await mount(createElement(Glow, { id: 42 }))
+    expect(byClass(m.all(), 'terrain-held-halo')).toBeTruthy()
     await m.unmount()
   })
 

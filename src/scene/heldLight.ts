@@ -15,16 +15,16 @@
  */
 
 import { Matrix4, Vector3 } from 'three'
-import { computeHeldLight, fillHeldPass, heldChunks, heldCorner, heldPassScratch, HELD_BYTES, type HeldGlow } from '../lib/terrain/heldLight'
-import type { TerrainWorld } from '../lib/terrain/world'
+import { computeHeldLight, fillHeldPass, heldChunksInto, heldCorner, heldPassScratch, HELD_BYTES, HELD_CHUNKS_MAX, type HeldGlow } from '../lib/terrain/heldLight'
+import { offKey, type ChunkSlot, type TerrainWorld } from '../lib/terrain/world'
 
 /** Where the light goes: terrainMaterial.ts setHeld. */
 export interface HeldTarget { setHeld: (bytes: Uint8Array | null, corner?: readonly [number, number, number]) => void }
 
 /** What one frame tells it. */
 export interface HeldFrame {
-  /** The field, or null outside TERRAIN. */
-  world: Pick<TerrainWorld, 'slotAt'> | null
+  /** The field, or null outside TERRAIN. Its chunks by key, where it has them, so a check for a change round you makes no key. */
+  world: (Pick<TerrainWorld, 'slotAt'> & { chunks?: ReadonlyMap<string, Pick<ChunkSlot, 'blocks' | 'version'>> }) | null
   /** Bumped by every change to the field's blocks (store/useTerrain.ts TerrainSession version). */
   version: number
   /** The glowing block in hand, or null. */
@@ -46,12 +46,21 @@ export class HeldLightDriver {
   private version = -1
   private eye: [number, number, number] = [NaN, NaN, NaN]
   private corner: [number, number, number] = [0, 0, 0]
-  /** The chunks the cube overlaps when last worked out, and their versions then. */
-  private chunks: Array<{ blocks: Uint8Array | null; version: number } | null> = []
-  private versions: number[] = []
+  /** The chunks the cube overlaps when last worked out (`count` of them), their keys, and their versions then: kept in place, so a check makes nothing. */
+  private count = 0
+  private chunks: Array<Pick<ChunkSlot, 'blocks' | 'version'> | null> = new Array(HELD_CHUNKS_MAX).fill(null)
+  private keys: string[] = new Array(HELD_CHUNKS_MAX).fill('')
+  private versions = new Int32Array(HELD_CHUNKS_MAX)
+  private offs = new Int32Array(3 * HELD_CHUNKS_MAX)
   readonly stats: HeldStats = { updates: 0, lastMs: 0, totalMs: 0 }
 
   constructor(private readonly target: HeldTarget) {}
+
+  /** A chunk's blocks from those found for this relight, for fillHeldPass: made once, not per relight. */
+  private readonly read = (cx: number, cy: number, cz: number): Uint8Array | null => {
+    for (let i = 0; i < this.count; i++) if (this.offs[3 * i] === cx && this.offs[3 * i + 1] === cy && this.offs[3 * i + 2] === cz) return this.chunks[i]?.blocks ?? null
+    return null
+  }
 
   /** One frame: true when the light was worked out again. */
   frame(f: HeldFrame): boolean {
@@ -64,12 +73,15 @@ export class HeldLightDriver {
     this.eye[0] = f.eye[0]; this.eye[1] = f.eye[1]; this.eye[2] = f.eye[2]
     heldCorner(this.eye, this.corner)
     const world = f.world
-    this.chunks.length = 0; this.versions.length = 0
-    const pass = fillHeldPass((cx, cy, cz) => {
+    // The chunks round you, each looked up once (its key made once) per relight, kept for the checks between relights.
+    this.count = heldChunksInto(this.corner, this.offs)
+    for (let i = 0; i < this.count; i++) {
+      const cx = this.offs[3 * i], cy = this.offs[3 * i + 1], cz = this.offs[3 * i + 2]
       const slot = world.slotAt(cx, cy, cz)
-      this.chunks.push(slot); this.versions.push(slot?.version ?? -1)
-      return slot?.blocks ?? null
-    }, this.corner, heldPassScratch())
+      this.chunks[i] = slot; this.versions[i] = slot?.version ?? -1
+      this.keys[i] = world.chunks ? offKey(cx, cy, cz) : ''
+    }
+    const pass = fillHeldPass(this.read, this.corner, heldPassScratch())
     computeHeldLight(pass, f.glow.rgb, this.bytes)
     this.target.setHeld(this.bytes, this.corner)
     this.on = true
@@ -78,11 +90,10 @@ export class HeldLightDriver {
     return true
   }
 
-  /** Whether any chunk the cube overlaps came, went or changed since the light was worked out. */
-  private nearChanged(world: Pick<TerrainWorld, 'slotAt'>): boolean {
-    const at = heldChunks(this.corner)
-    for (let i = 0; i < at.length; i++) {
-      const slot = world.slotAt(at[i][0], at[i][1], at[i][2])
+  /** Whether any chunk the cube overlaps came, went or changed since the light was worked out. Makes nothing: the chunks are found by the keys kept. */
+  private nearChanged(world: NonNullable<HeldFrame['world']>): boolean {
+    for (let i = 0; i < this.count; i++) {
+      const slot = world.chunks ? world.chunks.get(this.keys[i]) ?? null : world.slotAt(this.offs[3 * i], this.offs[3 * i + 1], this.offs[3 * i + 2])
       if (slot !== this.chunks[i] || (slot?.version ?? -1) !== this.versions[i]) return true
     }
     return false

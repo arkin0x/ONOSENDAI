@@ -320,6 +320,27 @@ describe('a `surveyed` that is not an integer never drops the layer (§5.4)', ()
     expect(parsePlaintext(text.replace('"cells":[0', '"cells":[0.0'))).toBeNull()
     expect(parsePlaintext(text.replace('"pal":[null,0]', '"pal":[null,0e0]'))).toBeNull()
   })
+
+  it('an escaped duplicate key is read as JSON.parse reads it, so it cannot slip a number past the check', () => {
+    // JSON.parse reads "cell\u0073" as `cells`, and the later duplicate wins.
+    const dup = text.replace('"cells":[', '"cells":[0,-32767],"cell\\u0073":[')
+    expect(JSON.parse(dup).planes[0].cells).toEqual(JSON.parse(text).planes[0].cells)
+    expect(parsePlaintext(dup)).not.toBeNull()
+    const sneaky = dup.replace('"cell\\u0073":[0', '"cell\\u0073":[0.0')
+    expect(JSON.parse(sneaky).planes[0].cells[0]).toBe(0)
+    expect(parsePlaintext(sneaky)).toBeNull()
+    expect(parsePlaintext(text.replace('"pal":[null,0]', '"pa\\u006c":[null,0.0]'))).toBeNull()
+    // The same for `planes` itself.
+    expect(parsePlaintext(text.replace('{"planes":[', '{"planes":[],"plane\\u0073":[').replace('"pal":[null,0]', '"pal":[null,1e0]'))).toBeNull()
+  })
+
+  it('`plane` and `ground` stay strict integers', () => {
+    expect(parsePlaintext(text)).not.toBeNull()
+    expect(parsePlaintext(text.replace('"ground":2', '"ground":2.0'))).toBeNull()
+    expect(parsePlaintext(text.replace('"plane":0', '"plane":0.0'))).toBeNull()
+    expect(parsePlaintext(text.replace('"ground":2', '"groun\\u0064":2.0'))).toBeNull()
+    expect(parsePlaintext(text.replace('"ground":2', '"ground":2e0'))).toBeNull()
+  })
 })
 
 describe('a layer started from your other keys inside a home names the home owner\'s base (§5.6)', () => {

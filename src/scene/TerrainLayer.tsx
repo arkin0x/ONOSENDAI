@@ -52,7 +52,7 @@ import { airRefusal, cellInReach, slotInReach, surveyTarget, terrainSession, use
 import { AIM_COLORS, aimAt, sceneDraws, sharedKeys } from '../store/terrainShare'
 import { useCyberspace } from '../store/useCyberspace'
 import { useLayers } from '../store/useLayers'
-import { raycast, type RayHit } from '../lib/terrain/raycast'
+import { aimTest, raycast, type RayHit } from '../lib/terrain/raycast'
 import { CURSOR_REACH, TerrainWorld, type ChunkSlot } from '../lib/terrain/world'
 import { borderSlab, FLOATS_PER_VERTEX, type Borders } from '../lib/terrain/mesh'
 import { lightChunkAsync, meshChunkAsync } from '../lib/terrain/blocksClient'
@@ -558,8 +558,8 @@ function Marks({ axes }: { axes: ViewAxes }): JSX.Element {
       ray.setFromCamera(ndc, state.camera)
       from.copy(ray.ray.origin).applyMatrix4(inverse)
       toward.copy(ray.ray.origin).add(ray.ray.direction).applyMatrix4(inverse).sub(from)
-      const solid = (i: number, j: number, k: number): boolean => isSolid(s.world.blockCs(i, j, k))
-      return raycast([from.x - 0.5, from.y - 0.5, from.z - 0.5], [toward.x, toward.y, toward.z], CURSOR_REACH, solid)
+      // Every block stops it, a liquid too (so Tidewater and Magmaflow can be mined), but the one the eye is in (aimTest).
+      return raycast([from.x - 0.5, from.y - 0.5, from.z - 0.5], [toward.x, toward.y, toward.z], CURSOR_REACH, aimTest((i, j, k) => s.world.blockCs(i, j, k)))
     }
     // Whether a shard (any tap target) stands nearer along the ray than `distance` blocks (a hit's face, the ghost): the nearest thing wins, so a tap there is the shard's, never the block's behind it (TapOccluder.tsx).
     const shardInFront = (distance: number): boolean => {

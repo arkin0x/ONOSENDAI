@@ -17208,3 +17208,233 @@ div.bpt-tile__hit { cursor: default; }
 /* CARD in SURVEY's slot: the field card's amber, so it reads as another thing than the mint SURVEY hold. */
 .terrain-act--survey.is-card { --terrain-line: var(--sv-btn, #ffb547); color: var(--sv-btn, #ffb547); }
 .terrain-act--survey.is-card:active::before { background: rgba(255, 181, 71, 0.22); }
+
+/* Starred chunks (owner, 2026-11-28: "save and star this chunk so that I can find it later"). The survey card's star in
+   its head, the one-line star line under it, MINING's SAVED CHUNKS button, and the SAVED CHUNKS modal in the field card's
+   look: warm earth, amber ink, and the saved chunk's gold (lib/terrain/starredChunk.ts STAR_GOLD) for the star. */
+.survey-modal { --sv-gold: #ffcf4a; }
+.survey-card__star {
+  position: relative;
+  flex: none;
+  margin-left: auto;
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  color: var(--sv-ink);
+  background: transparent;
+  border: 1px solid rgba(255, 181, 71, 0.45);
+  cursor: pointer;
+}
+.survey-card__star::before { content: ''; position: absolute; inset: -9px; }
+.survey-card__star + .modal-close { margin-left: 0; }
+.survey-card__star.is-on { color: var(--sv-gold); border-color: var(--sv-gold); box-shadow: 0 0 10px rgba(255, 207, 74, 0.35); }
+/* A rare find here, not starred yet: the star glows gently until it is. */
+.survey-card__star.is-asking { color: var(--sv-gold); border-color: var(--sv-gold); animation: survey-star-ask 1.8s ease-in-out infinite; }
+@keyframes survey-star-ask {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 207, 74, 0.0); background: transparent; }
+  50% { box-shadow: 0 0 14px 2px rgba(255, 207, 74, 0.55); background: rgba(255, 207, 74, 0.14); }
+}
+@media (prefers-reduced-motion: reduce) { .survey-card__star.is-asking { animation: none; box-shadow: 0 0 12px rgba(255, 207, 74, 0.5); } }
+/* The star's line: one line high whatever it says, so starring never moves the card. */
+.survey-star {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  margin: 8px 0 0;
+  padding: 0 10px;
+  overflow: hidden;
+  font-size: 10.5px;
+  line-height: 1.25;
+  color: var(--sv-dim);
+  border-left: 2px solid rgba(211, 154, 60, 0.35);
+}
+.survey-star__words { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.survey-star.is-asking { color: #fff1c9; background: linear-gradient(90deg, rgba(255, 207, 74, 0.2), rgba(255, 207, 74, 0.03)); border-left-color: var(--sv-gold); }
+.survey-star.is-starred { color: #ffe9b0; border-left-color: var(--sv-gold); }
+.survey-star.is-starred .survey-star__words { flex: 0 1 auto; }
+.survey-star__link, .survey-star__undo {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 7px;
+  font: inherit;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: var(--sv-gold);
+  background: rgba(255, 207, 74, 0.08);
+  border: 1px solid rgba(255, 207, 74, 0.55);
+  cursor: pointer;
+}
+.survey-star__undo { margin-left: auto; }
+
+/* MINING's SAVED CHUNKS: one wide chamfered button over the stats. */
+.mining__saved {
+  --cham-line: rgba(255, 207, 74, 0.6);
+  --cham-fill: linear-gradient(90deg, rgba(42, 30, 8, 0.96), rgba(12, 10, 6, 0.96));
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 44px;
+  margin-bottom: 10px;
+  padding: 0 12px;
+  color: #ffe08a;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-align: left;
+  cursor: pointer;
+}
+.mining__saved-label { flex: 1 1 auto; }
+
+/* SAVED CHUNKS (terrain/SavedChunks.tsx): the field card, a list of saved chunks, then one chunk's view. */
+.saved-card { width: min(460px, 100%); }
+.saved-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 6px 0 0;
+  min-height: 26px;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  color: var(--sv-amber);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+.saved-empty { margin: 4px 0; font-size: 12px; line-height: 1.5; color: var(--sv-dim); }
+.saved-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+/* One saved chunk: the same height in every state, so a removal's UNDO line takes exactly its place. */
+.saved-row {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: 64px;
+  padding: 0 10px 0 6px;
+  color: var(--sv-ink);
+  font: inherit;
+  text-align: left;
+  background: linear-gradient(90deg, rgba(255, 181, 71, 0.08), rgba(255, 181, 71, 0.02));
+  border: 1px solid rgba(211, 154, 60, 0.28);
+  clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px);
+  cursor: pointer;
+}
+.saved-row:hover, .saved-row:focus-visible { border-color: rgba(255, 207, 74, 0.6); background: linear-gradient(90deg, rgba(255, 207, 74, 0.14), rgba(255, 181, 71, 0.03)); }
+.saved-row.is-guided { border-color: var(--sv-gold); box-shadow: inset 2px 0 0 var(--sv-gold); }
+.saved-row__text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.saved-row__name { display: flex; align-items: center; gap: 5px; min-width: 0; font-size: 12.5px; font-weight: 700; color: #ffe9b0; }
+.saved-row__name > svg { flex: none; color: var(--sv-gold); }
+.saved-row__name-text { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.saved-row__beacon { flex: none; color: var(--sv-gold); }
+.saved-row__sub, .saved-row__date { font-size: 10px; color: var(--sv-dim); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.saved-row__date { font-size: 9px; letter-spacing: 0.06em; opacity: 0.85; }
+.saved-row__where { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; min-width: 64px; }
+.saved-row__dist { font-size: 10px; font-variant-numeric: tabular-nums; color: var(--sv-ink); white-space: nowrap; }
+.saved-row--removed { grid-template-columns: minmax(0, 1fr) auto; cursor: default; padding-left: 14px; border-style: dashed; background: rgba(0, 0, 0, 0.18); }
+.saved-row__removed-words { font-size: 11px; color: var(--sv-dim); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.saved-undo {
+  --cham-cut: 6px;
+  --cham-line: rgba(255, 207, 74, 0.6);
+  --cham-fill: #1a1206;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 32px;
+  padding: 0 12px;
+  color: var(--sv-gold);
+  font: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  cursor: pointer;
+}
+/* The way to it: an arrow on a compass with the sun at the top. */
+.saved-arrow { display: inline-grid; place-items: center; color: var(--sv-gold); transform: rotate(var(--deg, 0deg)); transition: transform 0.25s ease; }
+.saved-arrow.is-flat { color: var(--sv-dim); }
+@media (prefers-reduced-motion: reduce) { .saved-arrow { transition: none; } }
+
+/* One chunk's view. */
+.saved-view__name { display: flex; align-items: center; gap: 7px; height: 36px; color: #ffe9b0; font-size: 15px; font-weight: 700; }
+.saved-view__name > svg { flex: none; color: var(--sv-gold); }
+.saved-view__name-text { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.saved-rename { display: flex; align-items: center; gap: 6px; width: 100%; height: 36px; }
+.saved-rename__input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 32px;
+  padding: 0 8px;
+  color: #fff;
+  font: inherit;
+  font-size: 14px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--sv-gold);
+  outline: none;
+}
+.saved-rename__btn {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  color: var(--sv-gold);
+  background: transparent;
+  border: 1px solid rgba(255, 207, 74, 0.55);
+  cursor: pointer;
+}
+.saved-where { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 14px; }
+.saved-where__facts { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.saved-where__big { font-size: 20px; font-weight: 700; color: #fff; font-variant-numeric: tabular-nums; }
+.saved-where__line { font-size: 11.5px; color: var(--sv-ink); }
+.saved-where__line--num { font-variant-numeric: tabular-nums; color: var(--sv-amber); }
+.saved-where__way { display: inline-flex; align-items: center; gap: 6px; }
+.saved-where__hint { font-size: 9px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--sv-dim); }
+.saved-where__words { font-size: 11px; color: var(--sv-dim); }
+/* The locator: a radar inset in the card's copper, the sun at the top, the chunk a gold star. */
+.saved-locator { flex: none; display: block; background: radial-gradient(circle at 50% 50%, rgba(255, 181, 71, 0.09), rgba(0, 0, 0, 0.35) 70%); clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px); }
+.saved-locator__rim { fill: none; stroke: rgba(211, 154, 60, 0.55); stroke-width: 1; }
+.saved-locator__ring { fill: none; stroke: rgba(211, 154, 60, 0.25); stroke-width: 1; stroke-dasharray: 2 3; }
+.saved-locator__axis { stroke: rgba(211, 154, 60, 0.16); stroke-width: 1; }
+.saved-locator__sun { fill: #1a0d22; stroke: #b36bff; stroke-width: 1.5; }
+.saved-locator__label { font-size: 8px; letter-spacing: 0.12em; fill: rgba(244, 230, 204, 0.6); font-family: var(--mono); }
+.saved-locator__you { fill: #ff2323; stroke: #fff; stroke-width: 1; }
+.saved-locator__path { stroke: rgba(255, 207, 74, 0.55); stroke-width: 1; stroke-dasharray: 3 3; }
+.saved-locator__star { fill: var(--sv-gold); stroke: #fff6d6; stroke-width: 0.8; filter: drop-shadow(0 0 3px rgba(255, 207, 74, 0.8)); }
+.saved-locator__star.is-past { opacity: 0.85; }
+/* The actions: half-width pairs as the CREATE panel's; NAVIGATE first, REMOVE last in red. */
+.saved-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; margin-top: 12px; }
+.saved-act {
+  --cham-cut: 7px;
+  --cham-line: rgba(211, 154, 60, 0.55);
+  --cham-fill: #160f08;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 40px;
+  padding: 0 8px;
+  color: var(--sv-ink);
+  font: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.saved-act:disabled { opacity: 0.5; cursor: default; }
+.saved-act.is-on { --cham-line: var(--sv-gold); --cham-fill: #2c2008; color: var(--sv-gold); }
+.saved-act--go { --cham-line: var(--sv-gold); --cham-fill: linear-gradient(90deg, #3a2a08, #1c1406); color: #fff1c2; grid-column: 1 / -1; }
+.saved-act--remove { --cham-line: rgba(255, 92, 92, 0.6); color: #ff9a9a; }
+
+/* CARD's small gold star while you stand in a chunk you starred (terrain/TerrainView.tsx). */
+.terrain-act__star { position: absolute; top: 3px; left: 9px; color: #ffcf4a; filter: drop-shadow(0 0 3px rgba(255, 207, 74, 0.8)); pointer-events: none; }

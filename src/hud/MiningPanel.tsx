@@ -16,19 +16,25 @@
  * of #951). The foot says what is true now: synced, saved on this device
  * only, or that the last sync failed.
  *
+ * SAVED CHUNKS (owner, 2026-11-28: "keep it in the mining panel in a button
+ * that triggers a modal that shows all your saved chunks"): one button at the
+ * top, with how many you saved, opening terrain/SavedChunks.tsx.
+ *
  * The look: the house chamfer on every tile, a cyan tick on the cut corner,
  * white tabular numbers (drawn from augmented-ui's cut corners and the FUI
  * HUD readouts the owner likes; no dependency).
  */
 
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
-import { Bomb, Boxes, Cloud, CloudOff, Cpu, DraftingCompass, Hammer, Pickaxe, ScanSearch, Timer } from 'lucide-react'
+import { Bomb, Boxes, ChevronRight, Cloud, CloudOff, Cpu, DraftingCompass, Hammer, Pickaxe, ScanSearch, Star, Timer } from 'lucide-react'
 import { useCyberspace } from '../store/useCyberspace'
 import { WRITE_EVERY_MS, isDirty, localFor, miningRecordFor, nudgeMining, useMiningStats, type MiningStatus } from '../store/miningStats'
 import { currentStreak, dayNumber, daysActive, longestStreak, rarestMined, topMined, totalsOf } from '../lib/miningRecord'
 import { blockKind, blockName } from '../lib/terrain/blocks'
 import { tileUrl } from '../lib/terrain/tiles'
 import { Explanation } from './Explanation'
+import { useStarredChunks } from '../store/starredChunks'
+import { openSavedChunks } from '../terrain/savedChunksUi'
 
 /** How many of the kinds mined most are shown. */
 export const TOP_KINDS = 4
@@ -122,6 +128,7 @@ export function MiningPanel(): JSX.Element {
     return () => seen.disconnect()
   }, [me])
 
+  const saved = useStarredChunks((s) => s.entries.length)
   const rec = miningRecordFor(me)
   const { c, k } = totalsOf(rec)
   const rare = rarestMined(k)
@@ -135,6 +142,11 @@ export function MiningPanel(): JSX.Element {
     <section className="panel panel--mining">
       <header className="panel__head"><h2>Mining</h2></header>
       <div className="mining" ref={body}>
+        <button type="button" className="cham-btn mining__saved" onClick={() => openSavedChunks()}>
+          <Star size={15} strokeWidth={2.25} aria-hidden fill={saved > 0 ? 'currentColor' : 'none'} />
+          <span className="mining__saved-label">SAVED CHUNKS ({saved})</span>
+          <ChevronRight size={15} strokeWidth={2.25} aria-hidden />
+        </button>
         <Group icon={<ScanSearch {...icon} />} title="Surveys">
           <Tile value={num(c.surveys)} label="Surveys" />
           <Tile value={num(c.chunks)} label="Unique chunks" />
@@ -195,7 +207,7 @@ export function MiningPanel(): JSX.Element {
         {line.when && <span className="mining__sync-when">{line.when}</span>}
       </footer>
       {enabled && live && (status === 'error' || status === 'unsupported') && note && <p className="notice" role="status">{note}</p>}
-      <Explanation>Everything you do in TERRAIN, added up across your devices. Saved encrypted to you, so only you can read it. Counts and dates only, never where you were.</Explanation>
+      <Explanation>Everything you do in TERRAIN, added up across your devices. Saved encrypted to you, so only you can read it. Counts and dates only, never where you were. SAVED CHUNKS are the chunks you starred on a survey card, with their cards, saved encrypted to you the same way.</Explanation>
     </section>
   )
 }

@@ -37,6 +37,8 @@ interface GoalState {
   goal: Goal | null
   /** Plan the trip to the spot on screen (the star's spot). */
   plan: () => void
+  /** Plan the trip to a place named elsewhere (a saved chunk's centre: hud/SavedChunks.tsx NAVIGATE). */
+  planTo: (target: Position, plane: Plane, label: string) => void
   /** Line up the walking leg from where you stand, or point at the ride. */
   aim: () => void
   clear: () => void
@@ -78,6 +80,10 @@ export const useGoal = create<GoalState>((set, get) => ({
     // GOAL only plans: SET makes the ride's exit the destination (arkinox,
     // 2026-10-15), so a destination already set is never replaced unasked.
     set({ goal: { target: { ...spot.position }, plane: spot.plane, label: spot.label, plan } })
+  },
+
+  planTo: (target, plane, label) => {
+    set({ goal: { target: { ...target }, plane, label, plan: planFor(target, plane) } })
   },
 
   aim: () => {

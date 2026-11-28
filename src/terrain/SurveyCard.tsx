@@ -26,11 +26,20 @@
  * figures, and a kind mined out stays on the list at 0 until the card closes,
  * so nothing on it moves.
  *
+ * Starred (owner, 2026-11-28: "How can we provide a UI UX to save and star
+ * this chunk so that I can find it later"): the star in the head saves the
+ * chunk, with this card as it is now, to your saved chunks (MINING's SAVED
+ * CHUNKS, store/starredChunks.ts); tapped again it comes off, with an UNDO.
+ * The line under the head says where the chunk stands with you, always one
+ * line high whatever it says: a card with a rare find (Glowcore, Cinderrock
+ * and the rare band) asks you to star it, and the star glows until you do.
+ * While a saved chunk's card is open, what it counts is kept with the star.
+ *
  * It closes by the shared ✕, a tap outside it or Esc (hud/modalStack.tsx).
  */
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react'
-import { Layers, Pickaxe, ScrollText } from 'lucide-react'
+import { Layers, Pickaxe, ScrollText, Star, Undo2 } from 'lucide-react'
 import { ModalClose } from '../hud/ui/ModalClose'
 import { Chamfer } from '../hud/ui/Chamfer'
 import { Stacked, useModalStack } from '../hud/modalStack'
@@ -39,8 +48,15 @@ import { blockKind } from '../lib/terrain/blocks'
 import { AVERAGE_HARDNESS, HARDNESS_MAX, coreLayers, coreSliceAt, hardnessLine, type CardRow } from '../lib/terrain/assay'
 import { cardFor, closeSurveyCard, stampDate, useSurveyCard, watchCard, type CardFor } from './surveyCard'
 import { Swatch } from './Swatch'
+import { findsHere, promptFinds, snapshotOf } from '../lib/terrain/starredChunk'
+import { refreshSnapshot, starChunkWhy, undoRemove, unstarChunk, useStarredChunks } from '../store/starredChunks'
+import { openSavedChunks } from './savedChunksUi'
+import { BRIEF_TOAST_MS, useToast } from '../store/useToast'
 
 const count = (n: number): string => n.toLocaleString('en-US')
+
+/** While a saved chunk's card is open and you mine, its kept card is brought up to date at most this often (and as it closes). */
+export const SNAPSHOT_EVERY_MS = 10_000
 
 /** The line over the lists: "You've mined 214 blocks here · 31,902 left". */
 export function tallyLine(mined: number, left: number): string {
@@ -59,7 +75,7 @@ export function visibilityLine(visible: number, buried: number): string {
   return `${count(visible)} visible · ${count(buried)} buried`
 }
 
-function Row({ row }: { row: CardRow }): JSX.Element {
+export function Row({ row }: { row: CardRow }): JSX.Element {
   const mark = row.count === 0 ? 'is-gone' : row.visible === 0 ? 'is-buried' : row.buried === 0 ? 'is-visible' : 'is-some'
   return (
     <li className={`survey-row${row.prized ? ' is-prized' : ''}`}>
@@ -74,7 +90,7 @@ function Row({ row }: { row: CardRow }): JSX.Element {
 }
 
 /** A list's heading, with the two columns' names over the numbers. */
-function Section({ name }: { name: string }): JSX.Element {
+export function Section({ name }: { name: string }): JSX.Element {
   return (
     <h3 className="survey-card__section">
       <span>{name}</span>
@@ -104,7 +120,7 @@ type BandEvent = ReactPointerEvent<HTMLDivElement>
  * to the keyboard and a screen reader: arrows, Home and End move along it.
  * It says no more than the colours do.
  */
-function Core({ strata }: { strata: Uint8Array }): JSX.Element {
+export function Core({ strata }: { strata: Uint8Array }): JSX.Element {
   const layers = useMemo(() => coreLayers(strata), [strata])
   const [active, setActive] = useState<number | null>(null)
   // Where the keyboard is along the core, kept while nothing is picked, so focus comes back to the same slice.
@@ -187,9 +203,28 @@ function Core({ strata }: { strata: Uint8Array }): JSX.Element {
   )
 }
 
+/**
+ * The star's line, under the card's head: one line high in every state, so
+ * starring never moves the card. A rare find asks to be starred; a starred
+ * chunk says where to find it again; one just taken off offers UNDO.
+ */
+export function StarLine({ chunk, rare, starred, removed }: { chunk: string; rare: string | null; starred: boolean; removed: boolean }): JSX.Element {
+  let body: JSX.Element
+  if (removed && !starred) {
+    body = <><span className="survey-star__words">Taken off your saved chunks.</span><button type="button" className="survey-star__undo" onClick={() => undoRemove()}><Undo2 size={12} strokeWidth={2.25} aria-hidden />UNDO</button></>
+  } else if (starred) {
+    body = <><span className="survey-star__words">{rare ? `${rare} Saved: ` : 'Saved: '}</span><button type="button" className="survey-star__link" onClick={() => openSavedChunks(chunk)}>SAVED CHUNKS</button></>
+  } else {
+    body = <span className="survey-star__words">{rare ? `${rare} Star this chunk to find it again.` : 'Star this chunk to find it again.'}</span>
+  }
+  return <p className={`survey-star${rare && !starred && !removed ? ' is-asking' : ''}${starred ? ' is-starred' : ''}`} role="status">{body}</p>
+}
+
 export function SurveyCard(): JSX.Element | null {
   const key = useSurveyCard((s) => s.open)
   const owns = useTerrain((s) => !!s.inventory.compiler)
+  const starred = useStarredChunks((s) => !!key && s.keys.has(key))
+  const removed = useStarredChunks((s) => !!key && s.removed?.entry.c === key)
   // Leaving TERRAIN takes the card with it.
   useEffect(() => () => closeSurveyCard(), [])
   // One pass over the chunk as it opens, at the revision you see it at (kept per chunk and version: lib/terrain/assay.ts
@@ -203,6 +238,13 @@ export function SurveyCard(): JSX.Element | null {
     let again = false
     // Every kind the open card has listed stays listed, at 0 once it is all gone, so no row jumps off it.
     const shown = new Set<number>()
+    let latest: CardFor | null = null
+    let keptAt = 0
+    const keep = (): void => {
+      keptAt = Date.now()
+      if (latest && useStarredChunks.getState().keys.has(key)) refreshSnapshot(key, snapshotOf(latest.card, latest.at))
+      latest = null
+    }
     const recount = (): void => {
       if (busy) { again = true; return }
       busy = true
@@ -213,13 +255,16 @@ export function SurveyCard(): JSX.Element | null {
       void cardFor(key, shown).then((card) => {
         if (!live) return
         if (card) for (const r of [...card.card.finds, ...card.card.common]) shown.add(r.id)
+        // A saved chunk keeps its card as you see it now: at most once every SNAPSHOT_EVERY_MS while you mine
+        // (never the whole list per block), and the last count as the card closes. Never a write to the relay by itself.
+        if (card) { latest = card; if (Date.now() - keptAt >= SNAPSHOT_EVERY_MS) keep() }
         setGot(card ? { key, card } : null)
         done()
       }, () => { if (live) setGot(null); done() })
     }
     recount()
     const stop = watchCard(key, recount)
-    return () => { live = false; stop() }
+    return () => { live = false; stop(); keep() }
   }, [key, owns])
   // On the Escape stack only while the card is drawn: one that could not be read never swallows Esc (review of #956).
   const shown = !!key && !!got && got.key === key
@@ -228,6 +273,16 @@ export function SurveyCard(): JSX.Element | null {
   const { card, at, revision } = got.card
   const date = stampDate(at)
   const h = card.hardness
+  const rareRows = promptFinds(card)
+  const rare = rareRows.length ? findsHere(rareRows) : null
+  const toggleStar = (): void => {
+    if (starred) unstarChunk(key)
+    else {
+      const why = starChunkWhy(key, snapshotOf(card, at))
+      if (why === 'full') useToast.getState().show({ label: 'No room left in your saved chunks', meta: 'They fill one private record. Remove one in MINING, SAVED CHUNKS, to star this one.', mark: 'star', ms: BRIEF_TOAST_MS })
+      else if (why === 'no-identity') useToast.getState().show({ label: 'Sign in to save chunks', meta: 'A saved chunk is kept for the identity you are signed in as.', mark: 'star', ms: BRIEF_TOAST_MS })
+    }
+  }
   return (
     <Stacked>
       <div className="modal survey-modal" role="dialog" aria-modal="true" aria-label="Survey card" onPointerDown={closeSurveyCard}>
@@ -235,8 +290,19 @@ export function SurveyCard(): JSX.Element | null {
           <div className="survey-card__head">
             <ScrollText size={16} strokeWidth={2} aria-hidden />
             <h2>FIELD SURVEY</h2>
+            <button
+              type="button"
+              className={`survey-card__star${starred ? ' is-on' : ''}${rare && !starred ? ' is-asking' : ''}`}
+              onClick={toggleStar}
+              aria-pressed={starred}
+              aria-label={starred ? 'Starred: tap to take it off your saved chunks' : 'Star this chunk to find it again'}
+              title={starred ? 'Starred: tap to take it off your saved chunks' : 'Star this chunk to find it again'}
+            >
+              <Star size={15} strokeWidth={2.25} aria-hidden fill={starred ? 'currentColor' : 'none'} />
+            </button>
             <ModalClose onClose={closeSurveyCard} title="Close (Esc)" />
           </div>
+          <StarLine chunk={key} rare={rare} starred={starred} removed={removed} />
           <div className="survey-card__body">
             <Core strata={card.strata} />
             <div className="survey-card__facts">

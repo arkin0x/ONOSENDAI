@@ -75,6 +75,7 @@ import { usePrizePick } from '../store/usePrizePick'
 import { useAirPlace } from '../store/useAirPlace'
 import { airPlacing } from '../store/airSwitch'
 import { SurveyGlow } from './SurveyGlow'
+import { StarredChunkMarks } from './StarredChunkMarks'
 import { airCellInto, type Cell } from '../lib/terrain/airPlace'
 import { isQuarry, placeable } from '../lib/terrain/terrainDb'
 import { ITEM_ORANGE } from '../lib/blueprint/itemMark'
@@ -708,6 +709,8 @@ export function TerrainLayer({ axes }: { axes: ViewAxes }): JSX.Element {
     <>
       <Chunks axes={axes} />
       <Marks axes={axes} />
+      {/* Your saved chunks: their gold outlines near you, and the beacon over the one you set as a waypoint. */}
+      <StarredChunkMarks axes={axes} />
       <SmashFx axes={axes} />
       <QuarryFx axes={axes} />
       <SmashKick />

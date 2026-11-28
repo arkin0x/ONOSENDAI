@@ -327,6 +327,7 @@ describe('GRAVITY, JUMP and DOWN on the right (arkinox, 2026-11-10; owner, 2026-
     // The LOOK ball a gap above the cluster; beside it on a short screen.
     expect(rule('.orbsquare.walklook')).toContain('right: var(--controls-right);')
     expect(rule('.orbsquare.walklook')).toContain('bottom: calc(var(--walkside-bottom) + var(--walkside-lift) + var(--walkside-h) + var(--routeov-gap));')
+    expect(css).toContain('@media (max-height: 520px) {\n  .orbsquare.walklook {\n    right: calc(var(--controls-right) + var(--walkside-width) + var(--routeov-gap));\n    bottom: max(calc(50% + 18px), calc(var(--walkside-bottom) + var(--walkside-lift)));')
     expect(css).not.toContain('.app:has(.hosaka-pulse) .walklook')
     expect(css).toContain('.app:has(.touchpad--mode-walk) .chatdock {\n    left: calc(var(--walkpad-left) + var(--controls-width) + var(--routeov-gap) + var(--hud-mid));')
     expect(rule('.app:has(.touchpad.is-lifted)')).toContain('--walkside-bottom: 116px;')

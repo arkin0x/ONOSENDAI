@@ -12430,11 +12430,13 @@ a.feed__act { text-decoration: none; }
   background-image: linear-gradient(rgba(255, 59, 107, 0.55), rgba(255, 59, 107, 0.55));
   border-color: rgba(255, 120, 150, 0.9);
 }
-/* A short screen (a phone on its side): the LOOK ball beside the column, level with JUMP and DOWN, not above GRAVITY. */
+/* A short screen (a phone on its side) has no height for the LOOK ball over GRAVITY under the compass: it stands
+   beside the column, inboard of GRAVITY, its bottom over the middle of the screen, so TERRAIN's line and message
+   beside the cross (.terrain-smash-preview, .terrain-message) stay clear under it. */
 @media (max-height: 520px) {
   .orbsquare.walklook {
     right: calc(var(--controls-right) + var(--walkside-width) + var(--routeov-gap));
-    bottom: calc(var(--walkside-bottom) + var(--walkside-lift));
+    bottom: max(calc(50% + 18px), calc(var(--walkside-bottom) + var(--walkside-lift)));
   }
 }
 
@@ -14619,6 +14621,10 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
   /* Level with the top of the walk pad, so PLACE and SURVEY beside it are always clear, the menu open or not. */
   .terrainview .terrain-hint { bottom: calc(var(--walkside-bottom) + 132px); }
 }
+/* On its side the LOOK ball stands inboard of the right column at that height: the steps end short of it. */
+@media (max-height: 520px) {
+  .terrainview .terrain-hint { right: calc(var(--controls-right) + var(--walkside-width) + var(--routeov-gap) + var(--terrain-orb) + 8px); }
+}
 @media (max-height: 520px) {
   .terrainview { --terrain-slot: 30px; }
 }
@@ -15675,6 +15681,8 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
     --terrain-row-slot: min(32px, calc((100vw - 32px - 27px) / 10));
     --terrain-lift: calc(var(--terrain-row-slot) + 8px);
     --walkside-bottom: calc(92px + var(--terrain-lift));
+    /* The hotbar row already stands between JUMP and DOWN and the commit block (a 56px gap): only 12px over the hotbar. */
+    --walkside-lift: 8px;
   }
   .app:has(.terrainview):has(.touchpad.is-lifted) { --walkside-bottom: calc(116px + var(--terrain-lift)); }
   .app:has(.terrainview) .touchpad { bottom: calc(92px + var(--terrain-lift)); }
@@ -15682,7 +15690,9 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
   .terrainview { --terrain-slot: var(--terrain-row-slot); }
   /* The hotbar 4px under the lifted row, the row's own gap, where the row stood. */
   .terrainview .terrain-hotbar { bottom: calc(var(--walkside-bottom) - var(--terrain-lift) + 4px); }
-  .terrainview .terrain-hint { bottom: calc(var(--terrain-orb-bottom) + var(--terrain-orb) + 10px); }
+  /* Over the stick's resting place, short of the LOOK ball: GRAVITY, JUMP and DOWN lift the ball too high for the steps
+     to stand over it, under the cross's line and message. */
+  .terrainview .terrain-hint { bottom: calc(var(--walkside-bottom) + var(--walkside-width) + 10px); right: calc(var(--controls-right) + var(--terrain-orb) + 10px); }
 }
 
 /* The chosen hotbar slot, clearly green (owner, 2026-11-24: "can the selected item be more green - the bg doesnt quite

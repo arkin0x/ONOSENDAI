@@ -61,7 +61,7 @@ import {
 import { PRIZE_VIEWS_SHOWN, type FinderView, type LockKind, type PrizeReveal, type PrizeView } from '../../lib/blueprint/format'
 import { ITEM_ORANGE } from '../../lib/blueprint/itemMark'
 import { blockKind } from '../../lib/terrain/blocks'
-import { GAME_CONSTRUCTION, GAME_CONSTRUCTION_SHEET, GAME_CONSTRUCTION_SHORT } from '../../lib/blueprint/gameCard'
+import { GAME_CONSTRUCTION, GAME_CONSTRUCTION_SHEET } from '../../lib/blueprint/gameCard'
 import { tileUrl } from '../../lib/terrain/tiles'
 import { Chamfer } from '../ui/Chamfer'
 import { ModalClose } from '../ui/ModalClose'
@@ -185,9 +185,9 @@ export function constructionWords(lock: LockKind, height?: number, game = false)
   return height !== undefined && Number.isFinite(height) ? `Must be built in a specific h${height} region` : 'Must be built in a specific region'
 }
 
-/** CONSTRUCTION in the title block, short: "Anywhere" or "h5 region" ("region" with no height); "In the air" for the game's own. */
+/** CONSTRUCTION in the title block, short: "Anywhere" or "h5 region" ("region" with no height); "Air gapped." for the game's own (owner's wording, as its card row). */
 export function constructionShort(lock: LockKind, height?: number, game = false): string {
-  if (game) return GAME_CONSTRUCTION_SHORT
+  if (game) return GAME_CONSTRUCTION
   if (lock !== 'location') return 'Anywhere'
   return height !== undefined && Number.isFinite(height) ? `h${height} region` : 'region'
 }

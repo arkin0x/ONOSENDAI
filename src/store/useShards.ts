@@ -747,10 +747,10 @@ export function cardsStayLocal(pending: DeployPending | null): boolean {
 export const CARDS_LOCAL_NOTE = 'Kept on this device until blueprints go live.'
 
 /** Why a card, or a chest holding one, cannot go where your things are already on the relays (until blueprints go live). */
-export const CARDS_LIVE_BAG = 'You already have things here on the relays, and blueprint cards stay on this device until blueprints go live. Leave this one somewhere else for now.'
+export const CARDS_LIVE_BAG = 'You have things here on the relays, and blueprint cards stay on this device until blueprints go live. Leave it somewhere else.'
 
 /** The same, in LOCAL once blueprints are live: the card would stay here while the bag it joins is on the relays. */
-export const CARDS_LOCAL_BAG = 'You already have things here on the relays, and in LOCAL this card would stay on this device only. Switch to LIVE to leave it here, or leave it somewhere else.'
+export const CARDS_LOCAL_BAG = 'You have things here on the relays. Switch to LIVE to leave it here, or leave it somewhere else.'
 
 /** Whether a deploy places a blueprint card: a card, or a new chest holding one. */
 export function carriesCard(pending: DeployPending | null): boolean {
@@ -5346,7 +5346,7 @@ export const useShards = create<ShardsState>((set, get) => {
       } else if (pending.type === 'blueprint') {
         // A copy of the creator's record, unchanged, in a card signed by you (DECK-0010 §7.5).
         const view = readRecord(pending.card.record)
-        if (!view) { set({ deployStatus: 'error', deployError: 'This blueprint could not be read, so it cannot be left anywhere.' }); return }
+        if (!view) { set({ deployStatus: 'error', deployError: 'This blueprint could not be read.' }); return }
         blueprint = { record: pending.card.record, title: view.title }
         innerTemplate = blueprintInnerTemplate(pending.card.record, at, plane, createdAt)
       } else {

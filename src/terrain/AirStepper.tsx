@@ -45,8 +45,8 @@ export function AirStepper(): JSX.Element {
       <span
         className={`terrain-air${ghost === 'bad' && on ? ' is-bad' : ''}${on ? '' : ' is-paused'}`}
         role="group"
-        aria-label={on ? `Ghost block distance: ${distance} blocks` : 'Air placing is off'}
-        title={on ? 'How far away the ghost block is: scroll the wheel, or tap − and +. Tap the number to turn air placing off' : 'Air placing is off: tap the number to turn it on'}
+        aria-label={on ? `Ghost block distance: ${distance} blocks` : 'Air Placement: off'}
+        title={on ? `Air Placement: ${distance} blocks away. Tap the number to turn it off` : 'Air Placement: off. Tap the number to turn it on'}
       >
         <button className="terrain-air__btn" {...noCallout} disabled={!live || distance <= AIR_MIN} tabIndex={live ? 0 : -1} onPointerDown={nudge(-1)} aria-label="Nearer"><Minus size={13} strokeWidth={2.5} aria-hidden /></button>
         <button
@@ -59,7 +59,7 @@ export function AirStepper(): JSX.Element {
           // ignored, so a tap never turns it twice.
           onClick={(e) => { e.stopPropagation(); if (e.detail === 0) toggleAirPlacing() }}
           aria-pressed={on}
-          aria-label={on ? `Air placing on, ${distance} blocks: turn it off` : 'Air placing off: turn it on'}
+          aria-label={on ? `Air Placement on, ${distance} blocks: turn it off` : 'Air Placement off: turn it on'}
         >
           {on ? distance : <><EyeOff size={11} strokeWidth={2.25} aria-hidden data-icon="eye-off" /><s className="terrain-air__struck">{distance}</s></>}
         </button>

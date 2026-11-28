@@ -85,7 +85,7 @@ export function PrizeStrip({ here }: { here: ToyRow[] }): JSX.Element | null {
       <span className="prize-strip__count">{here.length === 1 ? '1 prize' : `${here.length} prizes`}</span>
       {more > 0 && <button className="prize-strip__btn" onClick={() => usePrizePick.getState().setPicker(true)}>+{more} MORE</button>}
       <button className="prize-strip__btn prize-strip__btn--go" onClick={() => { for (const t of here) takeWithFlight(t.rowKey) }}><PackageCheck size={13} strokeWidth={2.25} aria-hidden />COLLECT ALL</button>
-      <button className="prize-strip__btn" onClick={() => useBlueprints.getState().putAwayToys(here.map((t) => t.rowKey))} title="Put these away: they wait in ITEMS, BLUEPRINTS, BUILT"><EyeOff size={13} strokeWidth={2.25} aria-hidden />PUT AWAY</button>
+      <button className="prize-strip__btn" onClick={() => useBlueprints.getState().putAwayToys(here.map((t) => t.rowKey))} title="Put away to ITEMS, BLUEPRINTS, BUILT"><EyeOff size={13} strokeWidth={2.25} aria-hidden />PUT AWAY</button>
     </span>
   )
 }
@@ -119,7 +119,7 @@ export function PrizeCard(): JSX.Element | null {
           </div>
           <div className="prize-card__spin">{shard ? <CardSpin shard={shard} size={180} /> : <Hammer size={64} strokeWidth={1.25} aria-hidden />}</div>
           <p className="prize-card__by">{toy.maker === 'game' ? 'From its own recipe' : <>From {toy.name}, by <MakerName maker={toy.maker} /></>}</p>
-          <p className="prize-card__what">{toy.prize.type === 'tool' ? toolWhat(toy.prize) : 'A shard. It goes to ITEMS, OTHER LOOT.'}</p>
+          <p className="prize-card__what">{toy.prize.type === 'tool' ? toolWhat(toy.prize) : 'A shard: ITEMS, OTHER LOOT.'}</p>
           <button className="prize-card__take" onClick={() => takeWithFlight(toy.rowKey)}><PackageCheck size={15} strokeWidth={2.25} aria-hidden />TAKE</button>
         </div>
       </div>

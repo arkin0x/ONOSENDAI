@@ -310,22 +310,22 @@ describe('the hardness line', () => {
 describe('the recipe lines', () => {
   it('Glowcore, Ferrovein and Cinderrock here: what the Compiler and the Quarry Charge need, in words', () => {
     expect(recipeNotes([GLOWCORE, CINDERROCK, FERROVEIN, RUSTBAND], false)).toEqual([
-      'Glowcore here: the Compiler needs one.',
-      'Cinderrock here: the Quarry Charge needs one.',
-      'Ferrovein here: the Compiler needs two and the Quarry Charge one.',
+      'Glowcore: the Compiler needs one.',
+      'Cinderrock: the Quarry Charge needs one.',
+      'Ferrovein: the Compiler needs two and the Quarry Charge one.',
     ])
   })
 
   it('the common rock never gets a line, and with the Compiler made its needs are left out', () => {
     expect(recipeNotes([RUSTBAND, UMBERSLATE], false)).toEqual([])
-    expect(recipeNotes([GLOWCORE, FERROVEIN], true)).toEqual(['Ferrovein here: the Quarry Charge needs one.'])
+    expect(recipeNotes([GLOWCORE, FERROVEIN], true)).toEqual(['Ferrovein: the Quarry Charge needs one.'])
     expect(recipeNotes([PRISMITE], false)).toEqual([])
   })
 
   it('the card carries them only for what is present', () => {
     const b = solid()
     b[123] = GLOWCORE
-    expect(surveyCard(assayBlocks(b), facts).notes).toEqual(['Glowcore here: the Compiler needs one.'])
+    expect(surveyCard(assayBlocks(b), facts).notes).toEqual(['Glowcore: the Compiler needs one.'])
     expect(surveyCard(assayBlocks(solid()), facts).notes).toEqual([])
   })
 })

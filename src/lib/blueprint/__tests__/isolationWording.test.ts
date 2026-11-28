@@ -1,8 +1,8 @@
 /**
  * isolationWording.test.ts - the owner's wording rule for blueprints (owner's
- * lost Glowcore, 2026-11-28): say "not touching any other block", "isolated"
- * or "with a gap all round", never the words for upright posture, and no long
- * dashes. The copy players read about blueprints, in the files that hold it,
+ * lost Glowcore, 2026-11-28; "air gapped" since his card copy the same day):
+ * never the words for upright posture, never "with a gap all round", and no
+ * long dashes. The copy players read about blueprints, in the files that hold it,
  * with comments stripped (code names may keep their words).
  */
 
@@ -16,7 +16,7 @@ const read = (p: string): string => readFileSync(join(SRC, p), 'utf8')
 /** The file without its comments (block, line and JSX), so only code and copy are left. */
 const copyOf = (p: string): string => read(p).replace(/\{\/\*[\s\S]*?\*\/\}/g, '').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
 
-const FORBIDDEN = /stand-alone|standalone|stand alone|\bstands?\b|\bstanding\b/i
+const FORBIDDEN = /stand-alone|standalone|stand alone|\bstands?\b|\bstanding\b|gap all round/i
 
 const FILES = [
   'hud/BuildBar.tsx',
@@ -38,12 +38,13 @@ describe("blueprint copy keeps the owner's wording", () => {
   })
 
   it('the BLUEPRINT button, RECORD and the capture refusal say it the owner\'s way', () => {
-    expect(read('hud/BuildBar.tsx')).toContain('title="Blueprint: an arrangement of blocks, not touching any other block, that compiles into a prize when someone builds it and smashes it"')
-    expect(read('hud/blueprint/BlueprintTool.tsx')).toContain('Aim at a build with a gap all round, not touching any other block, and press RECORD.')
+    expect(read('hud/BuildBar.tsx')).toContain('title="Blueprint: an air gapped build that compiles into a prize when smashed"')
+    expect(read('hud/blueprint/BlueprintTool.tsx')).toContain('Aim at an air gapped build and press RECORD.')
     // TERRAIN's RECORD strip (TerrainView.tsx keeps a `standing` variable of its own, so it is checked by its line).
     const view = read('terrain/TerrainView.tsx')
-    expect(view).toContain('<span className="prize-strip__count">Aim at a build with a gap all round</span>')
+    expect(view).toContain('<span className="prize-strip__count">Aim at an air gapped build</span>')
+    expect(view).not.toContain('gap all round')
     expect(view).not.toContain('Aim at a build that stands alone')
-    expect(CAPTURE_REFUSED).toBe('That build touches something or is too big. It must be isolated, with a gap all round, and fit in 16 by 16 by 16.')
+    expect(CAPTURE_REFUSED).toBe('Build must be air gapped and fit in 16x16x16.')
   })
 })

@@ -215,7 +215,7 @@ function Hotbar(): JSX.Element {
               disabled={left === 0}
               aria-label={`Quarry Charges, ${left} left, slot ${i + 1}`}
               aria-pressed={i === inv.slot}
-              title={left ? `Quarry Charges: ${left}. PLACE one and it clears the blocks round it (${i + 1})` : `No Quarry Charges left: compile more (${i + 1})`}
+              title={left ? `Quarry Charges: ${left}. PLACE one to loosen a 7x7x7 area (${i + 1})` : `No Quarry Charges left: compile more (${i + 1})`}
             >
               <span className="terrain-slot__num">{i + 1}</span>
               <img className="terrain-slot__charge" src={quarryIcon} alt="" aria-hidden draggable={false} />
@@ -706,7 +706,7 @@ function TerrainScreen({ covered }: { covered: boolean }): JSX.Element {
       <div className={`terrain-hint${holding || smashing ? ' is-under-hold' : ''}`} aria-live="polite">
         {capturing ? (
           <span className="prize-strip prize-strip--record" role="group" aria-label="Record a blueprint">
-            <span className="prize-strip__count">Aim at a build with a gap all round</span>
+            <span className="prize-strip__count">Aim at an air gapped build</span>
             <button className="prize-strip__btn prize-strip__btn--go" onClick={recordAtCursor}>RECORD<Key>R</Key></button>
             <button className="prize-strip__btn" onClick={() => { useBlueprintTool.getState().set({ capturing: false, open: true }); leaveTerrain() }}>BACK</button>
           </span>
@@ -721,7 +721,7 @@ function TerrainScreen({ covered }: { covered: boolean }): JSX.Element {
           FORWARD: just right of WALK's walk pad (owner, 2026-11-24), clear of the right column the menu opens over. Every
           slot is always kept, so nothing moves. Mining is a tap on the scene. */}
       <div className="terrain-tools" aria-label="Place, smash and survey">
-        <button className="terrain-act terrain-act--place" {...noCallout} onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); terrainInput.action = { kind: 'place', at: null } }} title="Place the chosen block on the face at the cross, or at the ghost block in open air (E, or right click)" aria-label="Place (E)"><Box size={15} strokeWidth={2.25} aria-hidden />PLACE<Key>E</Key></button>
+        <button className="terrain-act terrain-act--place" {...noCallout} onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); terrainInput.action = { kind: 'place', at: null } }} title="Place the chosen block (E, or right click)" aria-label="Place (E)"><Box size={15} strokeWidth={2.25} aria-hidden />PLACE<Key>E</Key></button>
         {/* SMASH, a hold (smashHold.ts; the times are lib/blueprint/smash.ts COMPILER_HOLD_MS and BARE_HOLD_MS). A hammer
             with the Compiler in hand, a fist with a bare hand (owner, 2026-11-27). Its slot is always there. */}
         <span className="terrain-tools__slot terrain-tools__slot--smash">
@@ -737,7 +737,7 @@ function TerrainScreen({ covered }: { covered: boolean }): JSX.Element {
             onPointerUp={cancelSmashHold}
             onPointerLeave={cancelSmashHold}
             onPointerCancel={cancelSmashHold}
-            title={bare ? `Hold to smash the blocks at the cross with your bare hand (hold F, ${BARE_HOLD_MS / 1000} seconds)` : `Hold to smash the blocks at the cross with the Compiler (hold F, ${COMPILER_HOLD_MS / 1000} seconds)`}
+            title={bare ? 'Smash with bare hands (hold F)' : 'Smash with the Compiler (hold F)'}
             aria-label="Hold to smash (hold F)"
           >
             {bare ? <HandFist size={15} strokeWidth={2.25} aria-hidden data-icon="fist" /> : <Hammer size={15} strokeWidth={2.25} aria-hidden data-icon="hammer" />}{smashing ? 'Smashing' : 'SMASH'}<Key>F</Key>
@@ -766,7 +766,7 @@ function TerrainScreen({ covered }: { covered: boolean }): JSX.Element {
               onPointerUp={() => { if (!releaseCard()) cancelSurveyHold() }}
               onPointerLeave={() => { abandonCard(); cancelSurveyHold() }}
               onPointerCancel={() => { abandonCard(); cancelSurveyHold() }}
-              title={showCard ? 'This chunk\'s survey card: what it holds (G). Hold to survey the next chunk the way you look' : 'Hold to fill this chunk with the ground everyone computes the same (hold G)'}
+              title={showCard ? 'Survey card (G). Hold to survey the next chunk ahead' : 'Survey this chunk (hold G)'}
               aria-label={showCard ? 'Survey card (G)' : 'Hold to survey (hold G)'}
             >
               {showCard ? <ScrollText size={15} strokeWidth={2.25} aria-hidden data-icon="card" /> : <Radar size={15} strokeWidth={2.25} aria-hidden data-icon="survey" />}

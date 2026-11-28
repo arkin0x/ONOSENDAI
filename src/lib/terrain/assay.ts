@@ -411,7 +411,7 @@ const RECIPES: ReadonlyArray<{ name: string; tool: 'compiler' | 'quarry'; needs:
 
 /**
  * A line for each find here that a recipe takes (common rock is everywhere,
- * so it gets none): "Glowcore here: the Compiler needs one." With the
+ * so it gets none): "Glowcore: the Compiler needs one." With the
  * Compiler made already, the Compiler's needs are left out.
  */
 export function recipeNotes(present: ReadonlyArray<number>, ownsCompiler: boolean): string[] {
@@ -421,7 +421,7 @@ export function recipeNotes(present: ReadonlyArray<number>, ownsCompiler: boolea
     const uses = RECIPES.filter((r) => (r.needs[id] ?? 0) > 0 && !(r.tool === 'compiler' && ownsCompiler))
     if (uses.length === 0) continue
     const parts = uses.map((r, i) => (i === 0 ? `${r.name} needs ${word(r.needs[id])}` : `${r.name} ${word(r.needs[id])}`))
-    out.push(`${blockName(id)} here: ${parts.join(' and ')}.`)
+    out.push(`${blockName(id)}: ${parts.join(' and ')}.`)
   }
   return out
 }

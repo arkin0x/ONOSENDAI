@@ -61,7 +61,7 @@ import {
 import { PRIZE_VIEWS_SHOWN, type FinderView, type LockKind, type PrizeReveal, type PrizeView } from '../../lib/blueprint/format'
 import { ITEM_ORANGE } from '../../lib/blueprint/itemMark'
 import { blockKind } from '../../lib/terrain/blocks'
-import { GAME_AIR_LINE, GAME_CONSTRUCTION, GAME_CONSTRUCTION_SHORT } from '../../lib/blueprint/gameCard'
+import { GAME_CONSTRUCTION, GAME_CONSTRUCTION_SHEET } from '../../lib/blueprint/gameCard'
 import { tileUrl } from '../../lib/terrain/tiles'
 import { Chamfer } from '../ui/Chamfer'
 import { ModalClose } from '../ui/ModalClose'
@@ -92,6 +92,8 @@ export interface ExamineBlueprint {
   item?: boolean
   /** The game's own (the Compiler's or the Quarry Charge's): CONSTRUCTION says how to build it isolated. */
   game?: boolean
+  /** The game's own: what PRIZE names (gamePrizeName). */
+  gamePrize?: string
 }
 
 /** For a maker examining their own blueprint: the whole arrangement and the prize's real name, if it has one to give. */
@@ -183,9 +185,9 @@ export function constructionWords(lock: LockKind, height?: number, game = false)
   return height !== undefined && Number.isFinite(height) ? `Must be built in a specific h${height} region` : 'Must be built in a specific region'
 }
 
-/** CONSTRUCTION in the title block, short: "Anywhere" or "h5 region" ("region" with no height); "In the air" for the game's own. */
+/** CONSTRUCTION in the title block, short: "Anywhere" or "h5 region" ("region" with no height); "Air gapped." for the game's own (owner's wording, as its card row). */
 export function constructionShort(lock: LockKind, height?: number, game = false): string {
-  if (game) return GAME_CONSTRUCTION_SHORT
+  if (game) return GAME_CONSTRUCTION
   if (lock !== 'location') return 'Anywhere'
   return height !== undefined && Number.isFinite(height) ? `h${height} region` : 'region'
 }
@@ -195,7 +197,8 @@ export function constructionShort(lock: LockKind, height?: number, game = false)
  * and the card: public information when it is shown in pictures or its
  * name is shown, a mystery when it is kept secret, hints only otherwise.
  */
-export function prizeShort(reveal: PrizeReveal, nameShown: boolean): string {
+export function prizeShort(reveal: PrizeReveal, nameShown: boolean, gamePrize?: string): string {
+  if (gamePrize) return gamePrize
   if (nameShown || reveal === 'render') return 'Public information'
   return reveal === 'hidden' ? 'A mystery' : 'Hints only'
 }
@@ -438,8 +441,8 @@ export function ExamineSheet({ bp, maker, onClose }: { bp: ExamineBlueprint; mak
                 </div>
                 <dl className="bp-ex__settings">
                   <div><dt>MATERIALS</dt><dd>{materialsWords(finderShown, finderHidden)}</dd></div>
-                  <div><dt>CONSTRUCTION</dt><dd>{construction}{bp.game && <span className="bp-ex__air">{GAME_AIR_LINE}</span>}</dd></div>
-                  <div><dt>PRIZE</dt><dd>{prizeShort(bp.prize.reveal, !!prizeName)}</dd></div>
+                  <div><dt>CONSTRUCTION</dt><dd>{bp.game ? GAME_CONSTRUCTION_SHEET : construction}</dd></div>
+                  <div><dt>PRIZE</dt><dd>{prizeShort(bp.prize.reveal, !!prizeName, bp.gamePrize)}</dd></div>
                 </dl>
                 {/* Only while something is unknown to a finder: the same in FINDER and MAKER, so switching moves nothing. */}
                 {finderHidden > 0 && (
@@ -539,7 +542,7 @@ export function ExamineSheet({ bp, maker, onClose }: { bp: ExamineBlueprint; mak
                   <div className="bp-ex__btot">{total} BLOCKS IN ALL · VOLUME {sx} × {sy} × {sz}</div>
                 </div>
                 <div className="bp-ex__box">
-                  <div className="bp-ex__bh"><span>PRIZE</span><b>{prizeShort(bp.prize.reveal, !!prizeName)}</b></div>
+                  <div className="bp-ex__bh"><span>PRIZE</span><b>{prizeShort(bp.prize.reveal, !!prizeName, bp.gamePrize)}</b></div>
                   {makerPrize ? (
                     // Both laid out in one cell, the one not shown hidden, so the box keeps its height.
                     <div className="bp-ex__pstack">

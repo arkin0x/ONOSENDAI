@@ -241,7 +241,7 @@ export function slotInReach(s: Pick<TerrainSession, 'world'>, key: string, head:
 }
 
 /** The plain words for PLACE with the charges chosen and none left. */
-export const NO_CHARGES = 'No Quarry Charges left: compile more from the Quarry Charge blueprint.'
+export const NO_CHARGES = 'No Quarry Charges left: compile more.'
 
 // Where a Quarry Charge is armed (store/quarryHooks.ts; store/useQuarry.ts sets it).
 export { quarryHooks } from './quarryHooks'
@@ -415,7 +415,7 @@ export const useTerrain = create<TerrainState>((set, get) => ({
     if (id <= EMPTY) return false
     // A chunk someone else surveyed is yours to build in at once (surveyShown); one nobody surveyed is never drawn.
     const at = s.world.locate(dx, dy, dz)
-    if (!surveyShown(s, at.slot)) { get().say('Survey this chunk before building in it.'); return false }
+    if (!surveyShown(s, at.slot)) { get().say('Survey this chunk first.'); return false }
     // What is yours in that cell: someone else's block mined is gone for you (and for whoever ranks you first), never carried; the base you were shown is.
     const yours = yieldOf(at.slot, at.cell, id)
     const change = s.world.setCs(dx, dy, dz, EMPTY)
@@ -453,9 +453,9 @@ export const useTerrain = create<TerrainState>((set, get) => ({
       if (!hit && !airPlacing() && placeable(inv) !== null) hintAirOff(get().say)
       return false
     }
-    if (isCompiler(id)) { get().say('The Compiler is in your hand: choose a block to place.'); return false }
+    if (isCompiler(id)) { get().say('Choose a block to place.'); return false }
     if (isQuarry(id) && !((inv.charges ?? 0) > 0)) { get().say(NO_CHARGES); return false }
-    if (!isQuarry(id) && (!id || !(inv.counts[id] > 0))) { get().say(id ? `No ${blockName(id)} left: mine some first.` : 'Nothing to place: mine a block first.'); return false }
+    if (!isQuarry(id) && (!id || !(inv.counts[id] > 0))) { get().say(id ? `No ${blockName(id)} left.` : 'Nothing to place: mine a block.'); return false }
     const cell = target.cell
     const [dx, dy, dz] = cell
     if (target.kind === 'air') {
@@ -468,8 +468,8 @@ export const useTerrain = create<TerrainState>((set, get) => ({
     if (isSolid(s.world.blockCs(dx, dy, dz))) return false
     const slot = s.world.slotAtCs(dx, dy, dz)
     // Never where you stand: the walk's own gibson. Asked first, so a refused place never surveys the chunk for you.
-    if (walkerAt(s, cell)) { get().say('You are standing there: step back to place it.'); return false }
-    if (!surveyShown(s, slot)) { get().say('Survey this chunk before building in it.'); return false }
+    if (walkerAt(s, cell)) { get().say('Step back to place it.'); return false }
+    if (!surveyShown(s, slot)) { get().say('Survey this chunk first.'); return false }
     if (isQuarry(id)) {
       // A charge is placed like a block but is not one: it arms where it stands and writes nothing until its blast (store/useQuarry.ts).
       if (quarryHooks.chargeAt?.(cell)) { get().say('A charge is already there.'); return false }
@@ -503,8 +503,8 @@ export const useTerrain = create<TerrainState>((set, get) => ({
     const at = slot ?? inv.slot
     if (at < 0 || at >= HOTBAR_SLOTS) return
     // Slot 1 holds the Compiler for good once it is made (owner, 2026-11-27), and the charges keep theirs.
-    if (isCompiler(inv.hotbar[at])) { get().say('Slot 1 holds the Compiler: choose another slot.'); return }
-    if (isQuarry(inv.hotbar[at])) { get().say(`Slot ${at + 1} holds the Quarry Charges: choose another slot.`); return }
+    if (isCompiler(inv.hotbar[at])) { get().say('Slot 1 holds the Compiler.'); return }
+    if (isQuarry(inv.hotbar[at])) { get().say(`Slot ${at + 1} holds the Quarry Charges.`); return }
     const hotbar = inv.hotbar.map((h) => (h === id ? 0 : h))
     hotbar[at] = id
     saveInventory({ ...inv, hotbar, slot: at })
@@ -549,7 +549,7 @@ export const useTerrain = create<TerrainState>((set, get) => ({
     if (!s) return 'Nothing to clear here.'
     if (cells.some((c) => !cellInReach(s, c))) return OUT_OF_REACH
     const slots = new Set<ChunkSlot | null>(cells.map((c) => s.world.slotAtCs(c[0], c[1], c[2])))
-    for (const sl of slots) if (!surveyShown(s, sl)) return 'Survey this chunk before building in it.'
+    for (const sl of slots) if (!surveyShown(s, sl)) return 'Survey this chunk first.'
     const changes: Change[] = []
     for (const [dx, dy, dz] of cells) {
       const change = s.world.setCs(dx, dy, dz, EMPTY)
@@ -598,9 +598,9 @@ export function airRefusal(s: TerrainSession, air: AirAim): string | null {
   if (problem) return problem
   if (!cellInReach(s, air.cell)) return OUT_OF_REACH
   const slot = s.world.slotAtCs(air.cell[0], air.cell[1], air.cell[2])
-  if (!slot) return 'Survey this chunk before building in it.'
+  if (!slot) return 'Survey this chunk first.'
   if (slot.own) return null
-  if (!slot.generated || !slot.inSpace || s.building.has(slot.key) || !surveyedForYou(slot.key)) return 'Survey this chunk before building in it.'
+  if (!slot.generated || !slot.inSpace || s.building.has(slot.key) || !surveyedForYou(slot.key)) return 'Survey this chunk first.'
   return null
 }
 

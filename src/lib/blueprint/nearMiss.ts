@@ -82,8 +82,10 @@ const RECIPES: ReadonlyArray<{ id: RecipeId; name: string; recipe: Arrangement }
   { id: 'quarry', name: 'the Quarry Charge', recipe: QUARRY_CHARGE_RECIPE },
 ]
 
-/** What a recipe makes, in a sentence: "it won't make Quarry Charges". */
+/** What a recipe makes, in a sentence: "Won't make Quarry Charges". */
 const MAKES: Readonly<Record<RecipeId, string>> = { compiler: 'the Compiler', quarry: 'Quarry Charges' }
+/** The label a near miss's line starts with after the smash: "No Compiler: touching the ground." */
+const NO_PRIZE: Readonly<Record<RecipeId, string>> = { compiler: 'No Compiler', quarry: 'No Quarry Charges' }
 
 function blocksOf(a: Arrangement): Array<readonly [number, number, number, number]> {
   const out: Array<readonly [number, number, number, number]> = []
@@ -277,41 +279,37 @@ export const CAUSE_WORDS: Readonly<Record<MissCause, string>> = {
 }
 
 /** The line after a bare-handed smash of a build too big for it. */
-export const TOO_BIG_LINE = 'Nothing compiled. That build is too big for a bare hand, which compiles builds up to 3 blocks on every side. The Compiler reaches 16.'
+export const TOO_BIG_LINE = 'Too big for bare hands: 3x3x3 at most. The Compiler takes 16x16x16.'
 
-/** Why a near miss will not compile, in the past (after the smash) or the present (before it). */
-function reasons(m: NearMiss, past: boolean): string {
+/** What is wrong with a near miss's shape, as plain labels: "a Rustband where an Umberslate goes", "turned the wrong way". */
+function reasons(m: NearMiss): string {
   const why: string[] = []
-  // The same wrong block in the same kind's places, said once: "two Rustbands were where Umberslates go".
+  // The same wrong block in the same kind's places, said once: "two Rustbands where Umberslates go".
   const same = new Map<string, { is: number; should: number; n: number }>()
   for (const w of m.wrong) { const k = `${w.is}>${w.should}`; const e = same.get(k); if (e) e.n++; else same.set(k, { ...w, n: 1 }) }
   for (const w of same.values()) {
     why.push(w.n === 1
-      ? `${article(blockName(w.is))} ${past ? 'was' : 'is'} where ${article(blockName(w.should))} goes`
-      : `${countWord(w.n)} ${plural(blockName(w.is))} ${past ? 'were' : 'are'} where ${plural(blockName(w.should))} go`)
+      ? `${article(blockName(w.is))} where ${article(blockName(w.should))} goes`
+      : `${countWord(w.n)} ${plural(blockName(w.is))} where ${plural(blockName(w.should))} go`)
   }
-  if (m.turned) why.push(past ? 'it was turned the wrong way' : 'it is turned the wrong way')
-  if (m.touching === 'ground') why.push(past ? 'it touched the ground' : 'it is touching the ground')
-  if (m.touching === 'block') why.push(past ? 'it touched another block' : 'it is touching another block')
+  if (m.turned) why.push('turned the wrong way')
   return list(why)
 }
 
-/** How to build it so it compiles. */
-function fixOf(m: NearMiss): string {
-  const asCard = m.turned || m.wrong.length > 0
-  return asCard && m.touching ? ' Build it as the card shows, with a gap all round.'
-    : asCard ? ' Build it as the card shows.'
-      : ' Build it with a gap all round.'
+/** What it touches, in the owner's words: " Not air gapped: touching the ground."; empty when it is air gapped. */
+function touchOfMiss(m: NearMiss): string {
+  return m.touching ? ` Not air gapped: touching ${m.touching === 'ground' ? 'the ground' : 'another block'}.` : ''
 }
 
-/** The line after the smash: "That was the Compiler, but it touched the ground. Build it with a gap all round." */
+/** "Label: what is wrong.", or "Label." when only the touch is wrong, then the touch. */
+function missWords(label: string, m: NearMiss): string {
+  const shape = reasons(m)
+  return `${label}${shape ? `: ${shape}` : ''}.${touchOfMiss(m)}`
+}
+
+/** The line after the smash: "No Compiler. Not air gapped: touching the ground." */
 export function nearMissLine(m: NearMiss): string {
-  return `That was ${nearly(m)}${m.name}, but ${reasons(m, true)}.${fixOf(m)}`
-}
-
-/** "nearly " when blocks are of the wrong kind: it was the recipe's shape, not the recipe. */
-function nearly(m: NearMiss): string {
-  return m.wrong.length ? 'nearly ' : ''
+  return missWords(NO_PRIZE[m.recipe], m)
 }
 
 /** "two", "three", or the number. */
@@ -354,16 +352,15 @@ function list(words: readonly string[]): string {
 
 /**
  * The confirm's question, when a smash that will not compile would destroy placed rare materials, or is a game recipe
- * built wrong: "This won't compile. It breaks 5 blocks, including placed Glowcore. Smash anyway?", or for a near miss
- * "This is the Compiler, but it is touching the ground, so it won't compile. Build it with a gap all round. Smashing
- * breaks 5 blocks, including placed Glowcore. Smash anyway?". An isolated turned recipe compiles, in either hand, as
- * another shape, so it "won't make" the recipe's prize rather than "won't compile" (`compiled`).
+ * built wrong: "Won't compile. Breaks 5 blocks, including placed Glowcore.", or for a near miss "Won't compile. Not
+ * air gapped: touching the ground. Breaks 5 blocks, including placed Glowcore." The confirm's title asks "Smash
+ * anyway?". An isolated turned recipe compiles, in either hand, as another shape, so it
+ * "won't make" the recipe's prize rather than "won't compile" (`compiled`).
  */
 export function confirmWords(count: number, rare: readonly string[], miss: NearMiss | null, compiled = false, tooBig = false): string {
   const blocks = `${count} block${count === 1 ? '' : 's'}`
   const incl = rare.length ? `, including placed ${list(rare)}` : ''
-  const big = tooBig ? ' It is too big for a bare hand, which compiles builds up to 3 blocks on every side.' : ''
-  if (!miss) return `This won't compile.${big} It breaks ${blocks}${incl}. Smash anyway?`
-  const outcome = compiled ? `it won't make ${MAKES[miss.recipe]}` : "it won't compile"
-  return `This is ${nearly(miss)}${miss.name}, but ${reasons(miss, false)}, so ${outcome}.${fixOf(miss)} Smashing breaks ${blocks}${incl}. Smash anyway?`
+  if (!miss) return `Won't compile${tooBig ? ': too big for bare hands, 3x3x3 at most' : ''}. Breaks ${blocks}${incl}.`
+  const outcome = compiled ? `Won't make ${MAKES[miss.recipe]}` : "Won't compile"
+  return `${missWords(outcome, miss)} Breaks ${blocks}${incl}.`
 }

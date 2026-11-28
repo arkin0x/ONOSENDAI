@@ -195,7 +195,7 @@ export function MiningPanel(): JSX.Element {
         {line.when && <span className="mining__sync-when">{line.when}</span>}
       </footer>
       {enabled && live && (status === 'error' || status === 'unsupported') && note && <p className="notice" role="status">{note}</p>}
-      <Explanation>Everything you do in TERRAIN, added up across your devices. Saved encrypted to you, so only you can read it. Counts and dates only, never where you were.</Explanation>
+      <Explanation>Encrypted to you. Counts and dates only, never where you were.</Explanation>
     </section>
   )
 }

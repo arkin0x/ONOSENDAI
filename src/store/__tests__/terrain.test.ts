@@ -273,7 +273,7 @@ describe('mining and placing', () => {
     await openSurveyed()
     const [c] = solidCells(1)
     expect(T().place(hitAt(...c))).toBe(false)
-    expect(T().message).toMatch(/mine a block first/)
+    expect(T().message).toBe('Nothing to place: mine a block.')
   })
 
   it('out of reach of where the walk has taken you, surveying, mining and placing are refused, in words', async () => {

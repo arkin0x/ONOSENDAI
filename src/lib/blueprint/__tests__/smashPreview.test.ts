@@ -124,12 +124,12 @@ describe('colour and line', () => {
 })
 
 describe('the line a smash with no prize leaves agrees with the preview', () => {
-  it('COMPILES and no blueprint matches: "Compiled. No blueprint matches."; BREAKS: "Nothing compiled."', () => {
+  it('COMPILES and no blueprint matches: "No blueprint matches."; BREAKS: "Nothing compiled."', () => {
     const hammerRead = reader(hammer())
     const valid = smashPreview(hammerRead, [1, 0, 0], false)!
     expect(valid.state).toBe('compiles')
     expect(missLine(valid.state === 'compiles', false, false)).toBe(NO_MATCH_LINE)
-    expect(NO_MATCH_LINE).toBe('Compiled. No blueprint matches. The blocks are spent.')
+    expect(NO_MATCH_LINE).toBe('No blueprint matches.')
     const broken = smashPreview(ground, [0, -1, 0], false)!
     expect(missLine(broken.state === 'compiles', false, false)).toBe(MISS_LINE)
     // Bare-handed, a build other than the recipe compiles too (owner, 2026-11-28), so a silent relay is said.

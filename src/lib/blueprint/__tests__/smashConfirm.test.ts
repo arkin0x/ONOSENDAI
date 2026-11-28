@@ -139,7 +139,7 @@ describe('the confirm before a wasted smash, on the real smash path', () => {
     vi.advanceTimersByTime(BARE_HOLD_MS)
     const ask = useSmashConfirm.getState().ask
     expect(ask).not.toBeNull()
-    expect(ask!.words).toBe("This is the Compiler, but it is touching the ground, so it won't compile. Build it with a gap all round. Smashing breaks 5 blocks, including placed Glowcore. Smash anyway?")
+    expect(ask!.words).toBe("Won't compile. Not air gapped: touching the ground. Breaks 5 blocks, including placed Glowcore.")
     expect(useSmashHold.getState().since).toBeNull()
     expect(useSmashHold.getState().swingAt).toBeNull()
     expect(present(t)).toBe(5)
@@ -165,7 +165,7 @@ describe('the confirm before a wasted smash, on the real smash path', () => {
     expect(useSmashHold.getState().swingAt).not.toBeNull()
     await vi.advanceTimersByTimeAsync(SWING_MS + RESOLVE_AFTER_MS + 500)
     expect(present(t)).toBe(0)
-    expect(T().message).toBe('That was the Compiler, but it touched the ground. Build it with a gap all round.')
+    expect(T().message).toBe('No Compiler. Not air gapped: touching the ground.')
   })
 
   it('the lifted T (a gap all round) compiles: the hold swings with no confirm', async () => {
@@ -205,7 +205,7 @@ describe('the confirm before a wasted smash, on the real smash path', () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     holdSmash()
     vi.advanceTimersByTime(BARE_HOLD_MS)
-    expect(useSmashConfirm.getState().ask?.words).toMatch(/^This is the Compiler, but it is touching another block, so it won't compile\./)
+    expect(useSmashConfirm.getState().ask?.words).toMatch(/^Won't compile\. Not air gapped: touching another block\./)
     answerSmash(false)
     expect(present(t)).toBe(5)
   })

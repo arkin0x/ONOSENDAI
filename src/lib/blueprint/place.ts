@@ -28,9 +28,9 @@ import type { BlueprintCard } from './blueprintDb'
 import { readRecord } from './format'
 
 /** Why a card cannot be left: its record does not read. */
-export const CARD_UNREADABLE = 'This blueprint could not be read, so it cannot be left anywhere.'
+export const CARD_UNREADABLE = 'This blueprint could not be read.'
 /** Why it waits: a hide is still going out. */
-export const PLACE_BUSY = 'Something is still going out. Try again when it lands.'
+export const PLACE_BUSY = 'Still sending. Try again in a moment.'
 /** Why it waits: something else is lined up on the hide bar. */
 export const PLACE_LINED_UP = 'Finish or cancel what is lined up first.'
 

@@ -25,7 +25,7 @@ import { useCyberspace } from './useCyberspace'
 export const AIR_PLACE_PREFIX = 'onosendai:air-place:'
 
 /** The words the first time PLACE finds nothing to do with air placing off (once a page). */
-export const AIR_OFF_HINT = 'Air placing is off. Tap the number to turn it on'
+export const AIR_OFF_HINT = 'Air Placement: off. Tap the number under PLACE.'
 
 /** Choices that did not read back once written (storage refused, or none at all): kept for this page's life. */
 const unsaved = new Map<string, boolean>()

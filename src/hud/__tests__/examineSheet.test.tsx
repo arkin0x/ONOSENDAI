@@ -14,7 +14,7 @@ import { describe, expect, it } from 'vitest'
 import { createElement } from 'react'
 import { fullView, type FinderView, type PrizeReveal } from '../../lib/blueprint/format'
 import { mount, textOf, type Host } from '../../test/elementRoot'
-import { GAME_AIR_LINE, GAME_CONSTRUCTION, GAME_CONSTRUCTION_SHORT, GAME_NO_DEPLOY, QUARRY_NO_DEPLOY } from '../../lib/blueprint/gameCard'
+import { GAME_CONSTRUCTION, GAME_CONSTRUCTION_SHEET, GAME_CONSTRUCTION_SHORT, GAME_NO_DEPLOY, QUARRY_NO_DEPLOY } from '../../lib/blueprint/gameCard'
 import { ExamineSheet, MYSTERY_PRIZE, NAME_HIDDEN, NO_PICTURES, constructionShort, constructionWords, materialsWords, prizeShort, prizeWords, type ExamineBlueprint, type ExamineMaker } from '../blueprint/ExamineSheet'
 
 /** Two blocks side by side, a Gridstone and a Glowcore; a finder is shown the Glowcore alone. */
@@ -248,22 +248,23 @@ describe("the game's own blueprints say how to build them isolated (owner's lost
 
   it('CONSTRUCTION is the isolation line and how to place in open air, never "May be built anywhere"; a player\'s blueprint keeps its line', async () => {
     const m = await mount(createElement(ExamineSheet, { bp: { ...blueprint('description', { text: 'A tool.' }), game: true }, onClose: noop }))
-    expect(rows(m)[1]).toBe(`CONSTRUCTION${GAME_CONSTRUCTION}${GAME_AIR_LINE}`)
+    expect(rows(m)[1]).toBe('CONSTRUCTIONair-gapped. Build must not touch any other blocks. Use Air Placement (under PLACE button).')
     expect(m.says('May be built anywhere')).toBe(false)
     expect(m.says('Anywhere')).toBe(false)
-    expect(m.says(GAME_CONSTRUCTION_SHORT)).toBe(true)
+    expect(m.says(GAME_CONSTRUCTION)).toBe(true)
+    expect(m.says(GAME_CONSTRUCTION_SHORT)).toBe(false)
     await m.unmount()
-    expect(GAME_CONSTRUCTION).toBe('Build it with a gap all round: no block may touch it, not even at an edge or corner.')
-    expect(GAME_AIR_LINE).toMatch(/tapping the number under PLACE/)
+    expect(GAME_CONSTRUCTION).toBe('Air gapped.')
+    expect(GAME_CONSTRUCTION_SHEET).toBe('air-gapped. Build must not touch any other blocks. Use Air Placement (under PLACE button).')
     expect(constructionWords('standard', undefined, true)).toBe(GAME_CONSTRUCTION)
-    expect(constructionShort('standard', undefined, true)).toBe(GAME_CONSTRUCTION_SHORT)
+    expect(constructionShort('standard', undefined, true)).toBe('Air gapped.')
     expect(constructionWords('standard')).toBe('May be built anywhere')
   })
 
   it('the cards\' own lines say it too, and no blueprint copy uses the words for upright posture', () => {
-    expect(GAME_NO_DEPLOY).toBe('Everyone gets this one. Build it in the air with a gap all round, then smash it to make your Compiler.')
-    expect(QUARRY_NO_DEPLOY).toMatch(/in the air with a gap all round, then smash it for seven Quarry Charges\.$/)
+    expect(GAME_NO_DEPLOY).toBe('Everyone gets this one. The Compiler can smash a 16x16x16 blueprint build with speed and style.')
+    expect(QUARRY_NO_DEPLOY).toBe('Everyone gets this one. Quarry Charges loosen all blocks in a 7x7x7 area so you can easily collect them.')
     const forbidden = /stand-alone|standalone|stand alone|\bstands?\b|\bstanding\b|—|–/i
-    for (const line of [GAME_NO_DEPLOY, QUARRY_NO_DEPLOY, GAME_CONSTRUCTION, GAME_CONSTRUCTION_SHORT, GAME_AIR_LINE]) expect(line).not.toMatch(forbidden)
+    for (const line of [GAME_NO_DEPLOY, QUARRY_NO_DEPLOY, GAME_CONSTRUCTION, GAME_CONSTRUCTION_SHEET, GAME_CONSTRUCTION_SHORT]) expect(line).not.toMatch(forbidden)
   })
 })

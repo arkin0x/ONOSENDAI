@@ -214,11 +214,11 @@ function ArrangementStep(): JSX.Element {
       )}
       <button className="bpt-choice" onClick={() => { st.set({ capturing: true, open: false }); if (!enterTerrainMode()) st.set({ capturing: false, open: true, error: 'TERRAIN cannot open here right now.' }) }}>
         <Radar size={22} strokeWidth={1.75} aria-hidden />
-        <span><b>CAPTURE FROM TERRAIN</b><small>Aim at a build with a gap all round, not touching any other block, and press RECORD. The blocks stay where they are.</small></span>
+        <span><b>CAPTURE FROM TERRAIN</b><small>Aim at an air gapped build and press RECORD.</small></span>
       </button>
       <button className="bpt-choice" onClick={() => st.set({ composing: true })}>
         <Boxes size={22} strokeWidth={1.75} aria-hidden />
-        <span><b>COMPOSE ON A GRID</b><small>Place blocks on a 16 by 16 by 16 grid, a layer at a time. Designing is free; building it costs the blocks.</small></span>
+        <span><b>COMPOSE ON A GRID</b><small>A 16x16x16 grid, one layer at a time.</small></span>
       </button>
       {st.arrangement && <button className="bpt-go" onClick={() => st.setStep(1)}>NEXT <ArrowRight size={14} aria-hidden /></button>}
     </div>
@@ -308,7 +308,7 @@ function PrizeStep(): JSX.Element {
                 shard={s}
                 chosen={chosen}
                 barred={false}
-                status="Not published: sealing puts it in the blueprint"
+                status="Not published"
                 action={chosen ? { label: 'LEAVE OUT', run: () => { setInc(s.id, false); st.set({ prize: null }) } } : { label: 'USE AS PRIZE', run: () => { setInc(s.id, true); choose(s, 'workshop') } }}
               />
             )
@@ -385,7 +385,7 @@ function SettingsStep({ onExamine }: { onExamine: () => void }): JSX.Element {
       )}
       {/* The prize's own name is part of what the maker reveals: off unless chosen. */}
       <label className="bpt-switch">
-        <span><b>Show the prize's name</b><small>{st.showName && st.prize ? `Finders see "${st.prize.name}".` : 'Finders see only what the choice above shows.'}</small></span>
+        <span><b>Show the prize's name</b><small>{st.showName && st.prize ? `Finders see "${st.prize.name}".` : 'Name hidden.'}</small></span>
         <Switch checked={st.showName} onCheckedChange={(on) => st.set({ showName: on })} aria-label="Show the prize's name" />
       </label>
 
@@ -394,7 +394,7 @@ function SettingsStep({ onExamine }: { onExamine: () => void }): JSX.Element {
         <button role="radio" aria-checked={st.lock === 'standard'} className={st.lock === 'standard' ? 'is-on' : ''} onClick={() => st.set({ lock: 'standard' })}><Lock size={13} aria-hidden />STANDARD</button>
         <button role="radio" aria-checked={st.lock === 'location'} className={st.lock === 'location' ? 'is-on' : ''} onClick={() => st.set({ lock: 'location' })}><MapPin size={13} aria-hidden />LOCATION</button>
       </div>
-      <p className="bpt-note">{st.lock === 'standard' ? 'The blocks are the lock: it can be built anywhere.' : lockKey ? `It must be built inside this region, ${regionWords(st.height)}.` : 'The build crosses a border of a region this size: choose a larger one.'}</p>
+      <p className="bpt-note">{st.lock === 'standard' ? 'Builds anywhere.' : lockKey ? `Builds only in this region, ${regionWords(st.height)}.` : 'Crosses a region border: choose a larger region.'}</p>
       {st.lock === 'location' && (
         <div className="bpt-layer">
           <button className="bpt-mini" onClick={() => st.set({ height: Math.max(1, st.height - 1) })} aria-label="Smaller region"><Minus size={14} aria-hidden /></button>
@@ -417,7 +417,7 @@ function SealStep(): JSX.Element {
   const seal = async (): Promise<void> => {
     if (!st.prize || st.sealing) return
     // Checked again as it is sealed: a kit piece never goes into a record, however it was picked.
-    if (!prizeAllowed(st.prize.shard, st.prize.from)) { st.set({ error: 'That object cannot be a prize: kit pieces and pieces never published stay with you.' }); return }
+    if (!prizeAllowed(st.prize.shard, st.prize.from)) { st.set({ error: 'Kit pieces and unpublished pieces cannot be prizes.' }); return }
     st.set({ sealing: true, error: null })
     // The pictures are drawn now, with every piece the prize places, and kept in the record (DECK-0010 §5.3).
     const flat = st.reveal === 'silhouette' || st.reveal === 'render'
@@ -461,7 +461,6 @@ function SealStep(): JSX.Element {
           <span className="bpt-sum__k">PRIZE</span> {prizeShort(st.reveal, st.showName)} ({st.prize?.name ?? 'no prize yet'}, seen only by you here)
         </span>
       </div>
-      <p className="bpt-note">Sealing makes the key from the blocks, seals the prize with it and adds your signature. Only the shape and the blocks you show go into it.</p>
       <button className="bpt-go bpt-go--seal" disabled={st.sealing} onClick={() => { void seal() }}><Stamp size={15} aria-hidden />{st.sealing ? 'SEALING' : 'SEAL'}</button>
     </div>
   )

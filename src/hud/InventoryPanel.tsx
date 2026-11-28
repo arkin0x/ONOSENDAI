@@ -819,7 +819,7 @@ export function InventoryPanel(): JSX.Element {
       {open && <ItemsModal key={open} kind={open} />}
       {blueprintsOpen && <BlueprintsModal />}
       {card && <HeldKeyCard item={card} onClose={() => setCard(null)} />}
-      <Explanation>Key items open doors and chests. Other loot is everything you've taken from chests. Blueprints are recipes: build one and smash it to make its prize.</Explanation>
+      <Explanation>Key items open doors and chests. Other loot is everything you've taken from chests. Blueprints: build one and smash it for its prize.</Explanation>
     </section>
   )
 }

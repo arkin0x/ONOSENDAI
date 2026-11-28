@@ -11,7 +11,7 @@ import { ConfirmModal } from '../hud/ConfirmModal'
 import { Checkbox } from '../hud/ui/Checkbox'
 import { answerSmash, useSmashConfirm, type SmashAsk } from '../lib/blueprint/smashConfirm'
 
-/** The confirm's title; the question's last words, so the body does not repeat them. */
+/** The confirm's title: the question, which the body never repeats. */
 export const SMASH_ASK_TITLE = 'Smash anyway?'
 /** The box under the question. */
 export const DONT_ASK_LABEL = "Don't ask again"
@@ -25,13 +25,12 @@ export function SmashConfirm(): JSX.Element | null {
 
 function SmashAskModal({ ask }: { ask: SmashAsk }): JSX.Element {
   const [dontAsk, setDontAsk] = useState(false)
-  const body = ask.words.replace(/\s*Smash anyway\?$/, '')
   return (
     <ConfirmModal
       title={SMASH_ASK_TITLE}
       body={(
         <>
-          <p className="smash-ask__words">{body}</p>
+          <p className="smash-ask__words">{ask.words}</p>
           <span className="smash-ask__dont">
             <Checkbox id="smash-ask-dont" checked={dontAsk} onCheckedChange={(v) => setDontAsk(v === true)} />
             <label htmlFor="smash-ask-dont">{DONT_ASK_LABEL}</label>

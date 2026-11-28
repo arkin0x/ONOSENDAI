@@ -42,14 +42,10 @@ import { Swatch } from './Swatch'
 
 const count = (n: number): string => n.toLocaleString('en-US')
 
-/** The line over the lists: "You've mined 214 blocks here · 31,902 left". */
+/** The line over the lists: "Mined: 214 · Left: 31,902". */
 export function tallyLine(mined: number, left: number): string {
-  const m = mined > 0 ? `You've mined ${count(mined)} ${mined === 1 ? 'block' : 'blocks'} here` : 'You haven\'t mined here yet'
-  return `${m} · ${count(left)} left`
+  return `Mined: ${count(mined)} · Left: ${count(left)}`
 }
-
-/** The one-line explainer over the lists. */
-export const VISIBLE_KEY = 'Visible means you can see it without digging.'
 
 /** The line under a kind's name: "2 visible · 5 buried", "all visible" or "all buried"; "none left" once it is all gone. */
 export function visibilityLine(visible: number, buried: number): string {
@@ -260,7 +256,7 @@ export function SurveyCard(): JSX.Element | null {
                 </>
               ) : <span className="survey-card__value">Not known</span>}
             </div>
-            <p className="survey-card__sub">{h ? `${hardnessLine(h.max)} Rare finds need hard ground.` : 'Rare finds need hard ground.'}</p>
+            {h && <p className="survey-card__sub">{hardnessLine(h.max)}</p>}
 
             {card.notes.length > 0 && (
               <ul className="survey-card__notes">
@@ -269,15 +265,14 @@ export function SurveyCard(): JSX.Element | null {
             )}
 
             <p className="survey-card__tally">{tallyLine(card.minedTotal, card.total)}</p>
-            <p className="survey-card__key">{VISIBLE_KEY}</p>
             <Section name="FINDS" />
             {card.finds.length > 0
               ? <ul className="survey-card__list">{card.finds.map((r) => <Row key={r.id} row={r} />)}</ul>
-              : <p className="survey-card__empty">Nothing rare in this chunk.</p>}
+              : <p className="survey-card__empty">None.</p>}
             <Section name="COMMON MATERIALS" />
             {card.common.length > 0
               ? <ul className="survey-card__list">{card.common.map((r) => <Row key={r.id} row={r} />)}</ul>
-              : <p className="survey-card__empty">Nothing here: open space.</p>}
+              : <p className="survey-card__empty">Open space.</p>}
             <p className="survey-card__foot"><span>Survey material audit.</span><span>Ground revision {revision}</span></p>
           </div>
         </div>

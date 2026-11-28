@@ -65,16 +65,16 @@ describe("the owner's Quarry Charge, through the app's read", () => {
       expect(previewLine(p.state, p.cells.length, previewCause(p))).toBe(`COMPILES · ${CAUSE_WORDS.wrong}`)
     }
     const m = nearMiss(read, [6, 25, 28])!
-    expect(nearMissLine(m)).toBe('That was nearly the Quarry Charge, but a Rustband was where an Umberslate goes. Build it as the card shows.')
-    expect(confirmWords(7, ['Cinderrock'], m, true)).toBe("This is nearly the Quarry Charge, but a Rustband is where an Umberslate goes, so it won't make Quarry Charges. Build it as the card shows. Smashing breaks 7 blocks, including placed Cinderrock. Smash anyway?")
+    expect(nearMissLine(m)).toBe('No Quarry Charges: a Rustband where an Umberslate goes.')
+    expect(confirmWords(7, ['Cinderrock'], m, true)).toBe("Won't make Quarry Charges: a Rustband where an Umberslate goes. Breaks 7 blocks, including placed Cinderrock.")
   })
 
   it('both Umberslates as Rustbands: one clause, "two Rustbands were where Umberslates go"', () => {
     const w = worldWith(HIS_BUILD.map(([x, y, z, id]) => (id === UMBERSLATE ? [x, y, z, RUSTBAND] as const : [x, y, z, id] as const)))
     const m = nearMiss((x, y, z) => w.blockCs(x, y, z), [6, 25, 28])!
     expect(m.wrong).toHaveLength(2)
-    expect(nearMissLine(m)).toBe('That was nearly the Quarry Charge, but two Rustbands were where Umberslates go. Build it as the card shows.')
-    expect(confirmWords(7, ['Cinderrock'], m, true)).toBe("This is nearly the Quarry Charge, but two Rustbands are where Umberslates go, so it won't make Quarry Charges. Build it as the card shows. Smashing breaks 7 blocks, including placed Cinderrock. Smash anyway?")
+    expect(nearMissLine(m)).toBe('No Quarry Charges: two Rustbands where Umberslates go.')
+    expect(confirmWords(7, ['Cinderrock'], m, true)).toBe("Won't make Quarry Charges: two Rustbands where Umberslates go. Breaks 7 blocks, including placed Cinderrock.")
   })
 
   it('more than two wrong blocks is not called a near miss of the Quarry Charge', () => {

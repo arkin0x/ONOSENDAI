@@ -42,7 +42,7 @@ import {
   type FinderView, type RecordView,
 } from '../../lib/blueprint/format'
 import { takeToy } from '../../lib/blueprint/smashRun'
-import { GAME_MAKER, gameNoDeploy, isGameCard, isQuarryPrize, toolWhat } from '../../lib/blueprint/gameCard'
+import { GAME_MAKER, gameNoDeploy, gamePrizeName, isGameCard, isQuarryPrize, toolWhat } from '../../lib/blueprint/gameCard'
 import { quarryModelNow, useQuarryModel } from '../../lib/blueprint/quarryModel'
 import { ITEM_ORANGE, isItemBlueprint } from '../../lib/blueprint/itemMark'
 import { startPlaceBlueprint } from '../../lib/blueprint/place'
@@ -100,19 +100,19 @@ export function cardViews(card: BlueprintCard): CardViews | null {
  * A card's summary as a finder sees it, in the sheet's words and order:
  * MATERIALS, CONSTRUCTION, PRIZE.
  */
-export function settingsParts(v: Pick<CardViews, 'record' | 'finder'>, game = false): Array<[string, string]> {
+export function settingsParts(v: Pick<CardViews, 'record' | 'finder'>, game = false, gamePrize?: string): Array<[string, string]> {
   const total = v.finder.occupied.reduce((n, o) => n + (o ? 1 : 0), 0)
   const known = v.finder.revealed.size
   return [
     ['MATERIALS', materialsWords(known, total - known)],
     ['CONSTRUCTION', constructionWords(v.record.sheet.lock, v.record.sheet.height, game)],
-    ['PRIZE', prizeShort(v.record.sheet.prize.reveal, !!v.record.prizeName)],
+    ['PRIZE', prizeShort(v.record.sheet.prize.reveal, !!v.record.prizeName, gamePrize)],
   ]
 }
 
 /** The summary in one line: "MATERIALS 45 known / 2 unknown · CONSTRUCTION May be built anywhere. · PRIZE Hints only". */
-export function settingsLine(v: Pick<CardViews, 'record' | 'finder'>, game = false): string {
-  return settingsParts(v, game).map(([k, w]) => `${k} ${w}`).join(' · ')
+export function settingsLine(v: Pick<CardViews, 'record' | 'finder'>, game = false, gamePrize?: string): string {
+  return settingsParts(v, game, gamePrize).map(([k, w]) => `${k} ${w}`).join(' · ')
 }
 
 /** Which tab a card is listed under. */
@@ -195,6 +195,7 @@ export function BlueprintExamine({ card, views, onClose }: { card: BlueprintCard
         maker: makerLabel(card.record.pubkey, me, makerName),
         item: isItemBlueprint(card),
         game: isGameCard(card),
+        gamePrize: isGameCard(card) ? gamePrizeName(card.record.id) : undefined,
         description: prize.text ?? '',
         view: views.finder,
         prize: { reveal: prize.reveal, text: prize.text, views: views.record.views, name: views.record.prizeName },
@@ -266,7 +267,7 @@ export function BlueprintRow({ card, views, fresh = false, focused = false, onAr
         {/* On a line of its own, so neither name is cut to make room for the other. */}
         {card.leftBy && <span className="item__meta held__meta"><span className="held__src">left here by <Who pubkey={card.leftBy} /></span></span>}
         <span className="bp-items__settings">
-          {settingsParts(views, game).map(([k, w], i) => (
+          {settingsParts(views, game, game ? gamePrizeName(card.record.id) : undefined).map(([k, w], i) => (
             <span className="bp-items__set" key={k}>{i > 0 && ' · '}<b>{k}</b> {w}</span>
           ))}
         </span>

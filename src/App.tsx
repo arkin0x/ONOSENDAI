@@ -117,6 +117,7 @@ import { startSelfSync } from './lib/selfSync'
 import { startMutes } from './store/useMutes'
 import { startHidesSync } from './store/hidesSyncLive'
 import { startMiningStats } from './store/miningStatsLive'
+import { startInventorySync } from './store/inventorySyncLive'
 import { watchBlockedSpectation } from './lib/spectator'
 import { startTracker } from './lib/tracker'
 import { useCyberspace } from './store/useCyberspace'
@@ -156,7 +157,7 @@ export default function App(): JSX.Element {
   useProofListener()
   // The chain drains to the relay from here on, whenever Live is on, and the
   // targets' positions are kept current.
-  useEffect(() => { startVersionGate(); startPublisher(); startTracker(); startPresence(); startSelfSync(); startMutes(); startHidesSync(); startMiningStats(); watchBlockedSpectation(); startCalibration(); void useCyberspace.getState().initSigner(); useHyperspace.getState().startSync(); watchMyAvatar(); void useSecrets.getState().load(); void useInventory.getState().load(); void useBlueprints.getState().load(); startCompilerGrant(); void useShardFolders.getState().load(); void useFound.getState().load(); startPersonalLists(); watchFocus(); watchNearbyReturn(); watchDoorReturn(); watchNearbyOpen() }, [])
+  useEffect(() => { startVersionGate(); startPublisher(); startTracker(); startPresence(); startSelfSync(); startMutes(); startHidesSync(); startMiningStats(); startInventorySync(); watchBlockedSpectation(); startCalibration(); void useCyberspace.getState().initSigner(); useHyperspace.getState().startSync(); watchMyAvatar(); void useSecrets.getState().load(); void useInventory.getState().load(); void useBlueprints.getState().load(); startCompilerGrant(); void useShardFolders.getState().load(); void useFound.getState().load(); startPersonalLists(); watchFocus(); watchNearbyReturn(); watchDoorReturn(); watchNearbyOpen() }, [])
   // onosendai.tech/C/<hex>: a place or a region to open on, and Back and
   // Forward over the ones the View box opens (store/useCoordRoute.ts).
   useEffect(() => {

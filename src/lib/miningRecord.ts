@@ -128,8 +128,8 @@ const MAX_UNKNOWN = 64
 const RECORD_FIELDS = new Set(['v', 'devices', 'first', 'best', 'days'])
 const DEVICE_FIELDS = new Set(['c', 'k', 'u'])
 
-/** The fields of `o` outside `known`, or undefined when there are none. */
-function extrasOf(o: Record<string, unknown>, known: ReadonlySet<string>): Extra | undefined {
+/** The fields of `o` outside `known`, or undefined when there are none (lib/inventoryRecord.ts carries them the same way). */
+export function extrasOf(o: Record<string, unknown>, known: ReadonlySet<string>): Extra | undefined {
   const out: Extra = {}
   let n = 0
   for (const [key, value] of Object.entries(o)) {
@@ -154,7 +154,7 @@ function numbersOf(o: unknown, ok: (n: unknown) => n is number, known: readonly 
 }
 
 /** Two sets of carried fields as one: the second's stand over the first's. */
-function mergeExtra(a: Extra | undefined, b: Extra | undefined): Extra | undefined {
+export function mergeExtra(a: Extra | undefined, b: Extra | undefined): Extra | undefined {
   return a || b ? { ...a, ...b } : undefined
 }
 

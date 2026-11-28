@@ -14914,6 +14914,8 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
 }
 /* The share line: its icon, its words taking the room, RETIRE KEY at the end, on one line. */
 .terrain-share { display: flex; align-items: center; gap: 8px; }
+.terrain-invsync { display: flex; align-items: center; gap: 8px; }
+.terrain-invsync > svg { flex: none; }
 .terrain-share > svg { flex: none; }
 .terrain-share__words { flex: 1 1 0; min-width: 0; }
 .terrain-share > .crew-btn { flex: none; min-width: 136px; }  /* fits TAP AGAIN TO RETIRE, so the words beside it wrap the same while it asks */

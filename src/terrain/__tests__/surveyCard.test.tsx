@@ -270,7 +270,8 @@ describe('the card', () => {
     openSurveyCard(key)
     const m = await mount(createElement(SurveyCard))
     try {
-      expect(m.says('Glowcore here')).toBe(false)
+      // No recipe line (the star's line still names the find: savedChunks.test.tsx).
+      expect(m.says('Glowcore here:')).toBe(false)
       expect(m.says('DATE UNKNOWN')).toBe(true)
       const close = m.all().find((h) => h.type === 'button' && String(h.props.className ?? '').includes('modal-close'))!
       ;(close.props.onClick as () => void)()

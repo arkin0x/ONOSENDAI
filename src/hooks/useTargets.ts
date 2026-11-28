@@ -13,6 +13,9 @@ import { targetColor, type CyberTarget } from '../lib/targets'
 import { usePresence } from '../store/usePresence'
 import { useCyberspace } from '../store/useCyberspace'
 import { useMutes } from '../store/useMutes'
+import { useStarredChunks } from '../store/starredChunks'
+import { parseChunkKey } from '../lib/terrain/coords'
+import { STAR_GOLD, chunkCentre, chunkName } from '../lib/terrain/starredChunk'
 
 /** The avatar's own red, so the marker for you is the color you are drawn in. */
 const YOU = '#ff2323'
@@ -50,6 +53,12 @@ export function useTargets(): CyberTarget[] {
   const me = useCyberspace((s) => s.identity.pubkey)
   // Nobody blocked gets a marker, a target included (store/useMutes).
   const blocked = useMutes((s) => s.muted.pubkeys)
+  // A saved chunk set as the HUD TARGET (terrain/SavedChunks.tsx): its key and name.
+  const chunkTarget = useStarredChunks((s) => (s.guide?.hud ? s.guide.key : null))
+  const chunkLabel = useStarredChunks((s) => {
+    const e = s.guide?.hud ? s.entries.find((x) => x.c === s.guide!.key) : undefined
+    return e ? chunkName(e) : ''
+  })
 
   return useMemo(() => {
     const out: CyberTarget[] = []
@@ -76,6 +85,9 @@ export function useTargets(): CyberTarget[] {
     // pointing at from anywhere; the projector's distance readout doubles as
     // how far the viewed place is from where you actually stand.
     if ((spectating || focused) && headPlane === plane) out.push({ id: 'you', label: 'YOU', color: YOU, at: position })
+    // The saved chunk you set as the HUD TARGET: its centre, in gold, in its own plane only.
+    const chunk = chunkTarget ? parseChunkKey(chunkTarget) : null
+    if (chunk && chunk.plane === plane) out.push({ id: 'starred-chunk', label: (chunkLabel || 'SAVED CHUNK').toUpperCase(), color: STAR_GOLD, at: chunkCentre(chunk) })
     // Ideaspace has no physical mapping, so there is no planet in it to point at.
     if (plane === 0) {
       out.push({
@@ -89,5 +101,5 @@ export function useTargets(): CyberTarget[] {
     return out
     // tracked is what targetList reads; listed so the memo follows it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [plane, headPlane, spectating, focused, position, tracked, focus, people, me, viewingEarth, blocked])
+  }, [plane, headPlane, spectating, focused, position, tracked, focus, people, me, viewingEarth, blocked, chunkTarget, chunkLabel])
 }

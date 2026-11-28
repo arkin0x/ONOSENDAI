@@ -53,6 +53,7 @@ import { useWalk } from '../store/useWalk'
 import { useFluidWalk } from '../store/fluidSwitch'
 import { useHidesSync } from '../store/hidesSync'
 import { useMiningStats } from '../store/miningStats'
+import { useStarredChunks } from '../store/starredChunks'
 import { setSfxOn, useSfxOn } from '../store/sfxSwitch'
 import { Field, Switch } from './ui/Switch'
 import { Explanation } from './Explanation'
@@ -100,7 +101,7 @@ export const SETTINGS_GROUPS: ReadonlyArray<{ id: string; title: string; rows: r
   { id: 'movement', title: 'Movement', rows: ['view-walk-gravity', 'view-walk-gravity-hard', 'view-walk-fluid', WALK_LIMITS_ROW] },
   { id: 'interface', title: 'Interface', rows: ['view-walk-look'] },
   { id: 'effects', title: 'Effects', rows: ['view-headlamp', 'view-glow', 'view-block-shading', 'view-walk-avatar', 'view-sfx'] },
-  { id: 'sync', title: 'Sync', rows: ['view-hides-sync', 'view-mining-sync'] },
+  { id: 'sync', title: 'Sync', rows: ['view-hides-sync', 'view-mining-sync', 'view-starred-sync'] },
 ]
 
 export function ViewPanel(): JSX.Element {
@@ -123,6 +124,9 @@ export function ViewPanel(): JSX.Element {
   const hidesStatus = useHidesSync((s) => s.status)
   const hidesNote = useHidesSync((s) => s.note)
   const miningSync = useMiningStats((s) => s.enabled)
+  const starredSync = useStarredChunks((s) => s.enabled)
+  const starredStatus = useStarredChunks((s) => s.status)
+  const starredNote = useStarredChunks((s) => s.note)
   const sfxOn = useSfxOn()
   // The newcomer view shows Interface only: the screen's two ways and the look sphere (newcomer/reveal.ts).
   const plain = useNewcomerView()
@@ -298,6 +302,16 @@ export function ViewPanel(): JSX.Element {
       on: miningSync,
       set: (v) => useMiningStats.getState().setEnabled(v),
     },
+    // The chunks you starred on a survey card, saved to the relay encrypted to
+    // you, so every device signed in as you lists them (store/starredChunks.ts;
+    // owner, 2026-11-28). On by default; off keeps them on this device.
+    {
+      id: 'view-starred-sync',
+      title: 'Sync starred chunks',
+      hint: starredSync && (starredStatus === 'unsupported' || starredStatus === 'error') && starredNote ? starredNote : 'Your saved chunks on every device signed in as you.',
+      on: starredSync,
+      set: (v) => useStarredChunks.getState().setEnabled(v),
+    },
   ]
 
   const byId = new Map(rows.map((r) => [r.id, r]))
@@ -377,6 +391,9 @@ export function ViewPanel(): JSX.Element {
         can open what is in it. Nothing is saved while you are LOCAL. If your
         signer cannot encrypt for you (it has no NIP-44), the list stays on
         this device. Turn it off to keep the list on this device only.
+        Sync mining stats and Sync starred chunks save your MINING numbers and
+        the chunks you starred the same way, encrypted so only you can read
+        them; where a starred chunk is never leaves the sealed record.
       </Explanation>
     </section>
   )

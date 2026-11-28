@@ -22,7 +22,7 @@
  */
 
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
-import { Backpack, Box, Hammer, HandFist, Radar, ScrollText } from 'lucide-react'
+import { Backpack, Box, Hammer, HandFist, Radar, ScrollText, Star } from 'lucide-react'
 import { HeldCharge } from './HeldCharge'
 import quarryIcon from '../assets/quarry-charge.png'
 import { HINT_DONE, cardChunkHere, headNow, offsetOf, surveyTarget as targetNow, terrainSession, useTerrain } from '../store/useTerrain'
@@ -60,6 +60,7 @@ import { AirStepper } from './AirStepper'
 import { Swatch } from './Swatch'
 import { SurveyCard } from './SurveyCard'
 import { autoOpenSurveyCard, openSurveyCard } from './surveyCard'
+import { useStarredChunks } from '../store/starredChunks'
 
 /** A press held this long without moving places (a long press). */
 export const LONG_PRESS_MS = 420
@@ -667,6 +668,8 @@ function TerrainScreen({ covered }: { covered: boolean }): JSX.Element {
   const capturing = useBlueprintTool((s) => s.capturing)
   // CARD in SURVEY's slot: standing in a surveyed chunk, while no survey is held or under way (those show SURVEY's own state).
   const showCard = !!card && !holding && !surveying
+  // A small gold star on CARD while the chunk you stand in is one you starred (store/starredChunks.ts).
+  const starredHere = useStarredChunks((s) => !!card && s.keys.has(card))
   // A SURVEY or SMASH hold the fold hides would never hear its finger lift: it ends there.
   useEffect(() => { if (folded) { abandonCard(); cancelSurveyHold(); cancelSmashHold() } }, [folded])
   // A tour run guides TERRAIN itself (tutorial/terrainRoute.ts): its own three steps wait until after, their slot kept.
@@ -766,6 +769,7 @@ function TerrainScreen({ covered }: { covered: boolean }): JSX.Element {
               {showCard ? <ScrollText size={15} strokeWidth={2.25} aria-hidden data-icon="card" /> : <Radar size={15} strokeWidth={2.25} aria-hidden data-icon="survey" />}
               {surveying ? '...' : holding ? 'Surveying' : showCard ? 'CARD' : 'SURVEY'}<Key>G</Key>
               <span className="terrain-act__bar" aria-hidden />
+              {showCard && starredHere && <Star className="terrain-act__star" size={11} strokeWidth={2.25} fill="currentColor" aria-label="A chunk you starred" />}
             </button>
           )}
         </span>

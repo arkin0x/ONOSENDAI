@@ -91,7 +91,7 @@ describe('PLACE with air placing off', () => {
     expect(useTerrain.getState().place(null, null)).toBe(false)
     expect(say).toHaveBeenCalledTimes(1)
     expect(say).toHaveBeenCalledWith(AIR_OFF_HINT)
-    expect(AIR_OFF_HINT).toBe('Air placing is off. Tap the number to turn it on')
+    expect(AIR_OFF_HINT).toBe('Air Placement: off. Tap the number under PLACE.')
     for (let i = 0; i < 5; i++) expect(useTerrain.getState().place(null, null)).toBe(false)
     expect(say).toHaveBeenCalledTimes(1)
   })

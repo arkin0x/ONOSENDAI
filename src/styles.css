@@ -17151,7 +17151,6 @@ div.bpt-tile__hit { cursor: default; }
   color: var(--sv-ink);
 }
 /* What "visible" means, once over the lists: it never changes, so it never moves the card. */
-.survey-card__key { margin: 4px 0 0; font-size: 9px; line-height: 1.4; letter-spacing: 0.04em; color: var(--sv-dim); }
 .survey-card__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
 .survey-card__empty { margin: 0; font-size: 11px; color: var(--sv-dim); }
 

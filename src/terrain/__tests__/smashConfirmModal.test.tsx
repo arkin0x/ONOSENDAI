@@ -46,7 +46,7 @@ function all(h: Host | string, out: Host[] = []): Host[] {
   return out
 }
 const button = (words: string): Host => all(body).find((h) => h.type === 'button' && textOf(h) === words)!
-const WORDS = "This won't compile. It breaks 5 blocks, including placed Glowcore. Smash anyway?"
+const WORDS = "Won't compile. Breaks 5 blocks, including placed Glowcore."
 
 describe('the confirm before a wasted smash', () => {
   it.skipIf(hadDocument)('says the question under "Smash anyway?", with SMASH, CANCEL and the box OFF; CANCEL spends nothing', async () => {
@@ -57,7 +57,7 @@ describe('the confirm before a wasted smash', () => {
     await settled()
     const dialog = all(body).find((h) => h.props.role === 'dialog')!
     expect(dialog.props['aria-label']).toBe(SMASH_ASK_TITLE)
-    expect(textOf(dialog)).toContain("This won't compile. It breaks 5 blocks, including placed Glowcore.")
+    expect(textOf(dialog)).toContain("Won't compile. Breaks 5 blocks, including placed Glowcore.")
     expect(textOf(dialog)).toContain(DONT_ASK_LABEL)
     const box = all(body).find((h) => h.props.id === 'smash-ask-dont')!
     expect(box.props.role).toBe('checkbox')

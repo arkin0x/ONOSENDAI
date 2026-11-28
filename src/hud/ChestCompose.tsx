@@ -542,7 +542,7 @@ export function ChestCompose({ onDone, target = { mode: 'place' } }: { onDone: (
           <button className="chest__act" onClick={() => setAdding('shard')} disabled={models.length === 0} title={models.length === 0 ? 'Nothing in your workshop yet' : 'One of your workshop models'}>+ SHARD</button>
           <button className="chest__act" onClick={() => setAdding('item')} title="An item you made, or a new one forged here">+ ITEM</button>
           <button className="chest__act" onClick={() => setAdding('audio')} title="An audio file, encrypted and uploaded now">+ AUDIO</button>
-          <button className="chest__act" onClick={() => setAdding('blueprint')} disabled={heldCards.length === 0} title={heldCards.length === 0 ? 'You hold no blueprints yet' : 'A copy of a blueprint you hold. Its maker keeps the credit'}>+ BLUEPRINT</button>
+          <button className="chest__act" onClick={() => setAdding('blueprint')} disabled={heldCards.length === 0} title={heldCards.length === 0 ? 'You hold no blueprints yet' : 'A copy of a blueprint you hold'}>+ BLUEPRINT</button>
         </div>
       ) : adding === 'blueprint' ? (
         <>

@@ -317,11 +317,11 @@ function keysFor(me: string): Map<string, Uint8Array> {
 
 const FILTER = (me: string): Filter => ({ kinds: [MINING_KIND], authors: [me], '#d': [MINING_D] })
 
-const NOT_ANSWERED = 'The relay did not answer, so your mining stats were not saved to it this time.'
-const NOT_OPENED = 'Your saved mining stats did not open with your signer, so they were left as they are.'
-const STALE = 'The relay answered with an older copy of your mining stats, so they were left as they are for now.'
-const NO_NIP44 = 'Your signer has no NIP-44 encryption, so your mining stats stay on this device.'
-const AHEAD = 'Your mining stats on the relay are dated ahead of this device\'s clock, so this device\'s numbers wait for your next change to try again.'
+const NOT_ANSWERED = 'The relay did not answer. Not synced.'
+const NOT_OPENED = 'Your signer could not open your saved stats. Left as they are.'
+const STALE = 'The relay sent an older copy. Left as they are.'
+const NO_NIP44 = 'Your signer has no NIP-44 encryption. Stats stay on this device.'
+const AHEAD = 'The relay copy is dated ahead of this device\'s clock. Tried again on your next change.'
 /** A read older than this device's own last write is not written over for this long. */
 const STALE_PATIENCE_S = 86_400
 
@@ -417,7 +417,7 @@ async function syncOnce(D: MiningDeps, write: boolean): Promise<Outcome> {
     const fresh = newRecordKey()
     let wrapped: string
     try { wrapped = await crypto.nip44Encrypt(bytesToHex(fresh)) } catch (err) {
-      return /no NIP-44/i.test(err instanceof Error ? err.message : String(err)) ? done('unsupported', NO_NIP44) : done('error', `Your signer did not encrypt your mining stats: ${err instanceof Error ? err.message : String(err)}`)
+      return /no NIP-44/i.test(err instanceof Error ? err.message : String(err)) ? done('unsupported', NO_NIP44) : done('error', `Not encrypted: ${err instanceof Error ? err.message : String(err)}`)
     }
     key = { wrapped, key: fresh }
     keysFor(me).set(wrapped, fresh)
@@ -428,7 +428,7 @@ async function syncOnce(D: MiningDeps, write: boolean): Promise<Outcome> {
   if (ahead && remote.id) aheadOf.add(remote.id)
   let ev: NostrEvent
   try { ev = await D.sign(recordTemplate(sealRecord(text, key.key, key.wrapped), createdAt)) } catch (err) {
-    return done('error', `Your mining stats were not signed: ${err instanceof Error ? err.message : String(err)}`)
+    return done('error', `Not signed: ${err instanceof Error ? err.message : String(err)}`)
   }
   if (ev.pubkey !== me || !mayWrite(D, me)) return none
   // A signer may take minutes: another device's write meanwhile means read, merge and sign again.
@@ -437,7 +437,7 @@ async function syncOnce(D: MiningDeps, write: boolean): Promise<Outcome> {
   if ((newestRecord(again.events.filter((e) => D.verify(e)), me)?.id ?? null) !== remote.id) return { wrote: false, raced: true }
   if (!mayWrite(D, me)) return none
   const res = await D.publish(ev)
-  if (!res.ok) return done('error', `Your mining stats were not saved to the relay (${res.reason}).`)
+  if (!res.ok) return done('error', `Not saved to the relay (${res.reason}).`)
   const now = localFor(me, D)
   saveLocal(me, { ...now, synced: Math.max(now.synced, rev), syncedReal: Math.max(now.syncedReal, real), syncedAt: D.now(), wroteAt: ev.created_at }, D)
   flip()

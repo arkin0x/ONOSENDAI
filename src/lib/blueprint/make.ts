@@ -31,9 +31,9 @@ export async function publishRecord(record: RecordEvent, live: boolean, send: (e
 
 /** What the toast says after sealing, for each way the record went. */
 export const SEALED_WORDS: Record<'sent' | 'kept' | 'failed', string> = {
-  sent: 'Sealed and published. It waits in ITEMS, BLUEPRINTS.',
-  kept: 'Sealed and kept on this device (LOCAL). It waits in ITEMS, BLUEPRINTS.',
-  failed: 'Sealed. No relay took it yet; it still travels in every card you place. It waits in ITEMS, BLUEPRINTS.',
+  sent: 'Sealed and published: ITEMS, BLUEPRINTS.',
+  kept: 'Sealed on this device (LOCAL): ITEMS, BLUEPRINTS.',
+  failed: 'Sealed. No relay took it yet: ITEMS, BLUEPRINTS.',
 }
 
 export interface MakeInput {
@@ -60,10 +60,10 @@ export interface MakeInput {
 /** Why a blueprint cannot be sealed as it is, in plain words, or null. */
 export function makeRefusal(m: Pick<MakeInput, 'arrangement' | 'reveal' | 'text' | 'views' | 'lock' | 'height' | 'regionKey'>): string | null {
   if (!m.arrangement.cells.some((id) => id > 0)) return 'Add at least one block.'
-  if (!connected(m.arrangement)) return 'Every block must touch the rest, at a face, an edge or a corner, or a smash would not take it all.'
+  if (!connected(m.arrangement)) return 'Every block must touch the rest.'
   if (m.reveal === 'description' && !m.text?.trim()) return 'Write a few words about the prize.'
   if ((m.reveal === 'silhouette' || m.reveal === 'render') && !Object.keys(m.views ?? {}).length) return 'Pick at least one view of the prize.'
-  if (m.lock === 'location' && (!m.height || !m.regionKey)) return 'The build must fit inside one region of the chosen size for a location lock.'
+  if (m.lock === 'location' && (!m.height || !m.regionKey)) return 'The build must fit inside one region.'
   return null
 }
 

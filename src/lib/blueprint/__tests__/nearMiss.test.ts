@@ -76,7 +76,7 @@ describe("the owner's build: a correct T resting on the floor", () => {
   })
 
   it('the line after the smash says what it was and how to build it', () => {
-    expect(nearMissLine(nearMiss(read, hit, nat)!)).toBe('That was the Compiler, but it touched the ground. Build it with a gap all round.')
+    expect(nearMissLine(nearMiss(read, hit, nat)!)).toBe('No Compiler. Not air gapped: touching the ground.')
   })
 
   it('where the world cannot tell natural ground, the floor counts as part of the build: no near miss', () => {
@@ -87,7 +87,7 @@ describe("the owner's build: a correct T resting on the floor", () => {
     const ask = smashAsk(read, hit, true, nat)!
     expect(ask.count).toBe(5)
     expect(ask.rare).toEqual(['Glowcore'])
-    expect(ask.words).toBe('This is the Compiler, but it is touching the ground, so it won\'t compile. Build it with a gap all round. Smashing breaks 5 blocks, including placed Glowcore. Smash anyway?')
+    expect(ask.words).toBe('Won\'t compile. Not air gapped: touching the ground. Breaks 5 blocks, including placed Glowcore.')
   })
 })
 
@@ -100,7 +100,7 @@ describe('other near misses', () => {
     expect(p.state).toBe('breaks')
     // The block is outside the bare hand's box round the hit, so only the T's five go.
     expect(previewLine(p.state, p.cells.length, previewCause(p))).toBe('BREAKS 5 · TOUCHING A BLOCK')
-    expect(nearMissLine(p.miss!)).toBe('That was the Compiler, but it touched another block. Build it with a gap all round.')
+    expect(nearMissLine(p.miss!)).toBe('No Compiler. Not air gapped: touching another block.')
   })
 
   it('a placed block in the T\'s empty corner touches it too', () => {
@@ -123,7 +123,7 @@ describe('other near misses', () => {
     expect(p.state).toBe('compiles')
     expect(p.miss).toMatchObject({ recipe: 'compiler', turned: true, touching: null })
     expect(previewLine(p.state, 5, missCause(p.miss!))).toBe('COMPILES · TURNED THE WRONG WAY')
-    expect(nearMissLine(p.miss!)).toBe('That was the Compiler, but it was turned the wrong way. Build it as the card shows.')
+    expect(nearMissLine(p.miss!)).toBe('No Compiler: turned the wrong way.')
   })
 
   it('upside down and on the floor: turned and touching, both said after', () => {
@@ -131,7 +131,7 @@ describe('other near misses', () => {
     for (const [x, y, id] of [[1, 2, FERROVEIN], [1, 1, FERROVEIN], [0, 0, RUSTBAND], [1, 0, GLOWCORE], [2, 0, RUSTBAND]] as const) m.set(key([x, y, 0]), id)
     const miss = nearMiss(reader(m, ground), [1, 1, 0], nat)!
     expect(missCause(miss)).toBe('turned')
-    expect(nearMissLine(miss)).toBe('That was the Compiler, but it was turned the wrong way and it touched the ground. Build it as the card shows, with a gap all round.')
+    expect(nearMissLine(miss)).toBe('No Compiler: turned the wrong way. Not air gapped: touching the ground.')
   })
 
   it('the Quarry Charge, isolated, compiles in either hand (owner, 2026-11-28: a bare hand compiles anything in reach)', () => {
@@ -166,7 +166,7 @@ describe('other near misses', () => {
     const read = reader(m, ground)
     const p = smashPreview(read, [1, 2, 0], true, nat)!
     expect(previewLine(p.state, p.cells.length, previewCause(p))).toBe('BREAKS 5 · TOUCHING A BLOCK')
-    expect(nearMissLine(p.miss!)).toBe('That was the Compiler, but it touched another block. Build it with a gap all round.')
+    expect(nearMissLine(p.miss!)).toBe('No Compiler. Not air gapped: touching another block.')
   })
 
   it('the Quarry Charge mirrored across X is turned (bare); mirrored across Y or Z it is the same recipe', () => {
@@ -188,8 +188,8 @@ describe('a turned recipe compiles as another shape, in either hand: still a nea
     expect(previewLine(p.state, 5, missCause(p.miss!))).toBe('COMPILES · TURNED THE WRONG WAY')
     expect(previewColor(p.state, missCause(p.miss!))).toBe(PREVIEW_NEAR_MISS)
     const ask = smashAsk(read, [0, 3, 1], false, nat)!
-    expect(ask.words).toBe("This is the Compiler, but it is turned the wrong way, so it won't make the Compiler. Build it as the card shows. Smashing breaks 5 blocks, including placed Glowcore. Smash anyway?")
-    expect(nearMissLine(p.miss!)).toBe('That was the Compiler, but it was turned the wrong way. Build it as the card shows.')
+    expect(ask.words).toBe("Won't make the Compiler: turned the wrong way. Breaks 5 blocks, including placed Glowcore.")
+    expect(nearMissLine(p.miss!)).toBe('No Compiler: turned the wrong way.')
   })
 
   it('the Quarry Charge mirrored across X never silently compiles into nothing: it warns and asks', () => {
@@ -199,7 +199,7 @@ describe('a turned recipe compiles as another shape, in either hand: still a nea
     expect(previewLine(p.state, 7, missCause(p.miss!))).toBe('COMPILES · TURNED THE WRONG WAY')
     const ask = smashAsk(read, [1, 2, 1], false, nat)!
     expect(ask.rare).toEqual(['Cinderrock'])
-    expect(ask.words).toBe("This is the Quarry Charge, but it is turned the wrong way, so it won't make Quarry Charges. Build it as the card shows. Smashing breaks 7 blocks, including placed Cinderrock. Smash anyway?")
+    expect(ask.words).toBe("Won't make Quarry Charges: turned the wrong way. Breaks 7 blocks, including placed Cinderrock.")
   })
 })
 
@@ -227,7 +227,7 @@ describe('a bare hand compiles anything that fits its reach of 3 (owner, 2026-11
       expect(held.state).toBe('compiles')
       expect(previewCause(held)).toBeNull()
     }
-    expect(TOO_BIG_LINE).toBe('Nothing compiled. That build is too big for a bare hand, which compiles builds up to 3 blocks on every side. The Compiler reaches 16.')
+    expect(TOO_BIG_LINE).toBe('Too big for bare hands: 3x3x3 at most. The Compiler takes 16x16x16.')
   })
 
   it('a 4-long build touching the ground is not too big, only not a construction', () => {
@@ -238,7 +238,7 @@ describe('a bare hand compiles anything that fits its reach of 3 (owner, 2026-11
   it('too big with a placed Glowcore in it: the confirm says so', () => {
     const m = new Map<string, number>([[key([0, 1, 0]), GRIDSTONE], [key([1, 1, 0]), GLOWCORE], [key([2, 1, 0]), GRIDSTONE], [key([3, 1, 0]), GRIDSTONE]])
     const ask = smashAsk(reader(m, ground), [1, 1, 0], true, nat)!
-    expect(ask.words).toBe(`This won't compile. It is too big for a bare hand, which compiles builds up to 3 blocks on every side. It breaks ${ask.count} blocks, including placed Glowcore. Smash anyway?`)
+    expect(ask.words).toBe(`Won't compile: too big for bare hands, 3x3x3 at most. Breaks ${ask.count} blocks, including placed Glowcore.`)
   })
 })
 
@@ -268,11 +268,11 @@ describe("isolated means touching no block on a face, edge or corner (the owner'
     // Four wide: too wide for a bare hand, so it only breaks, said as a near miss.
     const p = smashPreview(read, [1, 2, 0], true, nat)!
     expect(previewLine(p.state, p.cells.length, previewCause(p))).toBe('BREAKS 5 · TOUCHING A BLOCK')
-    expect(smashAsk(read, [1, 2, 0], true, nat)!.words).toMatch(/^This is the Compiler, but it is touching another block, so it won't compile\./)
+    expect(smashAsk(read, [1, 2, 0], true, nat)!.words).toMatch(/^Won't compile\. Not air gapped: touching another block\./)
     // With the Compiler the six touch nothing else, so they compile as another shape: a near miss all the same.
     const held = smashPreview(read, [1, 2, 0], false, nat)!
     expect(previewLine(held.state, held.cells.length, previewCause(held))).toBe('COMPILES · TOUCHING A BLOCK')
-    expect(smashAsk(read, [1, 2, 0], false, nat)!.words).toMatch(/^This is the Compiler, but it is touching another block, so it won't make the Compiler\./)
+    expect(smashAsk(read, [1, 2, 0], false, nat)!.words).toMatch(/^Won't make the Compiler\. Not air gapped: touching another block\./)
   })
 })
 
@@ -386,7 +386,7 @@ describe('the confirm before rare materials go (owner\'s ruling on bulk digging:
     const m = new Map<string, number>([[key([0, 0, 0]), GLOWCORE]])
     const ask = smashAsk(reader(m, ground), [0, 0, 0], true, nat)!
     expect(ask.miss).toBeNull()
-    expect(ask.words).toBe(`This won't compile. It breaks ${ask.count} blocks, including placed Glowcore. Smash anyway?`)
+    expect(ask.words).toBe(`Won't compile. Breaks ${ask.count} blocks, including placed Glowcore.`)
   })
 
   it('natural ore in the ground never asks, bare-handed or with the Compiler', () => {
@@ -403,7 +403,7 @@ describe('the confirm before rare materials go (owner\'s ruling on bulk digging:
     expect(rareLost(ids.map((id, i) => ({ at: at(i), id })))).toEqual(['Glowcore', 'Cinderrock', expect.any(String)])
     expect(rareLost(ids.map((id, i) => ({ at: at(i), id })), () => true)).toEqual([])
     expect(rareLost([GRIDSTONE, RUSTBAND, FERROVEIN].map((id, i) => ({ at: at(i), id })))).toEqual([])
-    expect(confirmWords(1, ['Glowcore', 'Cinderrock'], null)).toBe("This won't compile. It breaks 1 block, including placed Glowcore and Cinderrock. Smash anyway?")
+    expect(confirmWords(1, ['Glowcore', 'Cinderrock'], null)).toBe("Won't compile. Breaks 1 block, including placed Glowcore and Cinderrock.")
   })
 })
 

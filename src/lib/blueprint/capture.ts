@@ -14,12 +14,12 @@ import { useBlueprintTool } from '../../store/useBlueprintTool'
 import { leaveTerrain } from '../../store/padMode'
 
 /** What RECORD says when the build is not isolated or is too big. */
-export const CAPTURE_REFUSED = 'That build touches something or is too big. It must be isolated, with a gap all round, and fit in 16 by 16 by 16.'
+export const CAPTURE_REFUSED = 'Build must be air gapped and fit in 16x16x16.'
 
 export function recordAtCursor(): void {
   const s = terrainSession
   const hit = terrainCursor.hit
-  if (!s || !hit) { useTerrain.getState().say('Aim at a block of the build, then RECORD.'); return }
+  if (!s || !hit) { useTerrain.getState().say('Aim at the build, then RECORD.'); return }
   const g = gather((x, y, z) => s.world.blockCs(x, y, z), hit.cell)
   if (!g.isolated || !g.arrangement) {
     useTerrain.getState().say(CAPTURE_REFUSED)

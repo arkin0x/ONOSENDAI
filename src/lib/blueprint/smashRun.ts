@@ -44,7 +44,7 @@ export { compilerInHand } from '../../store/useTerrain'
 export function holdSmash(): void {
   const s = terrainSession
   const hit = terrainCursor.hit
-  if (!s || !hit) { useTerrain.getState().say('Aim at a block to smash it.'); return }
+  if (!s || !hit) { useTerrain.getState().say('Aim at a block.'); return }
   if (!cellInReach(s, hit.cell)) { useTerrain.getState().say(OUT_OF_REACH); return }
   if (useSmashHold.getState().since !== null) return
   // A confirm is up: it is answered first.
@@ -121,12 +121,12 @@ export async function strike(target: readonly [number, number, number], bare: bo
   const s = terrainSession
   if (!s) return
   // Started in another field or as another identity: nothing is spent.
-  if (from && (from.field !== s || from.me !== useCyberspace.getState().identity.pubkey)) { useTerrain.getState().say('The smash stopped: you changed identity or place.'); return }
+  if (from && (from.field !== s || from.me !== useCyberspace.getState().identity.pubkey)) { useTerrain.getState().say('Smash stopped: identity or place changed.'); return }
   const read = (x: number, y: number, z: number): number => s.world.blockCs(x, y, z)
   // Who struck, as the impact lands.
   const owner0 = useCyberspace.getState().identity.pubkey
   const g = smashGroup(read, target, bare)
-  if (!g.smash.length) { useTerrain.getState().say('Nothing there to smash.'); return }
+  if (!g.smash.length) { useTerrain.getState().say('Nothing to smash.'); return }
   // A game recipe built wrong, read before its blocks go, so the line after says why when nothing came of it (nearMiss.ts).
   const miss = nearMiss(read, target, naturalOf(s.world))
   // Bare-handed, an isolated build too long for the bare reach: said after (nearMiss.ts tooBigBare).
@@ -190,17 +190,17 @@ export async function strike(target: readonly [number, number, number], bare: bo
 // The lines a smash with no prize leaves live with the rules (smash.ts missLine).
 export { OFFLINE_LINE, UNKNOWN_LINE } from './smash'
 /** When the identity changed while a smash compiled: its prizes are not given to another (a change of place alone keeps them). */
-export const SWITCHED_LINE = 'The smash stopped: you changed identity.'
+export const SWITCHED_LINE = 'Smash stopped: identity changed.'
 /** When a waiting prize is not the identity's on screen, or its blocks have not loaded yet. */
-export const NOT_YOURS_LINE = 'This prize was found by another of your identities. Switch back to take it.'
+export const NOT_YOURS_LINE = 'Found by another of your identities. Switch back to take it.'
 /** When a waiting prize is the identity's on screen but TERRAIN still holds another's blocks. */
-export const NOT_LOADED_LINE = 'Your blocks are still loading. Try again in a moment.'
+export const NOT_LOADED_LINE = 'Your blocks are still loading.'
 
 /** When a tool was taken with no storage on this device: it lasts this visit only. */
-export const MEMORY_ONLY_LINE = 'Taken. This browser keeps no storage for TERRAIN, so it lasts until you close the page.'
+export const MEMORY_ONLY_LINE = 'Taken. No storage in this browser: gone when you close the page.'
 
 /** When more matched than one smash opens. */
-export const MORE_LINE = 'More may be waiting: this smash opened the first ones it found.'
+export const MORE_LINE = 'More may be waiting than one smash opens.'
 
 /** The ITEMS row of a SNO prize: the shard as its creator made it, from this blueprint (DECK-0010 §6.3). */
 function prizeEvent(prize: Extract<Prize, { type: 'sno' }>, record: RecordEvent | undefined, maker: string): NostrEvent {
@@ -229,11 +229,11 @@ export function takeToy(rowKey: string): boolean {
     const n = toolCount(toy.prize)
     useTerrain.getState().gainCharges(n)
     const inv = useTerrain.getState().inventory
-    useTerrain.getState().say(`${n} Quarry Charges: slot ${inv.hotbar.findIndex(isQuarry) + 1}. You have ${inv.charges ?? n}.`)
+    useTerrain.getState().say(`+${n} Quarry Charges: slot ${inv.hotbar.findIndex(isQuarry) + 1}.`)
   } else if (toy.prize.type === 'tool') {
     const had = useTerrain.getState().inventory.compiler === 'made'
     useTerrain.getState().gainCompiler()
-    useTerrain.getState().say(had ? 'You already have the Compiler.' : 'The Compiler is yours: slot 1.')
+    useTerrain.getState().say(had ? 'You already have the Compiler.' : 'The Compiler: slot 1.')
     if (!had) noteMining({ type: 'compiler' })
   } else {
     const event = prizeEvent(toy.prize, toy.record, toy.maker)

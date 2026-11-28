@@ -54,7 +54,7 @@ vi.mock('../../store/useTerrain', async (orig) => {
 import { createElement } from 'react'
 import { mount, textOf, type Host, type Mounted } from '../../test/elementRoot'
 import { TerrainView, LONG_PRESS_MS, pressCard, releaseCard, abandonCard } from '../TerrainView'
-import { CORE_CAPTION, SurveyCard, VISIBLE_KEY, tallyLine, visibilityLine } from '../SurveyCard'
+import { CORE_CAPTION, SurveyCard, tallyLine, visibilityLine } from '../SurveyCard'
 import { setTerrainSession, terrainSession, useTerrain, type TerrainSession } from '../../store/useTerrain'
 import { useCyberspace } from '../../store/useCyberspace'
 import { emptyInventory } from '../../lib/terrain/terrainDb'
@@ -239,12 +239,13 @@ describe('the card', () => {
       expect(m.says('27 NOV 2026')).toBe(true)
       expect(m.says('Ground revision 2')).toBe(true)
       expect(stampDate(at)).toBe('27 NOV 2026')
-      expect(m.says('Glowcore here: the Compiler needs one.')).toBe(true)
+      expect(m.says('Glowcore: the Compiler needs one.')).toBe(true)
+      expect(m.says('Rare finds need hard ground.')).toBe(false)
       const rows = m.all().filter((h) => String(h.props.className ?? '').split(' ').includes('survey-row'))
       // Nothing mined: a dim dash under MINED. Under each name, how many show: the Gridstone on the chunk's faces and under the open top layer.
       expect(rows.map(textOf)).toEqual(['Glowcore-1all buried', 'Gridstone-31,7435,644 visible · 26,099 buried'])
-      expect(m.says(VISIBLE_KEY)).toBe(true)
-      expect(m.says('You haven\'t mined here yet · 31,744 left')).toBe(true)
+      expect(m.says('Visible means')).toBe(false)
+      expect(m.says('Mined: 0 · Left: 31,744')).toBe(true)
       const meter = m.all().find((h) => h.props.role === 'meter')!
       expect(meter.props['aria-valuenow']).toBe(11)
       expect(m.says('11')).toBe(true)
@@ -276,7 +277,7 @@ describe('the card', () => {
     openSurveyCard(key)
     const m = await mount(createElement(SurveyCard))
     try {
-      expect(m.says('Glowcore here')).toBe(false)
+      expect(m.says('Glowcore: the Compiler')).toBe(false)
       expect(m.says('DATE UNKNOWN')).toBe(true)
       const close = m.all().find((h) => h.type === 'button' && String(h.props.className ?? '').includes('modal-close'))!
       ;(close.props.onClick as () => void)()
@@ -476,8 +477,7 @@ describe('live: what you mined and what is left', () => {
     expect(visibilityLine(3, 0)).toBe('all visible')
     expect(visibilityLine(0, 4)).toBe('all buried')
     expect(visibilityLine(0, 0)).toBe('none left')
-    expect(VISIBLE_KEY).toBe('Visible means you can see it without digging.')
-    for (const line of [visibilityLine(2, 5), visibilityLine(3, 0), visibilityLine(0, 4), visibilityLine(0, 0), VISIBLE_KEY]) {
+    for (const line of [visibilityLine(2, 5), visibilityLine(3, 0), visibilityLine(0, 4), visibilityLine(0, 0)]) {
       expect(/\u2014|\(|sealed|pocket|\bstand/i.test(line)).toBe(false)
     }
   })
@@ -517,10 +517,10 @@ describe('live: what you mined and what is left', () => {
     }
   })
 
-  it('the tally line says it plainly, one block or many', () => {
-    expect(tallyLine(0, 31902)).toBe('You haven\'t mined here yet · 31,902 left')
-    expect(tallyLine(1, 31902)).toBe('You\'ve mined 1 block here · 31,902 left')
-    expect(tallyLine(214, 31902)).toBe('You\'ve mined 214 blocks here · 31,902 left')
+  it('the tally line is two labels and their numbers', () => {
+    expect(tallyLine(0, 31902)).toBe('Mined: 0 · Left: 31,902')
+    expect(tallyLine(1, 31902)).toBe('Mined: 1 · Left: 31,902')
+    expect(tallyLine(214, 31902)).toBe('Mined: 214 · Left: 31,902')
     expect(/\u2014/.test(tallyLine(214, 31902))).toBe(false)
   })
 
@@ -535,7 +535,7 @@ describe('live: what you mined and what is left', () => {
       change(key, idx(2, 1, 1), 0, true)
       await wait(CARD_WATCH_MS + 80)
       expect(rows(m).map(textOf)).toEqual(['Glowcore-1all buried', 'Gridstone231,7415,644 visible · 26,097 buried'])
-      expect(tally(m)).toBe('You\'ve mined 2 blocks here · 31,742 left')
+      expect(tally(m)).toBe('Mined: 2 · Left: 31,742')
       // Someone else's layer arrives with a Gridstone mined: one fewer left, still two mined by you.
       change(key, idx(3, 1, 1), 0, false)
       await wait(CARD_WATCH_MS + 80)
@@ -552,7 +552,7 @@ describe('live: what you mined and what is left', () => {
       for (let y = 9; y <= 11; y++) for (let z = 9; z <= 11; z++) for (let x = 9; x <= 11; x++) change(key, idx(x, y, z), 0, true)
       await wait(CARD_WATCH_MS + 80)
       expect(rows(m).map(textOf)).toEqual(['Glowcore10none left', 'Gridstone2831,7145,644 visible · 26,070 buried'])
-      expect(tally(m)).toBe('You\'ve mined 29 blocks here · 31,714 left')
+      expect(tally(m)).toBe('Mined: 29 · Left: 31,714')
     } finally {
       await m.unmount()
     }
@@ -566,7 +566,7 @@ describe('live: what you mined and what is left', () => {
       change(key, idx(10, 10, 10), 0, false)
       await wait(CARD_WATCH_MS + 80)
       expect(rows(m).map(textOf)).toEqual(['Glowcore-0none left', 'Gridstone-31,7435,644 visible · 26,099 buried'])
-      expect(m.says('Nothing rare in this chunk.')).toBe(false)
+      expect(m.says('None.')).toBe(false)
     } finally {
       await m.unmount()
     }

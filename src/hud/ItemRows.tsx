@@ -103,7 +103,7 @@ export function TakeCopy({ record, placer }: { record: NostrEvent; placer?: stri
   const held = useHoldsCard(record.id)
   const take = (): void => { useBlueprints.getState().addFound(record, placer ?? undefined) }
   return (
-    <button className={`chest__act chest__act--take bp-place__take${held ? ' is-on' : ''}`} onClick={take} disabled={held} title={held ? 'It is in your BLUEPRINTS' : 'Copy it into your BLUEPRINTS. It stays here for the next finder'}>
+    <button className={`chest__act chest__act--take bp-place__take${held ? ' is-on' : ''}`} onClick={take} disabled={held} title={held ? 'It is in your BLUEPRINTS' : 'Copy it into your BLUEPRINTS'}>
       {held ? 'IN BLUEPRINTS' : 'TAKE A COPY'}
     </button>
   )

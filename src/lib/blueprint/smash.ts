@@ -68,12 +68,12 @@ export const RING_MAX = 8
 /** The most prizes unsealed from one lookup (the spec's 4, raised at the owner's word; the ring shows RING_MAX). */
 export const PRIZES_MAX = 32
 /** The line a smash leaves when nothing was compiled: not a construction (touching something, or too big for the reach: design page 3). */
-export const MISS_LINE = 'Nothing compiled. The blocks are spent.'
+export const MISS_LINE = 'Nothing compiled.'
 /** The line when a construction was compiled but no blueprint matches it (the preview said COMPILES: smashPreview.ts). */
-export const NO_MATCH_LINE = 'Compiled. No blueprint matches. The blocks are spent.'
+export const NO_MATCH_LINE = 'No blueprint matches.'
 
 /** What a smash says when no relay answered and nothing on this device matched. */
-export const OFFLINE_LINE = 'No relay answered, so only blueprints on this device were checked. No blueprint matches. The blocks are spent.'
+export const OFFLINE_LINE = 'No relay answered. No blueprint on this device matches.'
 
 /**
  * The line a smash that found no prize leaves: a construction was compiled (the preview said COMPILES), so it says no
@@ -85,7 +85,7 @@ export function missLine(compiled: boolean, offline: boolean, unknown: boolean):
 }
 
 /** When it compiled into a prize this version cannot open. */
-export const UNKNOWN_LINE = 'It compiled into something this version cannot open yet.'
+export const UNKNOWN_LINE = 'Compiled into something this version cannot open.'
 
 /**
  * Whether a smash compiles what it gathered: a construction, in either hand (owner, 2026-11-28). The reach already

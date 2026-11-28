@@ -17,7 +17,7 @@ export type BlocksRequest =
   | { type: 'light'; id: number; around: Array<Uint8Array | null>; skyTop: Uint8Array | null }
 
 export type BlocksAnswer =
-  | { type: 'generate'; id: number; blocks: Uint8Array; top: number; rind: number; ms: number }
+  | { type: 'generate'; id: number; blocks: Uint8Array; top: number; rind: number; family: string; maxK: number; meanK: number; ms: number }
   | { type: 'mesh'; id: number; mesh: ChunkMesh; ms: number }
   | { type: 'light'; id: number; light: Uint8Array<ArrayBuffer>; ms: number }
   | { type: 'error'; id: number; message: string }
@@ -33,7 +33,7 @@ export function handleBlocks(req: BlocksRequest): { answer: BlocksAnswer; transf
   try {
     if (req.type === 'generate') {
       const g = generate(req.base, null, req.revision)
-      return { answer: { type: 'generate', id: req.id, blocks: g.blocks, top: g.top, rind: g.rind, ms: performance.now() - t0 }, transfer: [g.blocks.buffer] }
+      return { answer: { type: 'generate', id: req.id, blocks: g.blocks, top: g.top, rind: g.rind, family: g.family, maxK: g.maxK, meanK: g.meanK, ms: performance.now() - t0 }, transfer: [g.blocks.buffer] }
     }
     if (req.type === 'light') {
       lights ??= lightTables()

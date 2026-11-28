@@ -695,6 +695,21 @@ export function surveyedForYou(key: string): boolean {
   return sessionFor()?.views.get(key)?.surveyed ?? false
 }
 
+/**
+ * When the chunk was first surveyed by anyone drawn for you, in milliseconds:
+ * the earliest first-survey date (§5.4 readSurveyed) of the surveying planes
+ * drawn there, on the plane you are on (never a layer's created_at, which is
+ * its last publish). The survey card's date for a chunk someone else
+ * surveyed. Null when no surveying plane is drawn there.
+ */
+export function firstSurveyedAt(key: string): number | null {
+  const s = sessionFor()
+  const layers = s?.views.get(key)?.layers ?? []
+  let first = Infinity
+  for (const l of layers) for (const p of l.planes) if (p.survey && p.plane === s!.plane && p.surveyed > 0 && p.surveyed < first) first = p.surveyed
+  return Number.isFinite(first) ? first * 1000 : null
+}
+
 /** Chunks that others built in near you: loaded and drawn even where you never surveyed. */
 export function sharedKeys(): ReadonlySet<string> {
   const s = sessionFor()

@@ -48,6 +48,7 @@ import { takeSceneTaps, usePad } from './usePad'
 import { CELLS, chunkOf, chunkKey, parseChunkKey, type ChunkBase } from '../lib/terrain/coords'
 import { RING, TerrainWorld, REACH, type Change, type ChunkSlot } from '../lib/terrain/world'
 import { applyLayer, encodeLayer, isLayer, layerRevision, rebaseBlocks, type Layer } from '../lib/terrain/layer'
+import type { GroundFacts } from '../lib/terrain/assay'
 import { generateChunk } from '../lib/terrain/blocksClient'
 import { groundWriteRevision, type GroundRevision } from '../lib/terrain/groundRevision'
 import { EMPTY, blockName, kindId, solid as isSolid } from '../lib/terrain/blocks'
@@ -747,6 +748,8 @@ async function build(s: TerrainSession, slot: ChunkSlot): Promise<void> {
     // Blocks a new key carried in from your other keys' layers (store/terrainShare.ts, DECK-0009 §5.6) are yours here.
     if (own) applyCarried(slot.key, own, g.blocks, revision)
     slot.own = own
+    // What the generator said of this ground at this revision (its type and hardness), for the survey card (lib/terrain/assay.ts).
+    slot.ground = typeof g.family === 'string' ? { family: g.family, maxK: g.maxK, meanK: g.meanK, top: g.top } : null
     s.world.setBlocks(slot.key, g.blocks, viewOf(slot.key, g.blocks, own, revision, s.revisions.get(slot.key)?.surveyed))
     slot.revision = revision
     s.version++
@@ -932,6 +935,20 @@ export function hereSurveyedBy(s: TerrainSession | null = terrainSession): 'you'
 }
 
 /**
+ * The chunk you stand in when it is surveyed for you (by you, or counted as
+ * surveyed from someone else's layer) and its blocks are in: the one SURVEY's
+ * button offers the survey card for (terrain/SurveyCard.tsx). Null otherwise.
+ */
+export function cardChunkHere(s: TerrainSession | null = terrainSession): string | null {
+  if (!s) return null
+  const w = offsetOf(s, headNow())
+  const here = s.world.slotAtCs(w[0], w[1], w[2])
+  // Its blocks stay drawn while it is built again (a reground at another revision): CARD stays with them (review of #956).
+  if (!here || !here.inSpace || !here.blocks) return null
+  return s.surveyedKeys.has(here.key) || surveyedForYou(here.key) ? here.key : null
+}
+
+/**
  * Whether TERRAIN can open now, and if not, why in plain words: at your own
  * head, nothing lined up to place.
  */
@@ -1040,17 +1057,20 @@ export function groundRevisionFor(chunk: string | ChunkBase, s: TerrainSession |
  * A chunk's generated ground, block id per cell (coords.ts idx order), at the
  * revision you see it at (groundRevisionFor): the one API for the ground of
  * a chunk, so nothing counts or draws a revision the chunk is not. A copy:
- * the caller may keep or change it.
+ * the caller may keep or change it. With it, what the generator said of that
+ * ground (its type and terrain K, lib/terrain/assay.ts GroundFacts), for the
+ * survey card.
  */
-export async function groundFor(chunk: string | ChunkBase): Promise<{ revision: GroundRevision; blocks: Uint8Array; base: ChunkBase }> {
+export async function groundFor(chunk: string | ChunkBase): Promise<{ revision: GroundRevision; blocks: Uint8Array; base: ChunkBase; facts: GroundFacts | null }> {
   const key = keyOf(chunk)
   const base = typeof chunk === 'string' ? parseChunkKey(chunk) : chunk
   if (!base) throw new Error(`not a chunk: ${key}`)
   const s = terrainSession
   const revision = groundRevisionFor(key, s)
   const slot = s?.world.slotByKey(key)
-  if (slot?.generated && (slot.revision ?? 2) === revision) return { revision, blocks: slot.generated.slice(), base }
-  return { revision, blocks: (await generateChunk(base, revision)).blocks, base }
+  if (slot?.generated && (slot.revision ?? 2) === revision && slot.ground !== undefined) return { revision, blocks: slot.generated.slice(), base, facts: slot.ground }
+  const g = await generateChunk(base, revision)
+  return { revision, blocks: g.blocks, base, facts: typeof g.family === 'string' ? { family: g.family, maxK: g.maxK, meanK: g.meanK, top: g.top } : null }
 }
 
 connectShareHost({

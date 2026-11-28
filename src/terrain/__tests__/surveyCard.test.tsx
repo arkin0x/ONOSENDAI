@@ -10,8 +10,13 @@
  *   go before the end cancels it; held with none ahead, it opens the card.
  * - The card shows the ground, the hardness, the stamp's date, the recipe
  *   line for a Glowcore here, each kind with visible or buried, and no position.
+ * - The core reads out the slice under a finger or a mouse (owner, 2026-11-28:
+ *   "id like to tap or slide my finger across the core sample to see the name
+ *   of the resource representing the layer"): a tap, a slide past the ends, a
+ *   hatched layer, a hover, the arrows, and a readout that never moves the card.
  */
 
+import { readFileSync } from 'node:fs'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('../../terrain/HeldCompiler', () => ({ HeldCompiler: () => null }))
@@ -41,13 +46,13 @@ vi.mock('../../store/useTerrain', async (orig) => {
 import { createElement } from 'react'
 import { mount, textOf, type Host, type Mounted } from '../../test/elementRoot'
 import { TerrainView, LONG_PRESS_MS, pressCard, releaseCard, abandonCard } from '../TerrainView'
-import { SurveyCard } from '../SurveyCard'
+import { CORE_CAPTION, SurveyCard } from '../SurveyCard'
 import { setTerrainSession, useTerrain, type TerrainSession } from '../../store/useTerrain'
 import { useCyberspace } from '../../store/useCyberspace'
 import { emptyInventory } from '../../lib/terrain/terrainDb'
 import { TerrainWorld } from '../../lib/terrain/world'
 import { CELLS, idx, type ChunkBase } from '../../lib/terrain/coords'
-import { forgetAssays } from '../../lib/terrain/assay'
+import { coreSliceAt, forgetAssays } from '../../lib/terrain/assay'
 import { cancelSurveyHold, useSurveyHold } from '../surveyHold'
 import { openSurveyCard, resetSurveyCards, stampDate, useSurveyCard } from '../surveyCard'
 import { topEscape } from '../../hooks/useEscape'
@@ -74,13 +79,14 @@ async function hold(m: Mounted, ms: number): Promise<void> {
 
 const BASE: ChunkBase = { x: 0x1234567890abcdef12340n, y: 0xfedcba0987654321fed80n, z: 0x0f0f0f0f0f0f0f0f0f0e0n, plane: 0 }
 
-/** A field with one chunk: Gridstone, a buried Glowcore, an open layer on top. */
-function fieldWithGlowcore(at: number | null): string {
+/** A field with one chunk: Gridstone, a buried Glowcore, an open layer on top; `edit` changes its blocks first. */
+function fieldWithGlowcore(at: number | null, edit?: (b: Uint8Array) => void): string {
   const world = new TerrainWorld(BASE, { right: { axis: 'x', dir: 1 }, up: { axis: 'y', dir: 1 }, out: { axis: 'z', dir: 1 } })
   const slot = world.slotAt(0, 0, 0, true)!
   const b = new Uint8Array(CELLS).fill(1)
   for (let o = 31 * 1024; o < CELLS; o++) b[o] = 0
   b[idx(10, 10, 10)] = 42
+  edit?.(b)
   world.setBlocks(slot.key, b, b.slice())
   slot.ground = { family: 'volcanic', maxK: 11, meanK: 7.6, top: 7 }
   const revisions = new Map([[slot.key, { revision: 2, surveyed: at === null ? 0 : Math.floor(at / 1000) }]])
@@ -262,6 +268,174 @@ describe('the card', () => {
       await wait(5)
       expect(useSurveyCard.getState().open).toBeNull()
       expect(m.says('FIELD SURVEY')).toBe(false)
+    } finally {
+      await m.unmount()
+    }
+  })
+})
+
+describe('the core', () => {
+  const CINDERROCK = 7
+  const LEFT = 100, WIDTH = 320 // 10 px a slice
+  const xOf = (layer: number): number => LEFT + (layer - 1) * 10 + 5
+  const cls = (h: Host): string[] => String(h.props.className ?? '').split(' ')
+  const slider = (m: Mounted): Host => m.all().find((h) => h.props.role === 'slider')!
+  const readout = (m: Mounted): Host => m.all().find((h) => cls(h).includes('survey-card__readout'))!
+  const bands = (m: Mounted): Host[] => m.all().filter((h) => cls(h).includes('survey-band'))
+  const lit = (m: Mounted): number[] => bands(m).flatMap((h, i) => (cls(h).includes('is-active') ? [i + 1] : []))
+  const target = { getBoundingClientRect: () => ({ left: LEFT, width: WIDTH }), setPointerCapture: vi.fn(), releasePointerCapture: vi.fn() }
+  const fire = async (m: Mounted, name: string, e: Record<string, unknown>): Promise<void> => {
+    ;(slider(m).props[name] as (e: unknown) => void)({ pointerId: 1, pointerType: 'touch', preventDefault: () => {}, currentTarget: target, ...e })
+    await wait(5)
+  }
+
+  async function open(): Promise<Mounted> {
+    target.setPointerCapture.mockClear()
+    target.releasePointerCapture.mockClear()
+    // Gridstone with the top layer open (layer 1) and y 25, the seventh layer down, Cinderrock.
+    const key = fieldWithGlowcore(null, (b) => { for (let x = 0; x < 32; x++) for (let z = 0; z < 32; z++) b[idx(x, 25, z)] = CINDERROCK })
+    openSurveyCard(key)
+    return mount(createElement(SurveyCard))
+  }
+
+  it('picks the slice under a pointer at any x, the end slices past either end', () => {
+    expect(coreSliceAt(xOf(1), LEFT, WIDTH, 32)).toBe(0)
+    expect(coreSliceAt(xOf(7), LEFT, WIDTH, 32)).toBe(6)
+    expect(coreSliceAt(LEFT + WIDTH, LEFT, WIDTH, 32)).toBe(31)
+    expect(coreSliceAt(-50, LEFT, WIDTH, 32)).toBe(0)
+    expect(coreSliceAt(5000, LEFT, WIDTH, 32)).toBe(31)
+    expect(coreSliceAt(150, LEFT, 0, 32)).toBe(0)
+  })
+
+  it('a tap reads out its slice with the swatch and lights it; a slide follows the finger, past the ends too', async () => {
+    const m = await open()
+    try {
+      expect(textOf(readout(m))).toBe(CORE_CAPTION)
+      expect(lit(m)).toEqual([])
+      const s = slider(m)
+      expect(s.props['aria-hidden']).toBeUndefined()
+      expect(s.props.tabIndex).toBe(0)
+      expect([s.props['aria-valuemin'], s.props['aria-valuemax']]).toEqual([1, 32])
+
+      await fire(m, 'onPointerDown', { clientX: xOf(7) })
+      expect(target.setPointerCapture).toHaveBeenCalledWith(1)
+      expect(textOf(readout(m))).toBe('Layer 7: Cinderrock')
+      expect(readout(m).children.some((h) => typeof h !== 'string' && cls(h).includes('terrain-swatch'))).toBe(true)
+      expect(lit(m)).toEqual([7])
+      expect(slider(m).props['aria-valuenow']).toBe(7)
+      expect(slider(m).props['aria-valuetext']).toBe('Layer 7: Cinderrock')
+
+      await fire(m, 'onPointerMove', { clientX: xOf(12) })
+      expect(textOf(readout(m))).toBe('Layer 12: Gridstone')
+      expect(lit(m)).toEqual([12])
+      // Captured: the finger slid off the right end keeps the bottom slice.
+      await fire(m, 'onPointerMove', { clientX: LEFT + WIDTH + 80 })
+      expect(textOf(readout(m))).toBe('Layer 32: Gridstone')
+      await fire(m, 'onPointerUp', { clientX: LEFT + WIDTH + 80 })
+      expect(target.releasePointerCapture).toHaveBeenCalledWith(1)
+      // A finger lifted keeps its slice up to read, and a touch moving without a press picks nothing.
+      await fire(m, 'onPointerLeave', {})
+      await fire(m, 'onPointerMove', { clientX: xOf(3) })
+      expect(textOf(readout(m))).toBe('Layer 32: Gridstone')
+      // Focus moving on puts the caption back.
+      ;(slider(m).props.onBlur as () => void)()
+      await wait(5)
+      expect(textOf(readout(m))).toBe(CORE_CAPTION)
+      expect(lit(m)).toEqual([])
+    } finally {
+      await m.unmount()
+    }
+  })
+
+  it('a hatched layer reads "mostly open" with the hatched mark, never a kind', async () => {
+    const m = await open()
+    try {
+      expect(cls(bands(m)[0])).toContain('is-open')
+      await fire(m, 'onPointerDown', { clientX: xOf(1) })
+      expect(textOf(readout(m))).toBe('Layer 1: mostly open')
+      expect(readout(m).children.some((h) => typeof h !== 'string' && cls(h).includes('survey-card__readout-open'))).toBe(true)
+      expect(readout(m).children.some((h) => typeof h !== 'string' && cls(h).includes('terrain-swatch'))).toBe(false)
+      expect(slider(m).props['aria-valuetext']).toBe('Layer 1: mostly open')
+    } finally {
+      await m.unmount()
+    }
+  })
+
+  it('a mouse hovering reads out the slice under it and lets go as it leaves', async () => {
+    const m = await open()
+    try {
+      await fire(m, 'onPointerMove', { pointerType: 'mouse', clientX: xOf(7) })
+      expect(textOf(readout(m))).toBe('Layer 7: Cinderrock')
+      await fire(m, 'onPointerLeave', { pointerType: 'mouse' })
+      expect(textOf(readout(m))).toBe(CORE_CAPTION)
+    } finally {
+      await m.unmount()
+    }
+  })
+
+  it('the arrows, Home and End move along it as a slider, held at the ends', async () => {
+    const m = await open()
+    try {
+      const key = async (k: string): Promise<boolean> => {
+        let stopped = false
+        ;(slider(m).props.onKeyDown as (e: unknown) => void)({ key: k, preventDefault: () => { stopped = true } })
+        await wait(5)
+        return stopped
+      }
+      ;(slider(m).props.onFocus as () => void)()
+      await wait(5)
+      expect(textOf(readout(m))).toBe('Layer 1: mostly open')
+      expect(await key('ArrowRight')).toBe(true)
+      expect(slider(m).props['aria-valuenow']).toBe(2)
+      for (let i = 0; i < 5; i++) await key('ArrowRight')
+      expect(textOf(readout(m))).toBe('Layer 7: Cinderrock')
+      expect(slider(m).props['aria-valuetext']).toBe('Layer 7: Cinderrock')
+      await key('ArrowLeft')
+      expect(slider(m).props['aria-valuenow']).toBe(6)
+      await key('End')
+      await key('ArrowRight')
+      expect(slider(m).props['aria-valuenow']).toBe(32)
+      await key('Home')
+      await key('ArrowLeft')
+      expect(slider(m).props['aria-valuenow']).toBe(1)
+      // Esc and every other key go on to the card.
+      expect(await key('Escape')).toBe(false)
+      expect(await key('Tab')).toBe(false)
+      // Focus coming back returns to the same slice.
+      await key('ArrowRight')
+      ;(slider(m).props.onBlur as () => void)()
+      await wait(5)
+      expect(textOf(readout(m))).toBe(CORE_CAPTION)
+      expect(slider(m).props['aria-valuenow']).toBe(2)
+      ;(slider(m).props.onFocus as () => void)()
+      await wait(5)
+      expect(textOf(readout(m))).toBe('Layer 2: Gridstone')
+    } finally {
+      await m.unmount()
+    }
+  })
+
+  it('the readout is the same element at one fixed height whatever it says, so nothing on the card moves', async () => {
+    const m = await open()
+    try {
+      const before = readout(m)
+      const tray = m.all().find((h) => cls(h).includes('survey-card__tray'))!
+      const shape = (): string[] => tray.children.map((c) => (typeof c === 'string' ? c : cls(c)[0]))
+      const was = shape()
+      await fire(m, 'onPointerDown', { clientX: xOf(7) })
+      expect(readout(m)).toBe(before)
+      expect(shape()).toEqual(was)
+      expect(was).toEqual(['survey-card__readout', 'survey-card__core', 'survey-card__tray-labels'])
+      const css = readFileSync(new URL('../../styles.css', import.meta.url), 'utf8')
+      const rule = (sel: string): string => css.match(new RegExp(`\\n${sel.replace(/[.]/g, '\\.')} \\{([^}]*)\\}`))?.[1] ?? ''
+      expect(rule('.survey-card__readout')).toMatch(/\bheight: 14px;/)
+      expect(rule('.survey-card__readout')).toMatch(/white-space: nowrap;/)
+      expect(rule('.survey-card__readout')).toMatch(/overflow: hidden;/)
+      // The bolder active line sets no height of its own: the same 14px box.
+      expect(css.match(/\.survey-card__readout\.is-active \{([^}]*)\}/)?.[1] ?? '').not.toMatch(/height|margin|padding/)
+      // Only the core takes the finger's slide; the card body still scrolls.
+      expect(rule('.survey-card__core')).toMatch(/touch-action: none;/)
+      expect(rule('.survey-card__body')).not.toMatch(/touch-action/)
     } finally {
       await m.unmount()
     }

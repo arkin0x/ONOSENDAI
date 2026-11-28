@@ -82,6 +82,7 @@ import { useSurveyHold } from '../terrain/surveyHold'
 import { edgeSegments, outlineLines, outlineMaterial as sharedOutline, sizeOutline } from './hiddenParts'
 import { HeldLightDriver, eyeCell, type HeldFrame } from './heldLight'
 import { heldLightSource } from '../lib/terrain/heldLight'
+import { tvIsOn } from '../store/tvOn'
 
 /** Chunks meshing at once. */
 const MESH_IN_FLIGHT = 2
@@ -137,11 +138,19 @@ export const terrainCursor: { hit: RayHit | null; air: AirAim | null } = { hit: 
  * (owner, 2026-11-24: "the whole world of blocks just shifted for a frame or two").
  */
 export function fieldMatrix(s: Pick<TerrainSession, 'world'>, axes: ViewAxes, scaleExp: number, out: Matrix4, shift: readonly [number, number, number] = [0, 0, 0]): Matrix4 {
+  return originMatrix(s.world.origin, axes, scaleExp, out, shift)
+}
+
+/**
+ * The same frame for any origin in gibsons (fieldMatrix's, from the field's
+ * origin): Cyberspace TV places each chunk it draws from the chunk's own
+ * corner (scene/TvTerrain.tsx).
+ */
+export function originMatrix(o: Position, axes: ViewAxes, scaleExp: number, out: Matrix4, shift: readonly [number, number, number] = [0, 0, 0]): Matrix4 {
   const origin = alignedOrigin(drawnAnchor(), scaleExp)
   const k = 1 / 2 ** scaleExp
   const cols = [new Vector3(), new Vector3(), new Vector3()]
   const t = [0, 0, 0]
-  const o = s.world.origin
   ;[axes.right, axes.up, axes.out].forEach((a, i) => {
     const csi = a.axis === 'x' ? 0 : a.axis === 'y' ? 1 : 2
     cols[csi].setComponent(i, a.dir * k)
@@ -151,6 +160,17 @@ export function fieldMatrix(s: Pick<TerrainSession, 'world'>, axes: ViewAxes, sc
   out.makeBasis(cols[0], cols[1], cols[2])
   out.setPosition(t[0], t[1], t[2])
   return out
+}
+
+/**
+ * Whether your own field's blocks are drawn: a field in the plane you are in,
+ * at a zoom where a chunk is more than a few pixels, and never while
+ * Cyberspace TV is on, which draws the tape's blocks round its avatar
+ * instead (scene/TvTerrain.tsx). The TV scene does not mount this layer at
+ * all (Scene.tsx); this keeps your field off TV however it is mounted.
+ */
+export function fieldVisible(s: Pick<TerrainSession, 'plane'> | null, plane: number, zoom: number, tvOn: boolean): boolean {
+  return !!s && !tvOn && s.plane === plane && zoom <= MAX_SCALE
 }
 
 /** The anchor the scene on screen is drawn against: the committed one, the store's before the first commit. */
@@ -237,7 +257,7 @@ function Chunks({ axes }: { axes: ViewAxes }): JSX.Element {
       placedFor.current = ''
     }
     const zoom = drawnScale()
-    const show = !!s && s.plane === cs.plane && zoom <= MAX_SCALE
+    const show = fieldVisible(s, cs.plane, zoom, tvIsOn())
     g.visible = show
     if (!s || !show) return
     const layers = useLayers.getState()

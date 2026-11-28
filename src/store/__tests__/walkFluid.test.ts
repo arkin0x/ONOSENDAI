@@ -76,7 +76,8 @@ import { useLayers } from '../useLayers'
 import { canonicalQuaternion, type Position, type ViewAxes } from '../../lib/space'
 import { walkKeyDown, walkKeyUp, walkKeysReleased } from '../../hooks/useKeyboard'
 import { rampFixture } from '../fixtures/rampFixture'
-import { holdEnd, holdStart } from '../walkHold'
+import { holdEnd, holdStart, stickHold } from '../walkHold'
+import { quantize8, stickVector } from '../../lib/walkStick'
 import { estimateHopCost } from 'cyberspace-core'
 import { projectCantorMs } from '../../lib/calibration'
 
@@ -266,6 +267,68 @@ describe('acceleration', () => {
     expect(went).toBeGreaterThan(FLUID_NUDGE_STEPS - 0.15)
     expect(went).toBeLessThan(FLUID_NUDGE_STEPS + 0.05)
     expect(FLUID_NUDGE_STEPS + 0.05).toBeLessThan(1)
+  })
+})
+
+describe('the stick in fluid WALK (owner, 2026-11-28): the way and the speed it is pushed, the way you face', () => {
+  /** The stick pushed (dx, dy) pixels from where it landed, reach 48, as the zone hands it on. */
+  function push(dx: number, dy: number): void {
+    const v = stickVector(dx, dy, 48)
+    stickHold(v, quantize8(v)?.dir ?? null)
+  }
+  const letGo = (): void => stickHold({ fwd: 0, strafe: 0, mag: 0 }, null)
+  afterEach(letGo)
+
+  it('half a push walks at half the speed; a full push at the full speed', () => {
+    walk()
+    push(0, -(0.12 * 48 + 0.5 * 0.88 * 48))
+    frames(1200)
+    expect(len(fluidState().v)).toBeCloseTo(FLUID_MAX_SPEED * 0.5, 4)
+    push(0, -48)
+    frames(1200)
+    expect(len(fluidState().v)).toBeCloseTo(FLUID_MAX_SPEED, 4)
+    letGo()
+    frames(400)
+    expect(len(fluidState().v)).toBe(0)
+  })
+
+  it('analog, not snapped: pushed 30 degrees right of up, it goes 30 degrees right of the way you face', () => {
+    walk()
+    const r = (30 * Math.PI) / 180
+    push(48 * Math.sin(r), -48 * Math.cos(r))
+    frames(1000)
+    const v = fluidState().v
+    expect(v.y).toBe(0)
+    expect(Math.atan2(v.x, -v.z)).toBeCloseTo(r, 4)
+  })
+
+  it('camera-relative: facing +X, up the screen goes +X and right goes +Z', () => {
+    face(90)
+    walk()
+    push(0, -48)
+    frames(800)
+    expect(fluidState().v.x).toBeCloseTo(FLUID_MAX_SPEED, 4)
+    letGo()
+    frames(400)
+    push(48, 0)
+    frames(800)
+    expect(fluidState().v.z).toBeCloseTo(FLUID_MAX_SPEED, 4)
+    expect(Math.abs(fluidState().v.x)).toBeLessThan(1e-6)
+  })
+
+  it('gravity off, the stick\'s forward follows the look up, as W does (#946); its sides stay level', () => {
+    walk(false)
+    walkFacing.forward = { x: 0, y: Math.SQRT1_2, z: -Math.SQRT1_2 }
+    walkFacing.right = { x: 1, y: 0, z: 0 }
+    push(0, -48)
+    frames(800)
+    expect(fluidState().v.y).toBeGreaterThan(FLUID_MAX_SPEED * 0.6)
+    expect(fluidState().v.z).toBeLessThan(-FLUID_MAX_SPEED * 0.6)
+    letGo()
+    frames(400)
+    push(48, 0)
+    frames(800)
+    expect(Math.abs(fluidState().v.y)).toBeLessThan(1e-6)
   })
 })
 

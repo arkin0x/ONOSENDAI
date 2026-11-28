@@ -54,18 +54,29 @@
  * same day). Each key is its own hold: JUMP pressed with FORWARD held is a
  * running jump, and FORWARD walks on.
  *
- * JUMP and DOWN stand apart from the pad (arkinox, 2026-11-10), at the
- * height they had in the pad's bottom row, under the LOOK ball. Since the
+ * JUMP and DOWN stand apart from the pad (arkinox, 2026-11-10). Since the
  * owner's swap (2026-11-14: "Movement should be on the left, and look/jump
- * should be on the right") the walk pad, a compact cluster of GRAVITY,
- * FORWARD, and the sides with BACK, stands on the left over the menu
- * button, and JUMP, DOWN and the LOOK ball on the right over the commit
- * block: the walk is the left thumb's, the look and the jump the right's.
- * Only WALK's pad moves (styles.css "WALK's controls, mirrored").
+ * should be on the right") the walk is the left thumb's, the look and the
+ * jump the right's. Only WALK's pad moves (styles.css "WALK's controls,
+ * mirrored").
+ *
+ * The stick (owner, 2026-11-28; hud/WalkStick.tsx): on a phone the left
+ * thumb walks with a floating stick, where FORWARD, BACK and the side keys
+ * were. The walk pad's box is its resting place (a faint ring with MOVE in
+ * it), and a finger landing anywhere in the lower left takes it there and
+ * then. With a mouse or keys the box prints W A S D instead
+ * (hooks/useFingerInput.ts). The stick is level only: GRAVITY, JUMP and
+ * DOWN are the right thumb's: GRAVITY directly over the commit block, then
+ * a clear gap, then two round buttons set on a thumb's arc, JUMP higher and
+ * inboard, DOWN lower and outboard (owner, 2026-11-28: "make them larger
+ * and round, like a game controller, and angle them for comfort (down
+ * button slightly lower than jump)"; "The gravity button should go
+ * directly above the mode buttons and then have a gap between it and the
+ * jump and down buttons").
  */
 
 import { useEffect, useState, type ReactNode } from 'react'
-import { Box, Globe, Scan } from 'lucide-react'
+import { ArrowBigDownDash, ArrowBigUpDash, Box, Globe, Scan } from 'lucide-react'
 import { ConfirmModal } from './ConfirmModal'
 import { busyLabel, samePosition, useCyberspace } from '../store/useCyberspace'
 import { DEFAULT_RELAY } from '../store/useRelays'
@@ -86,6 +97,9 @@ import { buildHeld, commitSettling, cycleMode, goBack, leaveWalk, padMode, press
 import { DEFAULT_MODES, modeInfo, nextInRing, useEffectiveModes, useModeRoles, useModes } from '../store/modeOrder'
 import { useCover } from '../hooks/useCover'
 import { ForwardArrow3D, ReverseArrow3D } from './ui/FlyArrows'
+import { WalkStickHome, WalkStickZone } from './WalkStick'
+import { useFingerInput } from '../hooks/useFingerInput'
+import { useMenuIsOpen } from '../hooks/useMenuOpen'
 import { regionAtOriginalSize, toggleRegion, useRegion } from '../store/useRegion'
 import { holdEnd, holdEndAll, holdStart } from '../store/walkHold'
 import { flyDir, useViewFly } from '../lib/viewFly'
@@ -157,23 +171,20 @@ export interface PadKey {
   keyHint?: string
   /** WALK: the direction this key holds while pressed (store/walkHold.ts). */
   hold?: HeldDir
-  /** WALK's JUMP and DOWN: drawn in their own row (.walkside) on the right, over the commit block, not in the pad. */
-  side?: boolean
   /** The aria-label, when it says more than the title. */
   label?: string
 }
 
 /**
- * WALK's keys (arkinox, 2026-11-02), each the same step its key on the
- * keyboard takes (lib/walkKeys.ts), so the pad and the keys never disagree:
+ * WALK's keys on the right (arkinox, 2026-11-02), each the same step its key
+ * on the keyboard takes (lib/walkKeys.ts), so the pad and the keys never
+ * disagree. The level walk is the stick's (hud/WalkStick.tsx; owner,
+ * 2026-11-28), in place of FORWARD, BACK and the side keys:
  *
- * | Key | Keyboard | Was |
- * |---|---|---|
- * | FORWARD, one large key | W | FAR, up and NEAR |
- * | BACKWARD | S | down |
- * | left, right | A, D | the same |
- * | JUMP | Space (R too under GRAVITY) | + and the 2^ readout |
- * | DOWN | C (F too under GRAVITY) | - |
+ * | Key | Keyboard |
+ * |---|---|
+ * | JUMP | Space (R too under GRAVITY) |
+ * | DOWN | C (F too under GRAVITY) |
  *
  * Under GRAVITY JUMP is a jump, and DOWN moves nothing but absorbs a bounce
  * pressed just before the landing, or every landing while held
@@ -181,10 +192,7 @@ export interface PadKey {
  * so it stays on: on a phone it is the only way to absorb one (review of
  * #649). JUMP pressed again in the air is a double jump (store/useWalk.ts
  * (F)). With gravity off, JUMP and DOWN are one cell up and down. Both
- * stand in their own row on the right of the screen (`side`), the rest in
- * the pad, which WALK draws on the left.
- * The forward and reverse arrows are the pair VIEW's fly keys wear too
- * (hud/ui/FlyArrows.tsx).
+ * stand on the right of the screen (.walkside), round, on a thumb's arc.
  *
  * Each key holds its direction while pressed (store/walkHold.ts).
  */
@@ -192,12 +200,8 @@ export function walkPad(gravity: boolean, move: (name: MoveName) => () => void):
   // JUMP and DOWN are Space and C: up and down as you see the world, not tipped by LOOK (lib/walkKeys.ts).
   const key = (name: MoveName, view = false): Pick<PadKey, 'act' | 'hold'> => ({ act: move(name), hold: walkHeldDir(name, view) })
   return [
-    { cell: 'forward', glyph: <ForwardArrow3D size={26} />, sub: 'FORWARD', title: 'Forward (W)', keyHint: 'W', ...key('away') },
-    { cell: 'left', glyph: '◀', title: 'Left (A)', keyHint: 'A', ...key('left') },
-    { cell: 'backward', glyph: <ReverseArrow3D size={20} />, sub: 'BACK', title: 'Backward (S)', keyHint: 'S', ...key('toward') },
-    { cell: 'right', glyph: '▶', title: 'Right (D)', keyHint: 'D', ...key('right') },
-    { cell: 'jump', glyph: 'JUMP', title: gravity ? 'Jump (Space or R). Press again in the air to double jump.' : 'Jump: up one cell (Space)', keyHint: 'SPACE', ...key('up', true), side: true },
-    { cell: 'down', glyph: '▼', title: gravity ? 'Down: hold to absorb a bounce (C or F)' : 'Down one cell (C)', keyHint: 'C', ...key('down', true), side: true },
+    { cell: 'jump', glyph: <ArrowBigUpDash size={24} strokeWidth={2} aria-hidden />, sub: 'JUMP', title: gravity ? 'Jump (Space or R). Press again in the air to double jump.' : 'Jump: up one cell (Space)', keyHint: 'SPACE', ...key('up', true) },
+    { cell: 'down', glyph: <ArrowBigDownDash size={20} strokeWidth={2} aria-hidden />, sub: 'DOWN', title: gravity ? 'Down: hold to absorb a bounce (C or F)' : 'Down one cell (C)', keyHint: 'C', ...key('down', true) },
   ]
 }
 
@@ -291,6 +295,13 @@ export function TouchControls(): JSX.Element {
   const walkFrom = useWalk((s) => s.from)
   // GRAVITY in WALK (store/useWalk.ts): JUMP jumps, DOWN absorbs a bounce.
   const gravity = useWalk((s) => s.gravity)
+  // A finger on a touch screen: the stick; a mouse or keys: W A S D printed in its place (hooks/useFingerInput.ts).
+  const finger = useFingerInput()
+  // The stick held: its resting ring steps back (hud/WalkStick.tsx).
+  const [stickHeld, setStickHeld] = useState(false)
+  // The menu's panels open: on a phone they cover the pad (App hides it); on a wide screen they stand at the left
+  // edge, over the stick's zone, so the zone stands down until they close (review of #974).
+  const menuOpen = useMenuIsOpen((s) => s.open)
   const building = useBuilder((s) => s.active)
   // Region mode, a tool inside VIEW (store/useRegion.ts): the Region button
   // turns it on, RECALL becomes RESET once the region has grown, and the pad
@@ -462,10 +473,10 @@ export function TouchControls(): JSX.Element {
     )
   }
 
-  // WALK's JUMP and DOWN, on the right over the commit block (walkPad `side`).
+  // WALK's JUMP and DOWN, on the right over the commit block, under GRAVITY.
   // Not while placing, nor off your head, where the pad stands its
-  // direction keys down.
-  const sideKeys = deploying || !atHead ? [] : pad.filter((b) => b.side)
+  // direction keys down; GRAVITY stays, in its place.
+  const sideKeys = walking && !deploying && atHead ? pad : []
   // The ring stays out of the newcomer view until the tour reaches BUILD:
   // its slot holds a resting GO instead, so the slot never empties or moves.
   const ringShown = veil('pad.modes') !== ' nc-veiled'
@@ -527,17 +538,9 @@ export function TouchControls(): JSX.Element {
             </button>
           </>
         )}
-        {walking && (
-          <button
-            className={`touchpad__key touchpad__key--gravity${gravity ? ' is-on' : ''}${veil('pad.gravity')}`}
-            aria-pressed={gravity}
-            title="Gravity (Z)"
-            aria-label="Gravity"
-            {...noCallout}
-            onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); useWalk.getState().setGravity(!gravity) }}
-          >GRAVITY<span className="touchpad__keyhint" aria-hidden>Z</span></button>
-        )}
-        {pad.filter((b) => !b.side).map(padKey)}
+        {/* WALK's left: the stick's resting place, or W A S D with a mouse or keys (hud/WalkStick.tsx). */}
+        {walking && atHead && <span className={`walkstick-slot${veil('pad.arrows')}`}><WalkStickHome finger={finger} held={stickHeld} terrain={terrainOn} /></span>}
+        {!walking && pad.map(padKey)}
         {/* The hub doubles as the scale readout and its reset: a tap returns
             to 2^0, the finest scale. Hiding the pad lives on the canvas tap,
             where it always also lived, so nothing is lost to the reset.
@@ -555,8 +558,20 @@ export function TouchControls(): JSX.Element {
         >2^{scaleExp}</button>}
       </div>
 
-      {sideKeys.length > 0 && (
-        <div className="walkside" role="group" aria-label="Jump and down">
+      {/* The stick's zone: the lower left, under every button, a finger's only (hud/WalkStick.tsx). */}
+      {walking && atHead && finger && !menuOpen && <WalkStickZone terrain={terrainOn} onHeld={setStickHeld} veil={veil('pad.arrows')} />}
+
+      {/* WALK's right: GRAVITY over the commit block, a gap, then JUMP and DOWN, round, on a thumb's arc (owner, 2026-11-28). */}
+      {walking && (
+        <div className="walkside" role="group" aria-label="Gravity, jump and down">
+          <button
+            className={`touchpad__key touchpad__key--gravity${gravity ? ' is-on' : ''}${veil('pad.gravity')}`}
+            aria-pressed={gravity}
+            title="Gravity (Z)"
+            aria-label="Gravity"
+            {...noCallout}
+            onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); useWalk.getState().setGravity(!gravity) }}
+          >GRAVITY<span className="touchpad__keyhint" aria-hidden>Z</span></button>
           {sideKeys.map(padKey)}
         </div>
       )}

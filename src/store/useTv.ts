@@ -60,6 +60,8 @@ import { FIT_CELLS, fitScale, scaleAt, zoomPlan, type ZoomStep } from '../lib/tv
 import { useMutes } from './useMutes'
 import { withoutMuted } from '../lib/muteList'
 import { setTvOn } from './tvOn'
+import { TERRAIN_SCALE_EXP, isTerrainShot, terrainFraming, type TerrainCamera } from '../lib/tv/terrainShot'
+import { newTapeTvTerrain, startTvTerrain, stopTvTerrain, terrainOn, tvTerrainTick } from './useTvTerrain'
 
 /** Where an avatar stands on the tape, and since when. */
 export interface TvAvatar {
@@ -184,6 +186,12 @@ interface TvState {
   boxes: Array<{ id: string; hint: HintBox }>
   /** The hyperjump being ridden on screen, or null. */
   jump: TvJump | null
+  /**
+   * The shot on screen plays as TERRAIN (lib/tv/terrainShot.ts): its camera,
+   * for the shot named. Read through store/useTvTerrain.ts terrainOn, which
+   * checks the shot is still the one on screen.
+   */
+  terrain: (TerrainCamera & { shot: string }) | null
   /**
    * The commercial on screen (lib/tv/hosakaAd): which spot, since `at`
    * (performance.now()), or null. Nothing from the tape plays under it.
@@ -814,9 +822,11 @@ function beginShot(shot: Shot, now: number, id: number): void {
   // A hyperjump's ride opens where the rider stood, in the tunnel (tick plays the rest).
   const ride = shot.prelude ? rideEnds(shot.beats[0]) : null
   const opening = ride ? shot.beats[0].from : shotOpening(shot)
+  // A TERRAIN shot (lib/tv/terrainShot.ts) plays at a block's zoom, close, with the blocks round its avatar drawn.
+  const terrain = ride === null && isTerrainShot(shot)
   // The zoom follows the moves (lib/tv/zoom.ts): it opens at the first span's.
-  zoom = zoomPlan(shot.beats, shot.offsets, shot.length, shot.prelude ?? 0)
-  const scaleExp = zoom[0]?.scaleExp ?? fitScale(shot.beats)
+  zoom = terrain ? [] : zoomPlan(shot.beats, shot.offsets, shot.length, shot.prelude ?? 0)
+  const scaleExp = terrain ? TERRAIN_SCALE_EXP : zoom[0]?.scaleExp ?? fitScale(shot.beats)
   const before = s.shot
   // Straight on from the shot before: the same avatar, picking up where it
   // stopped, at the same zoom. Anything else is a cut, with static. The zoom
@@ -829,7 +839,9 @@ function beginShot(shot: Shot, now: number, id: number): void {
   const was = s.avatars[shot.pubkey]
   // Only after a trip: a segment's author is not where its camera was (review of #371).
   const continues = ride === null && before !== null && before.kind === 'trip' && before.pubkey === shot.pubkey && was !== undefined &&
-    was.plane === opening.plane && cells(was.position, opening.position, scaleExp) <= 1 && scaleExp === s.scaleExp
+    was.plane === opening.plane && cells(was.position, opening.position, scaleExp) <= 1 && scaleExp === s.scaleExp &&
+    // Into or out of TERRAIN is a cut: its camera is its own.
+    terrainOn(s) === terrain
   const skipped = before && shot.start > before.end ? shot.start - before.end : 0
   useTv.setState({
     shot,
@@ -837,8 +849,9 @@ function beginShot(shot: Shot, now: number, id: number): void {
     tapeTime: shot.start,
     scaleExp,
     // A shot that follows straight on keeps its camera: a new framing would be a cut.
-    framing: ride ? WARP_FRAMING : continues ? { ...s.framing, from: s.framing.to } : shotFraming(shot.id),
+    framing: ride ? WARP_FRAMING : continues ? { ...s.framing, from: s.framing.to } : terrain ? terrainFraming(shot.id) : shotFraming(shot.id),
     jump: ride ? { phase: 'warp', ...ride } : null,
+    terrain: terrain ? { mode: 'orbit', shot: shot.id } : null,
     skipped: continues ? 0 : skipped,
     meanwhile: before !== null && !continues && shot.start < before.end,
     status: 'playing',
@@ -1029,6 +1042,8 @@ function tick(id: number): void {
     s = useTv.getState()
   }
   scanTick(s)
+  // TERRAIN: the blocks round the shots coming read ahead, and the chunks the TERRAIN shot on screen draws (store/useTvTerrain.ts).
+  tvTerrainTick(useTv.getState(), queue)
   // A block made while TV is on takes that person off the air at once:
   // their queued shots, the shot on screen, their avatar and their ticker
   // lines (review of #464, S6). Read every tick, since the tape was read
@@ -1174,7 +1189,8 @@ async function tune(id: number): Promise<void> {
   looked = null
   dwell.onScreen(null, performance.now())
   prepared.clear()
-  useTv.setState({ status: 'tuning', shot: null, played: 0, tapeTime: null, avatars: {}, arrivals: [], reactions: [], boxes: [], jump: null, ad: null, stats: null, skipped: 0, cutAt: performance.now(), found: {}, finds: [] })
+  newTapeTvTerrain()
+  useTv.setState({ status: 'tuning', shot: null, played: 0, tapeTime: null, avatars: {}, arrivals: [], reactions: [], boxes: [], jump: null, terrain: null, ad: null, stats: null, skipped: 0, cutAt: performance.now(), found: {}, finds: [] })
   let from = takeNextStart()
   for (let attempt = 0; from === null; attempt++) {
     try {
@@ -1247,6 +1263,7 @@ export const useTv = create<TvState>((set, get) => ({
   chains: {},
   boxes: [],
   jump: null,
+  terrain: null,
   ad: null,
   stats: null,
 
@@ -1262,6 +1279,8 @@ export const useTv = create<TvState>((set, get) => ({
     if (cs.spectate) stopSpectating()
     run++
     scanner = newScanner()
+    // TERRAIN's blocks round the avatars on tape: TV's own reader and worker (store/useTvTerrain.ts).
+    startTvTerrain()
     dwell = new Dwell(dwellLimits(isBroadcast()))
     set({ on: true })
     adDue = performance.now() + adEveryMs(isBroadcast())
@@ -1307,6 +1326,7 @@ export const useTv = create<TvState>((set, get) => ({
     keyWorker?.close()
     keyWorker = null
     scanner = null
+    stopTvTerrain()
     looked = null
     prepared.clear()
     keptBags.clear()
@@ -1314,7 +1334,7 @@ export const useTv = create<TvState>((set, get) => ({
     stopExplainers()
     stopMusic()
     stopWatching()
-    set({ on: false, shot: null, played: 0, tapeTime: null, avatars: {}, arrivals: [], reactions: [], found: {}, finds: [], chains: {}, boxes: [], jump: null, ad: null, stats: null, status: 'tuning' })
+    set({ on: false, shot: null, played: 0, tapeTime: null, avatars: {}, arrivals: [], reactions: [], found: {}, finds: [], chains: {}, boxes: [], jump: null, terrain: null, ad: null, stats: null, status: 'tuning' })
     // A tap on an avatar during TV is not a request for its card afterwards.
     usePersonCard.getState().close()
     const cs = useCyberspace.getState()

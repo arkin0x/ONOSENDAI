@@ -101,19 +101,15 @@ export function surveyTarget(): string | null {
  * when a block is mined or placed. Hidden with an empty slot or none left.
  * A glowing block glows in hand, and tints the screen's edges (HeldGlow.tsx).
  */
-function HeldBlock(): JSX.Element | null {
+export function HeldBlock(): JSX.Element | null {
   const inv = useTerrain((s) => s.inventory)
   const walking = useWalk((w) => w.behind > 0 || w.open !== null)
   const id = inv.hotbar[inv.slot]
   const k = id && !isCompiler(id) && (inv.counts[id] ?? 0) > 0 ? blockKind(id) : null
-  // A dip each time what you carry changes by a mine or a place (the counts change; choosing a slot does not).
-  const [dip, setDip] = useState(0)
-  const counts = useRef(inv.counts)
-  useEffect(() => {
-    if (counts.current === inv.counts) return
-    counts.current = inv.counts
-    setDip((d) => d + 1)
-  }, [inv.counts])
+  // A dip each time what you carry changes by a mine or a place (the counts change; choosing a slot does not), at most
+  // one each DIP_MS so a stream of pickups lets each play out. Its two names take turns, so it starts again without the
+  // cube being made again.
+  const dip = useThrottledBump(inv.counts, DIP_MS)
   const glow = useHeldGlow(k ? k.id : null)
   if (!k) return null
   const face = (f: number): CSSProperties => ({ backgroundColor: k.color, backgroundImage: `url(${tileUrl(k, f)})` })
@@ -122,7 +118,7 @@ function HeldBlock(): JSX.Element | null {
     {glow && <HeldVignette look={glow} />}
     {glow && <HeldHalo look={glow} />}
     <div className={`terrain-held${walking ? ' is-walking' : ''}`} aria-hidden>
-      <div key={dip} className={`terrain-held__dip${dip > 0 ? ' is-dipping' : ''}`}>
+      <div className={`terrain-held__dip${dip ? (dip % 2 ? ' is-dipping' : ' is-dipping-b') : ''}`}>
         <div className="terrain-held__cube">
           <span className="terrain-held__face terrain-held__face--top" style={face(0)} />
           <span className="terrain-held__face terrain-held__face--front" style={face(1)} />
@@ -181,6 +177,29 @@ export function terrainWheel(on: EventTarget): () => void {
 
 function Key({ children }: { children: ReactNode }): JSX.Element {
   return <kbd className="terrain-key">{children}</kbd>
+}
+
+/** The carried block's dip, ms (styles.css terrain-held-dip). */
+export const DIP_MS = 220
+
+/**
+ * A number that goes up each time `value` changes, at most once each `ms`
+ * (a change sooner is let pass): so an animation started on it plays out
+ * whole, even under a stream of changes.
+ */
+export function useThrottledBump<T>(value: T, ms: number): number {
+  const was = useRef(value)
+  const at = useRef(-Infinity)
+  const [n, setN] = useState(0)
+  useEffect(() => {
+    if (was.current === value) return
+    was.current = value
+    const t = performance.now()
+    if (t - at.current < ms) return
+    at.current = t
+    setN((v) => v + 1)
+  }, [value, ms])
+  return n
 }
 
 /** A count's bump, ms (styles.css terrain-count-bump). */

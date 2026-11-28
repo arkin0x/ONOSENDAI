@@ -353,6 +353,35 @@ describe('M', () => {
   })
 })
 
+/** H inside TERRAIN: TERRAIN's own keys (terrain/TerrainView.tsx terrainKeys, in capture) leave it to HOP (review of #950). */
+describe('H from TERRAIN', () => {
+  it('still goes to HOP: TERRAIN\'s keys hear it first and neither take it nor stop it', async () => {
+    const { terrainKeys } = await import('../../terrain/TerrainView')
+    press('KeyT')
+    await settled()
+    expect(currentPadMode()).toBe('terrain')
+    // TERRAIN's listener as the real window runs it: in capture, ahead of the main keymap, able to stop it.
+    const captured = new Set<Listener>()
+    const stop = terrainKeys({
+      addEventListener: (t: string, f: Listener, capture?: boolean) => { if (t === 'keydown' && capture) captured.add(f) },
+      removeEventListener: (t: string, f: Listener) => { if (t === 'keydown') captured.delete(f) },
+    } as unknown as EventTarget)
+    try {
+      expect(captured.size).toBe(1)
+      let stopped = false
+      const e = { code: 'KeyH', key: 'h', target, repeat: false, defaultPrevented: false, metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, preventDefault: () => { e.defaultPrevented = true }, stopImmediatePropagation: () => { stopped = true } }
+      for (const f of captured) f(e)
+      expect(stopped).toBe(false)
+      expect(e.defaultPrevented).toBe(false)
+      for (const f of listeners.get('keydown') ?? []) if (!stopped) f(e)
+      await settled()
+      expect(currentPadMode()).toBe('hop')
+    } finally {
+      stop()
+    }
+  })
+})
+
 /** The main keymap and WALK's hold no other meaning for H, V, Y or M. */
 describe('no collisions', () => {
   it('H, V, Y and M are nobody else\'s in the main keymap', async () => {

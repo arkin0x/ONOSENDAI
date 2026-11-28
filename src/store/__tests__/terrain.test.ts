@@ -37,6 +37,7 @@ import { chunkKey, chunkOf, CELLS } from '../../lib/terrain/coords'
 import { COMPILER_ID, FOLD_AT, openTerrainDb, readKept, withCompiler } from '../../lib/terrain/terrainDb'
 import { applyLayer } from '../../lib/terrain/layer'
 import { generate } from '../../lib/terrain/generate'
+import { groundWriteRevision } from '../../lib/terrain/groundRevision'
 import { EMPTY } from '../../lib/terrain/blocks'
 import type { RayHit } from '../../lib/terrain/raycast'
 import type { Position } from '../../lib/space'
@@ -199,8 +200,9 @@ describe('SURVEY', () => {
     const db = await openTerrainDb()
     const kept = await readKept(db, A, [key])
     db.close()
-    const gen = generate(chunkOf(HEAD.x, HEAD.y, HEAD.z, 0)).blocks
-    expect(applyLayer(gen, kept.layers[0].layer)).toEqual(before)
+    // Surveyed fresh, so at the revision new surveys write.
+    const gen = generate(chunkOf(HEAD.x, HEAD.y, HEAD.z, 0), null, groundWriteRevision()).blocks
+    expect(applyLayer(gen, kept.layers[0].layer, groundWriteRevision())).toEqual(before)
   })
 
   it('follows you: walk on across chunks and the chunks round you are always there to survey', async () => {

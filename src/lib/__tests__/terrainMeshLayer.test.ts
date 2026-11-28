@@ -79,10 +79,10 @@ describe('the layer', () => {
   const gen = generate(base).blocks
 
   it('of an untouched chunk is a few dozen bytes, and changes nothing', () => {
-    const l = encodeLayer(gen, gen.slice())
+    const l = encodeLayer(gen, gen.slice(), 0, 2)
     expect(emptyLayer(l)).toBe(true)
     expect(JSON.stringify(l).length).toBeLessThan(96)
-    expect(applyLayer(gen, l)).toEqual(gen)
+    expect(applyLayer(gen, l, 2)).toEqual(gen)
   })
 
   it('holds a few changes as a small diff, and gives them back exactly', () => {
@@ -90,27 +90,27 @@ describe('the layer', () => {
     cur[idx(1, 2, 3)] = 0
     cur[idx(4, 5, 6)] = CHROME
     cur[idx(4, 5, 7)] = CHROME
-    const l = encodeLayer(gen, cur)
+    const l = encodeLayer(gen, cur, 0, 2)
     expect(l.form).toBe('diff')
     expect(JSON.stringify(l).length).toBeLessThan(140)
-    expect(applyLayer(gen, l)).toEqual(cur)
+    expect(applyLayer(gen, l, 2)).toEqual(cur)
   })
 
   it('is written whole when that is smaller, as when the ground is cleared and built over', () => {
     const cur = new Uint8Array(CELLS)
     for (let y = 0; y < 8; y++) for (let z = 0; z < 32; z++) for (let x = 0; x < 32; x++) cur[idx(x, y, z)] = SLATE
-    const l = encodeLayer(gen, cur)
+    const l = encodeLayer(gen, cur, 0, 2)
     expect(l.form).toBe('whole')
-    expect(JSON.stringify(l).length).toBeLessThan(JSON.stringify(diffLayer(gen, cur)).length)
-    expect(applyLayer(gen, l)).toEqual(cur)
-    expect(applyLayer(gen, wholeLayer(cur))).toEqual(cur)
+    expect(JSON.stringify(l).length).toBeLessThan(JSON.stringify(diffLayer(gen, cur, 0, 2)).length)
+    expect(applyLayer(gen, l, 2)).toEqual(cur)
+    expect(applyLayer(gen, wholeLayer(cur, 0, 2), 2)).toEqual(cur)
   })
 
   it('refuses what it cannot read rather than guessing', () => {
     const plane = { plane: 0, survey: true } as const
-    expect(applyLayer(gen, { ...plane, form: 'diff', pal: [null], cells: [0, -5] })).toBeNull()
-    expect(applyLayer(gen, { ...plane, ground: 999, form: 'diff', pal: [null], cells: [0, -(CELLS - 1)] })).toBeNull()
-    expect(applyLayer(gen, { ...plane, form: 'diff', pal: [null, 3], cells: [2, -(CELLS - 1)] })).toBeNull()
-    expect(applyLayer(gen, { ...plane, form: 'diff', pal: [5], cells: [0, -(CELLS - 1)] })).toBeNull()
+    expect(applyLayer(gen, { ...plane, form: 'diff', pal: [null], cells: [0, -5] }, 2)).toBeNull()
+    expect(applyLayer(gen, { ...plane, ground: 999, form: 'diff', pal: [null], cells: [0, -(CELLS - 1)] }, 2)).toBeNull()
+    expect(applyLayer(gen, { ...plane, form: 'diff', pal: [null, 3], cells: [2, -(CELLS - 1)] }, 2)).toBeNull()
+    expect(applyLayer(gen, { ...plane, form: 'diff', pal: [5], cells: [0, -(CELLS - 1)] }, 2)).toBeNull()
   })
 })

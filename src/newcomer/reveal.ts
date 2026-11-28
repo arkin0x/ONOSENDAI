@@ -67,6 +67,8 @@ export const REVEAL: Readonly<Record<RevealId, RevealAt>> = {
   'panel.targets': 'friend',
   'panel.links': 'straylight',
   'pad.modes': 'build-place',
+  // MINING comes in with the modes, TERRAIN among them.
+  'panel.mining': 'build-place',
   // HOSAKA's price comes in with the short trips; a job bought then is kept, resumed or discarded in Cloud compute.
   'panel.cloud': 'earth-pick',
   // Not part of the newcomer view: movement proof terms and expert panels.

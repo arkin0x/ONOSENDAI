@@ -105,14 +105,21 @@ export async function lookupOf(key: Uint8Array): Promise<string> {
 
 // ---------- the prize (§5.5) ----------
 
-/** A prize as sealed: a SNO object payload, or a tool (only the Compiler in this revision). */
-export type Prize = { type: 'sno'; payload: Record<string, unknown> } | { type: 'tool'; tool: 'compiler' }
+/**
+ * A prize as sealed: a SNO object payload, or a tool, the Compiler or Quarry
+ * Charges with an optional count, 1 when absent (§5.5). A tool is honoured
+ * only from a game recipe (§8.4): smash.ts passes over a record's tool prize.
+ */
+export type Prize = { type: 'sno'; payload: Record<string, unknown> } | { type: 'tool'; tool: 'compiler'; count?: number } | { type: 'tool'; tool: 'quarry-charge'; count?: number }
+
+/** How many of a tool a prize gives: its count, 1 when absent (§5.5). */
+export const toolCount = (p: { count?: number }): number => p.count ?? 1
 
 /** Whether an opened prize is one this client can show. A reader still keeps one it cannot (§5.5). */
 export function isPrize(v: unknown): v is Prize {
   const p = v as Prize | null
   if (!p || typeof p !== 'object') return false
-  if (p.type === 'tool') return p.tool === 'compiler'
+  if (p.type === 'tool') return (p.tool === 'compiler' || p.tool === 'quarry-charge') && (p.count === undefined || (Number.isInteger(p.count) && p.count >= 1))
   return p.type === 'sno' && !!p.payload && typeof p.payload === 'object' && !Array.isArray(p.payload)
 }
 

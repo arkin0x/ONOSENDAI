@@ -42,7 +42,8 @@ import {
   type FinderView, type RecordView,
 } from '../../lib/blueprint/format'
 import { takeToy } from '../../lib/blueprint/smashRun'
-import { GAME_MAKER, GAME_NO_DEPLOY, isGameCard } from '../../lib/blueprint/gameCard'
+import { GAME_MAKER, gameNoDeploy, isGameCard, isQuarryPrize, toolWhat } from '../../lib/blueprint/gameCard'
+import { quarryModelNow, useQuarryModel } from '../../lib/blueprint/quarryModel'
 import { ITEM_ORANGE, isItemBlueprint } from '../../lib/blueprint/itemMark'
 import { startPlaceBlueprint } from '../../lib/blueprint/place'
 import { useBlueprints } from '../../store/useBlueprints'
@@ -241,7 +242,7 @@ export function BlueprintRow({ card, views, fresh = false, focused = false, onAr
     <>
       <button className="chest__act" onClick={() => setExamining(true)} title="Every clue on one drafting sheet">EXAMINE</button>
       {/* The game's own is never placed: a plain line where PLACE HERE and PUT IN A CHEST would be. */}
-      {!card.archived && game && <span className="bp-items__gameline">{GAME_NO_DEPLOY}</span>}
+      {!card.archived && game && <span className="bp-items__gameline">{gameNoDeploy(card)}</span>}
       {!card.archived && !game && <button className="chest__act" onClick={() => place('here')} title="Leave it where you stand, for others to find. They each take a copy">PLACE HERE</button>}
       {!card.archived && !game && <button className="chest__act" onClick={() => place('chest')} title="Put a copy in one of your chests">PUT IN A CHEST</button>}
       {card.archived
@@ -290,6 +291,7 @@ export function BlueprintRow({ card, views, fresh = false, focused = false, onAr
 
 /** A prize's model, when it is a shard. */
 function prizeModel(toy: ToyRow): ReturnType<typeof fromPayload> | null {
+  if (isQuarryPrize(toy.prize)) return quarryModelNow()
   if (toy.prize.type !== 'sno') return null
   const s = fromPayload(toy.prize.payload, toy.rowKey)
   return s ? keepOwnTable(s, toy.maker) : null
@@ -297,7 +299,9 @@ function prizeModel(toy: ToyRow): ReturnType<typeof fromPayload> | null {
 
 /** A prize waiting to be taken: its picture, name, maker, and TAKE. */
 export function PrizeRow({ toy }: { toy: ToyRow }): JSX.Element {
-  const shard = useMemo(() => prizeModel(toy), [toy])
+  // The Quarry Charge's model is read on first use: drawn once it is in (quarryModel.ts).
+  const quarry = useQuarryModel(isQuarryPrize(toy.prize))
+  const shard = useMemo(() => prizeModel(toy), [toy, quarry])
   const [refusal, setRefusal] = useState<string | null>(null)
   const tool = toy.prize.type === 'tool'
   return (
@@ -311,7 +315,7 @@ export function PrizeRow({ toy }: { toy: ToyRow }): JSX.Element {
           <span className="held__src">by {toy.maker === 'game' ? 'a starter recipe' : <Who pubkey={toy.maker} />}</span>
           <span className="held__age">{' · built '}<span title={formatStamp(toy.made)}>{formatAgo(toy.made)}</span></span>
         </span>
-        <span className="bp-items__settings">{tool ? 'A tool. It sits in slot 1 for good.' : 'A shard. TAKE puts it in OTHER LOOT.'}</span>
+        <span className="bp-items__settings">{tool ? toolWhat(toy.prize) : 'A shard. TAKE puts it in OTHER LOOT.'}</span>
       </span>
       <span className="held__acts">
         <button className="chest__act bp-items__take" onClick={() => { if (!takeToy(toy.rowKey)) setRefusal('This prize could not be taken.') }} title="Take it into your ITEMS">

@@ -12,7 +12,11 @@
  * identity in IndexedDB (lib/terrain/terrainDb.ts; arkinox 2026-11-19: all
  * local data per npub): the op log of your changes, folded into layers as
  * DECK §5.5 planes (lib/terrain/layer.ts), the chunks surveyed, the
- * inventory and the first-visit hint. While LIVE, each chunk's changes are
+ * inventory and the first-visit hint. Each chunk you surveyed keeps the
+ * ground revision it was first surveyed at (DECK-0009 §3.10, §7.5;
+ * lib/terrain/groundRevision.ts), so its ground never shifts under a
+ * build: groundFor gives any chunk's ground at the revision you see it at.
+ * While LIVE, each chunk's changes are
  * shared as this device's block layer, and other builders' layers near you
  * are read and stacked with yours (store/terrainShare.ts, DECK-0009 §5 to
  * §7, the Stack); LOCAL shares nothing.
@@ -34,31 +38,37 @@
 import type { PadMode } from './padMode'
 import { create } from 'zustand'
 import { useCyberspace } from './useCyberspace'
+import { airPlacing, hintAirOff } from './airSwitch'
 import { useShards } from './useShards'
 import { useWalk } from './useWalk'
 import { walkLookDirection } from './walkFluid'
 import { BRIEF_TOAST_MS, useToast } from './useToast'
 import { setTerrainWalls } from './walkWalls'
 import { takeSceneTaps, usePad } from './usePad'
-import { chunkOf, chunkKey, type ChunkBase } from '../lib/terrain/coords'
+import { CELLS, chunkOf, chunkKey, parseChunkKey, type ChunkBase } from '../lib/terrain/coords'
 import { RING, TerrainWorld, REACH, type Change, type ChunkSlot } from '../lib/terrain/world'
-import { applyLayer, encodeLayer, isLayer, type Layer } from '../lib/terrain/layer'
+import { applyLayer, encodeLayer, isLayer, layerRevision, rebaseBlocks, type Layer } from '../lib/terrain/layer'
+import type { GroundFacts } from '../lib/terrain/assay'
 import { generateChunk } from '../lib/terrain/blocksClient'
+import { groundWriteRevision, type GroundRevision } from '../lib/terrain/groundRevision'
 import { EMPTY, blockName, kindId, solid as isSolid } from '../lib/terrain/blocks'
 import { terrainWallItems } from '../lib/terrain/walls'
 import {
-  FOLD_AT, HOTBAR_SLOTS, emptyInventory, foldChunk, isCompiler, openTerrainDb, opKey, readKept, readOwner, withCompiler, withoutCompiler, writeHint, writeInventory, writeOps, writeSurveyed,
-  type Inventory, type OpRow,
+  FOLD_AT, HOTBAR_SLOTS, carriedInto, emptyInventory, foldChunk, isCompiler, isQuarry, openTerrainDb, opKey, placeable, readKept, readOwner, withCharges, withCompiler, withoutCompiler, writeHint, writeInventory, writeOps, writeSurveyed,
+  type ChunkSurvey, type Inventory, type OpRow,
 } from '../lib/terrain/terrainDb'
 import { compilerGranted } from '../lib/blueprint/devGrant'
 import type { Position, ViewAxes } from '../lib/space'
 import type { RayHit } from '../lib/terrain/raycast'
 import { airProblem, bodyCells, placeTarget, type Cell } from '../lib/terrain/airPlace'
 import {
-  applyCarried, connectShareHost, fieldClosing, liveChanged, noteChange, noteChanges, noteMove, prepareChunk, READ_RING, identityLeaving, readNear, sharedKeys, surveyedForYou, terrainClosed, terrainOpened, viewOf,
+  addExplicit, applyCarried, connectShareHost, explicitCells, fieldClosing, liveChanged, noteChange, noteChanges, noteMove, othersRevision, prepareChunk, publishedPlane, READ_RING, identityLeaving,
+  readNear, sharedKeys, shownFromBase, shownRevision, surveyedForYou, terrainClosed, terrainOpened, viewOf,
 } from './terrainShare'
 import { loadBuilder, releaseBuilderDb } from '../lib/terrain/builderKey'
+import { quarryHooks } from './quarryHooks'
 import './terrainShareLive'
+import { noteMining } from './miningStats'
 
 /** The first-visit hint's steps: mine one, place one, open the inventory; then done. */
 export const HINT_DONE = 3
@@ -90,6 +100,8 @@ export interface TerrainSession {
   layers: Map<string, Layer>
   /** Every chunk this identity has surveyed, by key (the coordinate): the lookup that finds them wherever you are. */
   surveyedKeys: Set<string>
+  /** Each surveyed chunk's ground revision and first survey's date (DECK-0009 §7.5): kept from its first survey on. */
+  revisions: Map<string, ChunkSurvey>
   /** Chunks whose stored layer this build cannot read: drawn as the bare ground and never folded, so the layer is never overwritten. */
   unreadable: Set<string>
   /** Chunks being read and generated. */
@@ -100,7 +112,18 @@ export interface TerrainSession {
   version: number
   /** What the identity kept is read (the inventory, the surveyed list). */
   ready: Promise<void>
+  /**
+   * What it kept, as TERRAIN's inventory in memory stands to it: 'loading'
+   * while the saved inventory is still being read (the inventory in memory is
+   * then the field before's, and the read overwrites it), 'ready' once read,
+   * 'memory' when IndexedDB could not be opened (kept in memory for this
+   * visit). Absent counts as ready (a field made by hand, in tests).
+   */
+  kept?: 'loading' | 'ready' | 'memory'
 }
+
+/** Whether a field's saved inventory is read (or there is none to read), so TERRAIN's inventory in memory is its own. */
+export const fieldLoaded = (s: Pick<TerrainSession, 'kept'> | null): boolean => !!s && s.kept !== 'loading'
 
 /** The field, or null before one is made (by syncTerrain). */
 export let terrainSession: TerrainSession | null = null
@@ -157,6 +180,19 @@ export interface TerrainState {
   assignSlot: (id: number, slot?: number) => void
   /** The Compiler joins the bar in slot 1, kept for good (made from its recipe: lib/blueprint/smash.ts). */
   gainCompiler: () => void
+  /** `n` more Quarry Charges (a compile of its recipe gives 7: lib/blueprint/smash.ts); they join the bar after the Compiler, kept for good. */
+  gainCharges: (n: number) => void
+  /** `n` more blocks of kind `id` carried (a drop picked up: store/useQuarry.ts), as mining carries them. */
+  carry: (id: number, n?: number) => void
+  /**
+   * A Quarry Charge's blast (lib/terrain/quarry.ts): every cell given that
+   * mining could take (in reach, in a chunk you can build in, holding a
+   * block), cleared as edits in your own layer in one batch, as mining
+   * would; the rest left as they are. Carries nothing: what mining would have
+   * carried comes back as the `carry` of each cell taken (0 for nothing),
+   * for the drops. `id` is the block as it was drawn, for the shatter.
+   */
+  blast: (cells: ReadonlyArray<readonly [number, number, number]>) => Array<{ at: [number, number, number]; id: number; carry: number }>
   /**
    * Clear cells (cs offsets) to open space as edits in your own layer, as
    * mining would but carrying nothing: a smash spends its blocks (lib/blueprint/smash.ts).
@@ -172,6 +208,12 @@ let messageTimer: ReturnType<typeof setTimeout> | undefined
 /** Persist quietly: a failed write keeps the session going in memory. */
 function keep(p: Promise<void> | undefined): void {
   void p?.catch(() => { /* kept in memory for this session */ })
+}
+
+/** Whether the Compiler is the chosen slot (otherwise the hand is bare: lib/blueprint/smash.ts). */
+export function compilerInHand(): boolean {
+  const inv = useTerrain.getState().inventory
+  return isCompiler(inv.hotbar[inv.slot])
 }
 
 /** Where you are, as the field loads round it and reach is measured from it: the walk's gibson (the cursor) while walking, your head otherwise. */
@@ -198,17 +240,57 @@ export function slotInReach(s: Pick<TerrainSession, 'world'>, key: string, head:
   return TerrainWorld.inReach(32 * sl.off[0], 32 * sl.off[1], 32 * sl.off[2], offsetOf(s, head))
 }
 
+/** The plain words for PLACE with the charges chosen and none left. */
+export const NO_CHARGES = 'No Quarry Charges left: compile more from the Quarry Charge blueprint.'
+
+// Where a Quarry Charge is armed (store/quarryHooks.ts; store/useQuarry.ts sets it).
+export { quarryHooks } from './quarryHooks'
+
 /** The plain words for a block out of reach. */
 export const OUT_OF_REACH = `Too far from your avatar: you build within ${REACH} blocks of it. Hop closer to build here.`
 
-/** Apply a chunk's folded layer and its waiting log over its generated ground. */
-function builtBlocks(s: TerrainSession, key: string, generated: Uint8Array): Uint8Array {
+const nowSeconds = (): number => Math.floor(Date.now() / 1000)
+
+/**
+ * Apply a chunk's folded layer and its waiting log over its generated ground
+ * (`generated`, at `revision`). A layer kept against another revision's
+ * ground (`layerGround`, at the layer's own revision) is read over that one,
+ * and the cells it never changed take this one's (layer.ts rebaseBlocks).
+ */
+function builtBlocks(s: TerrainSession, key: string, generated: Uint8Array, revision: GroundRevision, layerGround: Uint8Array | null = null): Uint8Array {
   const layer = s.layers.get(key)
-  const applied = layer ? applyLayer(generated, layer) : null
+  const lr = layer ? layerRevision(layer) : null
+  let applied: Uint8Array | null = null
+  if (layer && (lr === revision || (lr === null && layer.form === 'whole'))) applied = applyLayer(generated, layer, revision)
+  else if (layer && lr !== null && layerGround) {
+    const at = applyLayer(layerGround, layer, lr)
+    applied = at && rebaseBlocks(at, layerGround, generated)
+    // A cell you changed to what is now this revision's ground stays a change (§5.4), as after a merge (host.rebase).
+    if (at) {
+      const kept: number[] = []
+      for (let c = 0; c < CELLS; c++) if (at[c] !== layerGround[c] && at[c] === generated[c]) kept.push(c)
+      if (kept.length) addExplicit(key, kept)
+    }
+  }
   if (layer && !applied) s.unreadable.add(key)
   const blocks = applied ?? generated.slice()
   for (const { change } of s.pending.get(key) ?? []) blocks[change.cell] = change.id
   return blocks
+}
+
+/**
+ * What mining a cell carries: your own block there, or, where you never
+ * changed it and it shows the base (no layer changed it), the base you were
+ * shown: the ground at the base revision, which is not your own revision's
+ * where someone who ranks above you surveyed at another (a home owner, or
+ * another device of yours that surveyed first). So what you carry is what
+ * you saw, as the mining stats record it. `shown` is the cell as drawn.
+ */
+function yieldOf(slot: ChunkSlot & { own: Uint8Array }, cell: number, shown: number): number {
+  const yours = slot.own[cell]
+  // The common case first: a cell you changed, or a base at your own revision, gives your own block.
+  if (!slot.generated || yours !== slot.generated[cell] || shownRevision(slot.key) === (slot.revision ?? 2)) return yours
+  return shownFromBase(slot.key, cell) && !explicitCells(slot.key).has(cell) ? shown : yours
 }
 
 /**
@@ -225,13 +307,17 @@ function surveyShown(s: TerrainSession, slot: ChunkSlot | null): slot is ChunkSl
   if (slot.own) return true
   if (!slot.generated || !slot.inSpace || s.building.has(slot.key) || !surveyedForYou(slot.key)) return false
   s.surveyedKeys.add(slot.key)
-  const own = builtBlocks(s, slot.key, slot.generated)
-  applyCarried(slot.key, own, slot.generated)
+  // Your survey takes the revision it is surveyed at for you: the ground you are shown (§3.10), kept from now on.
+  const revision = slot.revision ?? 2
+  const at: ChunkSurvey = s.revisions.get(slot.key) ?? { revision, surveyed: nowSeconds() }
+  s.revisions.set(slot.key, at)
+  const own = builtBlocks(s, slot.key, slot.generated, revision)
+  applyCarried(slot.key, own, slot.generated, revision)
   slot.own = own
-  if (s.db) keep(writeSurveyed(s.db, s.owner, slot.key, Date.now()))
+  if (s.db) keep(writeSurveyed(s.db, s.owner, slot.key, Date.now(), at))
   // The survey is shared like any change (DECK-0009 §3.1), with the change about to be made.
   noteChange(slot.key)
-  s.world.setBlocks(slot.key, slot.generated, viewOf(slot.key, slot.generated, own))
+  s.world.setBlocks(slot.key, slot.generated, viewOf(slot.key, slot.generated, own, revision, at.surveyed))
   s.version++
   return true
 }
@@ -296,18 +382,24 @@ export const useTerrain = create<TerrainState>((set, get) => ({
     if (slot.own || s.building.has(key)) return
     if (!slotInReach(s, key)) { get().say(OUT_OF_REACH); return }
     set({ surveying: [...get().surveying, key] })
+    // A first survey takes the base revision others' surveys give you, else the revision this release writes (§3.10).
+    const had = s.revisions.get(key)
+    const at: ChunkSurvey = had ?? { revision: othersRevision(key) ?? groundWriteRevision(), surveyed: nowSeconds() }
     try {
       s.surveyedKeys.add(key)
+      s.revisions.set(key, at)
       await build(s, slot)
       if (terrainSession !== s) return
-      if (s.db) keep(writeSurveyed(s.db, s.owner, key, Date.now()))
+      if (s.db) keep(writeSurveyed(s.db, s.owner, key, Date.now(), s.revisions.get(key) ?? at))
       // A survey is shared like any change (DECK-0009 §3.1).
       noteChange(key)
       clearWalker(s, key)
       count('surveyed')
+      noteMining({ type: 'survey', chunk: key }, s.owner)
       get().say('Terrain revealed from cyberspace\'s structure.')
     } catch {
       s.surveyedKeys.delete(key)
+      if (!had) s.revisions.delete(key)
       get().say('That chunk could not be surveyed. Try again.')
     } finally {
       set({ surveying: get().surveying.filter((k) => k !== key) })
@@ -324,31 +416,28 @@ export const useTerrain = create<TerrainState>((set, get) => ({
     // A chunk someone else surveyed is yours to build in at once (surveyShown); one nobody surveyed is never drawn.
     const at = s.world.locate(dx, dy, dz)
     if (!surveyShown(s, at.slot)) { get().say('Survey this chunk before building in it.'); return false }
-    // What is yours in that cell: someone else's block mined is gone for you (and for whoever ranks you first), never carried.
-    const yours = at.slot.own[at.cell]
+    // What is yours in that cell: someone else's block mined is gone for you (and for whoever ranks you first), never carried; the base you were shown is.
+    const yours = yieldOf(at.slot, at.cell, id)
     const change = s.world.setCs(dx, dy, dz, EMPTY)
     if (!change) return false
     record(s, change)
     advanceHint(0)
     count('mined')
+    noteMining({ type: 'mine', kind: kindId(id) }, s.owner)
     // What it carries as: its kind's own id. A block this client has no kind for is mined, and carried as nothing.
     if (yours <= EMPTY) return true
     const was = kindId(yours)
     if (was === 255) return true
-    const inv = get().inventory
-    const counts = { ...inv.counts, [was]: (inv.counts[was] ?? 0) + 1 }
-    let hotbar = inv.hotbar
-    // A kind newly carried takes the first empty slot, so it is ready to place.
-    if (!hotbar.includes(was)) {
-      const free = hotbar.indexOf(0)
-      if (free >= 0) { hotbar = [...hotbar]; hotbar[free] = was }
-    }
-    // With an empty slot chosen, the kind just mined is chosen instead.
-    const slot = hotbar[inv.slot] === 0 && hotbar.includes(was) ? hotbar.indexOf(was) : inv.slot
-    // Everything else the inventory holds (the Compiler and how it came) stays: dropping it here hid the held Compiler
-    // until a reload (owner, 2026-11-27), and a reload then lost a made one.
-    saveInventory({ ...inv, counts, hotbar, slot })
+    get().carry(was)
     return true
+  },
+
+  carry: (id, n = 1) => {
+    const inv = get().inventory
+    // Everything else the inventory holds (the Compiler and how it came, the charges) stays (terrainDb.ts carriedInto):
+    // dropping it here hid the held Compiler until a reload (owner, 2026-11-27), and a reload then lost a made one.
+    const next = carriedInto(inv, id, n)
+    if (next !== inv) saveInventory(next)
   },
 
   place: (hit, air) => {
@@ -356,11 +445,17 @@ export const useTerrain = create<TerrainState>((set, get) => ({
     if (!s) return false
     // A hit always comes first; with none, the ghost's cell in open air.
     const target = placeTarget(hit, hit ? null : air?.cell ?? null)
-    if (!target) return false
     const inv = get().inventory
     const id = inv.hotbar[inv.slot]
+    if (!target) {
+      // Nothing at the cross with air placing switched off (store/airSwitch.ts): nothing happens, and the first time a
+      // page, one quiet word on turning it back on, never a message at every press.
+      if (!hit && !airPlacing() && placeable(inv) !== null) hintAirOff(get().say)
+      return false
+    }
     if (isCompiler(id)) { get().say('The Compiler is in your hand: choose a block to place.'); return false }
-    if (!id || !(inv.counts[id] > 0)) { get().say(id ? `No ${blockName(id)} left: mine some first.` : 'Nothing to place: mine a block first.'); return false }
+    if (isQuarry(id) && !((inv.charges ?? 0) > 0)) { get().say(NO_CHARGES); return false }
+    if (!isQuarry(id) && (!id || !(inv.counts[id] > 0))) { get().say(id ? `No ${blockName(id)} left: mine some first.` : 'Nothing to place: mine a block first.'); return false }
     const cell = target.cell
     const [dx, dy, dz] = cell
     if (target.kind === 'air') {
@@ -375,6 +470,13 @@ export const useTerrain = create<TerrainState>((set, get) => ({
     // Never where you stand: the walk's own gibson. Asked first, so a refused place never surveys the chunk for you.
     if (walkerAt(s, cell)) { get().say('You are standing there: step back to place it.'); return false }
     if (!surveyShown(s, slot)) { get().say('Survey this chunk before building in it.'); return false }
+    if (isQuarry(id)) {
+      // A charge is placed like a block but is not one: it arms where it stands and writes nothing until its blast (store/useQuarry.ts).
+      if (quarryHooks.chargeAt?.(cell)) { get().say('A charge is already there.'); return false }
+      if (!quarryHooks.arm?.(cell)) return false
+      saveInventory(withCharges(inv, (inv.charges ?? 0) - 1))
+      return true
+    }
     // Stored and shared as every placed block is: one change in your layer, whether or not it touches another block.
     const change = s.world.setCs(dx, dy, dz, id)
     if (!change) return false
@@ -386,6 +488,7 @@ export const useTerrain = create<TerrainState>((set, get) => ({
     saveInventory({ ...inv, counts })
     advanceHint(1)
     count('placed')
+    noteMining({ type: 'place', air: target.kind === 'air' }, s.owner)
     return true
   },
 
@@ -399,8 +502,9 @@ export const useTerrain = create<TerrainState>((set, get) => ({
     const inv = get().inventory
     const at = slot ?? inv.slot
     if (at < 0 || at >= HOTBAR_SLOTS) return
-    // Slot 1 holds the Compiler for good once it is made (owner, 2026-11-27).
+    // Slot 1 holds the Compiler for good once it is made (owner, 2026-11-27), and the charges keep theirs.
     if (isCompiler(inv.hotbar[at])) { get().say('Slot 1 holds the Compiler: choose another slot.'); return }
+    if (isQuarry(inv.hotbar[at])) { get().say(`Slot ${at + 1} holds the Quarry Charges: choose another slot.`); return }
     const hotbar = inv.hotbar.map((h) => (h === id ? 0 : h))
     hotbar[at] = id
     saveInventory({ ...inv, hotbar, slot: at })
@@ -409,6 +513,35 @@ export const useTerrain = create<TerrainState>((set, get) => ({
 
   gainCompiler: () => {
     saveInventory(withCompiler(get().inventory, 'made'))
+  },
+
+  gainCharges: (n) => {
+    const inv = get().inventory
+    saveInventory(withCharges(inv, (inv.charges ?? 0) + Math.max(0, Math.floor(n))))
+  },
+
+  blast: (cells) => {
+    const s = terrainSession
+    const out: Array<{ at: [number, number, number]; id: number; carry: number }> = []
+    if (!s) return out
+    const changes: Change[] = []
+    for (const c of cells) {
+      // What mining asks of each cell (mine above): in reach, a block there, a chunk you can build in.
+      if (!cellInReach(s, c)) continue
+      const id = s.world.blockCs(c[0], c[1], c[2])
+      if (id <= EMPTY) continue
+      const at = s.world.locate(c[0], c[1], c[2])
+      if (!surveyShown(s, at.slot)) continue
+      // What is yours in that cell: someone else's block taken is gone for you, never carried; the base you were shown is.
+      const yours = yieldOf(at.slot, at.cell, id)
+      const change = s.world.setCs(c[0], c[1], c[2], EMPTY)
+      if (!change) continue
+      changes.push(change)
+      const carry = yours > EMPTY ? kindId(yours) : 0
+      out.push({ at: [c[0], c[1], c[2]], id, carry: carry === 255 ? 0 : carry })
+    }
+    recordMany(s, changes)
+    return out
   },
 
   clear: (cells) => {
@@ -499,8 +632,8 @@ async function foldKey(s: TerrainSession, key: string): Promise<void> {
   const own = slot?.own
   if (!slot?.generated || !own || !list || list.length === 0) return
   if (s.unreadable.has(key)) return
-  // Your own blocks alone, never what others shared: your layer says only what you changed.
-  const layer = encodeLayer(slot.generated, own, s.plane === 1 ? 1 : 0)
+  // Your own blocks alone, never what others shared: your layer says only what you changed, against the chunk's own revision.
+  const layer = encodeLayer(slot.generated, own, s.plane === 1 ? 1 : 0, slot.revision ?? 2)
   s.layers.set(key, layer)
   const seqs = list.map((p) => p.seq)
   s.pending.delete(key)
@@ -566,7 +699,28 @@ function advanceHint(from: number): void {
   if (s?.db) keep(writeHint(s.db, s.owner, step))
 }
 
-/** Read a surveyed chunk's layer and log, generate its ground, and put its blocks in the world. */
+/**
+ * The ground revision a chunk is built at here (DECK-0009 §3.10, §7.5).
+ * Where you surveyed it: what your published layer names (carried forward),
+ * else what this device kept from your first survey, else your layer's, else
+ * 2 (every chunk surveyed before revision 3). Where you did not: the base
+ * others' surveys give you, else the revision a fresh survey writes.
+ */
+function chunkRevision(s: TerrainSession, key: string): GroundRevision {
+  if (!s.surveyedKeys.has(key)) return othersRevision(key) ?? groundWriteRevision()
+  const kept = s.revisions.get(key)
+  const layer = s.layers.get(key)
+  const pub = publishedPlane(key)
+  const revision = pub?.revision ?? kept?.revision ?? (layer ? layerRevision(layer) : null) ?? 2
+  if (!kept || kept.revision !== revision) {
+    const at: ChunkSurvey = { revision, surveyed: pub?.surveyed ?? kept?.surveyed ?? nowSeconds() }
+    s.revisions.set(key, at)
+    if (kept && s.db) keep(writeSurveyed(s.db, s.owner, key, Date.now(), at))
+  }
+  return revision
+}
+
+/** Read a surveyed chunk's layer and log, generate its ground at its revision, and put its blocks in the world. */
 async function build(s: TerrainSession, slot: ChunkSlot): Promise<void> {
   if (!slot.inSpace || s.building.has(slot.key)) return
   s.building.add(slot.key)
@@ -581,15 +735,25 @@ async function build(s: TerrainSession, slot: ChunkSlot): Promise<void> {
         if (ops.length) s.pending.set(slot.key, ops.map((op) => ({ seq: op.seq, change: { chunk: op.chunk, cell: op.cell, id: op.id, was: EMPTY } })))
       }
     }
-    const g = await generateChunk(slot.base)
+    // What your published layer names here is read first: the revision it names is the chunk's (§3.10).
     await prepareChunk(slot.key)
+    if (terrainSession !== s) return
+    const revision = chunkRevision(s, slot.key)
+    const g = await generateChunk(slot.base, revision)
+    // A layer kept against the other revision's ground is read over that one.
+    const layer = s.surveyedKeys.has(slot.key) ? s.layers.get(slot.key) : undefined
+    const lr = layer ? layerRevision(layer) : null
+    const lg = lr !== null && lr !== revision ? (await generateChunk(slot.base, lr)).blocks : null
     if (terrainSession !== s || s.world.slotByKey(slot.key) !== slot) return
     // Your own blocks where you surveyed, and everyone else's shared layers under them (store/terrainShare.ts).
-    const own = s.surveyedKeys.has(slot.key) ? builtBlocks(s, slot.key, g.blocks) : null
+    const own = s.surveyedKeys.has(slot.key) ? builtBlocks(s, slot.key, g.blocks, revision, lg) : null
     // Blocks a new key carried in from your other keys' layers (store/terrainShare.ts, DECK-0009 §5.6) are yours here.
-    if (own) applyCarried(slot.key, own, g.blocks)
+    if (own) applyCarried(slot.key, own, g.blocks, revision)
     slot.own = own
-    s.world.setBlocks(slot.key, g.blocks, viewOf(slot.key, g.blocks, own))
+    // What the generator said of this ground at this revision (its type and hardness), for the survey card (lib/terrain/assay.ts).
+    slot.ground = typeof g.family === 'string' ? { family: g.family, maxK: g.maxK, meanK: g.meanK, top: g.top } : null
+    s.world.setBlocks(slot.key, g.blocks, viewOf(slot.key, g.blocks, own, revision, s.revisions.get(slot.key)?.surveyed))
+    slot.revision = revision
     s.version++
     useTerrain.setState({ waiting: countWaiting(s) })
   } finally {
@@ -601,8 +765,8 @@ async function build(s: TerrainSession, slot: ChunkSlot): Promise<void> {
 function makeField(owner: string, plane: number, at: Position): TerrainSession {
   const world = new TerrainWorld(chunkOf(at.x, at.y, at.z, plane), CS_AXES)
   const s: TerrainSession = {
-    owner, plane, world, pending: new Map(), layers: new Map(), surveyedKeys: new Set(), unreadable: new Set(), building: new Set(),
-    nextSeq: 1, db: null, version: 0, ready: Promise.resolve(),
+    owner, plane, world, pending: new Map(), layers: new Map(), surveyedKeys: new Set(), revisions: new Map(), unreadable: new Set(), building: new Set(),
+    nextSeq: 1, db: null, version: 0, ready: Promise.resolve(), kept: 'loading',
   }
   s.ready = (async () => {
     let db: IDBDatabase | null = null
@@ -612,6 +776,7 @@ function makeField(owner: string, plane: number, at: Position): TerrainSession {
       // The database joins the field only once what it kept is read: a change in between never overwrites the saved inventory.
       if (terrainSession !== s) { db.close(); return }
       for (const k of kept.surveyed) s.surveyedKeys.add(k)
+      for (const [k, at] of kept.revisions) s.revisions.set(k, at)
       s.nextSeq = Math.max(s.nextSeq, kept.nextSeq)
       s.db = db
       await loadBuilder(db, owner).catch(() => undefined)
@@ -620,8 +785,12 @@ function makeField(owner: string, plane: number, at: Position): TerrainSession {
       if (compilerGranted() && !inventory.compiler) inventory = withCompiler(inventory, 'granted')
       else if (!compilerGranted() && inventory.compiler === 'granted') inventory = withoutCompiler(inventory)
       useTerrain.setState({ inventory, hint: kept.hint })
+      s.kept = 'ready'
+      for (const f of quarryHooks.fieldReady) { try { f(s) } catch { /* one listener failing never stops the field */ } }
     } catch {
       db?.close()
+      // No storage here (a private window, a refusal): the inventory in memory is this visit's own, never overwritten.
+      if (terrainSession === s) s.kept = 'memory'
     }
   })()
   return s
@@ -771,6 +940,20 @@ export function hereSurveyedBy(s: TerrainSession | null = terrainSession): 'you'
 }
 
 /**
+ * The chunk you stand in when it is surveyed for you (by you, or counted as
+ * surveyed from someone else's layer) and its blocks are in: the one SURVEY's
+ * button offers the survey card for (terrain/SurveyCard.tsx). Null otherwise.
+ */
+export function cardChunkHere(s: TerrainSession | null = terrainSession): string | null {
+  if (!s) return null
+  const w = offsetOf(s, headNow())
+  const here = s.world.slotAtCs(w[0], w[1], w[2])
+  // Its blocks stay drawn while it is built again (a reground at another revision): CARD stays with them (review of #956).
+  if (!here || !here.inSpace || !here.blocks) return null
+  return s.surveyedKeys.has(here.key) || surveyedForYou(here.key) ? here.key : null
+}
+
+/**
  * Whether TERRAIN can open now, and if not, why in plain words: at your own
  * head, nothing lined up to place.
  */
@@ -823,20 +1006,85 @@ useCyberspace.subscribe((c, prev) => {
 useTerrain.subscribe((t, prev) => { if (t.active !== prev.active) follow() })
 publishWalls()
 
-/** Draw a chunk again with what is shared there now (store/terrainShare.ts), or load it when it is not held. */
+/**
+ * Draw a chunk again with what is shared there now (store/terrainShare.ts),
+ * or load it when it is not held. A chunk you never surveyed is drawn over
+ * the base others' surveys give you, so when that base moves to another
+ * revision (a survey that ranks higher for you came in), its ground is made
+ * again at it.
+ */
 function redisplay(key: string): void {
   const s = terrainSession
   if (!s) return
   const slot = s.world.slotByKey(key)
   if (!slot?.generated) { void syncTerrain(); return }
-  s.world.setBlocks(key, slot.generated, viewOf(key, slot.generated, slot.own ?? null))
+  if (!slot.own && !s.building.has(key)) {
+    const want = othersRevision(key)
+    if (want !== null && want !== (slot.revision ?? 2)) { void reground(s, slot, want); return }
+  }
+  s.world.setBlocks(key, slot.generated, viewOf(key, slot.generated, slot.own ?? null, slot.revision ?? 2, s.revisions.get(key)?.surveyed))
   s.version++
+}
+
+/** A chunk you never surveyed, drawn again over its ground at another revision (redisplay). */
+async function reground(s: TerrainSession, slot: ChunkSlot, revision: GroundRevision): Promise<void> {
+  if (s.building.has(slot.key)) return
+  s.building.add(slot.key)
+  try {
+    const g = await generateChunk(slot.base, revision)
+    if (terrainSession !== s || s.world.slotByKey(slot.key) !== slot || slot.own) return
+    s.world.setBlocks(slot.key, g.blocks, viewOf(slot.key, g.blocks, null, revision))
+    slot.revision = revision
+    s.version++
+  } catch { /* drawn as it was; the next read tries again */ } finally {
+    s.building.delete(slot.key)
+  }
+}
+
+/** A chunk key, from a key or a chunk base. */
+const keyOf = (chunk: string | ChunkBase): string => (typeof chunk === 'string' ? chunk : chunkKey(chunk))
+
+/**
+ * The ground revision you see a chunk at (DECK-0009 §3.10, §7.5): the base
+ * it is drawn over; where you surveyed it, the revision it keeps; where
+ * someone else did, the base their surveys give you; and where nobody did,
+ * the revision a survey of yours would reveal now.
+ */
+export function groundRevisionFor(chunk: string | ChunkBase, s: TerrainSession | null = terrainSession): GroundRevision {
+  const key = keyOf(chunk)
+  const shown = shownRevision(key)
+  if (shown !== null) return shown
+  if (s?.surveyedKeys.has(key)) return s.revisions.get(key)?.revision ?? 2
+  return othersRevision(key) ?? groundWriteRevision()
+}
+
+/**
+ * A chunk's generated ground, block id per cell (coords.ts idx order), at the
+ * revision you see it at (groundRevisionFor): the one API for the ground of
+ * a chunk, so nothing counts or draws a revision the chunk is not. A copy:
+ * the caller may keep or change it. With it, what the generator said of that
+ * ground (its type and terrain K, lib/terrain/assay.ts GroundFacts), for the
+ * survey card.
+ */
+export async function groundFor(chunk: string | ChunkBase): Promise<{ revision: GroundRevision; blocks: Uint8Array; base: ChunkBase; facts: GroundFacts | null }> {
+  const key = keyOf(chunk)
+  const base = typeof chunk === 'string' ? parseChunkKey(chunk) : chunk
+  if (!base) throw new Error(`not a chunk: ${key}`)
+  const s = terrainSession
+  const revision = groundRevisionFor(key, s)
+  const slot = s?.world.slotByKey(key)
+  if (slot?.generated && (slot.revision ?? 2) === revision && slot.ground !== undefined) return { revision, blocks: slot.generated.slice(), base, facts: slot.ground }
+  const g = await generateChunk(base, revision)
+  return { revision, blocks: g.blocks, base, facts: typeof g.family === 'string' ? { family: g.family, maxK: g.maxK, meanK: g.meanK, top: g.top } : null }
 }
 
 connectShareHost({
   field: () => {
     const s = terrainSession
-    return s ? { owner: s.owner, plane: s.plane, db: s.db, slot: (key) => s.world.slotByKey(key), surveyed: (key) => s.surveyedKeys.has(key) } : null
+    return s ? {
+      owner: s.owner, plane: s.plane, db: s.db, slot: (key) => s.world.slotByKey(key), surveyed: (key) => s.surveyedKeys.has(key),
+      surveyedAt: (key) => (s.surveyedKeys.has(key) ? s.revisions.get(key)?.surveyed : undefined),
+    } : null
   },
   head: headNow,
   active: () => useTerrain.getState().active,
@@ -849,8 +1097,35 @@ connectShareHost({
     // Another key's blocks a new key started from (store/terrainShare.ts, DECK-0009 §5.6): yours on this device now.
     for (const [c, v] of cells) slot.own[c] = Math.min(v, 255)
     for (const { change } of s.pending.get(key) ?? []) slot.own[change.cell] = change.id
-    const layer = encodeLayer(slot.generated, slot.own, s.plane === 1 ? 1 : 0)
+    const layer = encodeLayer(slot.generated, slot.own, s.plane === 1 ? 1 : 0, slot.revision ?? 2)
     s.layers.set(key, layer)
+    if (s.db) await foldChunk(s.db, s.owner, key, layer, [], Date.now()).catch(() => { /* kept in memory */ })
+    redisplay(key)
+  },
+  rebase: async (key, revision, surveyed, changed) => {
+    const s = terrainSession
+    const slot = s?.world.slotByKey(key)
+    if (!s || !slot?.generated || !slot.own || (slot.revision ?? 2) === revision) return
+    const g = (await generateChunk(slot.base, revision)).blocks
+    if (terrainSession !== s || s.world.slotByKey(key) !== slot || !slot.own || !slot.generated) return
+    // Every cell you changed keeps its value (the ones named, and any other your blocks hold); the rest take the new ground.
+    const was = slot.generated
+    const explicit = explicitCells(key)
+    const kept = new Set(changed)
+    for (let c = 0; c < CELLS; c++) if (slot.own[c] !== was[c] || explicit.has(c)) kept.add(c)
+    const own = new Uint8Array(CELLS)
+    for (let c = 0; c < CELLS; c++) own[c] = kept.has(c) ? slot.own[c] : g[c]
+    // A change of yours that is now the ground's value stays a change (§5.4).
+    addExplicit(key, [...kept].filter((c) => own[c] === g[c]))
+    slot.own = own
+    slot.generated = g
+    slot.revision = revision
+    const at: ChunkSurvey = { revision, surveyed }
+    s.revisions.set(key, at)
+    if (s.db) keep(writeSurveyed(s.db, s.owner, key, Date.now(), at))
+    const layer = encodeLayer(g, own, s.plane === 1 ? 1 : 0, revision)
+    s.layers.set(key, layer)
+    s.unreadable.delete(key)
     if (s.db) await foldChunk(s.db, s.owner, key, layer, [], Date.now()).catch(() => { /* kept in memory */ })
     redisplay(key)
   },

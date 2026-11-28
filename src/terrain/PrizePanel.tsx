@@ -12,7 +12,9 @@
 
 import { ITEM_ORANGE, isItemPrize } from '../lib/blueprint/itemMark'
 import { useEffect, useMemo, useState } from 'react'
-import { Boxes, EyeOff, Hammer, PackageCheck, Sparkles } from 'lucide-react'
+import { Bomb, Boxes, EyeOff, Hammer, PackageCheck, Sparkles } from 'lucide-react'
+import { isQuarryPrize, toolWhat } from '../lib/blueprint/gameCard'
+import { quarryModelNow, useQuarryModel } from '../lib/blueprint/quarryModel'
 import { fromPayload } from 'sno-core/shards'
 import { useBlueprints } from '../store/useBlueprints'
 import { prizeName, usePrizePick } from '../store/usePrizePick'
@@ -89,6 +91,7 @@ export function PrizeStrip({ here }: { here: ToyRow[] }): JSX.Element | null {
 }
 
 function prizeModel(toy: ToyRow): ReturnType<typeof fromPayload> | null {
+  if (isQuarryPrize(toy.prize)) return quarryModelNow()
   if (toy.prize.type !== 'sno') return null
   const s = fromPayload(toy.prize.payload, toy.rowKey)
   return s ? keepOwnTable(s, toy.maker) : null
@@ -100,21 +103,23 @@ export function PrizeCard(): JSX.Element | null {
   const toy = useBlueprints((s) => s.toys.find((t) => t.rowKey === key) ?? null)
   const close = (): void => usePrizePick.getState().select(null)
   useModalStack(!!toy, close)
-  const shard = useMemo(() => (toy ? prizeModel(toy) : null), [toy])
+  // The Quarry Charge's model is read on first use: drawn once it is in (quarryModel.ts).
+  const quarry = useQuarryModel(!!toy && isQuarryPrize(toy.prize))
+  const shard = useMemo(() => (toy ? prizeModel(toy) : null), [toy, quarry])
   if (!toy) return null
   return (
     <Stacked>
       <div className="modal prize-modal" role="dialog" aria-modal="true" aria-label={prizeName(toy)} onPointerDown={close}>
         <div className="modal__card prize-card" onPointerDown={(e) => e.stopPropagation()} style={{ ['--prize-glow' as string]: toy.maker === 'game' ? '#ff9a3c' : authorColour(toy.maker) }}>
           <div className="prize-card__head">
-            {toy.prize.type === 'tool' ? <Hammer size={16} strokeWidth={2} aria-hidden /> : <Boxes size={16} strokeWidth={2} aria-hidden />}
+            {isQuarryPrize(toy.prize) ? <Bomb size={16} strokeWidth={2} aria-hidden /> : toy.prize.type === 'tool' ? <Hammer size={16} strokeWidth={2} aria-hidden /> : <Boxes size={16} strokeWidth={2} aria-hidden />}
             <h2>{prizeName(toy)}</h2>
             {isItemPrize(toy.prize) && <span className="item-chip" style={{ ['--item' as string]: ITEM_ORANGE }}>ITEM</span>}
             <ModalClose onClose={close} />
           </div>
           <div className="prize-card__spin">{shard ? <CardSpin shard={shard} size={180} /> : <Hammer size={64} strokeWidth={1.25} aria-hidden />}</div>
           <p className="prize-card__by">{toy.maker === 'game' ? 'From its own recipe' : <>From {toy.name}, by <MakerName maker={toy.maker} /></>}</p>
-          <p className="prize-card__what">{toy.prize.type === 'tool' ? 'A tool. It sits in slot 1 for good.' : 'A shard. It goes to ITEMS, OTHER LOOT.'}</p>
+          <p className="prize-card__what">{toy.prize.type === 'tool' ? toolWhat(toy.prize) : 'A shard. It goes to ITEMS, OTHER LOOT.'}</p>
           <button className="prize-card__take" onClick={() => takeWithFlight(toy.rowKey)}><PackageCheck size={15} strokeWidth={2.25} aria-hidden />TAKE</button>
         </div>
       </div>
@@ -128,6 +133,8 @@ export function PrizePicker({ here }: { here: ToyRow[] }): JSX.Element | null {
   const close = (): void => usePrizePick.getState().setPicker(false)
   useModalStack(open, close)
   useEffect(() => { if (open && here.length === 0) close() }, [open, here.length])
+  // Drawn again once the Quarry Charge's model is read, when one waits here.
+  useQuarryModel(open && here.some((t) => isQuarryPrize(t.prize)))
   if (!open) return null
   return (
     <Stacked>

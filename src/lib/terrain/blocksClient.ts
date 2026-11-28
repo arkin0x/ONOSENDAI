@@ -8,6 +8,7 @@
  */
 
 import type { ChunkBase } from './coords'
+import type { GroundRevision } from './generate'
 import { handleBlocks, type BlocksAnswer, type BlocksRequest } from './blocksJob'
 import type { Borders, ChunkMesh } from './mesh'
 
@@ -62,12 +63,15 @@ function ask(req: BlocksRequest, transfer: Transferable[] = []): Promise<BlocksA
   })
 }
 
-/** A chunk's generated ground, and its family's top and rind ids (DECK ids). */
-export async function generateChunk(base: ChunkBase): Promise<{ blocks: Uint8Array; top: number; rind: number }> {
-  const a = await ask({ type: 'generate', id: nextId++, base })
+/**
+ * A chunk's generated ground at a revision (DECK-0009 §3.10; lib/terrain/groundRevision.ts), its family's top and rind
+ * ids (DECK ids), and its family and terrain K for the survey card (lib/terrain/assay.ts).
+ */
+export async function generateChunk(base: ChunkBase, revision: GroundRevision): Promise<{ blocks: Uint8Array; top: number; rind: number; family: string; maxK: number; meanK: number }> {
+  const a = await ask({ type: 'generate', id: nextId++, base, revision })
   if (a.type === 'error') throw new Error(a.message)
   if (a.type !== 'generate') throw new Error('unexpected answer')
-  return { blocks: a.blocks, top: a.top, rind: a.rind }
+  return { blocks: a.blocks, top: a.top, rind: a.rind, family: a.family, maxK: a.maxK, meanK: a.meanK }
 }
 
 /** A chunk's mesh, from a copy of its blocks (the caller keeps its own). */

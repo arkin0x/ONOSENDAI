@@ -8,7 +8,7 @@ import type { NostrEvent } from '../events'
 import { postNote } from './channel'
 import { probeStore } from './probe'
 import { markChainVerdicts } from './chainVerdicts'
-import { budget, byAddress, byAuthorKind, byKind, byTag, getRows, ingest, type IngestItem } from './store'
+import { budget, byAddress, byAuthorKind, byKind, byTag, getRows, ingest, seenSince, type IngestItem } from './store'
 import { chainHead, checkChainRows, commitChain, flagRows, migrateChain, partedBranches, readChain, setAsideBranch, type ChainCommit, type ChainMigration, type ChainSource } from './chainRows'
 
 /** Whether this runs in a worker (workers/events.worker.ts), and not on the page's main thread. */
@@ -28,6 +28,7 @@ export const eventDbOps = {
   getRows: (ids: string[]) => withEventDb((db) => getRows(db, ids)),
   byAuthorKind: (pubkey: string, kind: number, limit?: number) => withEventDb((db) => byAuthorKind(db, pubkey, kind, limit)),
   byKind: (kind: number, limit?: number) => withEventDb((db) => byKind(db, kind, limit)),
+  seenSince: (pubkey: string, kind: number, since: number, limit?: number) => withEventDb((db) => seenSince(db, pubkey, kind, since, limit)),
   byTag: (tag: string, limit?: number) => withEventDb((db) => byTag(db, tag, limit)),
   byAddress: (addr: string) => withEventDb((db) => byAddress(db, addr)),
   budget: () => withEventDb((db) => budget(db)),

@@ -12,7 +12,7 @@
  */
 
 import { sha256 } from '@noble/hashes/sha2.js'
-import { useTerrain, terrainSession, cellInReach, OUT_OF_REACH } from '../../store/useTerrain'
+import { useTerrain, terrainSession, cellInReach, compilerInHand, fieldLoaded, OUT_OF_REACH } from '../../store/useTerrain'
 import { useSmashFx } from '../../store/useSmashFx'
 import { useBlueprints } from '../../store/useBlueprints'
 import { useCyberspace } from '../../store/useCyberspace'
@@ -22,21 +22,19 @@ import { followsKnown } from '../../store/terrainShare'
 import { cancelSmashHold as cancelHold, startSmashHold, useSmashHold } from '../../terrain/smashHold'
 import { humStart, humStop, impact, whoosh } from './smashSound'
 import { terrainCursor } from '../../scene/TerrainLayer'
-import { isCompiler } from '../terrain/terrainDb'
 import { query } from '../relay'
 import { regionKeyAt } from '../shardCrypto'
 import { bytesToHex, type NostrEvent } from '../events'
 import { readItem, SHARD_KIND } from '../hidden'
 import { heldFromEntry } from '../inventory'
-import { BARE_HOLD_MS, COMPILER_HOLD_MS, MISS_LINE, RESOLVE_AFTER_MS, SWING_MS, compile, dropStep, relayAsker, smashGroup, type Found, type SmashDeps } from './smash'
-import { readRecord, type Prize, type RecordEvent } from './format'
+import { BARE_HOLD_MS, COMPILER_HOLD_MS, RESOLVE_AFTER_MS, SWING_MS, compile, compiles, dropStep, missLine, relayAsker, smashGroup, type Found, type SmashDeps } from './smash'
+import { readRecord, toolCount, type Prize, type RecordEvent } from './format'
+import { isQuarry } from '../terrain/terrainDb'
 import type { ToyRow } from './blueprintDb'
+import { noteMining } from '../../store/miningStats'
 
-/** Whether the Compiler is the chosen slot (otherwise the hand is bare). */
-export function compilerInHand(): boolean {
-  const inv = useTerrain.getState().inventory
-  return isCompiler(inv.hotbar[inv.slot])
-}
+// Whether the Compiler is the chosen slot (otherwise the hand is bare): with the terrain store, where the preview asks it too.
+export { compilerInHand } from '../../store/useTerrain'
 
 /** Start the smash hold at the block under the cross: COMPILER_HOLD_MS with the Compiler, BARE_HOLD_MS bare (lib/blueprint/smash.ts). */
 export function holdSmash(): void {
@@ -112,12 +110,15 @@ export async function strike(target: readonly [number, number, number], bare: bo
   // Started in another field or as another identity: nothing is spent.
   if (from && (from.field !== s || from.me !== useCyberspace.getState().identity.pubkey)) { useTerrain.getState().say('The smash stopped: you changed identity or place.'); return }
   const read = (x: number, y: number, z: number): number => s.world.blockCs(x, y, z)
+  // Who struck, as the impact lands.
+  const owner0 = useCyberspace.getState().identity.pubkey
   const g = smashGroup(read, target, bare)
   if (!g.smash.length) { useTerrain.getState().say('Nothing there to smash.'); return }
   // What goes is the smash set (a construction whole, else the reach's box round the hit), spent whether or not it
   // compiles (DECK-0010 §4.3); what compiles is the gather's arrangement.
   const refused = useTerrain.getState().clear(g.smash)
   if (refused) { useTerrain.getState().say(refused); return }
+  noteMining({ type: 'smash', bare, blocks: g.smash.length }, s.owner)
   const centre: [number, number, number] = [0, 0, 0]
   for (const c of g.smash) for (let a = 0; a < 3; a++) centre[a] += c[a] + 0.5
   for (let a = 0; a < 3; a++) centre[a] /= g.smash.length
@@ -138,14 +139,23 @@ export async function strike(target: readonly [number, number, number], bare: bo
     try { ({ found, offline, unknown, more } = await compile(g.arrangement, bare, depsFor(lo, g.size))) } catch { found = [] }
   }
   await wait(struck + RESOLVE_AFTER_MS - performance.now())
+  // The prizes are the identity's that struck: one switched away from while it compiled gets none, and the new one none
+  // of its (review of #952). Prizes are kept per identity, not per field, so a change of place alone keeps them (#960).
+  const striker = from?.me ?? owner0
+  if (useCyberspace.getState().identity.pubkey !== striker) {
+    useSmashFx.getState().resolve(id, 'miss')
+    useTerrain.getState().say(SWITCHED_LINE)
+    return
+  }
   if (!found.length) {
     useSmashFx.getState().resolve(id, 'miss')
     // Only what this code does: no recheck happens later, and a prize of an unknown type is not opened (review of #943).
-    useTerrain.getState().say(offline ? OFFLINE_LINE : unknown ? UNKNOWN_LINE : MISS_LINE)
+    useTerrain.getState().say(missLine(compiles(g.arrangement, bare), offline, unknown > 0))
     return
   }
   useSmashFx.getState().resolve(id, 'match')
-  const owner = useBlueprints.getState().owner || useCyberspace.getState().identity.pubkey
+  noteMining({ type: 'compile' }, s.owner)
+  const owner = striker
   const now = Math.floor(Date.now() / 1000)
   const toys: ToyRow[] = found.map((f, i) => ({
     rowKey: `${owner}/${f.lookup}/${f.record?.id ?? f.maker}/${Date.now()}-${toyCount++}/${i}`,
@@ -160,10 +170,18 @@ export async function strike(target: readonly [number, number, number], bare: bo
   if (more) useTerrain.getState().say(MORE_LINE)
 }
 
-/** What a smash says when no relay answered and nothing on this device matched. */
-export const OFFLINE_LINE = 'No relay answered, so only blueprints on this device were checked. Nothing compiled. The blocks are spent.'
-/** When it compiled into a prize this version cannot open. */
-export const UNKNOWN_LINE = 'It compiled into something this version cannot open yet.'
+// The lines a smash with no prize leaves live with the rules (smash.ts missLine).
+export { OFFLINE_LINE, UNKNOWN_LINE } from './smash'
+/** When the identity changed while a smash compiled: its prizes are not given to another (a change of place alone keeps them). */
+export const SWITCHED_LINE = 'The smash stopped: you changed identity.'
+/** When a waiting prize is not the identity's on screen, or its blocks have not loaded yet. */
+export const NOT_YOURS_LINE = 'This prize was found by another of your identities. Switch back to take it.'
+/** When a waiting prize is the identity's on screen but TERRAIN still holds another's blocks. */
+export const NOT_LOADED_LINE = 'Your blocks are still loading. Try again in a moment.'
+
+/** When a tool was taken with no storage on this device: it lasts this visit only. */
+export const MEMORY_ONLY_LINE = 'Taken. This browser keeps no storage for TERRAIN, so it lasts until you close the page.'
+
 /** When more matched than one smash opens. */
 export const MORE_LINE = 'More may be waiting: this smash opened the first ones it found.'
 
@@ -174,24 +192,44 @@ function prizeEvent(prize: Extract<Prize, { type: 'sno' }>, record: RecordEvent 
   return { id, pubkey: record?.pubkey ?? maker, created_at: record?.created_at ?? Math.floor(Date.now() / 1000), kind: SHARD_KIND, tags: [], content, sig: '' }
 }
 
-/** Take a waiting prize: the Compiler joins the bar, a shard joins ITEMS › OTHER LOOT. True when taken. */
+/** Take a waiting prize: the Compiler joins the bar, Quarry Charges are added to theirs, a shard joins ITEMS › OTHER LOOT. True when taken. */
 export function takeToy(rowKey: string): boolean {
   const bp = useBlueprints.getState()
   const toy = bp.toys.find((t) => t.rowKey === rowKey)
   if (!toy) return false
-  if (toy.prize.type === 'tool') {
+  // Credited to the identity on screen, and only when the prize is its own and TERRAIN's inventory is that identity's
+  // (review of #952): a tool goes into that inventory, a shard into that identity's ITEMS.
+  const me = useCyberspace.getState().identity.pubkey
+  if (toy.owner !== me) { useTerrain.getState().say(NOT_YOURS_LINE); return false }
+  // A tool goes into TERRAIN's inventory: only once it is this identity's, read from the device (fieldLoaded), or the read
+  // landing after would overwrite it (review of #960).
+  const field = terrainSession
+  if (toy.prize.type === 'tool' && (!field || field.owner !== (me || 'local') || !fieldLoaded(field))) { useTerrain.getState().say(NOT_LOADED_LINE); return false }
+  // With no storage here the inventory is this visit's alone: said once the tool is in it.
+  const memoryOnly = toy.prize.type === 'tool' && field?.kept === 'memory'
+  if (toy.prize.type === 'tool' && toy.prize.tool === 'quarry-charge') {
+    // No cap: each compile adds its count (DECK-0010 §8.6), beside the Compiler for good.
+    const n = toolCount(toy.prize)
+    useTerrain.getState().gainCharges(n)
+    const inv = useTerrain.getState().inventory
+    useTerrain.getState().say(`${n} Quarry Charges: slot ${inv.hotbar.findIndex(isQuarry) + 1}. You have ${inv.charges ?? n}.`)
+  } else if (toy.prize.type === 'tool') {
     const had = useTerrain.getState().inventory.compiler === 'made'
     useTerrain.getState().gainCompiler()
     useTerrain.getState().say(had ? 'You already have the Compiler.' : 'The Compiler is yours: slot 1.')
+    if (!had) noteMining({ type: 'compiler' })
   } else {
     const event = prizeEvent(toy.prize, toy.record, toy.maker)
     const body = readItem(event, event.pubkey)
     if (!body) { useTerrain.getState().say('This prize could not be read.'); return false }
-    const owner = useInventory.getState().owner || useCyberspace.getState().identity.pubkey
+    // The identity checked above: ITEMS follows the identity on screen (useInventory ownerNow).
+    const owner = me
     // The record's signature covers the sealed prize, so who made it is a fact once the record was checked.
     useInventory.getState().add([heldFromEntry(owner, { id: event.id, event, verified: true, body }, { chestId: `blueprint:${toy.lookup}`, chestName: toy.name }, null, Math.floor(Date.now() / 1000))])
   }
   bp.dropToy(rowKey)
+  if (memoryOnly) useTerrain.getState().say(MEMORY_ONLY_LINE)
+  noteMining({ type: 'prize' })
   return true
 }
 

@@ -8,9 +8,15 @@
  * boxes of the hotbar, SURVEY (with its hold bar), PLACE, CHAT, the walk
  * pad, the menu button, JUMP and DOWN, the LOOK ball, the commit block, the
  * carried block, the first-visit hint and the ghost block's distance stepper (its slot is always kept, so it is measured
- * shown, as when the ghost block is out) do not intersect. With the bag open on a phone (375 and 430 portrait) it
+ * shown, as when the ghost block is out) do not intersect. SURVEY is measured by its slot, kept whether it is offered or
+ * not. The tools stand two by two on every screen (owner, 2026-11-27: "place distance adjustment should be under place
+ * button; survey can go to the right of it under smash"): PLACE and SMASH on top, level, the stepper under PLACE and
+ * SURVEY under SMASH, level, each column lined up. With the bag open on a phone (375 and 430 portrait) it
  * covers everything as the menu does: every point of its card is the card's own, and none of the HUD (the boxes above,
- * the carried block, the instruments and the tutorial card) is left showing under it. Nothing reaches a relay: every
+ * the carried block, the instruments and the tutorial card) is left showing under it. With the menu closed, the stack
+ * round the cross is measured too (review of #948): the smash preview's line, the message (two and three lines), the
+ * hold ring and its name plate mid-hold, none over another or over the boxes (the ghost block's stepper and its WHEEL
+ * hint among them), and the preview line in the same place with and without a hold. Nothing reaches a relay: every
  * socket is answered here. With SHOTS=<dir>, a screenshot of each phone with the bag open is saved there.
  *
  * Usage: start the dev server (npm run dev -- --port 5197), then
@@ -22,9 +28,13 @@ import { generateSecretKey, getPublicKey, nip19 } from 'nostr-tools'
 
 const URL = process.argv[2] ?? 'http://localhost:5197/'
 const SIZES = [
+  { name: '375x667', w: 375, h: 667, touch: true },
   { name: '375 portrait', w: 375, h: 812, touch: true },
+  { name: '390x844', w: 390, h: 844, touch: true },
   { name: '430 portrait', w: 430, h: 932, touch: true },
   { name: 'landscape', w: 812, h: 375, touch: true },
+  { name: '844x390', w: 844, h: 390, touch: true },
+  { name: '700x500 mouse', w: 700, h: 500, touch: false },
   { name: '700x900', w: 700, h: 900, touch: true },
   { name: '930x900', w: 930, h: 900, touch: true },
   { name: '1366x662', w: 1366, h: 662, touch: false },
@@ -32,7 +42,7 @@ const SIZES = [
 ]
 const BOXES = {
   hotbar: '.terrain-hotbar',
-  survey: '.terrain-act--survey',
+  survey: '.terrain-tools__slot--survey',
   place: '.terrain-act--place',
   smash: '.terrain-act--smash',
   chat: '.chatdock__chip',
@@ -46,8 +56,77 @@ const BOXES = {
   airhint: '.terrain-air__hint',
 }
 /** TERRAIN's own HUD: with the menu open none may stand over its columns (hidden under it on a phone, as WALK's pad is). */
-const TERRAIN = { hotbar: '.terrain-hotbar', survey: '.terrain-act--survey', place: '.terrain-act--place', hint: '.terrain-hint__box', cross: '.terrain-crosshair', air: '.terrain-air' }
+const TERRAIN = { hotbar: '.terrain-hotbar', survey: '.terrain-tools__slot--survey', place: '.terrain-act--place', hint: '.terrain-hint__box', cross: '.terrain-crosshair', air: '.terrain-air' }
 // The carried block (.terrain-held) is under everything by design, menu included, so it is not measured.
+
+/** What stands round the cross: the smash preview's line, the message's text, the hold ring and its name plate. */
+const STACK = { preview: '.terrain-smash-preview__text', message: '.terrain-message__text', ring: '.hold-ring svg', plate: '.hold-ring__label' }
+/** Two real lines a smash or a block tool can leave: the longest (three lines on a narrow phone) and a two-line one. */
+const MESSAGES = [
+  'No relay answered, so only blueprints on this device were checked. No blueprint matches. The blocks are spent.',
+  'Survey this chunk before building in it.',
+  'Too far from your avatar: you build within 64 blocks of it. Hop closer to build here.',
+]
+
+/**
+ * The stack round the cross (review of #948), with the menu closed: the preview line shown (BREAKS and a four-figure
+ * count, its widest), with each message, then mid-hold with the ring and its plate. Nothing of it over another part of
+ * it or over the HUD's boxes, and the preview line never moves. Returns the number of failures.
+ */
+async function crossStack(page, label) {
+  let fails = 0
+  const boxes = (sels) => page.evaluate(`(${((sels) => Object.fromEntries(Object.entries(sels).map(([k, sel]) => {
+    const e = document.querySelector(sel)
+    if (!e || getComputedStyle(e).visibility === 'hidden') return [k, null]
+    const r = e.getBoundingClientRect()
+    return [k, r.width > 0 && r.height > 0 ? { l: r.left, t: r.top, r: r.right, b: r.bottom } : null]
+  }))).toString()})(${JSON.stringify(sels)})`)
+  // The HUD's boxes measured again with the stack each time: something may give way while a hold is up.
+  const measure = async () => ({ stack: await boxes(STACK), hud: await boxes(BOXES) })
+  // The preview's line held on, whatever the scene says (the scene sets it each frame from what is aimed at).
+  await page.evaluate(async () => {
+    const m = await import('/src/lib/blueprint/smashPreview.ts')
+    m.useSmashPreview.setState({ state: 'breaks', count: 1745 })
+    m.useSmashPreview.setState = () => {}
+  })
+  const check = (what, { stack: got, hud }) => {
+    const all = { ...hud, ...got }
+    const mine = Object.keys(got).filter((k) => got[k])
+    const over = []
+    for (const k of mine) for (const [o, b] of Object.entries(all)) {
+      const a = got[k]
+      if (o === k || !b || (mine.includes(o) && o < k)) continue
+      // The ring stands round the cross, inside nothing else of the stack.
+      const at = (r) => `${Math.round(r.t)}-${Math.round(r.b)}`
+      if (a.l < b.r && b.l < a.r && a.t < b.b && b.t < a.b) over.push(`${k} ${at(a)} x ${o} ${at(b)}`)
+    }
+    if (over.length) { fails++; console.log(`${label}, ${what}: OVERLAP ${over.join('; ')}`) }
+    else console.log(`${label}, ${what}: clear (${mine.join(', ')})`)
+  }
+  let line = null
+  for (const [i, text] of MESSAGES.entries()) {
+    await page.evaluate(async (t) => { (await import('/src/store/useTerrain.ts')).useTerrain.getState().say(t) }, text)
+    await page.waitForTimeout(250)
+    const both = await measure()
+    const got = both.stack
+    if (!got.preview) { fails++; console.log(`${label}: no preview line`) }
+    if (!got.message) { fails++; console.log(`${label}: no message`) }
+    line ??= got.preview
+    check(`preview + message ${i + 1} (${got.message ? Math.round((got.message.b - got.message.t) / 16.8) : 0} lines)`, both)
+  }
+  await page.evaluate(async () => {
+    (await import('/src/store/useTerrain.ts')).useTerrain.getState().say(null)
+    ;(await import('/src/terrain/smashHold.ts')).startSmashHold([0, 0, 0], 600000, false, () => {})
+  })
+  await page.waitForTimeout(400)
+  const heldBoth = await measure()
+  const held = heldBoth.stack
+  if (!held.ring || !held.plate) { fails++; console.log(`${label}: no hold ring or plate`) }
+  check('preview + hold ring and plate', heldBoth)
+  if (line && held.preview && (line.t !== held.preview.t || line.l !== held.preview.l)) { fails++; console.log(`${label}: the preview line moved with the hold (${line.t} to ${held.preview.t})`) }
+  await page.evaluate(async () => { (await import('/src/terrain/smashHold.ts')).cancelSmashHold() })
+  return fails
+}
 
 const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] })
 let bad = 0
@@ -98,6 +177,15 @@ for (const size of SIZES) {
     }
     if (hits.length) { bad++; console.log(`${label}: OVERLAP ${hits.join('; ')}`) }
     else console.log(`${label}: clear (${keys.join(', ')})`)
+    // Two by two: PLACE over the stepper, SMASH over SURVEY, each row level, each column lined up, nothing skewed.
+    const { place: p, smash: m, air: a, survey: v } = rects
+    if (!menu || size.w >= 1101) {
+      const near = (x, y) => Math.abs(x - y) < 0.5
+      const grid = p && m && a && v && near(p.t, m.t) && near(a.t, v.t) && near(p.l, a.l) && near(m.l, v.l) && m.l > p.r && v.l > a.r && a.t > p.b && v.t > m.b
+      if (!grid) { bad++; console.log(`${label}: NOT TWO BY TWO ${JSON.stringify({ p, m, a, v })}`) }
+      else console.log(`${label}: two by two (${Math.round(p.r - p.l)}px tiles)`)
+    }
+    if (!menu) bad += await crossStack(page, label)
     await ctx.close()
   }
 }

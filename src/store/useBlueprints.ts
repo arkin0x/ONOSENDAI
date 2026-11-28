@@ -27,6 +27,7 @@ import {
 } from '../lib/blueprint/blueprintDb'
 import { readRecord, recordLookup } from '../lib/blueprint/format'
 import type { NostrEvent } from '../lib/events'
+import { noteMining } from './miningStats'
 
 interface BlueprintsState {
   owner: string
@@ -59,6 +60,8 @@ interface BlueprintsState {
   /** One more build of a held blueprint. */
   noteBuilt: (lookup: string) => void
   archive: (rowKey: string, archived: boolean) => void
+  /** A game card's record drawn again (a newer look of its prize): everything else about the card stays, archived or not. */
+  redrawGame: (rowKey: string, record: NostrEvent) => void
 }
 
 let db: Promise<IDBDatabase | null> | null = null
@@ -118,6 +121,7 @@ export const useBlueprints = create<BlueprintsState>((set, get) => ({
     set({ owner, cards: [card, ...get().cards.filter((x) => x.rowKey !== card.rowKey)], fresh: new Set([...get().fresh, card.rowKey]) })
     get().remember([card.record])
     void persist((d) => writeCards(d, [card]))
+    noteMining({ type: 'blueprint', what: 'made' }, owner)
     return card
   },
 
@@ -131,6 +135,7 @@ export const useBlueprints = create<BlueprintsState>((set, get) => ({
     set({ owner, cards: [card, ...get().cards], fresh: new Set([...get().fresh, rowKey]) })
     get().remember([record])
     void persist((d) => writeCards(d, [card]))
+    noteMining({ type: 'blueprint', what: 'found' }, owner)
     return card
   },
 
@@ -178,6 +183,17 @@ export const useBlueprints = create<BlueprintsState>((set, get) => ({
     const cards = get().cards.map((c) => {
       if (c.lookup !== lookup) return c
       const n = { ...c, built: (c.built ?? 0) + 1 }
+      changed.push(n)
+      return n
+    })
+    if (changed.length) { set({ cards }); void persist((d) => writeCards(d, changed)) }
+  },
+
+  redrawGame: (rowKey, record) => {
+    const changed: BlueprintCard[] = []
+    const cards = get().cards.map((c) => {
+      if (c.rowKey !== rowKey || c.source !== 'game') return c
+      const n = { ...c, record }
       changed.push(n)
       return n
     })

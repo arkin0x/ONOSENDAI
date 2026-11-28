@@ -59,7 +59,7 @@ export function liveShareDeps(): ShareDeps {
     },
     query,
     keyStatus,
-    ground: (base) => generateChunk(base).then((g) => g.blocks),
+    ground: (base, revision) => generateChunk(base, revision).then((g) => g.blocks),
     muted: () => useMutes.getState().muted.pubkeys,
     follows: (me) => followsOf(me),
     othersNear,

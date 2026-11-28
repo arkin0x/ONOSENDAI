@@ -130,8 +130,19 @@ const PENDING_MAX = 2048
  */
 function filtersFor(pubkey: string, since: number | undefined): Filter[] {
   const base = { kinds: [3333], authors: [pubkey] }
-  return since === undefined ? [{ ...base, limit: 1 }] : [{ ...base, limit: 1 }, { ...base, since }]
+  return since === undefined ? [{ ...base, limit: 1 }] : [{ ...base, limit: 1 }, { ...base, since, limit: SINCE_LIMIT }]
 }
+
+/**
+ * The most stored moves a (re)subscription asks for from the second of the
+ * newest move on the relays. A few cover what it is for (a move in the same
+ * second as the head); a long backlog published elsewhere is not this
+ * watch's to deliver: its newest moves do not link to the chain here, and
+ * the catch-up fetches the stretch whole (lib/selfSync.ts). Unbounded, the
+ * relay sent its 500 newest, each folded on its own (owner's tablet,
+ * 2026-11-27, 3,760 moves behind).
+ */
+export const SINCE_LIMIT = 50
 
 function openRelay(w: Watch, r: RelayWatch): void {
   if (w.stopped || r.sub) return

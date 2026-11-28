@@ -13,6 +13,7 @@
  */
 
 import { useSmashFx } from '../store/useSmashFx'
+import { fuseBurning, useQuarry } from '../store/useQuarry'
 import { useBlueprints } from '../store/useBlueprints'
 import { smashBusy } from '../lib/blueprint/shatter'
 import { advance, useThree } from '@react-three/fiber'
@@ -54,12 +55,14 @@ export function viewBusy(): boolean {
   // change wakes it first. No allocation here: this runs every display frame.
   // A smash's shatter, dust or ember still drawing (scene/SmashFx.tsx).
   if (smashBusy(useSmashFx.getState().show, performance.now())) return true
+  // A Quarry Charge's fuse burning: it blinks and counts down (scene/QuarryFx.tsx).
+  if (fuseBurning()) return true
   for (const _ in useOpenCeremony.getState().playing) return true
   return false
 }
 
 /** Stores whose every change means the view may be about to change: wake on it. */
-const STORES = [useCyberspace, useHyperspace, useShards, useTv, useDemo, useBuilder, useCeremony, useOpenCeremony, useViewFly, useSmashFx, useBlueprints] as const
+const STORES = [useCyberspace, useHyperspace, useShards, useTv, useDemo, useBuilder, useCeremony, useOpenCeremony, useViewFly, useSmashFx, useBlueprints, useQuarry] as const
 
 export function FrameDriver(): null {
   const get = useThree((s) => s.get)

@@ -35,6 +35,8 @@ import { prizeName, setToyProjector, usePrizePick } from '../store/usePrizePick'
 import { keepOwnTable } from '../lib/carried'
 import { authorColour } from '../lib/authorColour'
 import { compilerModel } from '../lib/blueprint/compilerModel'
+import { quarryModel } from '../lib/blueprint/quarryModel'
+import { isQuarryPrize } from '../lib/blueprint/gameCard'
 import { RING_MAX } from '../lib/blueprint/smash'
 import { prizeChime } from '../lib/blueprint/smashSound'
 import { takeToy } from '../lib/blueprint/smashRun'
@@ -99,7 +101,7 @@ function useToyModel(toy: ToyRow): ShardModel | null {
   useEffect(() => {
     if (toy.prize.type !== 'tool') return
     let live = true
-    void compilerModel().then((m) => { if (live) setTool(m) })
+    void (isQuarryPrize(toy.prize) ? quarryModel() : compilerModel()).then((m) => { if (live) setTool(m) })
     return () => { live = false }
   }, [toy])
   return sno ?? tool

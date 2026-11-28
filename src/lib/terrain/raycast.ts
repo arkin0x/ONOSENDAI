@@ -7,6 +7,8 @@
  * the ray came in through, as the cell beside it that a placed block fills.
  */
 
+import { EMPTY, liquid } from './blocks'
+
 export interface RayHit {
   /** The block hit. */
   cell: [number, number, number]
@@ -62,4 +64,36 @@ export function raycast(
     if (!here) inside = false
   }
   return null
+}
+
+/**
+ * What the cursor's ray stops at (owner, 2026-11-28: "I still can't pick up
+ * tide water"): every block, a liquid included, so Tidewater and Magmaflow
+ * can be aimed at, mined and carried like any other. A liquid is walked
+ * through (blocks.ts solid), which is WALK's business, not the aim's.
+ *
+ * Except the liquid the eye is in: from inside a pool the ray passes through
+ * cells of that same liquid (it would otherwise always take the cell you swim
+ * in) and stops at the first other block past them, a different liquid
+ * included (Magmaflow beside the Tidewater you are in), until it reaches open
+ * space; any liquid after that is aimed at again. `fromOpen` is a ray that
+ * starts in open space whatever its first cell holds (blockOcclusion's, cast
+ * from where it enters the blocks, the eye outside them). One predicate per
+ * cast: it remembers the eye's liquid and whether the ray has left it, and
+ * raycast asks the cells in order, the eye's first.
+ */
+export function aimTest(blockAt: (i: number, j: number, k: number) => number, fromOpen = false): (i: number, j: number, k: number) => boolean {
+  let first = true
+  let out = fromOpen
+  let eye = EMPTY
+  return (i, j, k) => {
+    const id = blockAt(i, j, k)
+    if (first) {
+      first = false
+      if (!out && liquid(id)) { eye = id; return false }
+    }
+    if (id === EMPTY) { out = true; return false }
+    if (liquid(id)) return out || id !== eye
+    return true
+  }
 }

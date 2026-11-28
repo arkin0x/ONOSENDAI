@@ -52,7 +52,7 @@ import { airRefusal, cellInReach, slotInReach, surveyTarget, terrainSession, use
 import { AIM_COLORS, aimAt, sceneDraws, sharedKeys } from '../store/terrainShare'
 import { useCyberspace } from '../store/useCyberspace'
 import { useLayers } from '../store/useLayers'
-import { raycast, type RayHit } from '../lib/terrain/raycast'
+import { aimTest, raycast, type RayHit } from '../lib/terrain/raycast'
 import { CURSOR_REACH, TerrainWorld, type ChunkSlot } from '../lib/terrain/world'
 import { borderSlab, FLOATS_PER_VERTEX, type Borders } from '../lib/terrain/mesh'
 import { lightChunkAsync, meshChunkAsync } from '../lib/terrain/blocksClient'
@@ -429,13 +429,28 @@ export function blockOcclusion(s: TerrainSession | null, axes: ViewAxes, ray: Ra
   if (enter > leave) return null
   // From where the ray enters the box (a hair in, so the first cell is the box's own); from the eye when it starts inside.
   const start = enter > 0 ? enter + 1e-6 : 0
-  const solid = (i: number, j: number, k: number): boolean => isSolid(s.world.blockCs(i, j, k))
+  // In TERRAIN, the cursor's own rule (aimTest), so a liquid in front hides a shard from taps exactly as it takes the
+  // cursor's press: the nearest thing takes the tap, never both. Elsewhere only solid blocks hide (a shard in see-through water is tapped).
+  const read = cellReaders(s)
+  const hides = useTerrain.getState().active ? aimTest(read.blockAt, start > 0) : read.solid
   const at: [number, number, number] = [o[0] + d[0] * start - 0.5, o[1] + d[1] * start - 0.5, o[2] + d[2] * start - 0.5]
-  const hit = raycast(at, d as [number, number, number], leave - start, solid, start > 0 ? 'hit' : 'skip')
+  const hit = raycast(at, d as [number, number, number], leave - start, hides, start > 0 ? 'hit' : 'skip')
   if (!hit) return null
   // Back to render space: the point where the ray meets the block, measured from the ray's origin.
   occPoint.copy(occDir).multiplyScalar(start + hit.distance).add(occFrom).applyMatrix4(occField)
   return occPoint.distanceTo(ray.origin)
+}
+
+/** One field's cell lookups, made once per field, not per ray (the cursor casts every frame). */
+const readers = new WeakMap<TerrainSession, { blockAt: (i: number, j: number, k: number) => number; solid: (i: number, j: number, k: number) => boolean }>()
+function cellReaders(s: TerrainSession): { blockAt: (i: number, j: number, k: number) => number; solid: (i: number, j: number, k: number) => boolean } {
+  let r = readers.get(s)
+  if (!r) {
+    const blockAt = (i: number, j: number, k: number): number => s.world.blockCs(i, j, k)
+    r = { blockAt, solid: (i, j, k) => isSolid(blockAt(i, j, k)) }
+    readers.set(s, r)
+  }
+  return r
 }
 
 /** The targeted block's outline: a hair bigger than the block (OUTLINE_PULL keeps it off the block's own faces). */
@@ -558,8 +573,8 @@ function Marks({ axes }: { axes: ViewAxes }): JSX.Element {
       ray.setFromCamera(ndc, state.camera)
       from.copy(ray.ray.origin).applyMatrix4(inverse)
       toward.copy(ray.ray.origin).add(ray.ray.direction).applyMatrix4(inverse).sub(from)
-      const solid = (i: number, j: number, k: number): boolean => isSolid(s.world.blockCs(i, j, k))
-      return raycast([from.x - 0.5, from.y - 0.5, from.z - 0.5], [toward.x, toward.y, toward.z], CURSOR_REACH, solid)
+      // Every block stops it, a liquid too (so Tidewater and Magmaflow can be mined), but the one the eye is in (aimTest).
+      return raycast([from.x - 0.5, from.y - 0.5, from.z - 0.5], [toward.x, toward.y, toward.z], CURSOR_REACH, aimTest(cellReaders(s).blockAt))
     }
     // Whether a shard (any tap target) stands nearer along the ray than `distance` blocks (a hit's face, the ghost): the nearest thing wins, so a tap there is the shard's, never the block's behind it (TapOccluder.tsx).
     const shardInFront = (distance: number): boolean => {

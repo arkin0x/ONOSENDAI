@@ -116,7 +116,7 @@ function moved(at: Position, axis: AxisName, dir: 1 | -1, n: bigint): Position {
  * clear at either height, or nothing to stand on. A solid over you that
  * refused it is named (`lid`), so the WALL chip names it and not the riser.
  */
-function lifted(at: Position, axis: AxisName, dir: 1 | -1, items: readonly WallItem[], gravity: boolean, down: AxisDirection): { on: Position | null; lid: WallItem | null } {
+function lifted(at: Position, axis: AxisName, dir: 1 | -1, items: readonly WallItem[], down: AxisDirection): { on: Position | null; lid: WallItem | null } {
   // A solid whose underside is in your own plane: no lift at all goes into it.
   const lid = underSolid(at, items, down)
   if (lid) return { on: null, lid }
@@ -128,7 +128,7 @@ function lifted(at: Position, axis: AxisName, dir: 1 | -1, items: readonly WallI
     if (stepLimit(at, rise.axis, rise.dir, lift, items).reach !== lift) return { on: null, lid: null }
     if (stepLimit(up, axis, dir, 1n, items).reach !== 1n) continue
     const on = moved(up, axis, dir, 1n)
-    return { on: standing(on, items, gravity, down) ? on : null, lid: null }
+    return { on: standing(on, items, true, down) ? on : null, lid: null }
   }
   return { on: null, lid: null }
 }
@@ -140,8 +140,8 @@ function lifted(at: Position, axis: AxisName, dir: 1 | -1, items: readonly WallI
  * then). The settle is cleared by stepLimit and is the walls' own stop short
  * of the floor, so it ends at standing height.
  */
-function settled(at: Position, items: readonly WallItem[], gravity: boolean, down: AxisDirection): { at: Position; standing: boolean } {
-  const floor = stepLimit(at, down.axis, down.dir, STEP_DOWN_MAX + 1n, items, gravity && down)
+function settled(at: Position, items: readonly WallItem[], down: AxisDirection): { at: Position; standing: boolean } {
+  const floor = stepLimit(at, down.axis, down.dir, STEP_DOWN_MAX + 1n, items, down)
   const to = raised(at, down, -floor.reach)
   if (floor.by === null || clampAxis(to[down.axis]) !== to[down.axis]) return { at, standing: false }
   return { at: to, standing: true }
@@ -157,19 +157,19 @@ function settled(at: Position, items: readonly WallItem[], gravity: boolean, dow
  * plain step.
  */
 export function walkStep(from: Position, axis: AxisName, dir: 1 | -1, length: bigint, items: readonly WallItem[], gravity = false, down: AxisDirection = WORLD_DOWN): WalkStep {
-  if (!gravity || axis === down.axis || length > STEP_SUBSTEP_MAX || !standing(from, items, gravity, down)) {
+  if (!gravity || axis === down.axis || length > STEP_SUBSTEP_MAX || !standing(from, items, true, down)) {
     const wall = stepLimit(from, axis, dir, length, items)
     return stopOf(moved(from, axis, dir, wall.reach), wall)
   }
   let at = from
   for (let n = 0n; n < length; n++) {
     const ahead = stepLimit(at, axis, dir, 1n, items)
-    const lift = ahead.reach === 1n ? null : lifted(at, axis, dir, items, gravity, down)
+    const lift = ahead.reach === 1n ? null : lifted(at, axis, dir, items, down)
     const next = lift ? lift.on : moved(at, axis, dir, 1n)
     // Held: the press stops on the last gibson it reached.
     // A lid overhead says nothing of its faces' owner (judged by the shard); else the stop ahead.
     if (next === null) return lift?.lid ? { to: at, by: lift.lid } : stopOf(at, ahead)
-    const floor = settled(next, items, gravity, down)
+    const floor = settled(next, items, down)
     at = floor.at
     // Off an edge higher than a step-down, with no floor near: the press
     // ends here, and the fall starts from this gibson.

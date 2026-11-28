@@ -46,6 +46,8 @@ import { useWalk } from '../useWalk'
 import { useShards, type WorldItem } from '../useShards'
 import { useToast } from '../useToast'
 import { clearWalls } from '../walkWalls'
+import { WALK_HOLD_MS, holdReleaseAll, holdStart } from '../walkHold'
+import { useFluidWalk } from '../fluidSwitch'
 import { useCalibration } from '../../lib/calibration'
 import { withConstrain, type Constrain } from '../../lib/walkConstrain'
 import type { Position, ViewAxes } from '../../lib/space'
@@ -152,6 +154,27 @@ describe('WALK up a stair', () => {
     // Out over the flight (it starts a gibson ahead), never down onto a tread.
     expect(moved(start)[1]).toBe(0)
     expect(moved(start)[2]).toBeGreaterThanOrEqual(8)
+  })
+
+  it('gravity off, step WALK: forward and Space held climb the stair, Up taken whenever a riser holds the step', () => {
+    useFluidWalk.setState({ on: false, paused: false })
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] })
+    try {
+      world(start, stair(), [0, 7, -8])
+      useWalk.getState().enter()
+      useCyberspace.setState({ screenAxes: AXES })
+      holdStart('key:KeyW', { fwd: 1, strafe: 0, vert: 0 })
+      holdStart('key:Space', { fwd: 0, strafe: 0, vert: 1, view: true })
+      vi.advanceTimersByTime(WALK_HOLD_MS * 80)
+      holdReleaseAll()
+      // Up the whole flight and out over its head, never inside it.
+      const m = moved(start)
+      expect(m[1]).toBeGreaterThanOrEqual(16)
+      expect(m[2]).toBeLessThanOrEqual(-16)
+    } finally {
+      holdReleaseAll()
+      vi.useRealTimers()
+    }
   })
 
   it('a press up turns, and closes the segment, as before', () => {

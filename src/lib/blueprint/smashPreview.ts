@@ -108,7 +108,7 @@ export function smashPreview(read: (x: number, y: number, z: number) => number, 
   for (const c of g.smash) keys.add(packCell(c[0] - hit[0], c[1] - hit[1], c[2] - hit[2]))
   // Built wrong: touching or in the wrong hand only breaks; turned may compile, as another shape (nearMiss.ts).
   const miss = nearMiss(read, hit, natural)
-  const tooBig = !compiled && !miss && tooBigBare(read, hit, bare, g.arrangement)
+  const tooBig = !compiled && !miss && tooBigBare(read, hit, bare, g)
   return { hit: [hit[0], hit[1], hit[2]], bare, cells: g.smash, state: compiled ? 'compiles' : 'breaks', miss, tooBig, keys }
 }
 

@@ -9,7 +9,8 @@
 import { describe, expect, it } from 'vitest'
 import { smashGroup, compiles, BARE_REACH } from '../smash'
 import { PREVIEW_BREAKS, PREVIEW_NEAR_MISS, previewCause, previewColor, previewLine, showPreview, smashPreview, useSmashPreview } from '../smashPreview'
-import { CAUSE_WORDS, TOO_BIG_LINE, confirmWords, missCause, nearMiss, nearMissLine, posesOf, rareLost, type NearMiss } from '../nearMiss'
+import { CAUSE_WORDS, TOO_BIG_LINE, confirmWords, missCause, nearMiss, nearMissLine, posesOf, rareLost, tooBigBare, type NearMiss } from '../nearMiss'
+import { gather } from '../arrangement'
 import { smashAsk } from '../smashConfirm'
 import { CINDERROCK, COMPILER_RECIPE, FERROVEIN, GLOWCORE, GRIDSTONE, QUARRY_CHARGE_RECIPE, RUSTBAND, UMBERSLATE } from '../recipes'
 
@@ -78,8 +79,8 @@ describe("the owner's build: a correct T resting on the floor", () => {
     expect(nearMissLine(nearMiss(read, hit, nat)!)).toBe('That was the Compiler, but it touched the ground. Build it with a gap all round.')
   })
 
-  it('where the world cannot tell natural ground, what it rests on is only a block', () => {
-    expect(nearMiss(read, hit)?.touching).toBe('block')
+  it('where the world cannot tell natural ground, the floor counts as part of the build: no near miss', () => {
+    expect(nearMiss(read, hit)).toBeNull()
   })
 
   it('the confirm names the Glowcore and the cause', () => {
@@ -91,24 +92,24 @@ describe("the owner's build: a correct T resting on the floor", () => {
 })
 
 describe('other near misses', () => {
-  it('a block touching it at a corner, in open air: TOUCHING A BLOCK', () => {
+  it('a placed block touching it at a corner: TOUCHING A BLOCK', () => {
     const m = t([0, 5, 0])
-    m.set(key([3, 8, 1]), GRIDSTONE) // diagonal to the right Rustband at (2, 7, 0)
+    m.set(key([3, 8, 1]), GRIDSTONE) // corner to the right Rustband at (2, 7, 0)
     const read = reader(m)
     const p = smashPreview(read, [1, 6, 0], true)!
     expect(p.state).toBe('breaks')
     // The block is outside the bare hand's box round the hit, so only the T's five go.
-    expect(previewLine(p.state, p.cells.length, missCause(p.miss!))).toBe('BREAKS 5 · TOUCHING A BLOCK')
+    expect(previewLine(p.state, p.cells.length, previewCause(p))).toBe('BREAKS 5 · TOUCHING A BLOCK')
     expect(nearMissLine(p.miss!)).toBe('That was the Compiler, but it touched another block. Build it with a gap all round.')
   })
 
-  it('a block in the T\'s empty corner touches it too', () => {
+  it('a placed block in the T\'s empty corner touches it too', () => {
     const m = t([0, 5, 0])
     m.set(key([0, 5, 0]), GRIDSTONE)
     expect(nearMiss(reader(m), [1, 6, 0])?.touching).toBe('block')
   })
 
-  it('a block beside it that is natural ground: TOUCHING THE GROUND, when the world can tell', () => {
+  it('a block beside it that is natural ground: TOUCHING THE GROUND, when the world can tell (else a placed block)', () => {
     const m = t([0, 5, 0])
     m.set(key([3, 6, 0]), GRIDSTONE)
     const natural = (x: number, y: number, z: number): boolean => key([x, y, z]) === '3,6,0'
@@ -159,14 +160,12 @@ describe('other near misses', () => {
     expect(previewLine(p.state, p.cells.length, missCause(p.miss!))).toBe('BREAKS 5 · TOUCHING THE GROUND')
   })
 
-  it('on a placed platform: TOUCHING A BLOCK, not the ground', () => {
-    const m = t([0, 0, 0])
-    for (let x = -1; x <= 3; x++) for (let z = -1; z <= 1; z++) m.set(key([x, -1, z]), GRIDSTONE)
-    const placed = new Set([...m.keys()])
-    const natural = (x: number, y: number, z: number): boolean => y < 0 && !placed.has(key([x, y, z]))
+  it('on a small placed platform (3 blocks) laid on the ground: TOUCHING A BLOCK, not the ground', () => {
+    const m = t([0, 1, 0])
+    for (let x = 0; x <= 2; x++) m.set(key([x, 0, 0]), GRIDSTONE)
     const read = reader(m, ground)
-    const p = smashPreview(read, [1, 1, 0], true, natural)!
-    expect(previewLine(p.state, p.cells.length, missCause(p.miss!))).toBe('BREAKS 5 · TOUCHING A BLOCK')
+    const p = smashPreview(read, [1, 2, 0], true, nat)!
+    expect(previewLine(p.state, p.cells.length, previewCause(p))).toBe('BREAKS 5 · TOUCHING A BLOCK')
     expect(nearMissLine(p.miss!)).toBe('That was the Compiler, but it touched another block. Build it with a gap all round.')
   })
 
@@ -268,12 +267,87 @@ describe("isolated means touching no block on a face, edge or corner (the owner'
     expect(g.cells).toHaveLength(6)
     // Four wide: too wide for a bare hand, so it only breaks, said as a near miss.
     const p = smashPreview(read, [1, 2, 0], true, nat)!
-    expect(previewLine(p.state, p.cells.length, missCause(p.miss!))).toBe('BREAKS 5 · TOUCHING A BLOCK')
+    expect(previewLine(p.state, p.cells.length, previewCause(p))).toBe('BREAKS 5 · TOUCHING A BLOCK')
     expect(smashAsk(read, [1, 2, 0], true, nat)!.words).toMatch(/^This is the Compiler, but it is touching another block, so it won't compile\./)
     // With the Compiler the six touch nothing else, so they compile as another shape: a near miss all the same.
     const held = smashPreview(read, [1, 2, 0], false, nat)!
-    expect(previewLine(held.state, held.cells.length, missCause(held.miss!))).toBe('COMPILES · TOUCHING A BLOCK')
+    expect(previewLine(held.state, held.cells.length, previewCause(held))).toBe('COMPILES · TOUCHING A BLOCK')
     expect(smashAsk(read, [1, 2, 0], false, nat)!.words).toMatch(/^This is the Compiler, but it is touching another block, so it won't make the Compiler\./)
+  })
+})
+
+describe('a near miss only when the struck build is a recipe and at most 3 placed blocks besides (coordinator\'s ruling on #973)', () => {
+  /** The T lifted, with `n` placed Gridstone in a row out from the handle's foot, clear of the ground: each touches the build. */
+  const withExtra = (n: number): Read => {
+    const m = t([0, 1, 0])
+    for (let i = 0; i < n; i++) m.set(key([2 + i, 1, 0]), GRIDSTONE)
+    return reader(m, ground)
+  }
+
+  it('3 extra placed blocks: still the T built wrong, TOUCHING A BLOCK', () => {
+    expect(nearMiss(withExtra(3), [1, 2, 0], nat)).toMatchObject({ recipe: 'compiler', touching: 'block' })
+    expect(nearMiss(withExtra(1), [1, 2, 0], nat)?.touching).toBe('block')
+  })
+
+  it('4 extra placed blocks: a player\'s own build that holds the T\'s shape, so no near miss and no recipe question', () => {
+    const read = withExtra(4)
+    expect(nearMiss(read, [1, 2, 0], nat)).toBeNull()
+    expect(previewCause(smashPreview(read, [1, 2, 0], false, nat)!)).toBeNull()
+    // With the Compiler it compiles as the shape it is, so nothing asks.
+    expect(smashAsk(read, [1, 2, 0], false, nat)).toBeNull()
+  })
+
+  it('the same on a turned T: 3 extra warns TURNED THE WRONG WAY, 4 extra says nothing', () => {
+    const turned = (n: number): Read => {
+      const m = t([0, 1, 0], true)
+      for (let i = 0; i < n; i++) m.set(key([0, 4 + i, 1]), FERROVEIN) // a stack on top of the Glowcore
+      return reader(m, ground)
+    }
+    expect(nearMiss(turned(3), [0, 2, 1], nat)?.turned).toBe(true)
+    expect(nearMiss(turned(4), [0, 2, 1], nat)).toBeNull()
+  })
+
+  it('the recipe\'s materials in a shape that is no turn of it: no near miss', () => {
+    const m = new Map<string, number>()
+    for (const [x, id] of [[0, FERROVEIN], [1, FERROVEIN], [2, RUSTBAND], [3, GLOWCORE], [4, RUSTBAND]] as const) m.set(key([x, 1, 0]), id)
+    expect(nearMiss(reader(m, ground), [2, 1, 0], nat)).toBeNull()
+  })
+})
+
+describe('tooBigBare stays within its bound (timing-free: it counts the cells it reads)', () => {
+  it('bare-handed into endless ground: it stops once the group passes 16, far short of the whole window', () => {
+    const counted = (n: { count: number }): Read => (x, y, z) => { n.count++; return ground(x, y, z) }
+    const hit = [0, -1, 0] as const
+    const g = smashGroup(ground, hit, true)
+    expect(g.isolated).toBe(false)
+    const bounded = { count: 0 }
+    expect(tooBigBare(ground, hit, true, g, bounded)).toBe(false)
+    // The bound: each cell is read once, and it stops once the group spans 17, so it reads within 19 by 19 by 19.
+    expect(bounded.count).toBeGreaterThan(0)
+    expect(bounded.count).toBeLessThanOrEqual(19 ** 3)
+    // What the whole Compiler window costs, for scale: the bounded check reads well under half of it.
+    const whole = { count: 0 }
+    gather(counted(whole), hit)
+    expect(bounded.count * 2).toBeLessThan(whole.count)
+  })
+
+  it('an isolated bare gather with no arrangement is too big already: no second flood at all', () => {
+    const four: Read = (x, y, z) => (y === 1 && z === 0 && x >= 0 && x <= 3 ? GRIDSTONE : ground(x, y, z))
+    const g = smashGroup(four, [1, 1, 0], true)
+    expect(g.isolated).toBe(true)
+    expect(g.arrangement).toBeNull()
+    const reads = { count: 0 }
+    expect(tooBigBare(four, [1, 1, 0], true, g, reads)).toBe(true)
+    expect(reads.count).toBe(0)
+  })
+
+  it('a bare window cut off a longer build: the second look finds it isolated and too big', () => {
+    const six: Read = (x, y, z) => (y === 1 && z === 0 && x >= 0 && x <= 5 ? GRIDSTONE : ground(x, y, z))
+    const g = smashGroup(six, [0, 1, 0], true)
+    expect(g.isolated).toBe(false)
+    expect(tooBigBare(six, [0, 1, 0], true, g)).toBe(true)
+    // With the Compiler in hand it is never asked.
+    expect(tooBigBare(six, [0, 1, 0], false, g)).toBe(false)
   })
 })
 

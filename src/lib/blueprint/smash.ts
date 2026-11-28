@@ -155,10 +155,10 @@ export async function prizesOf(records: readonly RecordEvent[], lookup: string, 
     if (out.length >= max) { more.left = true; break }
     const v = readRecord(r)!
     const prize = await openPrize(key, v.sealed)
-    // A tool comes only from a game recipe (§5.5, §8.4): a record's tool prize is passed over.
+    // A tool comes only from a game recipe (§5.5, §8.4): a record's tool prize is one this client cannot show, counted
+    // and said in plain words with any other it cannot open; its record stays on the device (§5.5).
     if (!isPrize(prize) || prize.type === 'tool') {
-      // A prize this version cannot open is counted and said in plain words; its record stays on the device (§5.5).
-      if (prize && typeof prize === 'object' && !isPrize(prize)) unknown.count++
+      if (prize && typeof prize === 'object') unknown.count++
       continue
     }
     out.push({ prize, name: v.title, maker: r.pubkey, lookup, record: r })

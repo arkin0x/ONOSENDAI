@@ -23,10 +23,10 @@
  * - wrong: the recipe's shape, every cell filled, but a block or two of the
  *   wrong kind (owner's third smash, 2026-11-28: a Rustband where the
  *   Quarry Charge's top Umberslate goes). It compiles, in either hand, as the
- *   arrangement it is, and makes nothing: the preview said plain COMPILES.
- *   At most WRONG_MAX(recipe) blocks may differ (one in the Compiler's five,
- *   two in the Quarry Charge's seven), so a build of the same shape in other
- *   blocks is not called a near miss.
+ *   arrangement it is, and makes nothing. At most wrongMax(recipe) blocks
+ *   may differ (one in the Compiler's five, two in the Quarry Charge's
+ *   seven), so a build of the same shape in other blocks is not called a
+ *   near miss.
  *
  * And for any build, not only the game's: too big for a bare hand, an
  * isolated construction longer than a bare hand's reach of 3 on some axis
@@ -35,10 +35,16 @@
  * as long as it's small enough to fit within the range."), so that is the
  * only hand a build can be wrong for.
  *
- * The struck block must be one of the recipe's: the search anchors the
- * recipe on it in every orientation, so it is a few reads per anchor and
- * never per frame (the preview works it out only when the aim rests on a new
- * block: smashPreview.ts).
+ * - missing: the recipe's shape with a cell or two empty, the rest right,
+ *   even when the gap splits it in pieces (splitMiss). Wrong and missing
+ *   together are at most wrongMax(recipe).
+ *
+ * The verdict is the build's, the same from every one of its blocks (owner,
+ * 2026-11-28): an isolated build is judged by its arrangement, a touching one
+ * by the recipe's own cells. A natural formation alone never warns, and
+ * striking natural ground warns only when that block is one of the recipe's.
+ * It is worked out only when the aim rests on a new block (smashPreview.ts),
+ * never per frame.
  *
  * The words (the preview's tail and the line after the smash) live here too,
  * so the preview and the smash never say different things. The owner's
@@ -163,7 +169,40 @@ export function nearMiss(read: Read, hit: Cell, natural?: (x: number, y: number,
   if (!read(hit[0], hit[1], hit[2])) return null
   const g = gather(read, hit, RECIPE_REACH)
   if (recipeOf(g.arrangement)) return null
-  return (g.arrangement && arrangementMiss(g.arrangement)) || touchingMiss(read, hit, natural)
+  // A natural formation alone is never a recipe built wrong: a near miss needs a block someone placed (review of #982).
+  const placed = (cells: ReadonlyArray<readonly [number, number, number]>): boolean => cells.some(([x, y, z]) => !natural?.(x, y, z))
+  if (g.arrangement) {
+    if (!placed(g.cells)) return null
+    return arrangementMiss(g.arrangement) ?? splitMiss(read, g, natural) ?? touchingMiss(read, hit, natural)
+  }
+  return touchingMiss(read, hit, natural)
+}
+
+/**
+ * A recipe with a block missing that splits it in two (a T without its middle Ferrovein: the handle's foot is one
+ * build, the head another): the isolated groups within a recipe's box of the struck one, taken together, judged as
+ * one arrangement (arrangementMiss). Null when there is no other piece, when a piece touches something else, or when
+ * the pieces together span more than a recipe's box. Each piece finds the others, so every block says the same.
+ */
+function splitMiss(read: Read, g: Gathered, natural?: (x: number, y: number, z: number) => boolean): NearMiss | null {
+  const cells = new Map<string, readonly [number, number, number]>()
+  for (const c of g.cells) cells.set(`${c[0]},${c[1]},${c[2]}`, c)
+  const own = cells.size
+  const span = RECIPE_REACH - 1
+  for (let y = g.lo[1] - span; y < g.lo[1] + g.size[1] + span; y++) for (let z = g.lo[2] - span; z < g.lo[2] + g.size[2] + span; z++) for (let x = g.lo[0] - span; x < g.lo[0] + g.size[0] + span; x++) {
+    if (cells.has(`${x},${y},${z}`) || !read(x, y, z)) continue
+    const other = gather(read, [x, y, z], RECIPE_REACH)
+    // A piece that touches something past it, or is too big, is not a loose piece of a recipe.
+    if (!other.arrangement) return null
+    for (const c of other.cells) cells.set(`${c[0]},${c[1]},${c[2]}`, c)
+  }
+  if (cells.size === own) return null
+  const all = [...cells.values()]
+  const a = arrangementFrom(all.map((c) => ({ at: c as Cell, id: read(c[0], c[1], c[2]) })))
+  if (!a || a.size.some((v) => v > RECIPE_REACH)) return null
+  if (!all.some(([x, y, z]) => !natural?.(x, y, z))) return null
+  const m = arrangementMiss(a)
+  return m && m.missing > 0 ? m : null
 }
 
 /**
@@ -189,9 +228,9 @@ export function arrangementMiss(a: Arrangement): NearMiss | null {
         if (should === undefined) { extra = true; break }
         if (should !== id) wrong.push({ is: id, should })
       }
-      if (extra || wrong.length > max) continue
       const missing = pose.blocks.length - mine.length
-      if (missing > max || (!wrong.length && !missing && !pose.turned)) continue
+      // Wrong and missing together within the limit, so a label never hides a second fault (review of #982).
+      if (extra || wrong.length + missing > max || (!wrong.length && !missing && !pose.turned)) continue
       const cost = wrong.length + missing + (pose.turned ? 0.5 : 0)
       if (cost < bestCost) { bestCost = cost; best = { recipe: r.id, name: r.name, turned: pose.turned && !wrong.length && !missing, touching: null, wrong, missing } }
     }
@@ -219,23 +258,38 @@ function touchingMiss(read: Read, hit: Cell, natural?: (x: number, y: number, z:
  * few at most), so a stray block stuck to a recipe finds the recipe too and every block of the build says the same.
  */
 function anchorsOf(read: Read, hit: Cell, natural?: (x: number, y: number, z: number) => boolean): Cell[] {
-  const out: Cell[] = [hit]
-  if (natural?.(hit[0], hit[1], hit[2])) return out
+  // Struck on natural ground, only a recipe that holds that very block (digging beside a build never warns).
+  if (natural?.(hit[0], hit[1], hit[2])) return [hit]
+  const placed: Cell[] = [hit]
+  const kept: Cell[] = []
   const seen = new Set([`${hit[0]},${hit[1]},${hit[2]}`])
-  for (let i = 0; i < out.length; i++) {
-    const [x, y, z] = out[i]
+  for (let i = 0; i < placed.length; i++) {
+    const [x, y, z] = placed[i]
     for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
       const c: Cell = [x + dx, y + dy, z + dz]
       const k = `${c[0]},${c[1]},${c[2]}`
       if (seen.has(k)) continue
       seen.add(k)
-      if (!read(c[0], c[1], c[2]) || natural?.(c[0], c[1], c[2])) continue
-      out.push(c)
-      if (out.length > RECIPE_MAX + NEAR_MISS_EXTRA) return [hit]
+      const id = read(c[0], c[1], c[2])
+      if (!id) continue
+      if (natural?.(c[0], c[1], c[2])) {
+        // A natural block of a recipe's material beside the build may be one of its cells (a natural Umberslate as the
+        // Quarry Charge's base): an anchor, not followed further, so a stray touching only that base finds the recipe as
+        // extraPlaced counts it (review of #982).
+        if (RECIPE_IDS.has(id) && kept.length < NATURAL_ANCHORS_MAX) kept.push(c)
+        continue
+      }
+      placed.push(c)
+      if (placed.length > RECIPE_MAX + NEAR_MISS_EXTRA) return [hit]
     }
   }
-  return out
+  return [...placed, ...kept]
 }
+
+/** The materials of the game's recipes: only a natural block of one of these can be a recipe's cell. */
+const RECIPE_IDS: ReadonlySet<number> = new Set(RECIPES.flatMap((r) => [...r.recipe.cells].filter((id) => id)))
+/** The most natural blocks looked at as recipe cells round one build. */
+const NATURAL_ANCHORS_MAX = 64
 
 /** A recipe's blocks exactly at `at` (one of them), touching something or turned; 'recipe' when it is there isolated and the right way round. */
 function touchingAt(read: Read, at: Cell, natural?: (x: number, y: number, z: number) => boolean): NearMiss | 'recipe' | null {
@@ -247,6 +301,8 @@ function touchingAt(read: Read, at: Cell, natural?: (x: number, y: number, z: nu
     if (!pose.blocks.every(([x, y, z, id]) => read(lo[0] + x, lo[1] + y, lo[2] + z) === id)) continue
     const touching = touchOf(read, lo, pose, natural)
     if (!touching && !pose.turned) return 'recipe'
+    // A natural formation alone is never a recipe built wrong (review of #982).
+    if (pose.blocks.every(([x, y, z]) => natural?.(lo[0] + x, lo[1] + y, lo[2] + z))) continue
     if (extraPlaced(read, lo, pose, natural) > NEAR_MISS_EXTRA) continue
     const m: NearMiss = { recipe: r.id, name: r.name, turned: pose.turned, touching, wrong: [], missing: 0 }
     // The right way round wins over a turned reading of the same blocks.

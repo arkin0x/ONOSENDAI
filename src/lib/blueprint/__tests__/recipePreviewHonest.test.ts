@@ -123,6 +123,54 @@ describe('labels', () => {
   })
 })
 
+describe('review of #982', () => {
+  it('wrong and missing together past the limit: no near miss (a label never hides a second fault)', () => {
+    // The T missing a Rustband, with a Gridstone for the lower Ferrovein: one wrong and one missing, past the T's 1.
+    const t = blocks(COMPILER_RECIPE, [5, 5, 5]).filter((b) => !(b[3] === RUSTBAND && b[0] === 5)).map((b) => (b[3] === FERROVEIN && b[1] === 5 ? [b[0], b[1], b[2], GRIDSTONE] as B : b))
+    const a = world(t)
+    for (const [x, y, z] of t) expect(nearMiss(a.read, [x, y, z])).toBeNull()
+    expect([...fromEvery(a.read, t, true)][0]).toMatch(/^COMPILES /)
+    // A Quarry Charge of five with only three right: two missing and two wrong, past its 2.
+    const q = blocks(QUARRY_CHARGE_RECIPE, [5, 5, 5]).filter((b) => !(b[3] === RUSTBAND && b[2] === 5) && !(b[3] === UMBERSLATE && b[1] === 7))
+      .map((b) => (b[3] === CINDERROCK || b[3] === FERROVEIN ? [b[0], b[1], b[2], GRIDSTONE] as B : b))
+    expect(q).toHaveLength(5)
+    const w = world(q)
+    for (const [x, y, z] of q) expect(nearMiss(w.read, [x, y, z])).toBeNull()
+  })
+
+  it('a stray placed block touching only the natural base: NOT AIR GAPPED from every block, the stray and the base too', () => {
+    const stray: B = [12, 13, 8, GRIDSTONE]
+    const { w, read } = world([...PLACED, stray], NATURAL)
+    const labels = new Set([...PLACED, ...NATURAL, stray].map(([x, y, z]) => previewLabel(smashPreview(read, [x, y, z], true, naturalOf(w))!)))
+    expect([...labels]).toEqual(['NOT AIR GAPPED'])
+  })
+
+  it('a natural formation alone never warns, and striking the ground beside a T on it never warns', () => {
+    // The Quarry Charge's shape, every block natural, its top missing: nobody built it.
+    const natural = blocks(QUARRY_CHARGE_RECIPE, [5, 5, 5]).filter((b) => b[1] !== 7)
+    const a = world([], natural)
+    for (const [x, y, z] of natural) expect(nearMiss(a.read, [x, y, z], naturalOf(a.w))).toBeNull()
+    // A T on a natural floor: the T warns, the floor beside it does not (and so asks nothing when dug).
+    const floor: B[] = []
+    for (let x = 0; x < 9; x++) for (let z = 0; z < 9; z++) floor.push([x, 4, z, GRIDSTONE])
+    const t = blocks(COMPILER_RECIPE, [3, 5, 4])
+    const b = world(t, floor)
+    const nat = naturalOf(b.w)
+    expect(nearMiss(b.read, [4, 5, 4], nat)?.touching).toBe('ground')
+    for (const c of [[4, 4, 4], [3, 4, 4], [5, 4, 5], [4, 4, 3]] as const) {
+      expect(nearMiss(b.read, c, nat)).toBeNull()
+      expect(smashAsk(b.read, c, true, nat)).toBeNull()
+    }
+  })
+
+  it('a T without its middle Ferrovein, in two pieces: MISSING A BLOCK from every block', () => {
+    const t = blocks(COMPILER_RECIPE, [5, 5, 5]).filter((b) => !(b[3] === FERROVEIN && b[1] === 6))
+    const { read } = world(t)
+    expect(gather(read, [6, 5, 5], 3).cells).toHaveLength(1)
+    expect([...fromEvery(read, t, true)]).toEqual(['MISSING A BLOCK | compiles true | recipe null | No Compiler: a block missing.'])
+  })
+})
+
 describe('property: one build, one verdict, from every block', () => {
   it('his cells, every recipe pose with 0 to 2 blocks wrong or missing, and random builds', () => {
     let seed = 0x9e3779b9
@@ -147,6 +195,23 @@ describe('property: one build, one verdict, from every block', () => {
       }
       builds.push(cells)
     }
+    // His cells, with a stray on the natural base or beside a Rustband.
+    const his = (extra: B[]): { cells: B[]; natural: B[] } => ({ cells: [...PLACED, ...extra], natural: [...NATURAL] })
+    for (const extra of [[], [[12, 13, 8, GRIDSTONE] as B], [[12, 15, 6, GRIDSTONE] as B]]) {
+      const h = his(extra)
+      const { w, read } = world(h.cells, h.natural)
+      for (const bare of [true, false]) expect([...fromEvery(read, [...h.cells, ...h.natural], bare, naturalOf(w))], JSON.stringify(extra)).toHaveLength(1)
+    }
+    // Recipe poses with a block missing that splits them: still one verdict from every piece.
+    let split = 0
+    for (const recipe of [QUARRY_CHARGE_RECIPE, COMPILER_RECIPE]) for (const pose of posesOf(recipe)) for (let j = 0; j < pose.blocks.length; j++) {
+      const cells = pose.blocks.filter((_, i) => i !== j).map(([x, y, z, id]) => [x + 8, y + 8, z + 8, id] as B)
+      const { read } = world(cells)
+      if (gather(read, [cells[0][0], cells[0][1], cells[0][2]], 3).cells.length === cells.length) continue
+      for (const bare of [true, false]) expect([...fromEvery(read, cells, bare)], JSON.stringify(cells)).toHaveLength(1)
+      split++
+    }
+    expect(split).toBeGreaterThan(0)
     let checked = 0
     for (const cells of builds) {
       const { read } = world(cells)

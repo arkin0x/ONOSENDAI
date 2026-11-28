@@ -45,7 +45,7 @@ describe("the owner's build: a correct T resting on the floor", () => {
   const read = reader(t([0, 0, 0]), ground)
   const hit = [1, 1, 0] as const // the upper Ferrovein, where he struck
 
-  it('is not isolated, so it only breaks; the preview says BREAKS 5 · TOUCHING THE GROUND in the warning red', () => {
+  it('is not isolated, so it only breaks; the preview says NOT AIR GAPPED in the warning red', () => {
     const g = smashGroup(read, hit, true)
     expect(g.isolated).toBe(false)
     expect(g.smash).toHaveLength(5)
@@ -92,7 +92,7 @@ describe("the owner's build: a correct T resting on the floor", () => {
 })
 
 describe('other near misses', () => {
-  it('a placed block touching it at a corner: TOUCHING A BLOCK', () => {
+  it('a placed block touching it at a corner: NOT AIR GAPPED (touching a block)', () => {
     const m = t([0, 5, 0])
     m.set(key([3, 8, 1]), GRIDSTONE) // corner to the right Rustband at (2, 7, 0)
     const read = reader(m)
@@ -109,7 +109,7 @@ describe('other near misses', () => {
     expect(nearMiss(reader(m), [1, 6, 0])?.touching).toBe('block')
   })
 
-  it('a block beside it that is natural ground: TOUCHING THE GROUND, when the world can tell (else a placed block)', () => {
+  it('a block beside it that is natural ground: touching the ground, when the world can tell (else a placed block)', () => {
     const m = t([0, 5, 0])
     m.set(key([3, 6, 0]), GRIDSTONE)
     const natural = (x: number, y: number, z: number): boolean => key([x, y, z]) === '3,6,0'
@@ -117,7 +117,7 @@ describe('other near misses', () => {
     expect(nearMiss(reader(m), [1, 6, 0], natural)?.touching).toBe('ground')
   })
 
-  it('lifted, the head along Z, bare-handed: it compiles as another shape, so COMPILES · TURNED THE WRONG WAY', () => {
+  it('lifted, the head along Z, bare-handed: it compiles as another shape, so TURNED', () => {
     const read = reader(t([0, 1, 0], true), ground)
     const p = smashPreview(read, [0, 3, 1], true)!
     expect(p.state).toBe('compiles')
@@ -146,7 +146,7 @@ describe('other near misses', () => {
     expect(nearMiss(read, [1, 2, 1])).toBeNull()
   })
 
-  it('the Quarry Charge on the floor: TOUCHING THE GROUND, with the Compiler in hand', () => {
+  it('the Quarry Charge on the floor: NOT AIR GAPPED (touching the ground), with the Compiler in hand', () => {
     const read = reader(quarry([0, 0, 0]), ground)
     expect(missCause(smashPreview(read, [1, 1, 1], false, nat)!.miss!)).toBe('ground')
   })
@@ -160,7 +160,7 @@ describe('other near misses', () => {
     expect(previewLabel(p)).toBe('NOT AIR GAPPED')
   })
 
-  it('on a small placed platform (3 blocks) laid on the ground: TOUCHING A BLOCK, not the ground', () => {
+  it('on a small placed platform (3 blocks) laid on the ground: touching a block, not the ground', () => {
     const m = t([0, 1, 0])
     for (let x = 0; x <= 2; x++) m.set(key([x, 0, 0]), GRIDSTONE)
     const read = reader(m, ground)
@@ -179,7 +179,7 @@ describe('other near misses', () => {
 })
 
 describe('a turned recipe compiles as another shape, in either hand: still a near miss', () => {
-  it('the T turned a quarter, lifted: COMPILES · TURNED THE WRONG WAY in red, and it asks first', () => {
+  it('the T turned a quarter, lifted: TURNED in red, and it asks first', () => {
     const read = reader(t([0, 1, 0], true), ground)
     const g = smashGroup(read, [0, 3, 1], false)
     expect(compiles(g.arrangement)).toBe(true)
@@ -259,7 +259,7 @@ describe("isolated means touching no block on a face, edge or corner (the owner'
     }
   })
 
-  it('a block at a corner of it does touch: it joins the group, which is no longer the T, so TOUCHING A BLOCK', () => {
+  it('a block at a corner of it does touch: it joins the group, which is no longer the T, so NOT AIR GAPPED', () => {
     const m = t([0, 1, 0])
     m.set(key([-1, 4, 1]), GRIDSTONE) // corner to the left Rustband at (0, 3, 0)
     const read = reader(m, ground)
@@ -284,7 +284,7 @@ describe('a near miss only when the struck build is a recipe and at most 3 place
     return reader(m, ground)
   }
 
-  it('3 extra placed blocks: still the T built wrong, TOUCHING A BLOCK', () => {
+  it('3 extra placed blocks: still the T built wrong, NOT AIR GAPPED', () => {
     expect(nearMiss(withExtra(3), [1, 2, 0], nat)).toMatchObject({ recipe: 'compiler', touching: 'block' })
     expect(nearMiss(withExtra(1), [1, 2, 0], nat)?.touching).toBe('block')
   })
@@ -297,7 +297,7 @@ describe('a near miss only when the struck build is a recipe and at most 3 place
     expect(smashAsk(read, [1, 2, 0], false, nat)).toBeNull()
   })
 
-  it('the same on a turned T: 3 extra warns TURNED THE WRONG WAY, 4 extra says nothing', () => {
+  it('the same on a turned T: 3 extra warns TURNED, 4 extra says nothing', () => {
     const turned = (n: number): Read => {
       const m = t([0, 1, 0], true)
       for (let i = 0; i < n; i++) m.set(key([0, 4 + i, 1]), FERROVEIN) // a stack on top of the Glowcore

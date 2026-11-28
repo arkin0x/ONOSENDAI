@@ -360,11 +360,11 @@ function useCompiling(): boolean {
 
 /**
  * What a smash at the cross would do, in one line just over the hold ring's place (scene/SmashPreview.tsx pulses the
- * blocks): COMPILES for a construction, BREAKS and the count for anything else, with a mark in the pulse's colour, and
- * for a game recipe built wrong why, in the warning red ("BREAKS 5 · TOUCHING THE GROUND": lib/blueprint/nearMiss.ts). Its
- * slot is always there, whether a ring is up or not, so nothing moves when it or a hold comes and goes (styles.css
- * --terrain-over-cross). Over the cross (beside the ring on a screen on its side) it never covers the first-visit
- * steps, SMASH or LOOK.
+ * blocks): the preview's label (lib/blueprint/smashPreview.ts previewLabel), with a mark in the pulse's colour: a game
+ * recipe's prize in mint, a recipe built wrong in the warning red ("MISSING A BLOCK", "NOT AIR GAPPED"), COMPILES for
+ * any other construction, BREAKS and the count for anything else. Its slot is always there, whether a ring is up or
+ * not, so nothing moves when it or a hold comes and goes (styles.css --terrain-over-cross). Over the cross (beside the
+ * ring on a screen on its side) it never covers the first-visit steps, SMASH or LOOK.
  */
 export function SmashPreviewLabel(): JSX.Element {
   const state = useSmashPreview((s) => s.state)
@@ -445,15 +445,9 @@ export function mouseLocked(): boolean {
   return !!el && el.tagName === 'CANVAS'
 }
 
-/** The scene's canvas: the largest that is not a control's own (the compass, the LOOK ball, the workshop, a card's shard). */
+/** The main scene's canvas, by its mark (scene/sceneCanvas.ts). */
 function sceneCanvas(): HTMLCanvasElement | null {
-  let best: HTMLCanvasElement | null = null, area = 0
-  for (const c of Array.from(document.querySelectorAll('canvas'))) {
-    if (c.closest('.compass-3d, .benchorb, .orbsquare, .workshop, .thumbstage, .shardspin, .modal')) continue
-    const r = c.getBoundingClientRect()
-    if (r.width * r.height > area) { area = r.width * r.height; best = c }
-  }
-  return best
+  return document.querySelector<HTMLCanvasElement>(`canvas[data-scene="${SCENE_CANVAS}"]`)
 }
 
 function lockMouse(canvas: HTMLCanvasElement | null = sceneCanvas()): void {

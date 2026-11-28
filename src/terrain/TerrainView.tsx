@@ -46,6 +46,7 @@ import { TerrainCrew, crewChipAsking } from './TerrainCrew'
 import { CrewLayer, CrewPanel, closeCrewLayer } from './CrewPanel'
 import { isCompiler, isQuarry } from '../lib/terrain/terrainDb'
 import { HeldCompiler } from './HeldCompiler'
+import { HeldHalo, HeldVignette, useHeldGlow } from './HeldGlow'
 import { useSmashHold } from './smashHold'
 import { cancelSmashHold, holdSmash } from '../lib/blueprint/smashRun'
 import { useSmashFx } from '../store/useSmashFx'
@@ -95,6 +96,7 @@ export function surveyTarget(): string | null {
  * control and the menu, never taking a tap. CSS 3D, so it never clips into
  * the world and never blooms. It sways while a walk is under way and dips
  * when a block is mined or placed. Hidden with an empty slot or none left.
+ * A glowing block glows in hand, and tints the screen's edges (HeldGlow.tsx).
  */
 function HeldBlock(): JSX.Element | null {
   const inv = useTerrain((s) => s.inventory)
@@ -109,9 +111,13 @@ function HeldBlock(): JSX.Element | null {
     counts.current = inv.counts
     setDip((d) => d + 1)
   }, [inv.counts])
+  const glow = useHeldGlow(k ? k.id : null)
   if (!k) return null
   const face = (f: number): CSSProperties => ({ backgroundColor: k.color, backgroundImage: `url(${tileUrl(k, f)})` })
   return (
+    <>
+    {glow && <HeldVignette look={glow} />}
+    {glow && <HeldHalo look={glow} />}
     <div className={`terrain-held${walking ? ' is-walking' : ''}`} aria-hidden>
       <div key={dip} className={`terrain-held__dip${dip > 0 ? ' is-dipping' : ''}`}>
         <div className="terrain-held__cube">
@@ -124,6 +130,7 @@ function HeldBlock(): JSX.Element | null {
         </div>
       </div>
     </div>
+    </>
   )
 }
 

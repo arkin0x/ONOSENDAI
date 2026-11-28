@@ -17,12 +17,19 @@
  *
  * One material for every chunk (`material`), and one for each chunk's light
  * (`forChunk`): the same program, the same shared uniforms, its own texture.
+ *
+ * A glowing block in hand (lib/terrain/heldLight.ts): one more small 3D
+ * texture, the cube round your eye, shared by every chunk, read at the same
+ * point as the chunk's own light and placed by the chunk's corner; the
+ * brighter of the two lights the face. Off (nothing glowing in hand), it is
+ * not read.
  */
 
-import { ClampToEdgeWrapping, Color, CustomBlending, Data3DTexture, DataTexture, LinearFilter, LinearMipmapLinearFilter, NearestFilter, OneFactor, OneMinusSrcAlphaFactor, RGBAFormat, ShaderMaterial, SrcAlphaFactor, UnsignedByteType, ZeroFactor } from 'three'
+import { ClampToEdgeWrapping, Color, CustomBlending, Data3DTexture, DataTexture, LinearFilter, LinearMipmapLinearFilter, NearestFilter, OneFactor, OneMinusSrcAlphaFactor, RGBAFormat, ShaderMaterial, SrcAlphaFactor, UnsignedByteType, Vector3, ZeroFactor } from 'three'
 import { BG } from '../lib/palette'
 import { ATLAS, CELL, PER_ROW, buildAtlas } from '../lib/terrain/tiles'
 import { BRIGHT_MAX, BRIGHT_SKY, LIGHT_SIDE } from '../lib/terrain/light'
+import { HELD_SIDE } from '../lib/terrain/heldLight'
 import { SHADE } from '../lib/terrain/mesh'
 
 /** Where the fog starts and is whole, in blocks from the eye. The box is 96 blocks across. */
@@ -79,6 +86,11 @@ uniform float shading;
 /** The lamp at your eye: its light, and the blocks it reaches (Headlamp in Settings). */
 uniform float eyeLight;
 uniform float eyeReach;
+/** A glowing block in hand (lib/terrain/heldLight.ts): its light round your eye, on or off, the cube's lowest corner and this chunk's, in cells of the field. */
+uniform sampler3D held;
+uniform float heldOn;
+uniform vec3 heldAt;
+uniform vec3 chunkAt;
 uniform vec3 bg;
 uniform float fogNear;
 uniform float fogFar;
@@ -116,6 +128,15 @@ void main() {
     // The open cells' brightness alone: the filtered colour over the filtered share of open cells (solid cells hold 0), so no light leaks through a wall; stored as a square root.
     vec3 lv = l.rgb / max(l.a, 1.0 / 255.0);
     shine = lv * lv * ${BRIGHT_MAX.toFixed(2)};
+    if (heldOn > 0.5) {
+      // The same point in the cube round the eye. Its solid cells hold 0 and its alpha is its own share of open cells, so over that it is the open
+      // cells' light alone. Its own share, never the chunk's: the chunk's light is worked out later than an edit, and a face just mined
+      // would read a fresh held light over an old share of nothing and flash white. Never past 1 either way.
+      vec3 q = (chunkAt + vLocal + 0.5 * vNormal - heldAt) / ${HELD_SIDE.toFixed(1)};
+      vec4 h = texture(held, vec3(q.x, q.z, q.y));
+      vec3 hv = min(h.rgb / max(h.a, 1.0 / 255.0), vec3(1.0));
+      shine = max(shine, hv * hv * ${BRIGHT_MAX.toFixed(2)});
+    }
     float near = clamp(1.0 - gib / eyeReach, 0.0, 1.0);
     shine = max(shine, vec3(max(${LIGHT_FLOOR.toFixed(3)}, eyeLight * near * near)));
     shine *= mix(${AO_DARK.toFixed(3)}, 1.0, l.a);
@@ -142,8 +163,10 @@ export interface TerrainMaterial {
   clearMaterial: ShaderMaterial
   /** The zoom (render units per gibson), GLOW, Block shading and Headlamp, each frame. */
   setView: (unit: number, glow: boolean, shading?: boolean, headlamp?: boolean) => void
-  /** A chunk's two materials (solid and see-through) reading its own light; dispose them with the chunk. The texture is the caller's. */
-  forChunk: (light: Data3DTexture) => { material: ShaderMaterial; clearMaterial: ShaderMaterial }
+  /** A chunk's two materials (solid and see-through) reading its own light, the chunk at `off` (chunk offsets); dispose them with the chunk. The texture is the caller's. */
+  forChunk: (light: Data3DTexture, off?: readonly [number, number, number]) => { material: ShaderMaterial; clearMaterial: ShaderMaterial }
+  /** The light of a glowing block in hand (lib/terrain/heldLight.ts computeHeldLight's bytes), its cube's lowest corner in cells of the field; null puts it out. */
+  setHeld: (bytes: Uint8Array | null, corner?: readonly [number, number, number]) => void
   dispose: () => void
 }
 
@@ -160,6 +183,19 @@ export function lightTexture(bytes: Uint8Array<ArrayBuffer>): Data3DTexture {
   t.needsUpdate = true
   return t
 }
+
+/** No light: what the held light reads before a glowing block is first in hand. */
+function noLight(): Data3DTexture {
+  const t = new Data3DTexture(new Uint8Array(4), 1, 1, 1)
+  t.format = RGBAFormat
+  t.type = UnsignedByteType
+  t.unpackAlignment = 1
+  t.needsUpdate = true
+  return t
+}
+
+/** Where a chunk with no light of its own reads the held light: far outside the cube, where it is dark (its outer layer is 0 and the edge is clamped). */
+const NO_CHUNK = -1e5
 
 /** Full open light everywhere (BRIGHT_SKY at level 15, which decodes to 1): what a chunk reads before its own light is worked out. */
 function fullLight(): Data3DTexture {
@@ -195,10 +231,16 @@ export function makeTerrainMaterial(): TerrainMaterial {
   })
   material.uniforms.seeThrough = { value: 0 }
   material.uniforms.light = { value: full }
+  const none = noLight()
+  let heldTex: Data3DTexture | null = null
+  material.uniforms.held = { value: none }
+  material.uniforms.heldOn = { value: 0 }
+  material.uniforms.heldAt = { value: new Vector3() }
+  material.uniforms.chunkAt = { value: new Vector3(NO_CHUNK, NO_CHUNK, NO_CHUNK) }
   // A clone shares the program; its uniforms are put back to the shared ones (a clone copies the atlas texture, which would upload again).
-  const see = (m: ShaderMaterial, light: Data3DTexture): ShaderMaterial => {
+  const see = (m: ShaderMaterial, light: Data3DTexture, at: { value: Vector3 } = material.uniforms.chunkAt): ShaderMaterial => {
     const c = m.clone()
-    c.uniforms = { ...material.uniforms, seeThrough: { value: 1 }, light: { value: light } }
+    c.uniforms = { ...material.uniforms, seeThrough: { value: 1 }, light: { value: light }, chunkAt: at }
     c.transparent = true
     c.depthWrite = false
     c.blending = CustomBlending
@@ -218,11 +260,31 @@ export function makeTerrainMaterial(): TerrainMaterial {
       const eye = headlamp ? EYE_LAMP : EYE_GLIMMER
       u.eyeLight.value = eye.light; u.eyeReach.value = eye.reach
     },
-    forChunk: (light) => {
+    forChunk: (light, off) => {
+      const at = { value: off ? new Vector3(32 * off[0], 32 * off[1], 32 * off[2]) : new Vector3(NO_CHUNK, NO_CHUNK, NO_CHUNK) }
       const solid = material.clone()
-      solid.uniforms = { ...material.uniforms, light: { value: light } }
-      return { material: solid, clearMaterial: see(material, light) }
+      solid.uniforms = { ...material.uniforms, light: { value: light }, chunkAt: at }
+      return { material: solid, clearMaterial: see(material, light, at) }
     },
-    dispose: () => { material.dispose(); clearMaterial.dispose(); atlas.dispose(); full.dispose() },
+    setHeld: (bytes, corner) => {
+      const u = material.uniforms
+      if (!bytes) { u.heldOn.value = 0; return }
+      if (!heldTex) {
+        heldTex = new Data3DTexture(new Uint8Array(HELD_SIDE * HELD_SIDE * HELD_SIDE * 4), HELD_SIDE, HELD_SIDE, HELD_SIDE)
+        heldTex.format = RGBAFormat
+        heldTex.type = UnsignedByteType
+        heldTex.minFilter = LinearFilter
+        heldTex.magFilter = LinearFilter
+        heldTex.wrapS = heldTex.wrapT = heldTex.wrapR = ClampToEdgeWrapping
+        heldTex.unpackAlignment = 1
+        heldTex.generateMipmaps = false
+        u.held.value = heldTex
+      }
+      ;(heldTex.image.data as Uint8Array).set(bytes)
+      heldTex.needsUpdate = true
+      if (corner) (u.heldAt.value as Vector3).set(corner[0], corner[1], corner[2])
+      u.heldOn.value = 1
+    },
+    dispose: () => { material.dispose(); clearMaterial.dispose(); atlas.dispose(); full.dispose(); none.dispose(); heldTex?.dispose() },
   }
 }

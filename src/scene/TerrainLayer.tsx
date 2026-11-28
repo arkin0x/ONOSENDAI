@@ -23,7 +23,9 @@
  * the neighbours still to come round it (up to LIGHT_WAIT_MS), which would
  * otherwise count as open space for a moment; one whose light is being
  * worked out again keeps the light it had. Off, no light is worked out or
- * kept at all, and every chunk draws fully lit.
+ * kept at all, and every chunk draws fully lit. A glowing block in hand in
+ * TERRAIN lights the blocks round your eye too (scene/heldLight.ts), worked
+ * out on the page only when your eye moves into another cell.
  *
  * The glow. Ordinary rock writes the world's untagged colour (alpha 0, as a
  * shard face does), which the world bloom skips (scene/worldBloom.tsx); the
@@ -78,6 +80,8 @@ import { isQuarry, placeable } from '../lib/terrain/terrainDb'
 import { ITEM_ORANGE } from '../lib/blueprint/itemMark'
 import { useSurveyHold } from '../terrain/surveyHold'
 import { edgeSegments, outlineLines, outlineMaterial as sharedOutline, sizeOutline } from './hiddenParts'
+import { HeldLightDriver, eyeCell, type HeldFrame } from './heldLight'
+import { heldLightSource } from '../lib/terrain/heldLight'
 
 /** Chunks meshing at once. */
 const MESH_IN_FLIGHT = 2
@@ -192,6 +196,19 @@ function Chunks({ axes }: { axes: ViewAxes }): JSX.Element {
   const shadingWas = useRef(false)
   const placedFor = useRef('')
   const field = useRef<TerrainSession | null>(null)
+  // A glowing block in hand: its light round your eye (scene/heldLight.ts), and the field's frame and eye cell it is placed by.
+  const held = useMemo(() => new HeldLightDriver(made), [made])
+  const heldField = useRef(new Matrix4())
+  const heldEye = useRef<[number, number, number]>([NaN, NaN, NaN])
+  /** What each frame tells it, filled in place: nothing is made per frame. */
+  const heldAsk = useRef<HeldFrame>({ world: null, version: 0, glow: null, shading: false, eye: heldEye.current })
+  useEffect(() => {
+    // The dev probe (scripts/held-light-shots.mjs reads it): only in the dev build, only where there is a page.
+    if (!import.meta.env.DEV || typeof window === 'undefined') return
+    const w = window as unknown as { __heldLight?: HeldLightDriver }
+    w.__heldLight = held
+    return () => { delete w.__heldLight }
+  }, [held])
   const dropLight = (slot: ChunkSlot): void => {
     const l = lights.current.get(slot)
     if (!l) return
@@ -251,6 +268,15 @@ function Chunks({ axes }: { axes: ViewAxes }): JSX.Element {
     }
     for (const slot of [...lights.current.keys()]) if (s.world.chunks.get(slot.off.join(',')) !== slot || !slot.blocks) dropLight(slot)
     if (replace) for (const [slot, ms] of meshes.current) for (const m of ms) { fieldMatrix(s, axes, zoom, m.matrix, [32 * slot.off[0], 32 * slot.off[1], 32 * slot.off[2]]); m.matrixWorldNeedsUpdate = true }
+    if (replace) fieldMatrix(s, axes, zoom, heldField.current)
+    const st = useTerrain.getState()
+    const ask = heldAsk.current
+    ask.world = st.active ? s.world : null
+    ask.version = s.version
+    ask.glow = st.active ? heldLightSource(st.inventory) : null
+    ask.shading = shading
+    ask.eye = eyeCell(state.camera.position, heldField.current, heldEye.current)
+    held.frame(ask)
     const holdOver = holdUntil.current !== null && performance.now() >= holdUntil.current
     if (s.version === seen.current && inFlight.current.size === 0 && lightFlight.current.size === 0 && !holdOver) return
     seen.current = s.version
@@ -343,7 +369,7 @@ function Chunks({ axes }: { axes: ViewAxes }): JSX.Element {
           return
         }
         const tex = lightTexture(bytes)
-        const mats = made.forChunk(tex)
+        const mats = made.forChunk(tex, slot.off)
         lights.current.set(slot, { tex, ...mats })
         for (const m of meshes.current.get(slot) ?? []) m.material = m.renderOrder ? mats.clearMaterial : mats.material
         reveal(slot)

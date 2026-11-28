@@ -5,11 +5,13 @@
  *
  * - THE OUTLINES. A saved chunk within NEAR_CHUNKS of the chunk you stand in
  *   shows its twelve edges faintly in gold. The one you stand in is lit
- *   brighter, its faces faintly tinted gold, and the one being guided to
+ *   brighter, with a stronger glow, and the one being guided to
  *   breathes. The visual language is SurveyGlow's (the chunk's edges as one
- *   screen-space line, a wide faint line under it for the glow, faces a hair
- *   outside the chunk so they never fight the blocks on its border), in the
- *   saved chunk's gold instead of the SURVEY hold's mint.
+ *   screen-space line, a wide faint line under it for the glow, a hair
+ *   outside the chunk so it never fights the blocks on its border), in the
+ *   saved chunk's gold instead of the SURVEY hold's mint. No filled faces:
+ *   standing inside, even a 2% gold face over the black sky reads as an olive
+ *   wash once it is brought to the screen's colours (seen in the screenshots).
  * - THE BEACON (SET WAYPOINT). A tall light pillar of gold rising from the
  *   middle of the chunk's floor, a five-pointed star at its top, standing in
  *   the world so the way to it reads from far off. Drawn like a distant
@@ -69,14 +71,14 @@ const BREATH_MS = 2400
 /** How often the chunks near you are looked for, ms. */
 const LOOK_MS = 250
 
-const BOX = new BoxGeometry(SIDE + PAD, SIDE + PAD, SIDE + PAD)
-const EDGES = edgeSegments(BOX)
+/** The chunk's twelve edges, worked out once from a box that is then let go. */
+const EDGES = edgeSegments(new BoxGeometry(SIDE + PAD, SIDE + PAD, SIDE + PAD))
 
-/** The look per state: the edges, the glow under them, and the faces. */
+/** The look per state: the edges and the glow under them. */
 const LOOK = {
-  near: { edge: 0.32, halo: 0.08, face: 0 },
-  guided: { edge: 0.62, halo: 0.2, face: 0 },
-  here: { edge: 0.9, halo: 0.3, face: 0.018 },
+  near: { edge: 0.32, halo: 0.08 },
+  guided: { edge: 0.62, halo: 0.2 },
+  here: { edge: 0.95, halo: 0.36 },
 } as const
 
 /** A five-pointed star, flat, pointing up, `r` across from its middle to a point. */
@@ -114,29 +116,22 @@ interface Slot {
   halo: LineMaterial
   edgeLines: LineSegments2
   haloLines: LineSegments2
-  face: Mesh
 }
 
 /** The outlines' and the beacon's parts, made once. */
-function makeParts(): { slots: Slot[]; faceMat: MeshBasicMaterial; beacon: Group; core: ShaderMaterial; glow: ShaderMaterial; starMat: MeshBasicMaterial; star: Mesh; geos: Array<{ dispose: () => void }> } {
-  const faceMat = new MeshBasicMaterial({
-    color: STAR_GOLD, transparent: true, opacity: LOOK.here.face, depthTest: true, depthWrite: false, side: DoubleSide, forceSinglePass: true, toneMapped: false,
-    polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2, ...NO_BLOOM_BLEND,
-  })
+function makeParts(): { slots: Slot[]; beacon: Group; core: ShaderMaterial; glow: ShaderMaterial; starMat: MeshBasicMaterial; star: Mesh; geos: Array<{ dispose: () => void }> } {
+
   const slots: Slot[] = Array.from({ length: POOL }, () => {
     const edges = Object.assign(outlineMaterial({ color: STAR_GOLD, opacity: 0, px: 2 }), NO_BLOOM_BLEND, { side: DoubleSide })
     const halo = Object.assign(outlineMaterial({ color: STAR_GOLD, opacity: 0, px: 8 }), NO_BLOOM_BLEND, { side: DoubleSide })
     const edgeLines = outlineLines(EDGES, edges)
     const haloLines = outlineLines(EDGES, halo)
-    const face = new Mesh(BOX, faceMat)
-    face.raycast = () => {}
-    face.renderOrder = 3
     haloLines.renderOrder = 4
     edgeLines.renderOrder = 5
     const group = new Group()
     group.visible = false
-    group.add(face, haloLines, edgeLines)
-    return { group, edges, halo, edgeLines, haloLines, face }
+    group.add(haloLines, edgeLines)
+    return { group, edges, halo, edgeLines, haloLines }
   })
   // The beacon, in blocks, its foot at the origin, rising along +Y.
   const coreGeo = new CylinderGeometry(CORE_RADIUS, CORE_RADIUS, BEACON_HEIGHT, 10, 1, true)
@@ -155,7 +150,7 @@ function makeParts(): { slots: Slot[]; faceMat: MeshBasicMaterial; beacon: Group
   star.position.set(0, BEACON_HEIGHT + STAR_SIZE * 0.6, 0)
   for (const m of [coreMesh, glowMesh, star]) { m.raycast = () => {}; m.frustumCulled = false; m.renderOrder = 6 }
   beacon.add(glowMesh, coreMesh, star)
-  return { slots, faceMat, beacon, core, glow, starMat, star, geos: [coreGeo, glowGeo, starGeo] }
+  return { slots, beacon, core, glow, starMat, star, geos: [coreGeo, glowGeo, starGeo] }
 }
 
 /**
@@ -192,7 +187,7 @@ export function StarredChunkMarks({ axes }: { axes: ViewAxes }): JSX.Element {
   const parts = useMemo(() => makeParts(), [])
   useEffect(() => () => {
     for (const s of parts.slots) { s.edges.dispose(); s.halo.dispose(); s.edgeLines.geometry.dispose(); s.haloLines.geometry.dispose() }
-    parts.faceMat.dispose(); parts.core.dispose(); parts.glow.dispose(); parts.starMat.dispose()
+    parts.core.dispose(); parts.glow.dispose(); parts.starMat.dispose()
     for (const g of parts.geos) g.dispose()
   }, [parts])
   const outlines = useRef<Group>(null)
@@ -258,7 +253,6 @@ export function StarredChunkMarks({ axes }: { axes: ViewAxes }): JSX.Element {
       const lift = i === nr.guided ? 0.7 + 0.3 * breath : 1
       slot.edges.opacity = look.edge * lift
       slot.halo.opacity = look.halo * lift
-      slot.face.visible = look.face > 0
       sizeOutline(slot.edges, state.size)
       sizeOutline(slot.halo, state.size)
       slot.group.visible = true

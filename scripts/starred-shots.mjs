@@ -159,7 +159,7 @@ for (const size of SIZES) {
   await page.evaluate(() => { const m = document.querySelector('.hamburger-menu'); if (document.querySelector('.panel--mining')) m?.click() })
   await page.waitForTimeout(1200)
   // A little up, and on a narrow phone a little right, so the beacon (one chunk right, four ahead) rises in view.
-  await page.evaluate(async ([dx]) => { (await import('/src/lib/walkLook.ts')).walkLookBy(dx, -50) }, [size.touch ? Math.round(size.w * 0.06) : 0])
+  await page.evaluate(async ([dx, dy]) => { (await import('/src/lib/walkLook.ts')).walkLookBy(dx, dy) }, [size.touch ? Math.round(size.w * 0.06) : 0, size.touch ? -14 : -30])
   await page.waitForTimeout(3000)
   const hud = await page.evaluate(() => { const t = document.querySelector('[data-target="starred-chunk"]'); return t ? { text: t.textContent, style: t.getAttribute('style') } : null })
   if (!hud) fail(size, 'no HUD target marker')

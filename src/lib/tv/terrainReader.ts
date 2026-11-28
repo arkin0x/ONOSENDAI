@@ -24,7 +24,8 @@
  * - A layer published while its author's chain was in a no-broadcast
  *   stretch (spec §8.13: the tutorial) is skipped: any of the author's
  *   movement actions fetched for it carries the tag, those in the
- *   NB_LOOKBACK_S before its publish (asked once per author for a batch of
+ *   NB_LOOKBACK_S before its publish to NB_SKEW_S after it, for clocks
+ *   that differ (asked once per author for a batch of
  *   chunks), or failing any there, the newest few at or before it. Layers
  *   are signed by builder keys and never carry the tag themselves (one that
  *   does is skipped too). A read that cannot tell, or finds no action at all,
@@ -111,6 +112,12 @@ export const TV_STATUS_FRESH_MS = 10 * 60_000
 export const TV_UNKNOWN_FRESH_MS = 30_000
 /** How far before a layer's publish its author's movement actions are looked through for the no-broadcast tag (s). */
 export const NB_LOOKBACK_S = 15 * 60
+/**
+ * And how far after it (s): clocks differ between a builder's devices and
+ * the relay, so a tagged action dated just after a layer's publish hides
+ * the layer too.
+ */
+export const NB_SKEW_S = 2 * 60
 /** Region keys kept by one reader: one a chunk, 32 bytes and a lookup id. */
 export const TV_KEYS_KEPT = 512
 
@@ -426,10 +433,12 @@ export class TvTerrainReader {
    * Judge whether layers may be shown on TV (spec §8.13: not published during
    * the tutorial), into `broadcastable`. A layer is hidden when ANY movement
    * action fetched for it carries the tag. Per author, one question for the
-   * actions in the NB_LOOKBACK_S before each of their layers' publishes.
+   * actions in each layer's window: the NB_LOOKBACK_S before its publish to
+   * NB_SKEW_S after it (clocks differ, so a tagged action dated just after
+   * the publish hides it too).
    * When that answer may be cut off (it filled the limit asked), it is not
    * trusted: each layer is asked about with its own window, the
-   * NB_LOOKBACK_S up to its publish, and a window that is cut off too leaves
+   * same window, and a window that is cut off too leaves
    * the layer undecided. A layer with no action in its window (a long build
    * held still) is judged by the newest few before its publish. No action at
    * all, or no answer, leaves it undecided (left out, the chunk read again
@@ -455,10 +464,10 @@ export class TvTerrainReader {
         return null
       }
     }
-    const inWindow = (ev: NostrEvent) => (m: NostrEvent): boolean => m.created_at <= ev.created_at && m.created_at >= ev.created_at - NB_LOOKBACK_S
+    const inWindow = (ev: NostrEvent) => (m: NostrEvent): boolean => m.created_at <= ev.created_at + NB_SKEW_S && m.created_at >= ev.created_at - NB_LOOKBACK_S
     for (const [author, layers] of byAuthor) {
       const since = Math.min(...layers.map((l) => l.created_at)) - NB_LOOKBACK_S
-      const until = Math.max(...layers.map((l) => l.created_at))
+      const until = Math.max(...layers.map((l) => l.created_at)) + NB_SKEW_S
       const batch = { kinds: [ACTION_KIND], authors: [author], since, until, limit: TV_RELAY_CAP }
       const moves = await tryAsk(batch)
       if (moves === null) continue
@@ -468,14 +477,14 @@ export class TvTerrainReader {
         if (trusted) near = trusted.filter(inWindow(ev))
         else {
           // Cut off: this layer's own window, asked whole or not at all.
-          const own1 = { kinds: [ACTION_KIND], authors: [author], since: ev.created_at - NB_LOOKBACK_S, until: ev.created_at, limit: TV_RELAY_CAP }
+          const own1 = { kinds: [ACTION_KIND], authors: [author], since: ev.created_at - NB_LOOKBACK_S, until: ev.created_at + NB_SKEW_S, limit: TV_RELAY_CAP }
           const got = await tryAsk(own1)
           if (got === null || cutOff(got, own1.limit)) continue
           near = own(author, got).filter(inWindow(ev))
         }
         if (near.length) { decide(ev, near); continue }
-        const last = await tryAsk({ kinds: [ACTION_KIND], authors: [author], until: ev.created_at, limit: 5 })
-        if (last) decide(ev, own(author, last).filter((m) => m.created_at <= ev.created_at))
+        const last = await tryAsk({ kinds: [ACTION_KIND], authors: [author], until: ev.created_at + NB_SKEW_S, limit: 5 })
+        if (last) decide(ev, own(author, last).filter((m) => m.created_at <= ev.created_at + NB_SKEW_S))
       }
     }
   }

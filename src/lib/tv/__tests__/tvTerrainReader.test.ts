@@ -256,6 +256,16 @@ describe('no-broadcast stretches', () => {
     expect(reader.asOf(BASE, 6000)!.layers).toHaveLength(0)
   })
 
+  it('hides a layer when a tagged action is dated just after its publish (clocks differ: the reviewer\'s skew probe)', async () => {
+    const a = who()
+    const L = await layerOf(a, { createdAt: 5000, survey: false, set: [[airCells[0], 9]] })
+    const r = relay([L, moveOf(a, 4800), moveOf(a, 4900), moveOf(a, 5030, true), moveOf(a, 5090, true)])
+    r.valid.add(a.builderPk)
+    const reader = new TvTerrainReader(r.deps)
+    await reader.prepare([BASE])
+    expect(reader.asOf(BASE, 6000)!.layers).toHaveLength(0)
+  })
+
   it('leaves a layer out when its author has no action at all to judge it by, and reads it again later', async () => {
     const a = who()
     const L = await layerOf(a, { createdAt: 5000 })

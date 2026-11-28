@@ -38,7 +38,7 @@ import { encryptForRegion } from '../../lib/shardCrypto'
 import type { NostrEvent } from '../../lib/events'
 import { chunkRegionKeyOf, type TvTerrainDeps } from '../../lib/tv/terrainReader'
 import type { Beat, Shot } from '../../lib/tv/director'
-import { MAX_DRAWN, liveTvTerrainDepsForTest, readRing, tvRegionKeysHeld, tvTerrainReader, setTvTerrainDeps, startTvTerrain, stopTvTerrain, terrainOn, tvLighting, tvTerrainIdle, tvTerrainLightsKept, tvTerrainMeshesKept, tvTerrainTick, useTvTerrain, type TvTerrainFrame } from '../useTvTerrain'
+import { MAX_DRAWN, TV_TERRAIN_ON_STREAM, setTvTerrainSearchForTest, tvTerrainOn, liveTvTerrainDepsForTest, readRing, tvRegionKeysHeld, tvTerrainReader, setTvTerrainDeps, startTvTerrain, stopTvTerrain, terrainOn, tvLighting, tvTerrainIdle, tvTerrainLightsKept, tvTerrainMeshesKept, tvTerrainTick, useTvTerrain, type TvTerrainFrame } from '../useTvTerrain'
 import { setBroadcastForTest } from '../../lib/tv/broadcast'
 import { useLayers } from '../useLayers'
 import { LIGHT_BYTES } from '../../lib/terrain/light'
@@ -102,6 +102,7 @@ afterEach(() => {
   stopTvTerrain()
   setTvTerrainDeps(null)
   setBroadcastForTest(null)
+  setTvTerrainSearchForTest(null)
   useLayers.setState({ blockShading: true })
 })
 
@@ -143,8 +144,9 @@ describe('block lighting: the site\'s /tv lights its blocks, the stream never do
     expect(tvTerrainLightsKept()).toBe(0)
   }, 30_000)
 
-  it('on the stream, never: no light job runs even with Block shading on', async () => {
+  it('on the stream (TERRAIN let on there by tvTerrain=1), never: no light job runs even with Block shading on', async () => {
     setBroadcastForTest(true)
+    setTvTerrainSearchForTest('?broadcast=1&tvTerrain=1')
     useLayers.setState({ blockShading: true })
     expect(tvLighting()).toBe(false)
     await onScreen()
@@ -207,6 +209,34 @@ describe('the TV terrain engine', () => {
     const shot = tripOf([beat(1100, 1, 2)])
     expect(terrainOn({ shot, terrain: { mode: 'orbit', shot: 'another' } })).toBe(false)
     expect(terrainOn({ shot: null, terrain: { mode: 'orbit', shot: shot.id } })).toBe(false)
+  })
+})
+
+describe('TERRAIN on the stream: off until the box is measured', () => {
+  it('is off by default on the stream and on on the site; tvTerrain=1 lets it on for the stream', () => {
+    expect(TV_TERRAIN_ON_STREAM).toBe(false)
+    setBroadcastForTest(false)
+    expect(tvTerrainOn('')).toBe(true)
+    setBroadcastForTest(true)
+    expect(tvTerrainOn('?broadcast=1')).toBe(false)
+    expect(tvTerrainOn('?broadcast=1&tvTerrain=1')).toBe(true)
+  })
+
+  it('on the stream without the flag, reads no layers and draws no chunks', async () => {
+    setBroadcastForTest(true)
+    setTvTerrainSearchForTest('?broadcast=1')
+    const m = mockDeps([await surveyLayer(BASE, 1000), finalizeEvent({ kind: 3333, created_at: 990, tags: [['A', 'hop']], content: '' }, sk) as unknown as NostrEvent])
+    setTvTerrainDeps(m.deps)
+    startTvTerrain()
+    expect(tvTerrainReader()).toBeNull()
+    const shot = tripOf([beat(1100, 4, 5), beat(1101, 5, 6)])
+    tvTerrainTick({ shot: null, tapeTime: null, avatars: {}, terrain: null }, [shot])
+    const frame: TvTerrainFrame = { shot, tapeTime: 1101, avatars: { [pk]: { position: shot.beats[1].action.position, plane: 0 } }, terrain: { mode: 'orbit', shot: shot.id } }
+    for (let i = 0; i < 5; i++) { tvTerrainTick(frame, []); await settle(20) }
+    expect(m.asked).toHaveLength(0)
+    expect(shot.beats.some((b) => b.terrain)).toBe(false)
+    expect(useTvTerrain.getState().drawn).toHaveLength(0)
+    expect(tvRegionKeysHeld()).toBe(0)
   })
 })
 

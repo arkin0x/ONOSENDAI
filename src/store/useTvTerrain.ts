@@ -34,6 +34,10 @@
  * isBroadcast, the streamer's ?broadcast=1) there is no light at all: every
  * chunk draws fully lit and no light job runs.
  *
+ * On the 24/7 stream all of this is off (no reader, no worker, nothing
+ * drawn, so no TERRAIN shot) until the stream box is measured with it:
+ * TV_TERRAIN_ON_STREAM, or `tvTerrain=1` on the streamer's address.
+ *
  * Watching only: nothing here makes a signature, publishes or keeps anything past TV.
  */
 
@@ -181,9 +185,32 @@ export function liveTvTerrainDepsForTest(life: { ended: boolean }): TvTerrainDep
   return liveDeps(life)
 }
 
-/** TV came on: a reader and a blocks worker of its own. */
+/**
+ * TERRAIN on the 24/7 stream: off until the stream box has been measured
+ * with it (the coordinator, 2026-11-28), so merging changes the site's /tv
+ * only. The streamer can try it with `tvTerrain=1` on its address.
+ */
+export const TV_TERRAIN_ON_STREAM = false
+
+/**
+ * Whether TV reads and draws TERRAIN: always on the site's /tv; on the
+ * stream (lib/tv/broadcast.ts isBroadcast) only with TV_TERRAIN_ON_STREAM
+ * or `tvTerrain=1` in the address.
+ */
+export function tvTerrainOn(search: string = searchForTest ?? (typeof window !== 'undefined' && window.location ? window.location.search : '')): boolean {
+  if (!isBroadcast() || TV_TERRAIN_ON_STREAM) return true
+  return new URLSearchParams(search).get('tvTerrain') === '1'
+}
+let searchForTest: string | null = null
+/** For tests: the address's query as tvTerrainOn reads it (null: the page's own). */
+export function setTvTerrainSearchForTest(search: string | null): void {
+  searchForTest = search
+}
+
+/** TV came on: a reader and a blocks worker of its own (none where TERRAIN is off on TV: tvTerrainOn). */
 export function startTvTerrain(): void {
   stopTvTerrain()
+  if (!tvTerrainOn()) return
   client = makeBlocksClient()
   life = { ended: false }
   reader = new TvTerrainReader({ ...liveDeps(life), ...override })

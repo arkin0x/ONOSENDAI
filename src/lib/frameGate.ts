@@ -90,7 +90,12 @@ function stampMaterial(m: StampMaterial): void {
  * display's full rate; anything else under it that changes still wakes it.
  */
 function visit(o: Stampable, moving = false): void {
-  mix(o.visible === false ? 1 : 2)
+  // Nothing under an invisible object is drawn, so nothing under it can change
+  // the picture: its subtree is not walked at all (a far shard hidden by
+  // scene/farCull.ts holds its whole mesh, points and glow). Only the flag
+  // itself is mixed in, so hiding or showing it still wakes the view.
+  if (o.visible === false) { mix(1); return }
+  mix(2)
   const under = moving || o.userData?.ambientMotion === true
   const e = under ? undefined : o.matrixWorld?.elements
   if (e) { mix(e[0]); mix(e[1]); mix(e[5]); mix(e[12]); mix(e[13]); mix(e[14]) }

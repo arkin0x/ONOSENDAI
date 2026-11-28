@@ -61,6 +61,7 @@ vi.mock('../WorldShards', async (real) => ({ ...(await real<object>()), WorldSha
 vi.mock('../TerrainLayer', async (real) => ({ ...(await real<object>()), TerrainLayer: stub('TerrainLayer') }))
 vi.mock('../PrizeToys', async (real) => ({ ...(await real<object>()), PrizeToys: stub('PrizeToys') }))
 vi.mock('../WorldSeeds', async (real) => ({ ...(await real<object>()), WorldSeeds: stub('WorldSeeds') }))
+vi.mock('../FarShardDots', async (real) => ({ ...(await real<object>()), FarShardDots: stub('FarShardDots') }))
 vi.mock('../WorldMessages', async (real) => ({ ...(await real<object>()), WorldMessages: stub('WorldMessages') }))
 vi.mock('../ChestLooks', async (real) => ({ ...(await real<object>()), ChestLooks: stub('ChestLooks') }))
 vi.mock('../BuildOccluders', async (real) => ({ ...(await real<object>()), BuildOccluders: stub('BuildOccluders') }))

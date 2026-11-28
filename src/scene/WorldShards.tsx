@@ -8,7 +8,7 @@
  * the honest picture. Culled past the same reach as Earth and the spawn mark.
  */
 
-import { memo, useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSyncExternalStore } from 'react'
 import { followsVersion, onFollows, readFollows, trustedPlacement } from '../lib/trust'
 import { useFrame } from '@react-three/fiber'
 import type { Group, Material, Object3D } from 'three'
@@ -18,7 +18,8 @@ import { useCeremony } from '../store/useCeremony'
 import { editingId, useShards, type WorldItem } from '../store/useShards'
 import { WALL_BREATH_SECONDS } from './Rooms'
 import { WalkContactHint } from './WalkContactHint'
-import { glowReachDoublings } from '../lib/pointLook'
+import { glowReachDoublings, pointLookOf } from '../lib/pointLook'
+import { farCull, farCullEntry, setShard, type FarCullEntry } from './farCull'
 import { ShardMesh } from './ShardMesh'
 import { GHOST_OPACITY } from './shardFaces'
 import { regionBox, type Box } from '../lib/clip'
@@ -62,6 +63,22 @@ export function shardReach(shard: ShardModel, scale: number): number {
  */
 export function nearEdge(w: Pick<PlacedShardDraw, 'centre' | 'shard' | 'scale'>): number {
   return Math.max(0, Math.hypot(...w.centre) - shardReach(w.shard, w.scale))
+}
+
+/**
+ * How far a shard reaches from its centre for the size cull (scene/farCull.ts),
+ * in model units: its own reach, and past that the larger of its glow's radius
+ * (a glow reaches past its points, DECK-0003 §1.16) and half its POINT SIZE
+ * (§1.15). Placed objects are measured from what is drawn.
+ */
+const cullUnits = new WeakMap<ShardModel, number>()
+export function farCullUnits(shard: ShardModel): number {
+  let u = cullUnits.get(shard)
+  if (u === undefined) {
+    const look = pointLookOf(shard)
+    cullUnits.set(shard, (u = shardReach(shard, 1) + Math.max(look.glowRadius, (look.pointSize ?? 0) / 2)))
+  }
+  return u
 }
 
 /** The far cull for this shard: its own bound past the usual size (TapTarget farCullDoublings). */
@@ -292,7 +309,7 @@ export function WorldShards({ axes }: Props): JSX.Element | null {
 
   return (
     <>
-      {placed.map((w) => <PlacedShard key={w.key} w={w} birth={births[w.key]} moving={w.key === moving} occludes hidden={nearEdge(w) > reach} />)}
+      {placed.map((w) => <PlacedShard key={w.key} w={w} birth={births[w.key]} moving={w.key === moving} occludes hidden={nearEdge(w) > reach} cull />)}
     </>
   )
 }
@@ -364,7 +381,7 @@ export function keptWithin(placed: PlacedShardDraw[], reach: number, max: number
  * (BuildOccluders), except the one EDIT is moving, and take no taps while
  * dimmed, so a tap reaches what is behind them.
  */
-export function PlacedShard({ w, birth, moving = false, tappable = true, drawnRef, occludes = false, hidden: farHidden = false }: { w: PlacedShardDraw; birth: number | undefined; moving?: boolean; tappable?: boolean; drawnRef?: (g: Group | null) => void; occludes?: boolean; hidden?: boolean }): JSX.Element {
+export function PlacedShard({ w, birth, moving = false, tappable = true, drawnRef, occludes = false, hidden: farHidden = false, cull = false }: { w: PlacedShardDraw; birth: number | undefined; moving?: boolean; tappable?: boolean; drawnRef?: (g: Group | null) => void; occludes?: boolean; hidden?: boolean; cull?: boolean }): JSX.Element {
   // Step 1's green box is drawn by the tour's own mark in its place (scene/TutorialTarget.tsx).
   const hidden = farHidden || drawnByMark(w.key)
   // A landing moves the anchor, and with it every shard's centre: only this
@@ -374,12 +391,45 @@ export function PlacedShard({ w, birth, moving = false, tappable = true, drawnRe
   // that places nothing, and this render's centre for one that does.
   const told = useRef(w.centre)
   told.current = budgetCentre(told.current, w.centre, w.shard)
+  const far = useFarCull(cull, w, moving, birth, drawnRef)
   return (
     // Hidden: past the reach, kept mounted (WorldShards keptReach) and drawn nowhere, taking no taps.
-    <group position={w.centre} visible={!hidden}>
-      <PlacedShardBody shardKey={w.key} shard={w.shard} trusted={trustedPlacement(w.container, w.author)} scale={w.scale} clip={w.clip} pose={w.pose} centre={told.current} birth={birth} moving={moving} tappable={tappable && !hidden && !passesTaps(w.key)} drawnRef={drawnRef} occludes={occludes && !hidden} />
+    <group ref={far.at} position={w.centre} visible={!hidden}>
+      {/* Hidden and shown each frame by its size on screen (scene/farCull.ts), apart from the reach's own `visible` above. */}
+      <group ref={far.group}>
+        <PlacedShardBody shardKey={w.key} shard={w.shard} trusted={trustedPlacement(w.container, w.author)} scale={w.scale} clip={w.clip} pose={w.pose} centre={told.current} birth={birth} moving={moving} tappable={tappable && !hidden && !passesTaps(w.key)} drawnRef={far.drawn} occludes={occludes && !hidden} />
+      </group>
     </group>
   )
+}
+
+/**
+ * A world shard's place in the size cull (scene/farCull.ts), while `on`: its
+ * entry kept current with what it draws, at what scale, and whether it is
+ * moving or being born. The refs go on its positioned group, the group the
+ * cull hides, and what it draws (handed on to `drawnRef` as well).
+ */
+function useFarCull(on: boolean, w: PlacedShardDraw, moving: boolean, birth: number | undefined, drawnRef: ((g: Group | null) => void) | undefined): { at: (g: Group | null) => void; group: (g: Group | null) => void; drawn: (g: Group | null) => void } {
+  const entry = useRef<FarCullEntry | null>(null)
+  entry.current ??= farCullEntry(w.key)
+  const e = entry.current
+  useLayoutEffect(() => {
+    e.key = w.key
+    e.container = w.container
+    e.scale = w.scale
+    e.moving = moving
+    e.birth = birth
+    setShard(e, w.shard, farCullUnits(w.shard))
+  })
+  useLayoutEffect(() => {
+    if (!on) return
+    farCull.add(e)
+    return () => farCull.remove(e)
+  }, [on, e])
+  const at = useCallback((g: Group | null) => { e.at = g }, [e])
+  const group = useCallback((g: Group | null) => { e.group = g }, [e])
+  const drawn = useCallback((g: Group | null) => { e.drawn = g; drawnRef?.(g) }, [e, drawnRef])
+  return { at, group, drawn }
 }
 
 /**

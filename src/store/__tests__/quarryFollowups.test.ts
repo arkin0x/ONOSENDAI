@@ -58,7 +58,7 @@ import * as db from '../../lib/terrain/terrainDb'
 import { chunkKey, chunkOf } from '../../lib/terrain/coords'
 import { EMPTY } from '../../lib/terrain/blocks'
 import { FUSE_MS, cellKey, tidyDrops, type Drop } from '../../lib/terrain/quarry'
-import { NOT_YOURS_LINE, SWITCHED_LINE, strike, takeToy } from '../../lib/blueprint/smashRun'
+import { MEMORY_ONLY_LINE, NOT_LOADED_LINE, NOT_YOURS_LINE, SWITCHED_LINE, strike, takeToy } from '../../lib/blueprint/smashRun'
 import { COMPILER_RECIPE } from '../../lib/blueprint/recipes'
 import { cellIndex } from '../../lib/blueprint/format'
 import type { Position } from '../../lib/space'
@@ -256,5 +256,85 @@ describe('a prize goes to the identity that struck', () => {
     await done
     expect(useBlueprints.getState().toys).toEqual([])
     expect(T().message).toBe(SWITCHED_LINE)
+  }, 15_000)
+})
+
+/** The Compiler recipe standing alone near you, ready to strike bare-handed: the cell to strike. */
+function buildCompiler(): [number, number, number] {
+  const s = terrainSession!
+  useBlueprints.setState({ owner: A, loadedFor: A, cards: [], toys: [] })
+  const o = [19, 12, 19]
+  const cells: Array<[number, number, number]> = []
+  for (let x = -1; x <= 3; x++) for (let y = -1; y <= 3; y++) for (let z = -1; z <= 1; z++) cells.push([o[0] + x, o[1] + y, o[2] + z])
+  expect(T().clear(cells)).toBeNull()
+  const [sx, sy, sz] = COMPILER_RECIPE.size
+  let at: [number, number, number] | null = null
+  for (let x = 0; x < sx; x++) for (let y = 0; y < sy; y++) for (let z = 0; z < sz; z++) {
+    const id = COMPILER_RECIPE.cells[cellIndex(COMPILER_RECIPE.size, x, y, z)]
+    if (id) { s.world.setCs(o[0] + x, o[1] + y, o[2] + z, id); at ??= [o[0] + x, o[1] + y, o[2] + z] }
+  }
+  return at!
+}
+
+describe('while a field\'s saved inventory is still being read (review of #960)', () => {
+  const toy = (owner: string, tool: 'compiler' | 'quarry-charge') => ({
+    rowKey: `${owner}/t/${tool}`, owner, prize: tool === 'compiler' ? { type: 'tool' as const, tool } : { type: 'tool' as const, tool, count: 7 },
+    name: 'x', maker: 'game', lookup: 'l', at: { x: '0', y: '0', z: '0', plane: 0 }, made: 0,
+  })
+
+  it('a field opens loading, then is ready once what it kept is read', async () => {
+    await openSurveyed()
+    expect(terrainSession!.kept).toBe('ready')
+  })
+
+  it('collects no drop until then; once read, walking in collects it', async () => {
+    const c = await blastNear()
+    const s = terrainSession!
+    const n = Q().drops.length
+    const counts = { ...T().inventory.counts }
+    s.kept = 'loading'
+    stepTo(c)
+    expect(Q().drops).toHaveLength(n)
+    expect(T().inventory.counts).toEqual(counts)
+    s.kept = 'ready'
+    stepTo([c[0], c[1] + 5, c[2]])
+    stepTo(c)
+    expect(Q().drops.length).toBeLessThan(n)
+  })
+
+  it.each(['quarry-charge', 'compiler'] as const)('refuses a %s prize until then, and keeps it waiting; once read, takes it', async (tool) => {
+    await openSurveyed()
+    const s = terrainSession!
+    useBlueprints.setState({ toys: [toy(A, tool)] })
+    s.kept = 'loading'
+    expect(takeToy(`${A}/t/${tool}`)).toBe(false)
+    expect(T().message).toBe(NOT_LOADED_LINE)
+    expect(useBlueprints.getState().toys).toHaveLength(1)
+    s.kept = 'ready'
+    expect(takeToy(`${A}/t/${tool}`)).toBe(true)
+    expect(useBlueprints.getState().toys).toHaveLength(0)
+    if (tool === 'quarry-charge') expect(T().inventory.charges).toBe(7)
+    else expect(T().inventory.compiler).toBe('made')
+  })
+
+  it('with no storage on the device it takes the prize for this visit and says so, never "still loading" forever', async () => {
+    await openSurveyed()
+    terrainSession!.kept = 'memory'
+    useBlueprints.setState({ toys: [toy(A, 'quarry-charge')] })
+    expect(takeToy(`${A}/t/quarry-charge`)).toBe(true)
+    expect(T().inventory.charges).toBe(7)
+    expect(T().message).toBe(MEMORY_ONLY_LINE)
+  })
+
+  it('a change of place alone while a smash compiles keeps its prize: prizes are per identity', async () => {
+    await openSurveyed()
+    const at = buildCompiler()
+    const done = strike(at, true)
+    await settle(100)
+    // The field made again (a far jump, a plane switch and back), the same identity.
+    setTerrainSession({ ...terrainSession! })
+    await done
+    expect(useBlueprints.getState().toys).toHaveLength(1)
+    expect(useBlueprints.getState().toys[0].owner).toBe(A)
   }, 15_000)
 })

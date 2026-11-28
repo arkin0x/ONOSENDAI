@@ -25,7 +25,7 @@
  */
 
 import { create } from 'zustand'
-import { headNow, offsetOf, terrainSession, useTerrain, type TerrainSession } from './useTerrain'
+import { fieldLoaded, headNow, offsetOf, terrainSession, useTerrain, type TerrainSession } from './useTerrain'
 import { quarryHooks } from './quarryHooks'
 import { useCyberspace } from './useCyberspace'
 import { useSmashFx } from './useSmashFx'
@@ -169,7 +169,9 @@ export const useQuarry = create<QuarryState>((set, get) => ({
   collect: (keys) => {
     const st = get()
     const s = terrainSession
-    if (!keys.size || !st.drops.length || !s || s.owner !== st.owner) return 0
+    // Nothing until the field's saved inventory is read: the read would overwrite what was carried, and the drop would
+    // stay gone (review of #960).
+    if (!keys.size || !st.drops.length || !s || s.owner !== st.owner || !fieldLoaded(s)) return 0
     const now = Date.now()
     const got = new Map<number, number>()
     const left: Drop[] = []

@@ -12,7 +12,7 @@
  */
 
 import { sha256 } from '@noble/hashes/sha2.js'
-import { useTerrain, terrainSession, cellInReach, compilerInHand, OUT_OF_REACH } from '../../store/useTerrain'
+import { useTerrain, terrainSession, cellInReach, compilerInHand, fieldLoaded, OUT_OF_REACH } from '../../store/useTerrain'
 import { useSmashFx } from '../../store/useSmashFx'
 import { useBlueprints } from '../../store/useBlueprints'
 import { useCyberspace } from '../../store/useCyberspace'
@@ -140,9 +140,9 @@ export async function strike(target: readonly [number, number, number], bare: bo
   }
   await wait(struck + RESOLVE_AFTER_MS - performance.now())
   // The prizes are the identity's that struck: one switched away from while it compiled gets none, and the new one none
-  // of its (review of #952).
+  // of its (review of #952). Prizes are kept per identity, not per field, so a change of place alone keeps them (#960).
   const striker = from?.me ?? owner0
-  if (terrainSession !== s || useCyberspace.getState().identity.pubkey !== striker) {
+  if (useCyberspace.getState().identity.pubkey !== striker) {
     useSmashFx.getState().resolve(id, 'miss')
     useTerrain.getState().say(SWITCHED_LINE)
     return
@@ -172,12 +172,15 @@ export async function strike(target: readonly [number, number, number], bare: bo
 
 // The lines a smash with no prize leaves live with the rules (smash.ts missLine).
 export { OFFLINE_LINE, UNKNOWN_LINE } from './smash'
-/** When the identity changed while a smash compiled: its prizes are not given to another. */
-export const SWITCHED_LINE = 'The smash stopped: you changed identity or place.'
+/** When the identity changed while a smash compiled: its prizes are not given to another (a change of place alone keeps them). */
+export const SWITCHED_LINE = 'The smash stopped: you changed identity.'
 /** When a waiting prize is not the identity's on screen, or its blocks have not loaded yet. */
 export const NOT_YOURS_LINE = 'This prize was found by another of your identities. Switch back to take it.'
 /** When a waiting prize is the identity's on screen but TERRAIN still holds another's blocks. */
 export const NOT_LOADED_LINE = 'Your blocks are still loading. Try again in a moment.'
+
+/** When a tool was taken with no storage on this device: it lasts this visit only. */
+export const MEMORY_ONLY_LINE = 'Taken. This browser keeps no storage for TERRAIN, so it lasts until you close the page.'
 
 /** When more matched than one smash opens. */
 export const MORE_LINE = 'More may be waiting: this smash opened the first ones it found.'
@@ -198,7 +201,12 @@ export function takeToy(rowKey: string): boolean {
   // (review of #952): a tool goes into that inventory, a shard into that identity's ITEMS.
   const me = useCyberspace.getState().identity.pubkey
   if (toy.owner !== me) { useTerrain.getState().say(NOT_YOURS_LINE); return false }
-  if (toy.prize.type === 'tool' && (!terrainSession || terrainSession.owner !== (me || 'local'))) { useTerrain.getState().say(NOT_LOADED_LINE); return false }
+  // A tool goes into TERRAIN's inventory: only once it is this identity's, read from the device (fieldLoaded), or the read
+  // landing after would overwrite it (review of #960).
+  const field = terrainSession
+  if (toy.prize.type === 'tool' && (!field || field.owner !== (me || 'local') || !fieldLoaded(field))) { useTerrain.getState().say(NOT_LOADED_LINE); return false }
+  // With no storage here the inventory is this visit's alone: said once the tool is in it.
+  const memoryOnly = toy.prize.type === 'tool' && field?.kept === 'memory'
   if (toy.prize.type === 'tool' && toy.prize.tool === 'quarry-charge') {
     // No cap: each compile adds its count (DECK-0010 §8.6), beside the Compiler for good.
     const n = toolCount(toy.prize)
@@ -214,11 +222,13 @@ export function takeToy(rowKey: string): boolean {
     const event = prizeEvent(toy.prize, toy.record, toy.maker)
     const body = readItem(event, event.pubkey)
     if (!body) { useTerrain.getState().say('This prize could not be read.'); return false }
-    const owner = useInventory.getState().owner || useCyberspace.getState().identity.pubkey
+    // The identity checked above: ITEMS follows the identity on screen (useInventory ownerNow).
+    const owner = me
     // The record's signature covers the sealed prize, so who made it is a fact once the record was checked.
     useInventory.getState().add([heldFromEntry(owner, { id: event.id, event, verified: true, body }, { chestId: `blueprint:${toy.lookup}`, chestName: toy.name }, null, Math.floor(Date.now() / 1000))])
   }
   bp.dropToy(rowKey)
+  if (memoryOnly) useTerrain.getState().say(MEMORY_ONLY_LINE)
   noteMining({ type: 'prize' })
   return true
 }

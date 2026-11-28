@@ -74,6 +74,18 @@ export function gather(read: (x: number, y: number, z: number) => number, hit: C
  * blocks inside the n by n by n box round the hit (hit - floor(n/2) to the rest above: hit - 8 to + 7 for 16, hit - 1
  * to + 1 for 3), so a smash never deletes more than n along any axis.
  */
+/**
+ * Whether the group at `hit` is isolated and at most `n` on every axis, as gather's `arrangement !== null` would say,
+ * without making the arrangement and stopping as soon as the answer is no: once the group passes `n` on an axis, or a
+ * block past the window touches it. For nearMiss.ts tooBigBare, which asks it with the Compiler's reach while a bare
+ * hand digs, so a smash into the ground floods only until the group is longer than the reach, never the whole window.
+ * `reads` counts the cells it read (tests).
+ */
+export function fitsIsolated(read: (x: number, y: number, z: number) => number, hit: Cell, n: number = WINDOW_BELOW + WINDOW_ABOVE + 1, reads?: { count: number }): boolean {
+  if (read(hit[0], hit[1], hit[2]) === 0) return false
+  return !flood(read, hit, n - 1, n - 1, n, reads).cut
+}
+
 export function smashCells(read: (x: number, y: number, z: number) => number, hit: Cell, n: number, g: Gathered): Array<[number, number, number]> {
   if (g.arrangement) return g.cells
   if (read(hit[0], hit[1], hit[2]) === 0) return []
@@ -84,9 +96,11 @@ export function smashCells(read: (x: number, y: number, z: number) => number, hi
 /**
  * The occupied cells reachable from `hit` through faces, edges and corners, never more than `below` under or `above`
  * over it on any axis; `cut` when a block past the window's edge touches one of them (the component goes on past what
- * was looked at, so it is not isolated: gather).
+ * was looked at, so it is not isolated: gather). With `maxExtent` it stops at the first cut, or as soon as the cells
+ * found pass `maxExtent` on an axis (also `cut`: it cannot be a construction of that reach), and its cells are then
+ * only those found so far (fitsIsolated).
  */
-function flood(read: (x: number, y: number, z: number) => number, hit: Cell, below: number, above: number): { cells: Array<[number, number, number]>; has: (x: number, y: number, z: number) => boolean; cut: boolean } {
+function flood(read: (x: number, y: number, z: number) => number, hit: Cell, below: number, above: number, maxExtent = Infinity, reads?: { count: number }): { cells: Array<[number, number, number]>; cut: boolean } {
   // What was looked at, in a grid over the window (one byte a cell: 1 looked at, 2 in the group), not a set of strings:
   // the Compiler's window is 31 by 31 by 31, and the smash preview works it out each time the aim rests on a new block.
   // A reach under one looks at the struck block alone, as the set of strings did (review of #948: a reach of 0 threw).
@@ -101,19 +115,32 @@ function flood(read: (x: number, y: number, z: number) => number, hit: Cell, bel
   grid[at(hit[0], hit[1], hit[2])] = 2
   const cells: Array<[number, number, number]> = [[hit[0], hit[1], hit[2]]]
   let cut = false
+  const bounded = maxExtent !== Infinity
+  const lo = [hit[0], hit[1], hit[2]], hi = [hit[0], hit[1], hit[2]]
+  const look = (x: number, y: number, z: number): number => { if (reads) reads.count++; return read(x, y, z) }
   for (let i = 0; i < cells.length; i++) {
     const [x, y, z] = cells[i]
     for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
       if (!dx && !dy && !dz) continue
       const nx = x + dx, ny = y + dy, nz = z + dz
-      if (!inside(nx, ny, nz)) { if (!cut && read(nx, ny, nz) !== 0) cut = true; continue }
+      if (!inside(nx, ny, nz)) {
+        if (!cut && look(nx, ny, nz) !== 0) { cut = true; if (bounded) return { cells, cut } }
+        continue
+      }
       const k = at(nx, ny, nz)
       if (grid[k]) continue
       grid[k] = 1
-      if (read(nx, ny, nz) !== 0) { cells.push([nx, ny, nz]); grid[k] = 2 }
+      if (look(nx, ny, nz) !== 0) {
+        cells.push([nx, ny, nz]); grid[k] = 2
+        if (bounded) {
+          const c = [nx, ny, nz]
+          for (let a = 0; a < 3; a++) { if (c[a] < lo[a]) lo[a] = c[a]; if (c[a] > hi[a]) hi[a] = c[a] }
+          if (hi[0] - lo[0] >= maxExtent || hi[1] - lo[1] >= maxExtent || hi[2] - lo[2] >= maxExtent) return { cells, cut: true }
+        }
+      }
     }
   }
-  return { cells, has: (x, y, z) => inside(x, y, z) && grid[at(x, y, z)] === 2, cut }
+  return { cells, cut }
 }
 
 /** The arrangement of a group in its box: the group's own blocks, every other cell empty. */

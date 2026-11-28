@@ -60,7 +60,7 @@ export function smashAsk(read: (x: number, y: number, z: number) => number, targ
   const miss = nearMiss(read, target, natural)
   const rare = rareLost(g.blocks, natural)
   if (!miss && (compiled || !rare.length)) return null
-  const tooBig = !compiled && !miss && tooBigBare(read, target, bare, g.arrangement)
+  const tooBig = !compiled && !miss && tooBigBare(read, target, bare, g)
   return { words: confirmWords(g.smash.length, rare, miss, compiled, tooBig), count: g.smash.length, rare, miss }
 }
 

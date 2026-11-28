@@ -130,7 +130,7 @@ export async function strike(target: readonly [number, number, number], bare: bo
   // A game recipe built wrong, read before its blocks go, so the line after says why when nothing came of it (nearMiss.ts).
   const miss = nearMiss(read, target, naturalOf(s.world))
   // Bare-handed, an isolated build too long for the bare reach: said after (nearMiss.ts tooBigBare).
-  const tooBig = !miss && !compiles(g.arrangement) && tooBigBare(read, target, bare, g.arrangement)
+  const tooBig = !miss && !compiles(g.arrangement) && tooBigBare(read, target, bare, g)
   // What goes is the smash set (a construction whole, else the reach's box round the hit), spent whether or not it
   // compiles (DECK-0010 §4.3); what compiles is the gather's arrangement.
   const refused = useTerrain.getState().clear(g.smash)

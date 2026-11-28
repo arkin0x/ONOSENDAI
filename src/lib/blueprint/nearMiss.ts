@@ -39,9 +39,9 @@
  * round"; never the words for upright posture.
  */
 
-import { arrangementFrom, gather, type Cell } from './arrangement'
+import { arrangementFrom, fitsIsolated, type Cell, type Gathered } from './arrangement'
 import { cellAt, type Arrangement } from './format'
-import { CINDERROCK, COMPILER_RECIPE, GLOWCORE, QUARRY_CHARGE_RECIPE, sameArrangement } from './recipes'
+import { CINDERROCK, COMPILER_RECIPE, GLOWCORE, QUARRY_CHARGE_RECIPE, recipeNeeds, sameArrangement } from './recipes'
 import { blockName } from '../terrain/blocks'
 import { PRIZED } from '../terrain/assay'
 
@@ -108,32 +108,80 @@ function allPoses(): Array<{ id: RecipeId; name: string; poses: Pose[] }> {
   return poses
 }
 
+/** The most blocks in a game recipe: a build with more is never one (nearMiss). */
+const RECIPE_MAX = Math.max(...RECIPES.map((r) => r.recipe.cells.filter((id) => id).length))
+
+/**
+ * The struck build's blocks, counted by material: the placed blocks (not natural ground) reachable from `hit` through
+ * faces, edges and corners. Null past RECIPE_MAX blocks (it is no recipe), or when the hit is natural ground.
+ */
+function placedCounts(read: Read, hit: Cell, natural?: (x: number, y: number, z: number) => boolean): Map<number, number> | null {
+  const placed = (x: number, y: number, z: number): boolean => read(x, y, z) !== 0 && !natural?.(x, y, z)
+  if (!placed(hit[0], hit[1], hit[2])) return null
+  const seen = new Set<string>([`${hit[0]},${hit[1]},${hit[2]}`])
+  const q: Array<readonly [number, number, number]> = [hit]
+  for (let i = 0; i < q.length; i++) {
+    const [x, y, z] = q[i]
+    for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
+      const c = [x + dx, y + dy, z + dz] as const
+      const k = `${c[0]},${c[1]},${c[2]}`
+      if (seen.has(k) || !placed(c[0], c[1], c[2])) continue
+      seen.add(k)
+      q.push(c)
+      if (q.length > RECIPE_MAX) return null
+    }
+  }
+  const out = new Map<number, number>()
+  for (const [x, y, z] of q) { const id = read(x, y, z); out.set(id, (out.get(id) ?? 0) + 1) }
+  return out
+}
+
+/** Whether counted blocks are exactly a recipe's: the same count of every material, nothing more. */
+function sameCounts(counts: ReadonlyMap<number, number>, recipe: Arrangement): boolean {
+  const needs = recipeNeeds(recipe)
+  if (Object.keys(needs).length !== counts.size) return false
+  for (const [id, n] of counts) if (needs[id] !== n) return false
+  return true
+}
+
 /**
  * Whether a game recipe is built at `hit` (its blocks exactly, in some orientation, the hit one of them) but will not
  * make what it makes; null when no recipe is there, or when it is there and makes it. `natural` says whether a cell is
  * natural ground (TERRAIN's generated ground, unchanged); without it nothing touching counts as the ground.
+ *
+ * Only when the struck build is the recipe's blocks and no more (coordinator's ruling on #969's follow-ups): the placed
+ * blocks connected to the hit, counted by material, must equal the recipe's, so a larger build that holds a recipe's
+ * shape, or a recipe with a placed block touching it, is never called a near miss. Natural ground is not part of the
+ * build, so a recipe resting on it still is (TOUCHING THE GROUND).
  */
 export function nearMiss(read: Read, hit: Cell, natural?: (x: number, y: number, z: number) => boolean): NearMiss | null {
   const hitId = read(hit[0], hit[1], hit[2])
   if (!hitId) return null
+  const counts = placedCounts(read, hit, natural)
+  if (!counts) return null
   let best: NearMiss | null = null
-  for (const r of allPoses()) for (const pose of r.poses) for (const b of pose.blocks) {
-    if (b[3] !== hitId) continue
-    const lo = [hit[0] - b[0], hit[1] - b[1], hit[2] - b[2]] as const
-    if (!pose.blocks.every(([x, y, z, id]) => read(lo[0] + x, lo[1] + y, lo[2] + z) === id)) continue
-    const touching = touchOf(read, lo, pose, natural)
-    // Isolated and the right way round: it compiles in either hand (every game recipe fits a bare hand's reach).
-    if (!touching && !pose.turned) return null
-    const m: NearMiss = { recipe: r.id, name: r.name, turned: pose.turned, touching }
-    // The right way round wins over a turned reading of the same blocks.
-    if (!best || (best.turned && !m.turned)) best = m
+  for (const r of allPoses()) {
+    if (!sameCounts(counts, RECIPES.find((x) => x.id === r.id)!.recipe)) continue
+    for (const pose of r.poses) for (const b of pose.blocks) {
+      if (b[3] !== hitId) continue
+      const lo = [hit[0] - b[0], hit[1] - b[1], hit[2] - b[2]] as const
+      if (!pose.blocks.every(([x, y, z, id]) => read(lo[0] + x, lo[1] + y, lo[2] + z) === id)) continue
+      const touching = touchOf(read, lo, pose, natural)
+      // Isolated and the right way round: it compiles in either hand (every game recipe fits a bare hand's reach).
+      if (!touching && !pose.turned) return null
+      const m: NearMiss = { recipe: r.id, name: r.name, turned: pose.turned, touching }
+      // The right way round wins over a turned reading of the same blocks.
+      if (!best || (best.turned && !m.turned)) best = m
+    }
   }
   return best
 }
 
 /**
  * What touches a recipe at `lo`: a block, not one of its own, on a face, edge or corner of one of its blocks (the
- * owner's isolation rule, as arrangement.ts gather; a block in its box that touches nothing does not count).
+ * owner's isolation rule). Since nearMiss asks only when the placed build is the recipe's blocks alone, a placed block
+ * touching it makes a bigger build and no near miss, so only natural ground is found here now: "a block" is no longer
+ * reached, and kept so the rule reads whole. A block in its box that touches nothing does not count (arrangement.ts).
  */
 function touchOf(read: Read, lo: readonly [number, number, number], pose: Pose, natural?: (x: number, y: number, z: number) => boolean): 'ground' | 'block' | null {
   const mine = new Set(pose.blocks.map(([x, y, z]) => `${x},${y},${z}`))
@@ -157,12 +205,16 @@ export function naturalOf(world: { naturalCs?: (x: number, y: number, z: number)
 }
 
 /**
- * Whether a bare-handed smash at `hit` meets an isolated construction too big for a bare hand: its own gather (reach
- * 3) makes no arrangement, but the Compiler's (reach 16) does, so the build is isolated and longer than 3 on some axis.
- * Worked out only bare-handed and only when nothing compiles (a gather of 31 by 31 by 31 cells at most).
+ * Whether a bare-handed smash at `hit` meets an isolated construction too big for a bare hand, from the bare gather
+ * `g`: isolated with no arrangement is too big already (it fits the bare window of 5, so the Compiler's 16 too); not
+ * isolated, it may be a longer build the bare window cut off, so the Compiler's reach is asked (arrangement.ts
+ * fitsIsolated), stopping as soon as the group passes 16 on an axis or touches past the window. Never asked with the
+ * Compiler in hand, nor when the bare gather made an arrangement.
  */
-export function tooBigBare(read: Read, hit: Cell, bare: boolean, bareArrangement: unknown): boolean {
-  return bare && !bareArrangement && gather(read, hit).arrangement !== null
+export function tooBigBare(read: Read, hit: Cell, bare: boolean, g: Pick<Gathered, 'isolated' | 'arrangement'>, reads?: { count: number }): boolean {
+  if (!bare || g.arrangement) return false
+  if (g.isolated) return true
+  return fitsIsolated(read, hit, undefined, reads)
 }
 
 /** The one cause the preview names, most important first. */

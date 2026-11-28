@@ -13,8 +13,13 @@
  *   it speeds up smoothly to a top speed on a slight arc (the shader in
  *   scene/quarryDrops.ts draws it from the same numbers), passing through
  *   blocks, since it is loot and not a body.
- * - It is carried when it arrives (useQuarry collectDrops), by the drop
- *   itself and not by its cell. Whatever takes it first, the flight's arrival
+ * - It is carried once it arrives (useQuarry collectDrops), by the drop
+ *   itself and not by its cell. Arrivals are carried in batches, at most one
+ *   every BATCH_MS and one more as the last flight ends, each batch one change
+ *   in memory and one transaction in storage together: an arrived drop keeps
+ *   its flight (drawn as gone) until its batch, so the frame keeps running
+ *   for it, and a crash before its batch leaves it a drop: never both
+ *   carried and kept, and never lost. Whatever takes it first, the flight's arrival
  *   or the walk passing over it, takes it from the drops in one step, so it
  *   is carried exactly once: the other finds it gone.
  * - Drops further than HOME_RADIUS float as they always did, and set off once
@@ -47,7 +52,10 @@ export interface Flight {
   reduced: boolean
 }
 
-/** The drops flying now, by the drop itself. */
+/** How often arrived drops are carried, at most, in milliseconds: one change in memory and one write each time. */
+export const BATCH_MS = 150
+
+/** The drops flying now, by the drop itself (an arrived one too, until its batch carries it). */
 export const flights = new Map<Drop, Flight>()
 /** Bumped whenever a drop sets off, so the scene writes the flights into its instances (and only then). */
 export const homing = { version: 0 }
@@ -60,6 +68,8 @@ const seen: { drops: readonly Drop[] | null; field: TerrainSession | null } = { 
 const alive = new Set<Drop>()
 /** The drops due this tick, kept between ticks so a tick makes nothing. */
 const due: Drop[] = []
+/** When the last batch was carried (Date.now() ms). */
+let lastBatch = -Infinity
 
 let motionQuery: MediaQueryList | null | undefined
 /** Whether the person asked for less motion, from one query kept for the page (a frame asks it). */
@@ -104,6 +114,7 @@ export function resetHoming(): void {
   seen.drops = null; seen.field = null
   due.length = 0
   bodyPoint.valid = false
+  lastBatch = -Infinity
 }
 
 /**
@@ -119,6 +130,8 @@ export function tickHoming(now: number = Date.now(), reduced: boolean = reducedN
   // The drops' owner on screen, in their field and plane, with its saved inventory read (as useQuarry detonate and collect).
   if (!s || q.owner !== s.owner || (cs.identity.pubkey || 'local') !== q.owner || s.plane !== cs.plane || !fieldLoaded(s)) {
     bodyPoint.valid = false
+    // None of them flies for another identity, field or plane: let the flights go, so none keeps the frame driver busy.
+    idleHoming()
     return 0
   }
   const drops = q.drops
@@ -138,12 +151,14 @@ export function tickHoming(now: number = Date.now(), reduced: boolean = reducedN
   bodyPoint.valid = true
   const o = s.world.origin
   let started = false
+  let inAir = false
   due.length = 0
   for (let i = 0; i < drops.length; i++) {
     const d = drops[i]
     const f = flights.get(d)
     if (f) {
       if (now >= f.arrive) due.push(d)
+      else inAir = true
       continue
     }
     if (d.plane !== s.plane || d.expires <= now) continue
@@ -155,8 +170,10 @@ export function tickHoming(now: number = Date.now(), reduced: boolean = reducedN
     flights.set(d, { start, arrive: start + flightMs(dist, reduced), len: dist, side: chance * 2 - 1, reduced })
     started = true
   }
-  if (started) homing.version++
-  if (!due.length) return 0
+  if (started) { homing.version++; inAir = true }
+  // A batch: BATCH_MS since the last, or the last flight has ended. Until then an arrived drop waits, drawn as gone.
+  if (!due.length || (inAir && now - lastBatch < BATCH_MS)) { due.length = 0; return 0 }
+  lastBatch = now
   const n = q.collectDrops(due, true)
   // Arrived: carried now, or already taken by the walk. Either way its flight is over.
   for (const d of due) flights.delete(d)

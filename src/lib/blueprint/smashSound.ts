@@ -36,6 +36,9 @@
 
 import { audioContext } from '../audioContext'
 import { sfxAllowed } from '../sfx'
+import { useSfxSwitch } from '../../store/sfxSwitch'
+import { useSoundMutes } from '../../store/useSoundMutes'
+import { useCyberspace } from '../../store/useCyberspace'
 import { readyMs, windupFromMs } from './hammerAnim'
 
 function ctx(): AudioContext | null {
@@ -404,19 +407,41 @@ export function prizeChime(step: number): void {
  * same gates and the same limiter as the smash.
  */
 
+/** The fuses beeping now: each one's beeps, laid out ahead on the audio clock, and when its last ends (audio seconds). */
+const fuses = new Set<{ oscs: OscillatorNode[]; end: number }>()
+
+/** Silence every fuse at once: its beeps still to come never sound (Sound effects or MUTE ALL turned off mid-fuse). */
+export function silenceFuses(): void {
+  for (const f of fuses) for (const o of f.oscs) { try { o.stop(); o.disconnect() } catch { /* already done */ } }
+  fuses.clear()
+}
+
+/** Sound turned off while a fuse burns stops its beeps there and then, not at the next charge (review of #977). */
+function silenceIfOff(): void {
+  if (fuses.size && !sfxAllowed()) silenceFuses()
+}
+useSfxSwitch.subscribe(silenceIfOff)
+useSoundMutes.subscribe((m, was) => { if (m.master !== was.master) silenceIfOff() })
+// Another identity's Sound effects switch may be off.
+useCyberspace.subscribe((c, was) => { if (c.identity.pubkey !== was.identity.pubkey) silenceIfOff() })
+
 /**
  * The fuse's beeps, laid out at once on the audio clock at `times` (ms from
  * now, lib/terrain/quarry.ts beepTimes), each a little higher than the last.
- * Returns a stop for a fuse that ends early; nothing sounds when sound is off.
+ * Returns a stop for a fuse that ends early; nothing sounds when sound is off,
+ * and turning sound off mid-fuse silences the beeps still to come.
  */
 export function fuseBeeps(times: readonly number[]): () => void {
   const ac = ctx()
   if (!ac) return () => {}
   preloadSmashSounds()
   const oscs: OscillatorNode[] = []
+  const t0 = ac.currentTime + 0.01
+  // The fuses already over are let go.
+  for (const f of fuses) if (f.end < ac.currentTime) fuses.delete(f)
+  const fuse = { oscs, end: t0 + (times.length ? times[times.length - 1] / 1000 : 0) + 0.1 }
   try {
     const out = smashOut(ac)
-    const t0 = ac.currentTime + 0.01
     times.forEach((ms, i) => {
       const t = t0 + ms / 1000
       const o = ac.createOscillator()
@@ -431,7 +456,11 @@ export function fuseBeeps(times: readonly number[]): () => void {
       oscs.push(o)
     })
   } catch { /* silent */ }
-  return () => { for (const o of oscs) { try { o.stop() } catch { /* already done */ } } }
+  fuses.add(fuse)
+  return () => {
+    fuses.delete(fuse)
+    for (const o of oscs) { try { o.stop() } catch { /* already done */ } }
+  }
 }
 
 /** The blast: the smash's impact for `blocks` blocks, under a deeper boom and a second, later break. */

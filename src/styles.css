@@ -15521,6 +15521,8 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
 }
 .terrain-held__dip { width: 100%; height: 100%; transform-style: preserve-3d; }
 .terrain-held__dip.is-dipping { animation: terrain-held-dip 220ms ease-out; }
+/* The same dip under a second name, so the next starts again without the cube being made again (TerrainView HeldBlock). */
+.terrain-held__dip.is-dipping-b { animation: terrain-held-charge-dip 220ms ease-out; }
 @keyframes terrain-held-dip { 40% { transform: translateY(14px) rotate(-8deg); } }
 .terrain-held__cube {
   position: relative;
@@ -15536,7 +15538,8 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
 }
 @media (prefers-reduced-motion: reduce) {
   .terrain-held.is-walking .terrain-held__cube,
-  .terrain-held__dip.is-dipping { animation: none; }
+  .terrain-held__dip.is-dipping,
+  .terrain-held__dip.is-dipping-b { animation: none; }
 }
 .terrain-held__face {
   position: absolute;

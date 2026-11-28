@@ -202,6 +202,27 @@ export function flightShare(ms: number, distance: number, reduced = false): numb
   return Math.min(1, flown(ms) / distance)
 }
 
+/** A drop's middle in a field (cs offsets from `origin`, continuous), worked out once per drop and field. */
+export interface DropPlace { origin: unknown; x: number; y: number; z: number }
+const placeCache = new WeakMap<Drop, DropPlace>()
+/**
+ * Where a drop floats in the field whose origin is `origin`: its cell's middle.
+ * The bigints are made only the first time a drop is asked of a field; after
+ * that it is a lookup, so a frame (or a stream of pickups) asking again makes
+ * nothing.
+ */
+export function dropPlace(d: Drop, origin: { x: bigint; y: bigint; z: bigint }): DropPlace {
+  let p = placeCache.get(d)
+  if (!p) { p = { origin: null, x: 0, y: 0, z: 0 }; placeCache.set(d, p) }
+  if (p.origin !== origin) {
+    p.origin = origin
+    p.x = Number(BigInt(d.x) - origin.x) + 0.5
+    p.y = Number(BigInt(d.y) - origin.y) + 0.5
+    p.z = Number(BigInt(d.z) - origin.z) + 0.5
+  }
+  return p
+}
+
 /** A number from 0 to 1 that is a drop's own, from its cell (a cheap hash: neighbours differ). */
 export function dropChance(x: number, y: number, z: number): number {
   const v = Math.sin(x * 12.9898 + y * 78.233 + z * 37.719) * 43758.5453

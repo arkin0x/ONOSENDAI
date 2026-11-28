@@ -68,8 +68,10 @@ export interface QuarryState {
   collect: (keys: ReadonlySet<string>) => number
   /**
    * Collect these drops themselves (store/quarryHoming.ts, as each arrives): carried, and gone. Only those still among
-   * the drops count, so a drop already taken by the walk is never carried twice. `flying` softens the sound for a stream
-   * Returns how many.
+   * the drops count, so a drop already taken by the walk is never carried twice. `flying`: one pickup sound at most every
+   * PICKUP_GAP_MS, for a stream. Returns how many. Each call writes the inventory and the drops left in one transaction,
+   * never one without the other: mining saves the inventory on its own, so a later write of the drops could leave a
+   * crash with a drop both carried and kept.
    */
   collectDrops: (drops: readonly Drop[], flying?: boolean) => number
   /** Evaporate the drops past their time. */

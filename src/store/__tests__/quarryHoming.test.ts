@@ -37,7 +37,7 @@ import { useCyberspace } from '../useCyberspace'
 import { useWalk } from '../useWalk'
 import { offsetOf, setTerrainSession, terrainSession, useTerrain } from '../useTerrain'
 import { useQuarry } from '../useQuarry'
-import { flights, readBody, resetHoming, tickHoming } from '../quarryHoming'
+import { dropsFlying, flights, idleHoming, readBody, resetHoming, tickHoming } from '../quarryHoming'
 import { chunkKey, chunkOf } from '../../lib/terrain/coords'
 import { HOME_RADIUS, HOME_REDUCED_MS, HOME_STAGGER_MS, flightMs, flightShare, flown, homeDelay, homesFrom, makeDrop, type Drop } from '../../lib/terrain/quarry'
 import { walkGlide } from '../../lib/walkEye'
@@ -247,6 +247,36 @@ describe('carried exactly once', () => {
       expect(carried()).toBe(2)
     })
   }
+
+  it('the walk taking the last drop mid-flight leaves nothing flying: the frame driver is not kept busy (review)', () => {
+    const cell = [3, 0, 0] as const
+    const [d] = dropsAt([cell])
+    tickHoming(Date.now(), false, body())
+    expect(dropsFlying()).toBe(true)
+    const o = terrainSession!.world.origin
+    const ft = feet()
+    const at = { x: o.x + BigInt(ft[0] + cell[0]), y: o.y + BigInt(ft[1] + cell[1]), z: o.z + BigInt(ft[2] + cell[2]) }
+    useCyberspace.setState({ position: at, cursor: at })
+    expect(Q().drops).not.toContain(d)
+    expect(carried()).toBe(1)
+    expect(dropsFlying()).toBe(false)
+    // And the scene, finding no drops, lets the flight go (scene/QuarryFx.tsx).
+    idleHoming()
+    expect(flights.size).toBe(0)
+  })
+
+  it('nothing drawing them (zoomed out, another plane): the flights are let go, the drops kept, and they set off again when drawn', () => {
+    const made = dropsAt([[3, 0, 0], [-2, 1, 0]])
+    tickHoming(Date.now(), false, body())
+    expect(flights.size).toBe(2)
+    idleHoming()
+    expect(flights.size).toBe(0)
+    expect(Q().drops).toEqual(made)
+    tickHoming(Date.now(), false, body())
+    expect(flights.size).toBe(2)
+    tickHoming(Date.now() + 5000, false, body())
+    expect(carried()).toBe(2)
+  })
 
   it('asked for the same drop twice in one call, or twice over, it is carried once', () => {
     const [d] = dropsAt([[2, 0, 0]])

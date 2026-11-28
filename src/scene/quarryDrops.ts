@@ -25,7 +25,7 @@
 import { BoxGeometry, DataTexture, DynamicDrawUsage, Group, InstancedBufferAttribute, InstancedMesh, Matrix4, NearestFilter, RGBAFormat, ShaderMaterial, Vector3 } from 'three'
 import { DECK_TO_KIND, UNKNOWN_KIND, type BlockKind } from '../lib/terrain/blocks'
 import { makeTile } from '../lib/terrain/tiles'
-import { DROP_FADE_MS, DROP_SIZE, HOME_ACCEL, HOME_MAX_SPEED, HOME_REDUCED_MS, type Drop } from '../lib/terrain/quarry'
+import { DROP_FADE_MS, DROP_SIZE, HOME_ACCEL, dropPlace, HOME_MAX_SPEED, HOME_REDUCED_MS, type Drop } from '../lib/terrain/quarry'
 import type { Flight } from '../store/quarryHoming'
 import { NO_BLOOM_BLEND } from './shardFaces'
 
@@ -65,13 +65,14 @@ const DROP_VERTEX = /* glsl */ `
     vec3 p = vec3(c * position.x + s * position.z, position.y, -s * position.x + c * position.z);
     vec3 n = vec3(c * normal.x + s * normal.z, normal.y, -s * normal.x + c * normal.z);
     // Whole until its last seconds, then shrinking as it fades; gone once it arrives (or, reduced, as it fades out).
-    vLevel = clamp((aDrop.y - uTime) / uFade, 0.0, 1.0);
-    if (reduced) vLevel *= 1.0 - prog;
+    float lv = clamp((aDrop.y - uTime) / uFade, 0.0, 1.0);
+    p *= (0.35 + 0.65 * lv) * (1.0 - 0.45 * flying * flying);
+    // Reduced motion: only its light goes, where it is (no shrink, no rise).
+    vLevel = reduced ? lv * (1.0 - prog) : lv;
     if (prog >= 0.999) vLevel = 0.0;
-    p *= (0.35 + 0.65 * vLevel) * (1.0 - 0.45 * flying * flying);
     vec4 w = instanceMatrix * vec4(p, 1.0);
     // The bob, in cells, and a little rise as it evaporates; the bob settles as it flies.
-    w.y += (0.07 * sin(uTime * 2.1 + aDrop.x * 1.7)) * (1.0 - flying) + 0.25 * (1.0 - vLevel);
+    w.y += (0.07 * sin(uTime * 2.1 + aDrop.x * 1.7)) * (1.0 - flying) + 0.25 * (1.0 - lv);
     if (flying > 0.0) {
       // From its cell to the body's middle on a slight arc: up, and leaning to one side of the line.
       vec3 p0 = instanceMatrix[3].xyz;
@@ -227,8 +228,10 @@ export class DropField {
     for (const [id, list] of byKind) {
       const k = this.kindFor(id, list.length)
       list.forEach((d, i) => {
-        const x = Number(BigInt(d.x) - o.x), y = Number(BigInt(d.y) - o.y), z = Number(BigInt(d.z) - o.z)
-        scratch.makeScale(DROP_SIZE, DROP_SIZE, DROP_SIZE).setPosition(x + 0.5, y + 0.5, z + 0.5)
+        // Its cell's middle, worked out once per drop and field (a stream of pickups writes this again every frame).
+        const at = dropPlace(d, o)
+        const x = at.x - 0.5, y = at.y - 0.5, z = at.z - 0.5
+        scratch.makeScale(DROP_SIZE, DROP_SIZE, DROP_SIZE).setPosition(at.x, at.y, at.z)
         k.mesh.setMatrixAt(i, scratch)
         // A phase from its cell, so neighbours never bob in step.
         k.drop.setXY(i, (((x * 12.9898 + y * 78.233 + z * 37.719) % 6.2832) + 6.2832) % 6.2832, secondsOf(d.expires))

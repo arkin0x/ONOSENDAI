@@ -27,15 +27,16 @@
  * says otherwise (as useQuarry collect). Any gravity and any WALK (fluid or a
  * step at a time): the body's middle is read from where the walk draws you.
  *
- * Nothing is made in a frame where no drop changes: the drops' places in the
- * field are worked out again only when the drops or the field change.
+ * Nothing is made in a frame where no drop changes, and little when one
+ * does: each drop's place in the field is worked out once (lib/terrain/
+ * quarry.ts dropPlace), not again on every pickup of a stream.
  */
 
 import { fieldLoaded, headNow, terrainSession, type TerrainSession } from './useTerrain'
 import { useCyberspace } from './useCyberspace'
 import { useQuarry } from './useQuarry'
 import { walkFall, walkFallUp, walkGlide } from '../lib/walkEye'
-import { dropChance, flightMs, homeDelay, homeDistance, homesFrom, type Drop } from '../lib/terrain/quarry'
+import { dropChance, dropPlace, flightMs, homeDelay, homeDistance, homesFrom, type Drop } from '../lib/terrain/quarry'
 
 /** One drop's flight: when it sets off and arrives (Date.now() ms), how far it had to go, and its arc's lean (-1 to 1). */
 export interface Flight {
@@ -53,9 +54,10 @@ export const homing = { version: 0 }
 /** The body's middle as the last tick saw it, in the field's cells (cs offsets, continuous): the shader's target. */
 export const bodyPoint = { x: 0, y: 0, z: 0, valid: false }
 
-/** The drops' middles in the field, three numbers each, for the drops and the field they were worked out for. */
-let places = new Float64Array(0)
-let seen: { drops: readonly Drop[] | null; field: TerrainSession | null } = { drops: null, field: null }
+/** The drops and the field the flights were last checked against. */
+const seen: { drops: readonly Drop[] | null; field: TerrainSession | null } = { drops: null, field: null }
+/** The drops now, while flights are checked against them (kept between checks, emptied after). */
+const alive = new Set<Drop>()
 /** The drops due this tick, kept between ticks so a tick makes nothing. */
 const due: Drop[] = []
 
@@ -99,7 +101,7 @@ export function readBody(s: TerrainSession, out: { x: number; y: number; z: numb
 /** Forget every flight (a switch of identity or field: the drops they were for are gone). */
 export function resetHoming(): void {
   flights.clear()
-  seen = { drops: null, field: null }
+  seen.drops = null; seen.field = null
   due.length = 0
   bodyPoint.valid = false
 }
@@ -120,25 +122,21 @@ export function tickHoming(now: number = Date.now(), reduced: boolean = reducedN
     return 0
   }
   const drops = q.drops
-  // The drops' places, again only when the drops or the field changed; flights for drops gone are let go.
+  // Flights for drops gone (the walk took them, or they evaporated) are let go when the drops change.
   if (seen.drops !== drops || seen.field !== s) {
     if (seen.field !== s) flights.clear()
-    seen = { drops, field: s }
-    if (places.length < drops.length * 3) places = new Float64Array(Math.max(48, drops.length * 6))
-    const o = s.world.origin
-    drops.forEach((d, i) => {
-      places[i * 3] = Number(BigInt(d.x) - o.x) + 0.5
-      places[i * 3 + 1] = Number(BigInt(d.y) - o.y) + 0.5
-      places[i * 3 + 2] = Number(BigInt(d.z) - o.z) + 0.5
-    })
+    seen.drops = drops; seen.field = s
     if (flights.size) {
-      const kept = new Set(drops)
-      for (const d of flights.keys()) if (!kept.has(d)) flights.delete(d)
+      alive.clear()
+      for (const d of drops) alive.add(d)
+      for (const d of flights.keys()) if (!alive.has(d)) flights.delete(d)
+      alive.clear()
     }
   }
   if (body) { bodyPoint.x = body.x; bodyPoint.y = body.y; bodyPoint.z = body.z }
   else readBody(s, bodyPoint)
   bodyPoint.valid = true
+  const o = s.world.origin
   let started = false
   due.length = 0
   for (let i = 0; i < drops.length; i++) {
@@ -149,10 +147,10 @@ export function tickHoming(now: number = Date.now(), reduced: boolean = reducedN
       continue
     }
     if (d.plane !== s.plane || d.expires <= now) continue
-    const dx = places[i * 3] - bodyPoint.x, dy = places[i * 3 + 1] - bodyPoint.y, dz = places[i * 3 + 2] - bodyPoint.z
-    const dist = homeDistance(dx, dy, dz)
+    const at = dropPlace(d, o)
+    const dist = homeDistance(at.x - bodyPoint.x, at.y - bodyPoint.y, at.z - bodyPoint.z)
     if (!homesFrom(dist)) continue
-    const chance = dropChance(places[i * 3], places[i * 3 + 1], places[i * 3 + 2])
+    const chance = dropChance(at.x, at.y, at.z)
     const start = now + homeDelay(dist, chance, reduced)
     flights.set(d, { start, arrive: start + flightMs(dist, reduced), len: dist, side: chance * 2 - 1, reduced })
     started = true
@@ -167,4 +165,15 @@ export function tickHoming(now: number = Date.now(), reduced: boolean = reducedN
 }
 
 /** Whether any drop is flying now in the field on screen (the frame driver draws every frame while one does). */
-export const dropsFlying = (): boolean => flights.size > 0 && terrainSession !== null && seen.field === terrainSession
+export const dropsFlying = (): boolean => flights.size > 0 && terrainSession !== null && seen.field === terrainSession && useQuarry.getState().drops.length > 0
+
+/**
+ * Let every flight go when there is nothing left to fly or nothing drawing them
+ * (scene/QuarryFx.tsx: no drops, another plane, zoomed out of TERRAIN, its field
+ * gone). The drops themselves are kept; any within reach set off again once they
+ * are drawn. So no flight is left behind to keep the frame driver busy.
+ */
+export function idleHoming(): void {
+  if (flights.size) { flights.clear(); homing.version++ }
+  seen.drops = null
+}

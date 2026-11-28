@@ -31,7 +31,7 @@ import { terrainSession, type TerrainSession } from '../store/useTerrain'
 import { useCyberspace } from '../store/useCyberspace'
 import { useQuarry, type ArmedCharge } from '../store/useQuarry'
 import { FUSE_FINAL_MS, FUSE_MS, blinkLit, secondsLeft } from '../lib/terrain/quarry'
-import { bodyPoint, flights, homing, tickHoming } from '../store/quarryHoming'
+import { bodyPoint, flights, homing, idleHoming, tickHoming } from '../store/quarryHoming'
 import { ITEM_ORANGE } from '../lib/blueprint/itemMark'
 import { QUARRY_BOX, QUARRY_LAMP, useQuarryModel } from '../lib/blueprint/quarryModel'
 import { DropField } from './quarryDrops'
@@ -207,6 +207,8 @@ export function QuarryFx({ axes }: { axes: ViewAxes }): JSX.Element {
     const q = useQuarry.getState()
     const on = !!s && s.plane === plane && zoom <= MAX_SCALE && (q.charges.length > 0 || q.drops.length > 0)
     f.visible = on
+    // Nothing drawing the drops, or none left: no flight is kept waiting (store/quarryHoming.ts idleHoming).
+    if (!s || !on || !q.drops.length) idleHoming()
     if (!s || !on) return
     fieldMatrix(s, axes, zoom, f.matrix)
     f.matrixWorldNeedsUpdate = true

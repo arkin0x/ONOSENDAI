@@ -18,8 +18,9 @@
  *
  * Shipping a revision (§3.10): a client reads it a release before it writes
  * it, so clients not yet updated do not set aside the first chunks surveyed
- * at it. This release reads revision 3 and still writes revision 2; the
- * next flips GROUND_WRITE_REVISION to 3, a one-line change.
+ * at it. Revision 3 was read from #957 on while revision 2 was still
+ * written; GROUND_WRITE_REVISION is 3 since, so new surveys find Glowcore
+ * and Cinderrock. Reverting this one constant goes back to 2.
  */
 
 import { isGroundRevision, type GroundRevision } from './generate'
@@ -28,10 +29,10 @@ export { GROUND_REVISIONS, isGroundRevision, type GroundRevision } from './gener
 
 /**
  * The revision a fresh chunk is surveyed at: one nobody has surveyed in this
- * reader's view. 2 in the release that first reads revision 3; flipping it to
- * 3 is the whole of the next step.
+ * reader's view. 3: chunks already surveyed keep their own revision, 2 for
+ * every one surveyed before.
  */
-export const GROUND_WRITE_REVISION: GroundRevision = 2
+export const GROUND_WRITE_REVISION: GroundRevision = 3
 
 let writeRevision: GroundRevision = GROUND_WRITE_REVISION
 

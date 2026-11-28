@@ -264,11 +264,11 @@ describe('your own layers on the device (layer.ts)', () => {
 })
 
 describe('the write revision (§3.10: read a release before writing)', () => {
-  it('is 2 in this release; the flip is GROUND_WRITE_REVISION alone', () => {
-    expect(GROUND_WRITE_REVISION).toBe(2)
-    expect(groundWriteRevision()).toBe(2)
-    setGroundWriteRevisionForTests(3)
+  it('is 3 now (revision 3 was read a release first); the flip was GROUND_WRITE_REVISION alone', () => {
+    expect(GROUND_WRITE_REVISION).toBe(3)
     expect(groundWriteRevision()).toBe(3)
+    setGroundWriteRevisionForTests(2)
+    expect(groundWriteRevision()).toBe(2)
     setGroundWriteRevisionForTests(null)
     expect(groundWriteRevision()).toBe(GROUND_WRITE_REVISION)
   })

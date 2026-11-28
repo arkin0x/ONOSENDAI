@@ -25,6 +25,7 @@ vi.hoisted(() => {
 import type { AxisName, Position } from '../../lib/space'
 import { clearWalls, faceDistance, stepLimit, wallItems, type WallItem } from '../walkWalls'
 import { standing, walkStep } from '../walkStep'
+import { planWalkMove, type Stepper } from '../../lib/walkSlide'
 import { CHUNK_SIDE, STAY_WALL_NAME, stayHull, stayWallItem } from '../../lib/terrain/chunkWall'
 import { solidsOf, wallsOf } from '../../lib/walkConstrain'
 import { chunkKey, chunkOf } from '../../lib/terrain/coords'
@@ -86,6 +87,23 @@ describe('the lock holds every way out', () => {
     const side = at(0, 0, 4)
     expect(walkStep(side, 'x', -1, 1n, [wall], true, DOWN).to).toEqual(side)
     expect(walkStep(side, 'x', 1, 1n, [wall], true, DOWN).to).toEqual(at(1, 0, 4))
+  })
+
+  it('a diagonal press: held at a corner, along the edge it slides on this side, inside it goes both ways at once', () => {
+    // As WALK walks a press (store/useWalk.ts stepperFor): each straight piece is a walkStep.
+    const step: Stepper<WallItem> = (p, axis, dir, n) => { const s = walkStep(p, axis, dir, n, [wall]); return { to: s.to, by: s.by } }
+    const out = { main: { axis: 'x', dir: -1 }, side: { axis: 'z', dir: -1 }, lean: null } as const
+    const corner = at(0, 9, 0)
+    expect(planWalkMove(corner, out, 1n, step)).toMatchObject({ to: corner, kind: 'held' })
+    // On the low x face, a diagonal out through it: never across; at most the slide along the face, still in the chunk.
+    const edge = planWalkMove(at(0, 9, 5), out, 1n, step)
+    expect(edge.to.x).toBe(BASE.x)
+    expect(edge.kind).not.toBe('diagonal')
+    expect(planWalkMove(at(5, 9, 5), out, 1n, step)).toMatchObject({ to: at(4, 9, 4), kind: 'diagonal' })
+    // Gravity on, standing on the chunk's floor: the same at the corner.
+    const floorCorner = at(0, 0, 0)
+    const stepG: Stepper<WallItem> = (p, axis, dir, n) => { const s = walkStep(p, axis, dir, n, [wall], true, DOWN); return { to: s.to, by: s.by } }
+    expect(planWalkMove(floorCorner, out, 1n, stepG, { stands: (p) => standing(p, [wall], true, DOWN), down: DOWN }).to).toEqual(floorCorner)
   })
 
   it('fluid WALK: the glide meets the face half a gibson from the last gibson, and nothing from inside', () => {

@@ -163,6 +163,21 @@ describe('the wall in the scene', () => {
     expect(u().uShimmer.value).toBe(0)
   })
 
+  it('a new field (another origin) never draws the patch at the old one', async () => {
+    let now = field
+    await root.unmount()
+    root = await r3fRoot()
+    await root.render(createElement(ChunkWall, { session: () => now }))
+    await stand(cell(0, 16, 16))
+    expect((u().uCentre.value as Vector3[])[0].x).toBe(32)
+    // The same chunk and the same place, in a field whose origin is a chunk further west and lower: 32 more along x and y in its frame.
+    const west = { ...origin, x: origin.x - 32n, y: origin.y - 32n }
+    now = { plane: 0, world: { origin: west, slotByKey: field.world.slotByKey } } as unknown as TerrainSession
+    await root.frame()
+    expect((u().uCentre.value as Vector3[])[0].x).toBe(64)
+    expect((u().uCentre.value as Vector3[])[0].y).toBe(64 + 16.5)
+  })
+
   it('one mesh, made once: the same geometry, material and uniforms every frame', async () => {
     await stand(cell(0, 16, 16))
     const m = wall()

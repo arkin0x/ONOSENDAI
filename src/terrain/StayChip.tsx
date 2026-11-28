@@ -3,6 +3,7 @@
  * (terrain/chunkStay.ts), so you always know why the edge holds you. A tap on
  * it lets go. It stands in SURVEY's slot, over the corner the frame's chamfer
  * cuts, and takes no room of its own: nothing moves when it comes or goes.
+ * Its tap area is its own box, never CARD's corner beside it.
  */
 
 import { Lock } from 'lucide-react'

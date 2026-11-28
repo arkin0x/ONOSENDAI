@@ -17208,7 +17208,7 @@ div.bpt-tile__hit { cursor: default; }
 /* ===== chunk edge: STAY IN THIS CHUNK (terrain/chunkStay.ts) ===== */
 /* The lock by CARD while STAY IN THIS CHUNK is on (terrain/StayChip.tsx): a small mint tag pinned over the corner the
    frame's chamfer cuts, the lock in dark ink, taking no room of its own (nothing moves when it comes or goes). Its tap
-   area reaches a little further into CARD's corner, never over SMASH or the stepper beside it. */
+   area is its own box only, so a press on CARD never touches the lock. */
 .terrain-tools__slot--survey { position: relative; }
 .terrain-stay-chip {
   position: absolute;
@@ -17229,7 +17229,11 @@ div.bpt-tile__hit { cursor: default; }
   cursor: pointer;
   touch-action: none;
 }
-.terrain-stay-chip::after { content: ""; position: absolute; inset: 0 -7px -7px 0; }
+/* A finger gets a larger chip, never a tap area past it: CARD's corner stays CARD's. */
+@media (pointer: coarse) {
+  .terrain-stay-chip { width: 20px; height: 20px; }
+  .terrain-stay-chip svg { width: 13px; height: 13px; }
+}
 .terrain-stay-chip:focus-visible { outline: 1px solid #fff; outline-offset: 1px; }
 
 /* STAY IN THIS CHUNK on the survey card (terrain/SurveyCard.tsx StayRow): a switch row in the card's own ink, turning

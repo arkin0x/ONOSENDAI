@@ -198,7 +198,7 @@ function Core({ strata }: { strata: Uint8Array }): JSX.Element {
 /** The words under STAY IN THIS CHUNK, by state: on, offered, or not here. */
 export const STAY_ON = 'The edge holds you while you dig. Tap to let go.'
 export const STAY_OFF = 'Hold yourself inside this chunk while you dig.'
-export const STAY_AWAY = 'Stand in this chunk to stay in it.'
+export const STAY_AWAY = 'Walk into this chunk to stay in it.'
 
 /**
  * STAY IN THIS CHUNK: a switch row, the lock's icon in a chamfer, its name and

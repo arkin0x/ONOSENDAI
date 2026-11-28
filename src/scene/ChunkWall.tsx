@@ -241,6 +241,8 @@ export function ChunkWall({ session = () => terrainSession }: ChunkWallProps): J
     if (here !== k.key || s !== k.field) {
       const base = parseChunkKey(here)
       if (!base) { m.visible = false; return }
+      // Another field has another origin: the walker's place is worked out again from it, and the patch goes there at once.
+      if (s !== k.field) { k.cursor = null; k.placed = false }
       k.key = here; k.field = s; k.lookedAt = -Infinity
       const o = s.world.origin
       k.lo[0] = Number(base.x - o.x); k.lo[1] = Number(base.y - o.y); k.lo[2] = Number(base.z - o.z)

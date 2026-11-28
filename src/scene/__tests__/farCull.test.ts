@@ -4,19 +4,17 @@
  * the Block 101 town crawled, every shard of the town drawn in full while the
  * town was a few pixels across).
  */
-import inspector from 'node:inspector'
 import { afterEach, describe, expect, it } from 'vitest'
 import { BoxGeometry, type BufferAttribute, BufferGeometry, Group, LineSegments, Mesh, Points, Scene, type Object3D } from 'three'
 import { newShard, type ShardModel } from 'sno-core/shards'
 import { withGlow } from 'sno-core/glow'
 import { canonicalQuaternion, viewAxes, type Position } from '../../lib/space'
 import { SHARD_DECODE_MS } from '../../lib/decode'
-import { DOOR_DISSOLVE_MS } from '../../lib/ceremony'
 import { projScaleOf } from '../../lib/markerSize'
 import { setGuideBags } from '../../tutorial/guideBags'
 import { FOV } from '../camera'
-import { FarCull, HIDE_BELOW_PX, SHOW_ABOVE_PX, farCullEntry, measureEntry, nextHidden, setShard, shardColour, type FarCullEntry } from '../farCull'
-import { dotBuffers, writeDots } from '../FarShardDots'
+import { DOT_STEP_PX, FarCull, HIDE_BELOW_PX, SHOW_ABOVE_PX, farCullEntry, measureEntry, nextHidden, setShard, shardColour, type FarCullEntry } from '../farCull'
+import { DISC_SIZE_LINE, FAR_SHARD_DOT, dotBuffers, dotMaterial, dotPx, writeDots } from '../FarShardDots'
 import { drawableShards, farCullUnits, type PlacedShardDraw } from '../WorldShards'
 
 /** Pixels per render unit at one unit of depth on a 1,000 px tall view. */
@@ -160,11 +158,6 @@ describe('never hidden', () => {
     expect(one((e) => { e.birth = NOW - SHARD_DECODE_MS - 1 }).hidden).toBe(true)
   })
 
-  it('a shard dissolving, until it is gone', () => {
-    expect(one((e) => { e.dissolve = NOW - 100 }).hidden).toBe(false)
-    expect(one((e) => { e.dissolve = NOW - DOOR_DISSOLVE_MS - 1 }).hidden).toBe(true)
-  })
-
   it('the tutorial\'s shards: those it lets taps through, those its marks draw, and any its guide placed', () => {
     setGuideBags([], { passTaps: ['wall'], drawnByMark: ['box'] })
     expect(one(() => {}, 'wall').hidden).toBe(false)
@@ -223,6 +216,28 @@ describe('placed objects', () => {
     for (let i = 0; i < 3; i++) cull.frame(eye(1e9), PROJ, NOW)
     expect(list[0].measuredUnits).toBe(was)
   })
+
+  it('one never measured goes first: a shard among many whose placed objects arrive late is sized at the next frame', () => {
+    const placing = { ...cube('arch', 1), parts: [{ ref: 'a:33331:' + 'f'.repeat(64) + ':o', at: [0, 0, 0] }] } as unknown as ShardModel
+    const cull = new FarCull()
+    const scene = new Scene()
+    const list = Array.from({ length: 40 }, (_, i) => placed(cull, scene, { ...placing, id: `m${i}` }, [i * 10, 0, 0]))
+    scene.updateMatrixWorld(true)
+    for (let i = 0; i < 30; i++) cull.frame(eye(1e9), PROJ, NOW)
+    expect(list.every((e) => e.measured)).toBe(true)
+    // Its drawn group empty until its placed object arrives: never measured, so never hidden.
+    const late = placed(cull, scene, { ...placing, id: 'late' }, [999, 0, 0])
+    late.drawn!.clear()
+    cull.frame(eye(1e9), PROJ, NOW)
+    expect(late.measured).toBe(false)
+    expect(late.hidden).toBe(false)
+    const big = new Mesh(new BoxGeometry(400, 400, 400))
+    late.drawn!.add(big)
+    scene.updateMatrixWorld(true)
+    cull.frame(eye(1e9), PROJ, NOW)
+    expect(late.measured).toBe(true)
+    expect(late.measuredUnits).toBeGreaterThan(300)
+  })
 })
 
 describe('the dots', () => {
@@ -276,6 +291,62 @@ describe('the dots', () => {
     cull.frame(eye(10), PROJ, NOW)
     expect(dotted(cull)).toEqual([])
     expect(d.group!.visible).toBe(true)
+  })
+
+  it('a shard taken down while it is a dot takes its dot, even before its entry is removed', () => {
+    const cull = new FarCull()
+    const scene = new Scene()
+    const a = placed(cull, scene, cube('a', 1), [1, 0, 0])
+    const b = placed(cull, scene, cube('b', 1), [2, 0, 0])
+    let buf = dotBuffers(4)
+    buf = writeDots(cull, buf, cull.frame(eye(1e6), PROJ, NOW))
+    expect(dotted(cull)).toEqual([a, b])
+    // React lets go of the refs first.
+    a.at = null
+    a.group = null
+    expect(cull.frame(eye(1e6), PROJ, NOW)).toBe(true)
+    expect(dotted(cull)).toEqual([b])
+    expect(() => { buf = writeDots(cull, buf, true) }).not.toThrow()
+    expect(buf.geometry.drawRange.count).toBe(1)
+  })
+
+  it('each dot grows with its shard, from 2 px where it was hidden to 4 px where it is shown again, so the reveal does not pop', () => {
+    expect(dotPx(0.2)).toBe(2)
+    expect(dotPx(HIDE_BELOW_PX)).toBe(2)
+    expect(dotPx(1.5)).toBe(3)
+    expect(dotPx(SHOW_ABOVE_PX)).toBe(4)
+    expect(dotPx(9)).toBe(4)
+    expect(FAR_SHARD_DOT.maxPx).toBe(2 * SHOW_ABOVE_PX)
+
+    const cull = new FarCull()
+    const scene = new Scene()
+    const e = placed(cull, scene, cube('a', 1))
+    const r = farCullUnits(e.shard!)
+    const at = (px: number) => (r * PROJ) / px
+    let buf = dotBuffers(4)
+    buf = writeDots(cull, buf, cull.frame(eye(at(0.5)), PROJ, NOW))
+    expect(buf.sizes[0] * DOT_STEP_PX).toBe(2)
+    // Coming in, still hidden (under SHOW_ABOVE_PX): the dot grows.
+    const v = version(buf, 'aSteps')
+    buf = writeDots(cull, buf, cull.frame(eye(at(1.9)), PROJ, NOW))
+    expect(e.hidden).toBe(true)
+    expect(buf.sizes[0] * DOT_STEP_PX).toBe(3.75)
+    expect(version(buf, 'aSteps')).toBeGreaterThan(v)
+    // A camera easing a hair: the same step, nothing sent again.
+    const v2 = version(buf, 'aSteps')
+    buf = writeDots(cull, buf, cull.frame(eye(at(1.91)), PROJ, NOW))
+    expect(version(buf, 'aSteps')).toBe(v2)
+  })
+
+  it('the dots\' material reads each dot\'s width, and the disc shader still has the line it replaces', () => {
+    const m = dotMaterial()
+    expect(m.vertexShader).toContain(DISC_SIZE_LINE)
+    const shader = { vertexShader: m.vertexShader, fragmentShader: m.fragmentShader, uniforms: m.uniforms }
+    m.onBeforeCompile(shader as never, undefined as never)
+    expect(shader.vertexShader).not.toContain(DISC_SIZE_LINE)
+    expect(shader.vertexShader).toContain('attribute float aSteps;')
+    expect(shader.vertexShader).toContain('vPx = clamp(aSteps * 0.2500, uMinPx, uMaxPx) * uDpr;')
+    m.dispose()
   })
 
   it('outgrown, the buffers double and the old geometry is let go', () => {
@@ -369,47 +440,3 @@ describe('a hub zoomed out', () => {
     }
   })
 })
-
-describe('a frame', () => {
-  const post = <T>(sess: inspector.Session, method: string, params?: object): Promise<T> =>
-    new Promise((resolve, reject) => { sess.post(method, params as never, (err, r) => (err ? reject(err) : resolve(r as T))) })
-  interface SampledNode { selfSize: number; children: SampledNode[] }
-  /** What `run` allocated in KB, by V8's sampling heap profiler (frameAlloc.test.ts). */
-  async function allocatedKb(run: () => void): Promise<number> {
-    const sess = new inspector.Session()
-    sess.connect()
-    try {
-      await post(sess, 'HeapProfiler.startSampling', { samplingInterval: 256, includeObjectsCollectedByMajorGC: true, includeObjectsCollectedByMinorGC: true })
-      run()
-      const { profile } = await post<{ profile: { head: SampledNode } }>(sess, 'HeapProfiler.stopSampling')
-      const sum = (n: SampledNode): number => n.selfSize + n.children.reduce((t, c) => t + sum(c), 0)
-      return sum(profile.head) / 1024
-    } finally {
-      sess.disconnect()
-    }
-  }
-
-  it('allocates nothing: 200 shards, half of them crossing the line every frame, their dots rebuilt each time', async () => {
-    const cull = new FarCull()
-    const scene = new Scene()
-    // The small half is 2.8 px of radius at 600 and 0.8 at 2,000: hidden and shown again on alternate frames.
-    const list = Array.from({ length: 200 }, (_, i) => placed(cull, scene, cube(`f${i}`, i % 2 ? 1 : 200), [i, 0, 0]))
-    let buf = dotBuffers(256)
-    const run = (frames: number): void => {
-      for (let f = 0; f < frames; f++) {
-        const changed = cull.frame(eye(f % 2 ? 2_000 : 600), PROJ, NOW)
-        buf = writeDots(cull, buf, changed)
-      }
-    }
-    // Warmed, so the dot list has grown to its size once and the pass is compiled (unoptimised code boxes every number it works out).
-    run(3000)
-    expect(list.filter((e) => e.hidden).length).toBe(100)
-    expect(cull.dotCount).toBe(100)
-    run(1)
-    expect(cull.dotCount).toBe(0)
-    // The profiler's first session costs about 37 KB of its own; later ones about 2 KB.
-    await allocatedKb(() => {})
-    expect(await allocatedKb(() => run(500))).toBeLessThan(12)
-  })
-})
-

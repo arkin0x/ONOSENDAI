@@ -135,7 +135,7 @@ describe('the Quarry Charge recipe (DECK-0010 §8.5)', () => {
     expect(toolName(p)).toBe('Quarry Charges')
     expect(toolName({ type: 'tool', tool: 'compiler' })).toBe('The Compiler')
     expect(toolWhat(p)).toMatch(/^Seven Quarry Charges/)
-    expect(gameNoDeploy({ record: { id: 'game:quarry-charge' } })).toMatch(/seven Quarry Charges/)
+    expect(gameNoDeploy({ record: { id: 'game:quarry-charge' } })).toMatch(/7x7x7 area/)
     expect(gameNoDeploy({ record: { id: 'game:compiler' } })).toMatch(/Compiler/)
   })
 })

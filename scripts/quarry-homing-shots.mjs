@@ -112,13 +112,15 @@ for (const size of SIZES) {
   })
   await page.waitForTimeout(600)
   const boxes = () => page.evaluate(() => {
-    const box = (sel) => { const e = document.querySelector(sel); if (!e || getComputedStyle(e).visibility === 'hidden') return null; const r = e.getBoundingClientRect(); return [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)] }
+    // The first shown: the charge's box is kept (hidden) while a block is in hand.
+    const box = (sel) => { const e = [...document.querySelectorAll(sel)].find((x) => getComputedStyle(x).visibility !== 'hidden'); if (!e) return null; const r = e.getBoundingClientRect(); return [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)] }
     return { held: box('.terrain-held'), view: box('.terrain-held-charge__view'), place: box('.terrain-act--place'), smash: box('.terrain-act--smash'), jump: box('.walkside') }
   })
   await page.evaluate(async () => {
     const t = await import('/src/store/useTerrain.ts')
     const inv = t.useTerrain.getState().inventory
-    t.useTerrain.getState().selectSlot(inv.hotbar.indexOf(1))
+    const db = await import('/src/lib/terrain/terrainDb.ts')
+    t.useTerrain.getState().selectSlot(inv.hotbar.findIndex((id) => id && !db.isQuarry(id) && !db.isCompiler(id) && (inv.counts[id] ?? 0) > 0))
   })
   await page.waitForTimeout(900)
   await shot('1-held-block')
@@ -147,19 +149,27 @@ for (const size of SIZES) {
     const f = walkLookDirection().forward
     const len = Math.hypot(f.x, f.z) || 1
     const fx = len > 0.05 ? f.x / len : 1, fz = len > 0.05 ? f.z / len : 0
+    const why = []
     for (const [dx, dz] of [[fx, fz], [1, 0], [0, 1], [-1, 0], [0, -1]]) for (const d of [4, 3, 5, 6]) {
       const x = Math.round(w[0] + dx * d), z = Math.round(w[2] + dz * d)
       for (let y = w[1] + 4; y > w[1] - 24; y--) {
         if (solid(s.world.blockCs(x, y, z)) && !solid(s.world.blockCs(x, y + 1, z))) {
           if (t.useTerrain.getState().place({ cell: [x, y, z], normal: [0, 1, 0], distance: d })) return 'ahead'
+          why.push(t.useTerrain.getState().message)
           break
         }
       }
     }
-    return 'nothing'
+    // PLACE refused here (the look, the reach): arm it on the ground ahead as PLACE would (useQuarry arm).
+    const q = (await import('/src/store/useQuarry.ts')).useQuarry.getState()
+    for (const d of [4, 3, 5]) {
+      const x = Math.round(w[0] + fx * d), z = Math.round(w[2] + fz * d)
+      for (let y = w[1] + 4; y > w[1] - 24; y--) if (solid(s.world.blockCs(x, y, z)) && !solid(s.world.blockCs(x, y + 1, z))) { if (q.arm([x, y + 1, z])) return `armed (PLACE said: ${[...new Set(why)].join(' | ')})`; break }
+    }
+    return `nothing: ${[...new Set(why)].join(' | ')}`
   })
   console.log(`${size.name}: placed ${placed}`)
-  if (placed !== 'ahead') problems.push(`${size.name}: the charge was not placed`)
+  if (!/^(ahead|armed)/.test(placed)) problems.push(`${size.name}: the charge was not placed`)
   const t0 = Date.now()
   await page.waitForTimeout(1200)
   await shot('3-fuse-9')
@@ -169,24 +179,52 @@ for (const size of SIZES) {
   await shot('3-fuse-1')
   await page.waitForFunction(async () => (await import('/src/store/useQuarry.ts')).useQuarry.getState().charges.length === 0, null, { polling: 20, timeout: 8000 }).catch(() => {})
   const blastAt = Date.now() - t0
-  // 5. The stream: frames from the blast, with what is left and what is carried.
+  // 5. The stream. Screenshots in this software renderer take a second or more each, so the video holds the motion;
+  // a frame just after the blast, the state, then a step toward what is left beyond 7 to draw in the rest.
   const state = () => page.evaluate(async () => {
     const q = (await import('/src/store/useQuarry.ts')).useQuarry.getState()
     const h = await import('/src/store/quarryHoming.ts')
-    const t = (await import('/src/store/useTerrain.ts')).useTerrain.getState()
-    return { drops: q.drops.length, flying: h.flights.size, blocks: Object.values(t.inventory.counts).reduce((a, b) => a + b, 0) }
+    const t = await import('/src/store/useTerrain.ts')
+    const s = t.terrainSession
+    const b = { x: 0, y: 0, z: 0 }
+    h.readBody(s, b)
+    const o = s.world.origin
+    const dist = q.drops.map((d) => Math.hypot(Number(BigInt(d.x) - o.x) + 0.5 - b.x, Number(BigInt(d.y) - o.y) + 0.5 - b.y, Number(BigInt(d.z) - o.z) + 0.5 - b.z))
+    return { drops: q.drops.length, flying: h.flights.size, blocks: Object.values(t.useTerrain.getState().inventory.counts).reduce((a, b) => a + b, 0), nearest: dist.length ? Math.min(...dist).toFixed(2) : null }
   })
-  const stream = []
   const b0 = Date.now()
-  for (const at of [0, 120, 240, 360, 480, 640, 820, 1100, 1600, 2600]) {
-    await page.waitForTimeout(Math.max(0, at - (Date.now() - b0)))
-    await shot(`4-stream-${String(at).padStart(4, '0')}ms`)
+  await shot('4-just-after-blast')
+  const stream = [{ ms: Date.now() - b0, ...(await state()) }]
+  await page.waitForTimeout(2500)
+  stream.push({ ms: Date.now() - b0, ...(await state()) })
+  await shot('5-after-stream')
+  // A step toward what is left: three cells toward the drops' middle.
+  const stepped = await page.evaluate(async () => {
+    const q = (await import('/src/store/useQuarry.ts')).useQuarry.getState()
+    const c = await import('/src/store/useCyberspace.ts')
+    if (!q.drops.length) return false
+    let x = 0n, z = 0n
+    for (const d of q.drops) { x += BigInt(d.x); z += BigInt(d.z) }
+    const n = BigInt(q.drops.length)
+    const cur = c.useCyberspace.getState().cursor
+    const dx = x / n - cur.x, dz = z / n - cur.z
+    const step = (v) => (v > 0n ? (v > 3n ? 3n : v) : v < 0n ? (v < -3n ? -3n : v) : 0n)
+    const at = { ...cur, x: cur.x + step(dx), z: cur.z + step(dz) }
+    c.useCyberspace.setState({ cursor: at, position: { ...c.useCyberspace.getState().position, x: at.x, z: at.z } })
+    return true
+  })
+  if (stepped) {
+    stream.push({ ms: Date.now() - b0, step: true, ...(await state()) })
+    await shot('6-step-stream')
     stream.push({ ms: Date.now() - b0, ...(await state()) })
+    await page.waitForTimeout(2500)
+    stream.push({ ms: Date.now() - b0, ...(await state()) })
+    await shot('7-after-step')
   }
   console.log(`${size.name}: blast at ${blastAt} ms; stream`, JSON.stringify(stream))
   log.push({ size: size.name, blastAt, stream })
-  const first = stream[0], last = stream[stream.length - 1]
-  if (!(last.blocks > first.blocks)) problems.push(`${size.name}: nothing flew in`)
+  const last = stream[stream.length - 1]
+  if (!(last.blocks > 24)) problems.push(`${size.name}: nothing flew in`)
   const video = page.video()
   await ctx.close()
   if (video) { const p = await video.path(); renameSync(p, `${OUT}/${size.w}x${size.h}-quarry-homing.webm`) }

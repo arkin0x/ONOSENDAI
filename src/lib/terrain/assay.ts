@@ -98,32 +98,34 @@ export function neighbourBlocks(world: TerrainWorld, slot: ChunkSlot): Array<Uin
   return NEIGHBOURS.map(([dx, dy, dz]) => world.slotAt(slot.off[0] + dx, slot.off[1] + dy, slot.off[2] + dz)?.blocks ?? null)
 }
 
-/** Kept passes, by chunk key: its stamp (its version and its neighbours') and the pass. */
-const kept = new Map<string, { world: TerrainWorld; stamp: string; assay: Assay }>()
-/** How many chunks' passes are kept at once. */
-export const ASSAYS_KEPT = 12
+/**
+ * Kept passes, by the chunk's own slot (never its key: a chunk dropped and
+ * loaded again is a new slot whose versions start over, review of #956): the
+ * neighbour slots it was counted with, its stamp (its revision and version and
+ * theirs) and the pass. Weak, so a slot let go (a chunk dropped, TERRAIN
+ * closed, another identity's field) takes its pass with it.
+ */
+let kept = new WeakMap<ChunkSlot, { around: ReadonlyArray<ChunkSlot | null>; stamp: string; assay: Assay }>()
 
 /** For tests: forget every kept pass. */
 export function forgetAssays(): void {
-  kept.clear()
+  kept = new WeakMap()
 }
 
 /**
  * The pass for a loaded chunk, worked out once per version of it and of its
- * neighbours (a block mined or placed, a layer arriving, a neighbour coming or
- * going all change a version), else the kept one. Null before it has blocks.
+ * neighbours (a block mined or placed, a layer arriving, a neighbour coming,
+ * going or loaded again all change it), else the kept one. Null before it has blocks.
  */
 export function chunkAssay(world: TerrainWorld, slot: ChunkSlot): Assay | null {
   const blocks = slot.blocks
   if (!blocks) return null
   const around = NEIGHBOURS.map(([dx, dy, dz]) => world.slotAt(slot.off[0] + dx, slot.off[1] + dy, slot.off[2] + dz))
   const stamp = `${slot.revision ?? 2}|${slot.version}|${around.map((n) => (n?.blocks ? n.version : '-')).join(',')}`
-  const k = kept.get(slot.key)
-  if (k && k.world === world && k.stamp === stamp) return k.assay
+  const k = kept.get(slot)
+  if (k && k.stamp === stamp && k.around.every((n, i) => n === around[i])) return k.assay
   const assay = assayBlocks(blocks, around.map((n) => n?.blocks ?? null))
-  kept.delete(slot.key)
-  kept.set(slot.key, { world, stamp, assay })
-  while (kept.size > ASSAYS_KEPT) kept.delete(kept.keys().next().value as string)
+  kept.set(slot, { around, stamp, assay })
   return assay
 }
 

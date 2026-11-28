@@ -50,6 +50,7 @@ import { CELLS, idx, type ChunkBase } from '../../lib/terrain/coords'
 import { forgetAssays } from '../../lib/terrain/assay'
 import { cancelSurveyHold, useSurveyHold } from '../surveyHold'
 import { openSurveyCard, resetSurveyCards, stampDate, useSurveyCard } from '../surveyCard'
+import { topEscape } from '../../hooks/useEscape'
 
 const wait = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 const slotButton = (m: Mounted): Host | undefined => m.all().find((h) => h.type === 'button' && String(h.props.className ?? '').includes('terrain-act--survey'))
@@ -134,7 +135,7 @@ describe('SURVEY\'s slot', () => {
     try {
       await wait(300)
       await hold(m, 20)
-      expect(useSurveyCard.getState()).toMatchObject({ open: 'here', auto: false })
+      expect(useSurveyCard.getState().open).toBe('here')
       expect(useSurveyHold.getState().since).toBeNull()
     } finally {
       await m.unmount()
@@ -156,6 +157,28 @@ describe('SURVEY\'s slot', () => {
       expect(useSurveyHold.getState().since).toBeNull()
       expect(useSurveyCard.getState().open).toBeNull()
       expect(survey).not.toHaveBeenCalled()
+    } finally {
+      useTerrain.setState({ survey: real })
+    }
+  })
+
+  it('a press left over (a hold whose lift landed on the card that opened) never swallows the next tap', async () => {
+    aim.card = 'here'
+    aim.target = 'ahead'
+    const real = useTerrain.getState().survey
+    useTerrain.setState({ survey: vi.fn(async () => {}) })
+    try {
+      // Held on into SURVEY's hold, to its end: the press goes with the hold.
+      pressCard()
+      await wait(LONG_PRESS_MS + 40)
+      expect(useSurveyHold.getState().since).not.toBeNull()
+      cancelSurveyHold()
+      // A leftover press (its lift never came): the next press replaces it, and its tap opens the card.
+      pressCard()
+      aim.target = null
+      pressCard()
+      expect(releaseCard()).toBe(true)
+      expect(useSurveyCard.getState().open).toBe('here')
     } finally {
       useTerrain.setState({ survey: real })
     }
@@ -198,6 +221,18 @@ describe('the card', () => {
       // No coordinates or directions anywhere on it.
       expect(/\d+,\s*\d+,\s*\d+|north|south|east|west|\bx\b|\by\b/i.test(m.all().map(textOf).join(' '))).toBe(false)
       expect(m.says(key)).toBe(false)
+    } finally {
+      await m.unmount()
+    }
+  })
+
+  it('a card that cannot be read draws nothing and takes no Esc', async () => {
+    setTerrainSession(null)
+    openSurveyCard('nowhere')
+    const m = await mount(createElement(SurveyCard))
+    try {
+      expect(m.says('FIELD SURVEY')).toBe(false)
+      expect(topEscape()).toBeNull()
     } finally {
       await m.unmount()
     }

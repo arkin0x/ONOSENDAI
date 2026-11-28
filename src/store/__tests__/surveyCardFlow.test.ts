@@ -28,6 +28,7 @@ vi.mock('../../lib/relay', () => ({
 
 import { useCyberspace } from '../useCyberspace'
 import { useWalk } from '../useWalk'
+import { useTutorial } from '../useTutorial'
 import { cardChunkHere, groundRevisionFor, setTerrainSession, terrainSession, useTerrain } from '../useTerrain'
 import { setGroundWriteRevisionForTests } from '../../lib/terrain/groundRevision'
 import { chunkKey, chunkOf } from '../../lib/terrain/coords'
@@ -158,12 +159,37 @@ describe('the survey card in the store', () => {
     const key = headKey()
     expect(surveyChunk(key)).toBe(true)
     await settle(60)
-    expect(useSurveyCard.getState()).toMatchObject({ open: key, auto: true })
-    useSurveyCard.setState({ open: null, auto: false })
+    expect(useSurveyCard.getState().open).toBe(key)
+    useSurveyCard.setState({ open: null })
     // Asked again (already yours): nothing surveyed, nothing opens.
     expect(surveyChunk(key)).toBe(false)
     await settle(60)
     expect(useSurveyCard.getState().open).toBeNull()
+  })
+
+  it('while the tutorial\'s tour runs, a survey opens no card by itself', async () => {
+    await T().enter()
+    const key = headKey()
+    useTutorial.setState({ active: true })
+    try {
+      expect(surveyChunk(key)).toBe(true)
+      await settle(60)
+      expect(useSurveyCard.getState().open).toBeNull()
+    } finally {
+      useTutorial.setState({ active: false })
+    }
+  })
+
+  it('CARD stays while the chunk you stand in is built again (its blocks stay drawn)', async () => {
+    await T().enter()
+    const key = headKey()
+    await T().survey(key)
+    terrainSession!.building.add(key)
+    try {
+      expect(cardChunkHere()).toBe(key)
+    } finally {
+      terrainSession!.building.delete(key)
+    }
   })
 
   it('a survey that fails opens no card', async () => {

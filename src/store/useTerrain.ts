@@ -922,7 +922,8 @@ export function cardChunkHere(s: TerrainSession | null = terrainSession): string
   if (!s) return null
   const w = offsetOf(s, headNow())
   const here = s.world.slotAtCs(w[0], w[1], w[2])
-  if (!here || !here.inSpace || !here.blocks || s.building.has(here.key)) return null
+  // Its blocks stay drawn while it is built again (a reground at another revision): CARD stays with them (review of #956).
+  if (!here || !here.inSpace || !here.blocks) return null
   return s.surveyedKeys.has(here.key) || surveyedForYou(here.key) ? here.key : null
 }
 

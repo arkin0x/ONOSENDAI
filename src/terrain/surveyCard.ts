@@ -11,43 +11,46 @@
 
 import { create } from 'zustand'
 import { groundFor, groundRevisionFor, terrainSession, useTerrain } from '../store/useTerrain'
-import { firstLayerAt } from '../store/terrainShare'
+import { firstSurveyedAt } from '../store/terrainShare'
+import { useTutorial } from '../store/useTutorial'
 import { assayBlocks, chunkAssay, neighbourBlocks, surveyCard, type SurveyCardData } from '../lib/terrain/assay'
 import type { GroundRevision } from '../lib/terrain/groundRevision'
 
 interface SurveyCardState {
   /** The chunk whose card is open (its key), or null. */
   open: string | null
-  /** It opened by itself, as a survey completed. */
-  auto: boolean
 }
 
-export const useSurveyCard = create<SurveyCardState>(() => ({ open: null, auto: false }))
+export const useSurveyCard = create<SurveyCardState>(() => ({ open: null }))
 
 /** Chunks whose card has opened by itself this page: never twice. */
 const autoShown = new Set<string>()
 
 /** Open the card for the chunk `key`. */
-export function openSurveyCard(key: string, auto = false): void {
-  useSurveyCard.setState({ open: key, auto })
+export function openSurveyCard(key: string): void {
+  useSurveyCard.setState({ open: key })
 }
 
 export function closeSurveyCard(): void {
-  if (useSurveyCard.getState().open !== null) useSurveyCard.setState({ open: null, auto: false })
+  if (useSurveyCard.getState().open !== null) useSurveyCard.setState({ open: null })
 }
 
-/** A survey of `key` completed: its card opens by itself, the first time only. True when it opened. */
+/**
+ * A survey of `key` completed: its card opens by itself, the first time only,
+ * and never while the tutorial's tour runs (coordinator, 2026-11-28: it would
+ * cover the tour's next step). True when it opened.
+ */
 export function autoOpenSurveyCard(key: string): boolean {
-  if (autoShown.has(key)) return false
+  if (autoShown.has(key) || useTutorial.getState().active) return false
   autoShown.add(key)
-  openSurveyCard(key, true)
+  openSurveyCard(key)
   return true
 }
 
 /** For tests: forget which cards have opened by themselves, and close the card. */
 export function resetSurveyCards(): void {
   autoShown.clear()
-  useSurveyCard.setState({ open: null, auto: false })
+  useSurveyCard.setState({ open: null })
 }
 
 /** A survey card, with when the chunk was surveyed (ms, or null when not known) and the ground revision it counts. */
@@ -75,9 +78,10 @@ export async function cardFor(key: string): Promise<CardFor | null> {
     : assayBlocks(ground.blocks, neighbourBlocks(s.world, slot))
   if (!assay) return null
   const card = surveyCard(assay, ground.facts, { ownsCompiler: !!useTerrain.getState().inventory.compiler })
-  // When: your own survey's time where you surveyed it; else the oldest layer drawn there.
-  const mine = s.surveyedKeys.has(key) ? s.revisions.get(key)?.surveyed : undefined
-  return { card, at: mine ? mine * 1000 : firstLayerAt(key), revision: ground.revision }
+  // When: your own first survey's date where you surveyed it (0, as older rows can carry, is unknown); else the
+  // earliest first-survey date of the surveying layers drawn there.
+  const mine = s.surveyedKeys.has(key) ? s.revisions.get(key)?.surveyed ?? 0 : 0
+  return { card, at: mine > 0 ? mine * 1000 : firstSurveyedAt(key), revision: ground.revision }
 }
 
 const MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']

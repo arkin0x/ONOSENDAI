@@ -15,7 +15,7 @@ import { KINDS } from '../blocks'
 import { TerrainWorld } from '../world'
 import { encodeLayer, applyLayer } from '../layer'
 import {
-  ASSAYS_KEPT, COMMON, RARITY, STRATA_MIN, assayBlocks, assayRuns, chunkAssay, forgetAssays, recipeNotes, surveyCard, type GroundFacts,
+  COMMON, RARITY, STRATA_MIN, assayBlocks, assayRuns, chunkAssay, forgetAssays, recipeNotes, surveyCard, type GroundFacts,
 } from '../assay'
 
 const GRIDSTONE = 1, UMBERSLATE = 2, RUSTBAND = 5, CINDERROCK = 7, PRISMITE = 8, RIMEGLASS = 10, TIDEWATER = 11, FERROVEIN = 40, COBALTINE = 41, GLOWCORE = 42, VOIDPEARL = 193
@@ -215,20 +215,36 @@ describe('kept per chunk and version', () => {
     expect(b.seen[GRIDSTONE]).toBe(0)
   })
 
-  it('no blocks yet: no pass; and only a few chunks\' passes are kept', () => {
+  it('no blocks yet: no pass', () => {
     const w = new TerrainWorld(BASE, { right: { axis: 'x', dir: 1 }, up: { axis: 'y', dir: 1 }, out: { axis: 'z', dir: 1 } })
-    const first = w.slotAt(0, 0, 0, true)!
-    expect(chunkAssay(w, first)).toBeNull()
-    w.setBlocks(first.key, solid(), solid())
-    chunkAssay(w, first)
-    for (let i = 1; i <= ASSAYS_KEPT + 3; i++) {
-      const s = w.slotAt(2 * i, 0, 0, true)!
-      w.setBlocks(s.key, solid(), solid())
-      chunkAssay(w, s)
-    }
-    // The first chunk's pass was let go: counting it again runs a pass.
-    const before = assayRuns()
-    chunkAssay(w, w.slotAt(0, 0, 0)!)
-    expect(assayRuns()).toBe(before + 1)
+    expect(chunkAssay(w, w.slotAt(0, 0, 0, true)!)).toBeNull()
+  })
+
+  it('a chunk dropped and loaded again, its version back where it was, is counted again (review of #956)', () => {
+    const w = field()
+    const s = w.slotAt(0, 0, 0)!
+    const a = chunkAssay(w, s)!
+    expect(a.counts[GLOWCORE]).toBe(0)
+    const version = s.version
+    w.drop(s)
+    const again = w.slotAt(0, 0, 0, true)!
+    const b = solid()
+    b[idx(9, 9, 9)] = GLOWCORE
+    w.setBlocks(again.key, b, b.slice())
+    again.version = version
+    expect(chunkAssay(w, again)!.counts[GLOWCORE]).toBe(1)
+    // A neighbour dropped and loaded again at the same version counts again too.
+    const n = w.slotAt(1, 0, 0, true)!
+    w.setBlocks(n.key, solid(), solid())
+    const c = chunkAssay(w, again)!
+    const nv = n.version
+    w.drop(n)
+    const n2 = w.slotAt(1, 0, 0, true)!
+    const open = solid()
+    open[idx(0, 9, 9)] = 0
+    w.setBlocks(n2.key, open, open.slice())
+    n2.version = nv
+    const d = chunkAssay(w, again)!
+    expect(d).not.toBe(c)
   })
 })

@@ -564,7 +564,11 @@ export function surveyChunk(key: string | null): boolean {
 export function holdSurvey(): void {
   if (useSurveyHold.getState().since !== null) return
   // The glow flashes only once the survey has taken the chunk, never over one it turned down.
-  startSurveyHold((key) => { if (surveyChunk(key) && key) flashSurvey(key) }, performance.now(), surveyTarget())
+  startSurveyHold((key) => {
+    // A hold that began as CARD is over: its press goes with it, so the next tap on CARD opens the card (review of #956).
+    if (cardPress?.surveying) cardPress = null
+    if (surveyChunk(key) && key) flashSurvey(key)
+  }, performance.now(), surveyTarget())
 }
 
 /**
@@ -580,7 +584,8 @@ let cardPress: { timer: ReturnType<typeof setTimeout> | null; surveying: boolean
 
 /** CARD pressed (the button, or G). */
 export function pressCard(): void {
-  if (cardPress) return
+  // A press left over (its lift landed elsewhere, on a card that opened over the button) never swallows this one.
+  abandonCard()
   const press: { timer: ReturnType<typeof setTimeout> | null; surveying: boolean } = { timer: null, surveying: false }
   press.timer = setTimeout(() => {
     press.timer = null

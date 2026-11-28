@@ -67,7 +67,6 @@ function Core({ strata }: { strata: Uint8Array }): JSX.Element {
 export function SurveyCard(): JSX.Element | null {
   const key = useSurveyCard((s) => s.open)
   const owns = useTerrain((s) => !!s.inventory.compiler)
-  useModalStack(key !== null, closeSurveyCard)
   // Leaving TERRAIN takes the card with it.
   useEffect(() => () => closeSurveyCard(), [])
   // One pass over the chunk as it opens, at the revision you see it at (kept per chunk and version: lib/terrain/assay.ts
@@ -79,7 +78,10 @@ export function SurveyCard(): JSX.Element | null {
     void cardFor(key).then((card) => { if (live) setGot(card ? { key, card } : null) }, () => { if (live) setGot(null) })
     return () => { live = false }
   }, [key, owns])
-  if (!key || !got || got.key !== key) return null
+  // On the Escape stack only while the card is drawn: one that could not be read never swallows Esc (review of #956).
+  const shown = !!key && !!got && got.key === key
+  useModalStack(shown, closeSurveyCard)
+  if (!shown) return null
   const { card, at, revision } = got.card
   const date = stampDate(at)
   const h = card.hardness

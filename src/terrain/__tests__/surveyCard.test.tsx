@@ -566,7 +566,10 @@ describe('live: what you mined and what is left', () => {
       change(key, idx(10, 10, 10), 0, false)
       await wait(CARD_WATCH_MS + 80)
       expect(rows(m).map(textOf)).toEqual(['Glowcore-0none left', 'Gridstone-31,7435,644 visible · 26,099 buried'])
-      expect(m.says('None.')).toBe(false)
+      // FINDS still lists the Glowcore, at 0, under its section: neither list falls back to its empty line.
+      const finds = m.all().find((h) => cls(h).includes('survey-card__list'))!
+      expect(textOf(finds)).toBe('Glowcore-0none left')
+      expect(m.all().filter((h) => cls(h).includes('survey-card__empty'))).toEqual([])
     } finally {
       await m.unmount()
     }

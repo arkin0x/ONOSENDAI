@@ -321,7 +321,7 @@ const NOT_ANSWERED = 'The relay did not answer. Not synced.'
 const NOT_OPENED = 'Your signer could not open your saved stats. Left as they are.'
 const STALE = 'The relay sent an older copy. Left as they are.'
 const NO_NIP44 = 'Your signer has no NIP-44 encryption. Stats stay on this device.'
-const AHEAD = 'The relay copy is dated ahead of this device\'s clock. Tried again on your next change.'
+const AHEAD = 'The relay copy is dated ahead of this device\'s clock. Retries on your next change.'
 /** A read older than this device's own last write is not written over for this long. */
 const STALE_PATIENCE_S = 86_400
 

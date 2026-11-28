@@ -163,11 +163,16 @@ describe('review of #982', () => {
     }
   })
 
-  it('a T without its middle Ferrovein, in two pieces: MISSING A BLOCK from every block', () => {
+  it('a T without its middle Ferrovein, in two pieces: separate builds, COMPILES from every piece (coordinator\'s ruling)', () => {
     const t = blocks(COMPILER_RECIPE, [5, 5, 5]).filter((b) => !(b[3] === FERROVEIN && b[1] === 6))
     const { read } = world(t)
     expect(gather(read, [6, 5, 5], 3).cells).toHaveLength(1)
-    expect([...fromEvery(read, t, true)]).toEqual(['MISSING A BLOCK | compiles true | recipe null | No Compiler: a block missing.'])
+    expect([...fromEvery(read, t, true)]).toEqual(['COMPILES | compiles true | recipe null | -'])
+    // The same one cell over natural ground: still one verdict from both pieces.
+    const floor: B[] = []
+    for (let x = 0; x < 12; x++) for (let z = 0; z < 12; z++) floor.push([x, 3, z, GRIDSTONE])
+    const b = world(t, floor)
+    expect(new Set(t.map(([x, y, z]) => previewLabel(smashPreview(b.read, [x, y, z], true, naturalOf(b.w))!))).size).toBe(1)
   })
 })
 
@@ -202,7 +207,7 @@ describe('property: one build, one verdict, from every block', () => {
       const { w, read } = world(h.cells, h.natural)
       for (const bare of [true, false]) expect([...fromEvery(read, [...h.cells, ...h.natural], bare, naturalOf(w))], JSON.stringify(extra)).toHaveLength(1)
     }
-    // Recipe poses with a block missing that splits them: still one verdict from every piece.
+    // Recipe poses with a block missing that splits them: separate builds, still one verdict from every piece.
     let split = 0
     for (const recipe of [QUARRY_CHARGE_RECIPE, COMPILER_RECIPE]) for (const pose of posesOf(recipe)) for (let j = 0; j < pose.blocks.length; j++) {
       const cells = pose.blocks.filter((_, i) => i !== j).map(([x, y, z, id]) => [x + 8, y + 8, z + 8, id] as B)

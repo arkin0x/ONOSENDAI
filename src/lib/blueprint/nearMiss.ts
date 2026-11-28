@@ -35,9 +35,10 @@
  * as long as it's small enough to fit within the range."), so that is the
  * only hand a build can be wrong for.
  *
- * - missing: the recipe's shape with a cell or two empty, the rest right,
- *   even when the gap splits it in pieces (splitMiss). Wrong and missing
- *   together are at most wrongMax(recipe).
+ * - missing: the recipe's shape with a cell or two empty, the rest right.
+ *   Wrong and missing together are at most wrongMax(recipe). A gap that
+ *   splits the build leaves separate builds, each judged on its own, so
+ *   every piece says COMPILES (coordinator's ruling on #982).
  *
  * The verdict is the build's, the same from every one of its blocks (owner,
  * 2026-11-28): an isolated build is judged by its arrangement, a touching one
@@ -173,36 +174,9 @@ export function nearMiss(read: Read, hit: Cell, natural?: (x: number, y: number,
   const placed = (cells: ReadonlyArray<readonly [number, number, number]>): boolean => cells.some(([x, y, z]) => !natural?.(x, y, z))
   if (g.arrangement) {
     if (!placed(g.cells)) return null
-    return arrangementMiss(g.arrangement) ?? splitMiss(read, g, natural) ?? touchingMiss(read, hit, natural)
+    return arrangementMiss(g.arrangement) ?? touchingMiss(read, hit, natural)
   }
   return touchingMiss(read, hit, natural)
-}
-
-/**
- * A recipe with a block missing that splits it in two (a T without its middle Ferrovein: the handle's foot is one
- * build, the head another): the isolated groups within a recipe's box of the struck one, taken together, judged as
- * one arrangement (arrangementMiss). Null when there is no other piece, when a piece touches something else, or when
- * the pieces together span more than a recipe's box. Each piece finds the others, so every block says the same.
- */
-function splitMiss(read: Read, g: Gathered, natural?: (x: number, y: number, z: number) => boolean): NearMiss | null {
-  const cells = new Map<string, readonly [number, number, number]>()
-  for (const c of g.cells) cells.set(`${c[0]},${c[1]},${c[2]}`, c)
-  const own = cells.size
-  const span = RECIPE_REACH - 1
-  for (let y = g.lo[1] - span; y < g.lo[1] + g.size[1] + span; y++) for (let z = g.lo[2] - span; z < g.lo[2] + g.size[2] + span; z++) for (let x = g.lo[0] - span; x < g.lo[0] + g.size[0] + span; x++) {
-    if (cells.has(`${x},${y},${z}`) || !read(x, y, z)) continue
-    const other = gather(read, [x, y, z], RECIPE_REACH)
-    // A piece that touches something past it, or is too big, is not a loose piece of a recipe.
-    if (!other.arrangement) return null
-    for (const c of other.cells) cells.set(`${c[0]},${c[1]},${c[2]}`, c)
-  }
-  if (cells.size === own) return null
-  const all = [...cells.values()]
-  const a = arrangementFrom(all.map((c) => ({ at: c as Cell, id: read(c[0], c[1], c[2]) })))
-  if (!a || a.size.some((v) => v > RECIPE_REACH)) return null
-  if (!all.some(([x, y, z]) => !natural?.(x, y, z))) return null
-  const m = arrangementMiss(a)
-  return m && m.missing > 0 ? m : null
 }
 
 /**
@@ -276,14 +250,16 @@ function anchorsOf(read: Read, hit: Cell, natural?: (x: number, y: number, z: nu
         // A natural block of a recipe's material beside the build may be one of its cells (a natural Umberslate as the
         // Quarry Charge's base): an anchor, not followed further, so a stray touching only that base finds the recipe as
         // extraPlaced counts it (review of #982).
-        if (RECIPE_IDS.has(id) && kept.length < NATURAL_ANCHORS_MAX) kept.push(c)
+        if (RECIPE_IDS.has(id)) kept.push(c)
         continue
       }
       placed.push(c)
       if (placed.length > RECIPE_MAX + NEAR_MISS_EXTRA) return [hit]
     }
   }
-  return [...placed, ...kept]
+  // The natural ones in a fixed order before the cap, so which block was struck never changes which are looked at.
+  kept.sort((a, b) => a[1] - b[1] || a[2] - b[2] || a[0] - b[0])
+  return [...placed, ...kept.slice(0, NATURAL_ANCHORS_MAX)]
 }
 
 /** The materials of the game's recipes: only a natural block of one of these can be a recipe's cell. */

@@ -14631,6 +14631,10 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
   text-shadow: 0 1px 3px #000, 0 0 2px #000;
   white-space: nowrap;
 }
+/* A smash that would waste recipe materials asks first (terrain/SmashConfirm.tsx). */
+.smash-ask__words { margin: 0 0 12px; color: #fff; }
+.smash-ask__dont { display: inline-flex; align-items: center; gap: 8px; min-height: 32px; color: var(--dim); }
+.smash-ask__dont label { cursor: pointer; }
 .terrain-smash-preview__mark {
   width: 7px;
   height: 7px;
@@ -15878,6 +15882,7 @@ body:has(.terrainview.is-folded) .terrain-held { visibility: hidden; }
 .bp-ex__name { margin: 0; font-family: var(--mono); font-weight: 700; font-size: 26px; line-height: 1.05; letter-spacing: 0.08em; text-transform: uppercase; overflow-wrap: anywhere; }
 .bp-ex__settings { margin: 0; display: grid; gap: 6px; }
 .bp-ex__settings div { display: grid; grid-template-columns: 92px 1fr; gap: 8px; align-items: baseline; }
+.bp-ex__air { display: block; margin-top: 4px; opacity: 0.8; }
 .bp-ex__settings dt { font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.08em; color: var(--bp-cyan); }
 .bp-ex__settings dd { margin: 0; font-size: 12.5px; line-height: 1.35; }
 .bp-ex__meter { border: 1px solid var(--bp-line); padding: 8px 10px; background: rgba(2, 10, 24, 0.25); }

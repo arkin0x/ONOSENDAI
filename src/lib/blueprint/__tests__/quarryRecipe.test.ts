@@ -63,8 +63,8 @@ describe('the Quarry Charge recipe (DECK-0010 §8.5)', () => {
       const g = smashGroup(read, [x + 10, y + 20, z + 30], false)
       expect(g.isolated).toBe(true)
       expect(sameArrangement(g.arrangement!, QUARRY_CHARGE_RECIPE)).toBe(true)
-      expect(compiles(g.arrangement, false)).toBe(true)
-      const out = await compile(g.arrangement!, false, deps())
+      expect(compiles(g.arrangement)).toBe(true)
+      const out = await compile(g.arrangement!, deps())
       expect(out.lookup).toBe(QUARRY_LOOKUP)
       expect(out.found).toHaveLength(1)
       expect(out.found[0].prize).toEqual({ type: 'tool', tool: 'quarry-charge', count: QUARRY_CHARGE_COUNT })
@@ -73,16 +73,15 @@ describe('the Quarry Charge recipe (DECK-0010 §8.5)', () => {
     expect(QUARRY_CHARGE_COUNT).toBe(7)
   })
 
-  it('never bare-handed: a bare hand compiles only the Compiler', async () => {
+  it('bare-handed too: it fits a bare hand\'s reach of 3, so it compiles into seven Quarry Charges (owner, 2026-11-28)', async () => {
     const read = world(SPEC)
     for (const [x, y, z] of SPEC) {
-      // It fits a bare hand's reach of 3, so it is gathered whole, and still compiles nothing.
       const g = smashGroup(read, [x + 10, y + 20, z + 30], true)
       expect(sameArrangement(g.arrangement!, QUARRY_CHARGE_RECIPE)).toBe(true)
-      expect(compiles(g.arrangement, true)).toBe(false)
-      expect((await compile(g.arrangement!, true, deps())).found).toEqual([])
+      expect(compiles(g.arrangement)).toBe(true)
+      expect((await compile(g.arrangement!, deps())).found.map((f) => f.prize)).toEqual([{ type: 'tool', tool: 'quarry-charge', count: QUARRY_CHARGE_COUNT }])
     }
-    expect(compiles(COMPILER_RECIPE, true)).toBe(true)
+    expect(compiles(COMPILER_RECIPE)).toBe(true)
   })
 
   it('mirrored across X it is another arrangement and compiles nothing; across Y or Z it is the same', async () => {
@@ -94,7 +93,7 @@ describe('the Quarry Charge recipe (DECK-0010 §8.5)', () => {
     expect(sameArrangement(arr(mz), QUARRY_CHARGE_RECIPE)).toBe(true)
     const vx = (vectors.arrangements as unknown as Array<{ name: string; lookup: string }>).find((a) => a.name === 'quarry-charge-mirrored-x')!
     const g = smashGroup(world(mx), [11, 21, 31], false)
-    const out = await compile(g.arrangement!, false, deps())
+    const out = await compile(g.arrangement!, deps())
     expect(out.lookup).toBe(vx.lookup)
     expect(out.found).toEqual([])
     // Turned a quarter turn about Y, the Cinderrock on +Z: another arrangement too.
@@ -106,13 +105,13 @@ describe('the Quarry Charge recipe (DECK-0010 §8.5)', () => {
     const own = await toolRecord(QUARRY_LOOKUP, QUARRY_KEY_HEX)
     expect(readRecord(own)?.lookup).toBe(QUARRY_LOOKUP)
     // Under the game recipe's lookup, the client's own copy alone: seven, never the record's 9999.
-    const out = await compile(QUARRY_CHARGE_RECIPE, false, deps([own], [own]))
+    const out = await compile(QUARRY_CHARGE_RECIPE, deps([own], [own]))
     expect(out.found.map((f) => f.prize)).toEqual([{ type: 'tool', tool: 'quarry-charge', count: 7 }])
     // Under any other lookup a record's tool prize is passed over.
     const mx = arr(SPEC.map(([x, y, z, id]) => [2 - x, y, z, id] as Cell4))
     const k = await keyOf(mx)
     const stranger = await toolRecord(k.lookup, bytesToHex(k.key))
-    const out2 = await compile(mx, false, deps([stranger], [stranger]))
+    const out2 = await compile(mx, deps([stranger], [stranger]))
     expect(out2.found).toEqual([])
     // Counted as a prize this client cannot show (§5.5), so the smash says so in plain words.
     expect(out2.unknown).toBe(1)
@@ -120,7 +119,7 @@ describe('the Quarry Charge recipe (DECK-0010 §8.5)', () => {
     // A shard prize beside it under the same lookup still opens; only the tool is set aside.
     const sheet = { ...sheetShape(mx, () => true), lock: 'standard' as const, prize: { reveal: 'hidden' as const } }
     const shard = { ...recordTemplate({ lookup: k.lookup, sheet, sealed: await sealPrize(k.key, { type: 'sno', payload: { v: 2, name: 'Mirror' } }), title: 'Mirror', createdAt: 1_795_000_200 }), id: 'd'.repeat(64), pubkey: 'a'.repeat(64), sig: 'c'.repeat(128) }
-    const out3 = await compile(mx, false, deps([stranger, shard]))
+    const out3 = await compile(mx, deps([stranger, shard]))
     expect(out3.found.map((f) => f.name)).toEqual(['Mirror'])
     expect(out3.unknown).toBe(1)
   }, 60_000)

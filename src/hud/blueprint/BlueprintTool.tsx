@@ -214,7 +214,7 @@ function ArrangementStep(): JSX.Element {
       )}
       <button className="bpt-choice" onClick={() => { st.set({ capturing: true, open: false }); if (!enterTerrainMode()) st.set({ capturing: false, open: true, error: 'TERRAIN cannot open here right now.' }) }}>
         <Radar size={22} strokeWidth={1.75} aria-hidden />
-        <span><b>CAPTURE FROM TERRAIN</b><small>Aim at a build that stands alone and press RECORD. The blocks stay where they are.</small></span>
+        <span><b>CAPTURE FROM TERRAIN</b><small>Aim at a build with a gap all round, not touching any other block, and press RECORD. The blocks stay where they are.</small></span>
       </button>
       <button className="bpt-choice" onClick={() => st.set({ composing: true })}>
         <Boxes size={22} strokeWidth={1.75} aria-hidden />

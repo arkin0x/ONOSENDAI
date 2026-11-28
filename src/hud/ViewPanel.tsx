@@ -53,6 +53,7 @@ import { useWalk } from '../store/useWalk'
 import { useFluidWalk } from '../store/fluidSwitch'
 import { useHidesSync } from '../store/hidesSync'
 import { useMiningStats } from '../store/miningStats'
+import { useInventorySync } from '../store/inventorySync'
 import { setSfxOn, useSfxOn } from '../store/sfxSwitch'
 import { setSmashAsking, useSmashAsking } from '../lib/blueprint/smashConfirm'
 import { Field, Switch } from './ui/Switch'
@@ -105,7 +106,7 @@ export const SETTINGS_GROUPS: ReadonlyArray<{ id: string; title: string; rows: r
   { id: 'movement', title: 'Movement', rows: ['view-walk-gravity', 'view-walk-gravity-hard', 'view-walk-fluid', WALK_LIMITS_ROW] },
   { id: 'interface', title: 'Interface', rows: ['view-walk-look', 'view-smash-ask'] },
   { id: 'effects', title: 'Effects', rows: ['view-headlamp', 'view-glow', 'view-block-shading', 'view-walk-avatar', 'view-sfx'] },
-  { id: 'sync', title: 'Sync', rows: ['view-hides-sync', 'view-mining-sync'] },
+  { id: 'sync', title: 'Sync', rows: ['view-hides-sync', 'view-mining-sync', 'view-inventory-sync'] },
 ]
 
 export function ViewPanel(): JSX.Element {
@@ -128,6 +129,7 @@ export function ViewPanel(): JSX.Element {
   const hidesStatus = useHidesSync((s) => s.status)
   const hidesNote = useHidesSync((s) => s.note)
   const miningSync = useMiningStats((s) => s.enabled)
+  const inventorySync = useInventorySync((s) => s.enabled)
   const sfxOn = useSfxOn()
   const smashAsk = useSmashAsking()
   // The newcomer view shows Interface only: the screen's two ways and the look sphere (newcomer/reveal.ts).
@@ -314,6 +316,16 @@ export function ViewPanel(): JSX.Element {
       hint: 'Your MINING stats on every device signed in as you.',
       on: miningSync,
       set: (v) => useMiningStats.getState().setEnabled(v),
+    },
+    // Your TERRAIN inventory, saved to the relay encrypted to you, so every
+    // device signed in as you holds the same (store/inventorySync.ts; owner,
+    // 2026-11-28). On by default; off keeps it on this device.
+    {
+      id: 'view-inventory-sync',
+      title: 'Sync inventory',
+      hint: 'Your TERRAIN blocks, Compiler and Quarry Charges on every device signed in as you.',
+      on: inventorySync,
+      set: (v) => useInventorySync.getState().setEnabled(v),
     },
   ]
 

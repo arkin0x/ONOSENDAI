@@ -69,6 +69,7 @@ import { loadBuilder, releaseBuilderDb } from '../lib/terrain/builderKey'
 import { quarryHooks } from './quarryHooks'
 import './terrainShareLive'
 import { noteMining } from './miningStats'
+import { loadedInventory, noteInventory, nudgeInventory, onInventoryMerged, syncedInventory } from './inventorySync'
 
 /** The first-visit hint's steps: mine one, place one, open the inventory; then done. */
 export const HINT_DONE = 3
@@ -686,10 +687,29 @@ function count(what: keyof TerrainState['tally']): void {
 }
 
 function saveInventory(inv: Inventory): void {
-  useTerrain.setState({ inventory: inv })
   const s = terrainSession
-  if (s?.db) keep(writeInventory(s.db, s.owner, inv))
+  // Recorded for sync once the field's saved inventory is read (store/inventorySync.ts): the counts come back as the
+  // totals across your devices. Before that, the read overwrites whatever this was (#960).
+  const kept = s && fieldLoaded(s) ? noteInventory(s.owner, useTerrain.getState().inventory, inv) : inv
+  useTerrain.setState({ inventory: kept })
+  if (s?.db) keep(writeInventory(s.db, s.owner, kept))
 }
+
+/**
+ * Another device's numbers merged in (store/inventorySync.ts): the new totals
+ * in the bag, the hotbar and the chosen slot as they are. Only into a field
+ * whose saved inventory is read: one still loading reads the record when it is.
+ */
+function syncedIn(owner: string): void {
+  const s = terrainSession
+  if (!s || s.owner !== owner || !fieldLoaded(s)) return
+  const inv = useTerrain.getState().inventory
+  const next = syncedInventory(owner, inv)
+  if (next === inv) return
+  useTerrain.setState({ inventory: next })
+  if (s.db) keep(writeInventory(s.db, s.owner, next))
+}
+onInventoryMerged(syncedIn)
 
 function advanceHint(from: number): void {
   if (useTerrain.getState().hint !== from) return
@@ -781,16 +801,26 @@ function makeField(owner: string, plane: number, at: Position): TerrainSession {
       s.db = db
       await loadBuilder(db, owner).catch(() => undefined)
       // A preview build's Compiler to test with (lib/blueprint/devGrant.ts): on when the preview grants it, off again when not. Production never grants.
-      let inventory = kept.inventory
+      // The record across your devices (store/inventorySync.ts): what this device held counted once, the totals shown.
+      let inventory = loadedInventory(owner, kept.inventory) ?? kept.inventory
       if (compilerGranted() && !inventory.compiler) inventory = withCompiler(inventory, 'granted')
       else if (!compilerGranted() && inventory.compiler === 'granted') inventory = withoutCompiler(inventory)
       useTerrain.setState({ inventory, hint: kept.hint })
+      // What the load changed (this device's entry beside the counts, the totals across your devices) is kept in the row at
+      // once, not only at the next change: the entry is what stops a lost sync record from counting the bag twice (review of #972).
+      if (inventory !== kept.inventory) keep(writeInventory(db, owner, inventory))
       s.kept = 'ready'
+      nudgeInventory('read')
       for (const f of quarryHooks.fieldReady) { try { f(s) } catch { /* one listener failing never stops the field */ } }
     } catch {
       db?.close()
       // No storage here (a private window, a refusal): the inventory in memory is this visit's own, never overwritten.
-      if (terrainSession === s) s.kept = 'memory'
+      if (terrainSession === s) {
+        s.kept = 'memory'
+        // Only when this device's record already holds what it kept (store/inventorySync.ts loadedInventory).
+        const synced = loadedInventory(owner, null)
+        if (synced) useTerrain.setState({ inventory: synced })
+      }
     }
   })()
   return s

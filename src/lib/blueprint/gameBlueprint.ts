@@ -34,6 +34,7 @@ import { useBlueprints } from '../../store/useBlueprints'
 import { useCyberspace } from '../../store/useCyberspace'
 import { terrainSession, useTerrain } from '../../store/useTerrain'
 import { useToast } from '../../store/useToast'
+import { collectedFor, useInventorySync } from '../../store/inventorySync'
 import { bytesFromCells, recordTemplate, sealPrize, sheetShape, toBase64, type Arrangement, type Prize, type PrizeView, type RecordEvent } from './format'
 import { hexToBytes } from '../events'
 import { CINDERROCK, COMPILER_RECIPE, FERROVEIN, GLOWCORE, QUARRY_CHARGE_COUNT, QUARRY_CHARGE_RECIPE, RUSTBAND, UMBERSLATE } from './recipes'
@@ -203,12 +204,15 @@ export function startCompilerGrant(draw?: () => Promise<Pictures>): void {
     const me = useCyberspace.getState().identity.pubkey
     // The TERRAIN inventory is the identity's whose session it is.
     if (terrainSession && terrainSession.owner !== me) return
-    const counts = useTerrain.getState().inventory.counts
+    // What you hold, and every kind you ever collected on any device (store/inventorySync.ts): a gift earned on another
+    // device arrives here too, even with those blocks spent since.
+    const counts = { ...collectedFor(me), ...useTerrain.getState().inventory.counts }
     // One after the other, so two toasts never race for the same moment.
     void (async () => { for (const g of GAME_GIFTS) await grantGiftIfDue(g, me, counts, draw) })()
   }
   useTerrain.subscribe((t, prev) => { if (t.inventory.counts !== prev.inventory.counts) check() })
   useBlueprints.subscribe((b, prev) => { if (b.loadedFor !== prev.loadedFor) check() })
+  useInventorySync.subscribe((v, prev) => { if (v.flips !== prev.flips) check() })
   check()
 }
 /** The same watch, by what it does now: every game blueprint. */

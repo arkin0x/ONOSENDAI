@@ -19,6 +19,8 @@ if (typeof localStorage === 'undefined') {
 import { useBlueprints } from '../../../store/useBlueprints'
 import { useCyberspace } from '../../../store/useCyberspace'
 import { useTerrain } from '../../../store/useTerrain'
+import { noteInventory, resetInventorySync, setInventoryDeps } from '../../../store/inventorySync'
+import { carriedInto, emptyInventory } from '../../terrain/terrainDb'
 import { COMPILER_CARD_ID, COMPILER_KEY_HEX, COMPILER_LOOKUP, GAME_MAKER, QUARRY_CARD_ID, QUARRY_KEY_HEX, QUARRY_LOOKUP, QUARRY_TYPES, grantCompilerIfDue, grantQuarryIfDue, isGameCard, startCompilerGrant } from '../gameBlueprint'
 import { isItemBlueprint } from '../itemMark'
 import { readRecord, finderView } from '../format'
@@ -103,6 +105,30 @@ describe('the Compiler blueprint, the game\'s gift', () => {
     expect(f.revealed.size).toBe(5)
     expect(f.occupied.filter(Boolean)).toHaveLength(5)
     expect(useBlueprints.getState().fresh.has(card.rowKey)).toBe(true)
+  })
+})
+
+describe('a gift earned on another device (the inventory synced: store/inventorySync.ts)', () => {
+  it('a recipe block collected anywhere, even spent since, grants it here as BLUEPRINTS loads', async () => {
+    const pk = fresh()
+    const m = new Map<string, string>()
+    setInventoryDeps({ self: () => pk, storage: { getItem: (k) => m.get(k) ?? null, setItem: (k, v) => { m.set(k, v) }, removeItem: (k) => { m.delete(k) } } })
+    try {
+      startCompilerGrant(draw)
+      useCyberspace.setState({ identity: { ...useCyberspace.getState().identity, pubkey: pk } })
+      await new Promise((r) => setTimeout(r, 50))
+      useTerrain.setState({ inventory: emptyInventory() })
+      // Collected and placed again: the bag holds none of it now, the record remembers.
+      const one = carriedInto(emptyInventory(), FERROVEIN)
+      noteInventory(pk, emptyInventory(), one)
+      noteInventory(pk, one, emptyInventory())
+      expect(useTerrain.getState().inventory.counts).toEqual({})
+      await useBlueprints.getState().load(pk)
+      await vi.waitFor(() => expect(has(pk)).toBe(true), { timeout: 4000 })
+    } finally {
+      resetInventorySync()
+      setInventoryDeps(null)
+    }
   })
 })
 

@@ -22,7 +22,7 @@
  */
 
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
-import { Backpack, Box, Hammer, HandFist, Radar, ScrollText } from 'lucide-react'
+import { Backpack, Box, Cloud, CloudOff, Hammer, HandFist, Radar, ScrollText } from 'lucide-react'
 import { HeldCharge } from './HeldCharge'
 import quarryIcon from '../assets/quarry-charge.png'
 import { HINT_DONE, cardChunkHere, headNow, offsetOf, surveyTarget as targetNow, terrainSession, useTerrain } from '../store/useTerrain'
@@ -45,6 +45,8 @@ import { ShareLine } from './ShareLine'
 import { TerrainCrew, crewChipAsking } from './TerrainCrew'
 import { CrewLayer, CrewPanel, closeCrewLayer } from './CrewPanel'
 import { isCompiler, isQuarry } from '../lib/terrain/terrainDb'
+import { inventorySyncLine, localFor as inventoryLocalFor, nudgeInventory, useInventorySync } from '../store/inventorySync'
+import { useCyberspace } from '../store/useCyberspace'
 import { HeldCompiler } from './HeldCompiler'
 import { HeldHalo, HeldVignette, useHeldGlow } from './HeldGlow'
 import { useSmashHold } from './smashHold'
@@ -247,6 +249,38 @@ function Hotbar(): JSX.Element {
   )
 }
 
+/** The bag's quiet line on syncing it (store/inventorySync.ts): synced across your devices, saved here only, or failed. */
+function InventorySync(): JSX.Element {
+  const me = useCyberspace((s) => s.identity.pubkey)
+  const live = useCyberspace((s) => s.live)
+  useInventorySync((s) => s.flips)
+  const enabled = useInventorySync((s) => s.enabled)
+  const status = useInventorySync((s) => s.status)
+  const note = useInventorySync((s) => s.note)
+  // The bag opened: what your other devices did, read in (never a write; at most once a minute).
+  useEffect(() => { nudgeInventory('read') }, [])
+  const syncedAt = /^[0-9a-f]{64}$/.test(me) ? inventoryLocalFor(me, undefined, false).syncedAt : 0
+  const line = inventorySyncLine({ me, enabled, live, status, syncedAt, note })
+  const Icon = line.synced ? Cloud : CloudOff
+  // Why it is not synced, as words a tap shows (a phone has no hover).
+  const [asked, setAsked] = useState(false)
+  const why = !line.synced && line.why ? line.why : ''
+  return (
+    <div className="terrain-sheet__foot terrain-invsync-wrap" role="status">
+      <p className="terrain-invsync" title={line.why || undefined}>
+        <Icon size={13} strokeWidth={2} aria-hidden />
+        <span>{line.words}</span>
+        {why && (
+          <button type="button" className="terrain-invsync__why" aria-expanded={asked} onClick={() => setAsked((a) => !a)}>
+            Why?
+          </button>
+        )}
+      </p>
+      {why && asked && <p className="terrain-invsync__reason">{why}</p>}
+    </div>
+  )
+}
+
 function InventorySheet(): JSX.Element | null {
   const open = useTerrain((s) => s.sheet)
   const inv = useTerrain((s) => s.inventory)
@@ -263,7 +297,7 @@ function InventorySheet(): JSX.Element | null {
         </div>
         {/* What scrolls, under a title line that stays: the card's frame and fill stand still around it. */}
         <div className="terrain-sheet__body">
-          <p className="terrain-sheet__sub">Kept on this device. Tap a block to put it in slot&nbsp;{inv.slot + 1}.</p>
+          <p className="terrain-sheet__sub">Tap a block to put it in slot&nbsp;{inv.slot + 1}.</p>
           {inv.charges !== undefined && (
             <div className="terrain-sheet__grid terrain-sheet__grid--tools">
               <button className={`terrain-kind terrain-kind--quarry${inv.charges === 0 ? ' is-out' : ''}${isQuarry(inv.hotbar[inv.slot]) ? ' is-on' : ''}`} disabled={inv.charges === 0} onClick={() => { const at = inv.hotbar.findIndex(isQuarry); if (at >= 0) useTerrain.getState().selectSlot(at) }} aria-label={`Quarry Charges, ${inv.charges}: choose them`}>
@@ -286,6 +320,7 @@ function InventorySheet(): JSX.Element | null {
                 ))}
               </div>
             )}
+          <InventorySync />
           <ShareLine />
           <CrewPanel />
         </div>

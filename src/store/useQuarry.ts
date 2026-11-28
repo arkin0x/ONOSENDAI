@@ -33,6 +33,7 @@ import { carriedInto, readDrops, writeDrops, writeInventoryAndDrops } from '../l
 import { BLAST_HALF, FUSE_BEEPS, FUSE_MS, bodyAt, blastCells, cellKey, makeDrop, stepCells, tidyDrops, type Drop } from '../lib/terrain/quarry'
 import { blastSound, fuseBeeps, pickupSound } from '../lib/blueprint/smashSound'
 import { noteMining } from './miningStats'
+import { noteInventory } from './inventorySync'
 
 /** One charge burning: where it stands in cyberspace, whose it is, and when it was placed. */
 export interface ArmedCharge {
@@ -182,8 +183,11 @@ export const useQuarry = create<QuarryState>((set, get) => ({
     }
     if (!got.size) return 0
     let n = 0
-    let inv = useTerrain.getState().inventory
+    const before = useTerrain.getState().inventory
+    let inv = before
     for (const [id, count] of got) { inv = carriedInto(inv, id, count); n += count }
+    // Recorded for sync as every carry is (store/inventorySync.ts): the counts back as the totals across your devices.
+    inv = noteInventory(s.owner, before, inv)
     const gone = collected.get(st.owner) ?? new Map<string, number>()
     for (const d of taken) gone.set(dropId(d), d.expires)
     collected.set(st.owner, gone)

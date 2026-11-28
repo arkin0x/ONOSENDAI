@@ -10,7 +10,7 @@
 import { describe, expect, it } from 'vitest'
 import { arrangementFrom, type Cell } from '../arrangement'
 import { CINDERROCK, COMPILER_RECIPE, FERROVEIN, QUARRY_CHARGE_COUNT, QUARRY_CHARGE_RECIPE, RUSTBAND, UMBERSLATE, sameArrangement } from '../recipes'
-import { compile, compiles, smashGroup, type SmashDeps } from '../smash'
+import { UNKNOWN_LINE, compile, compiles, missLine, smashGroup, type SmashDeps } from '../smash'
 import { QUARRY_KEY_HEX, QUARRY_LOOKUP, QUARRY_NAME, gameNoDeploy, isQuarryPrize, toolName, toolWhat } from '../gameCard'
 import { isPrize, readRecord, recordTemplate, sealPrize, sheetShape, type RecordEvent } from '../format'
 import { keyOf } from '../keyClient'
@@ -113,7 +113,17 @@ describe('the Quarry Charge recipe (DECK-0010 §8.5)', () => {
     const mx = arr(SPEC.map(([x, y, z, id]) => [2 - x, y, z, id] as Cell4))
     const k = await keyOf(mx)
     const stranger = await toolRecord(k.lookup, bytesToHex(k.key))
-    expect((await compile(mx, false, deps([stranger], [stranger]))).found).toEqual([])
+    const out2 = await compile(mx, false, deps([stranger], [stranger]))
+    expect(out2.found).toEqual([])
+    // Counted as a prize this client cannot show (§5.5), so the smash says so in plain words.
+    expect(out2.unknown).toBe(1)
+    expect(missLine(true, out2.offline, out2.unknown > 0)).toBe(UNKNOWN_LINE)
+    // A shard prize beside it under the same lookup still opens; only the tool is set aside.
+    const sheet = { ...sheetShape(mx, () => true), lock: 'standard' as const, prize: { reveal: 'hidden' as const } }
+    const shard = { ...recordTemplate({ lookup: k.lookup, sheet, sealed: await sealPrize(k.key, { type: 'sno', payload: { v: 2, name: 'Mirror' } }), title: 'Mirror', createdAt: 1_795_000_200 }), id: 'd'.repeat(64), pubkey: 'a'.repeat(64), sig: 'c'.repeat(128) }
+    const out3 = await compile(mx, false, deps([stranger, shard]))
+    expect(out3.found.map((f) => f.name)).toEqual(['Mirror'])
+    expect(out3.unknown).toBe(1)
   }, 60_000)
 
   it('its prize reads, with a count of 1 or more; its words and model are its own', () => {

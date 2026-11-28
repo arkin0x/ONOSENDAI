@@ -54,7 +54,7 @@ import { groundWriteRevision, type GroundRevision } from '../lib/terrain/groundR
 import { EMPTY, blockName, kindId, solid as isSolid } from '../lib/terrain/blocks'
 import { terrainWallItems } from '../lib/terrain/walls'
 import {
-  FOLD_AT, HOTBAR_SLOTS, emptyInventory, foldChunk, isCompiler, isQuarry, openTerrainDb, opKey, placeable, readKept, readOwner, withCharges, withCompiler, withoutCompiler, writeHint, writeInventory, writeOps, writeSurveyed,
+  FOLD_AT, HOTBAR_SLOTS, carriedInto, emptyInventory, foldChunk, isCompiler, isQuarry, openTerrainDb, opKey, placeable, readKept, readOwner, withCharges, withCompiler, withoutCompiler, writeHint, writeInventory, writeOps, writeSurveyed,
   type ChunkSurvey, type Inventory, type OpRow,
 } from '../lib/terrain/terrainDb'
 import { compilerGranted } from '../lib/blueprint/devGrant'
@@ -112,7 +112,18 @@ export interface TerrainSession {
   version: number
   /** What the identity kept is read (the inventory, the surveyed list). */
   ready: Promise<void>
+  /**
+   * What it kept, as TERRAIN's inventory in memory stands to it: 'loading'
+   * while the saved inventory is still being read (the inventory in memory is
+   * then the field before's, and the read overwrites it), 'ready' once read,
+   * 'memory' when IndexedDB could not be opened (kept in memory for this
+   * visit). Absent counts as ready (a field made by hand, in tests).
+   */
+  kept?: 'loading' | 'ready' | 'memory'
 }
+
+/** Whether a field's saved inventory is read (or there is none to read), so TERRAIN's inventory in memory is its own. */
+export const fieldLoaded = (s: Pick<TerrainSession, 'kept'> | null): boolean => !!s && s.kept !== 'loading'
 
 /** The field, or null before one is made (by syncTerrain). */
 export let terrainSession: TerrainSession | null = null
@@ -422,20 +433,11 @@ export const useTerrain = create<TerrainState>((set, get) => ({
   },
 
   carry: (id, n = 1) => {
-    if (!(id > EMPTY && id < 255) || !(n > 0)) return
     const inv = get().inventory
-    const counts = { ...inv.counts, [id]: (inv.counts[id] ?? 0) + n }
-    let hotbar = inv.hotbar
-    // A kind newly carried takes the first empty slot, so it is ready to place.
-    if (!hotbar.includes(id)) {
-      const free = hotbar.indexOf(0)
-      if (free >= 0) { hotbar = [...hotbar]; hotbar[free] = id }
-    }
-    // With an empty slot chosen, the kind just carried is chosen instead.
-    const slot = hotbar[inv.slot] === 0 && hotbar.includes(id) ? hotbar.indexOf(id) : inv.slot
-    // Everything else the inventory holds (the Compiler and how it came, the charges) stays: dropping it here hid the held
-    // Compiler until a reload (owner, 2026-11-27), and a reload then lost a made one.
-    saveInventory({ ...inv, counts, hotbar, slot })
+    // Everything else the inventory holds (the Compiler and how it came, the charges) stays (terrainDb.ts carriedInto):
+    // dropping it here hid the held Compiler until a reload (owner, 2026-11-27), and a reload then lost a made one.
+    const next = carriedInto(inv, id, n)
+    if (next !== inv) saveInventory(next)
   },
 
   place: (hit, air) => {
@@ -764,7 +766,7 @@ function makeField(owner: string, plane: number, at: Position): TerrainSession {
   const world = new TerrainWorld(chunkOf(at.x, at.y, at.z, plane), CS_AXES)
   const s: TerrainSession = {
     owner, plane, world, pending: new Map(), layers: new Map(), surveyedKeys: new Set(), revisions: new Map(), unreadable: new Set(), building: new Set(),
-    nextSeq: 1, db: null, version: 0, ready: Promise.resolve(),
+    nextSeq: 1, db: null, version: 0, ready: Promise.resolve(), kept: 'loading',
   }
   s.ready = (async () => {
     let db: IDBDatabase | null = null
@@ -783,9 +785,12 @@ function makeField(owner: string, plane: number, at: Position): TerrainSession {
       if (compilerGranted() && !inventory.compiler) inventory = withCompiler(inventory, 'granted')
       else if (!compilerGranted() && inventory.compiler === 'granted') inventory = withoutCompiler(inventory)
       useTerrain.setState({ inventory, hint: kept.hint })
+      s.kept = 'ready'
       for (const f of quarryHooks.fieldReady) { try { f(s) } catch { /* one listener failing never stops the field */ } }
     } catch {
       db?.close()
+      // No storage here (a private window, a refusal): the inventory in memory is this visit's own, never overwritten.
+      if (terrainSession === s) s.kept = 'memory'
     }
   })()
   return s

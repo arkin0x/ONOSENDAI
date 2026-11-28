@@ -116,6 +116,24 @@ export const COMPILER_ID = 1000
 /** The Quarry Charges' place in the hotbar: never a block id either. */
 export const QUARRY_ID = 1001
 
+/**
+ * `n` more blocks of kind `id` carried: a kind newly carried takes the first
+ * empty slot, so it is ready to place, and with an empty slot chosen it is
+ * chosen instead. Everything else the inventory holds stays. Unchanged for an
+ * id that is not a block kind (1 to 254) or no blocks.
+ */
+export function carriedInto(inv: Inventory, id: number, n = 1): Inventory {
+  if (!(id > 0 && id < 255) || !(n > 0)) return inv
+  const counts = { ...inv.counts, [id]: (inv.counts[id] ?? 0) + n }
+  let hotbar = inv.hotbar
+  if (!hotbar.includes(id)) {
+    const free = hotbar.indexOf(0)
+    if (free >= 0) { hotbar = [...hotbar]; hotbar[free] = id }
+  }
+  const slot = hotbar[inv.slot] === 0 && hotbar.includes(id) ? hotbar.indexOf(id) : inv.slot
+  return { ...inv, counts, hotbar, slot }
+}
+
 /** Whether a hotbar entry is the Compiler. */
 export const isCompiler = (id: number): boolean => id === COMPILER_ID
 /** Whether a hotbar entry is the Quarry Charges. */
@@ -323,6 +341,15 @@ export async function readDrops(db: IDBDatabase, owner: string): Promise<unknown
 
 export function writeDrops(db: IDBDatabase, owner: string, drops: readonly unknown[]): Promise<void> {
   return putMany(db, META, [{ key: metaKey(owner, 'drops'), value: drops }])
+}
+
+/**
+ * The inventory and the drops, in one transaction (review of #952): a drop
+ * collected is carried and gone together, so a crash between the two can
+ * never leave it both carried and still floating.
+ */
+export function writeInventoryAndDrops(db: IDBDatabase, owner: string, inv: Inventory, drops: readonly unknown[]): Promise<void> {
+  return putMany(db, META, [{ key: metaKey(owner, 'inventory'), value: inv }, { key: metaKey(owner, 'drops'), value: drops }])
 }
 
 export function writeHint(db: IDBDatabase, owner: string, step: number): Promise<void> {

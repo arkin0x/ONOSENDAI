@@ -338,9 +338,11 @@ describe('the words keep the owner\'s rule', () => {
     const lines: string[] = [...Object.values(CAUSE_WORDS)]
     for (const recipe of ['compiler', 'quarry'] as const) for (const turned of [false, true]) for (const touching of [null, 'ground', 'block'] as const) {
       if (!turned && !touching) continue
-      const m: NearMiss = { recipe, name: recipe === 'compiler' ? 'the Compiler' : 'the Quarry Charge', turned, touching }
+      const m: NearMiss = { recipe, name: recipe === 'compiler' ? 'the Compiler' : 'the Quarry Charge', turned, touching, wrong: [] }
       lines.push(nearMissLine(m), confirmWords(5, ['Glowcore'], m), confirmWords(5, ['Glowcore'], m, true))
     }
+    const wrong: NearMiss = { recipe: 'quarry', name: 'the Quarry Charge', turned: false, touching: null, wrong: [{ is: 5, should: 2 }] }
+    lines.push(nearMissLine(wrong), confirmWords(7, ['Cinderrock'], wrong, true))
     lines.push(confirmWords(3, ['Glowcore'], null), confirmWords(3, ['Glowcore'], null, false, true), TOO_BIG_LINE)
     for (const l of lines) expect(l, l).not.toMatch(FORBIDDEN)
   })

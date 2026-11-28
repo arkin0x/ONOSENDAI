@@ -99,5 +99,5 @@ export function WorldSeeds({ axes }: { axes: ViewAxes }): JSX.Element | null {
   const placed = useSteadied(fresh)
 
   if (placed.length === 0) return null
-  return <>{placed.map((w) => <PlacedShard key={w.key} w={w} birth={births[w.key]} occludes />)}</>
+  return <>{placed.map((w) => <PlacedShard key={w.key} w={w} birth={births[w.key]} occludes cull />)}</>
 }

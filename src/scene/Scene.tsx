@@ -101,6 +101,7 @@ import { WorldShards } from './WorldShards'
 import { TerrainLayer } from './TerrainLayer'
 import { PrizeToys } from './PrizeToys'
 import { WorldSeeds } from './WorldSeeds'
+import { FarShardDots } from './FarShardDots'
 import { WorldMessages } from './WorldMessages'
 import { ChestLooks } from './ChestLooks'
 import { BuildOccluders } from './BuildOccluders'
@@ -292,6 +293,8 @@ export function World(): JSX.Element {
       <PrizeToys axes={axes} />
       {/* Each seed's bloom, grown here from its DNA and the blocks since it was planted (DECK-0008). */}
       <WorldSeeds axes={axes} />
+      {/* The world shards and seeds too small on screen to draw, one dot each; also where their size cull runs (farCull.ts). */}
+      <FarShardDots />
       <WorldMessages axes={axes} />
       {/* Each hidden sound's full-volume sphere, behind the Settings switch (AudioSpheres). */}
       <AudioSpheres axes={axes} />

@@ -147,6 +147,23 @@ describe('what counts as the view changing', () => {
     expect(changes((s) => { s.mesh.visible = false })).toBe(true)
   })
 
+  it('nothing under a hidden object counts, since nothing under it is drawn; hiding or showing it still does', () => {
+    const part = { matrixWorld: matrix(), material: { opacity: 1, version: 1, uniforms: { uTime: { value: 1 } } }, geometry: { attributes: { position: { version: 1 } } } }
+    const shard = { visible: false, matrixWorld: matrix(), children: [{ matrixWorld: matrix(), children: [part] }] }
+    const s = scene()
+    ;(s.root as unknown as { children: unknown[] }).children.push(shard)
+    const at = (): number => sceneStamp(s.root as never, s.camera as never)
+    const before = at()
+    part.matrixWorld.elements[14] = 3
+    part.material.opacity = 0.5
+    part.material.uniforms.uTime.value = 2
+    part.geometry.attributes.position.version++
+    shard.matrixWorld.elements[12] = 9
+    expect(at()).toBe(before)
+    shard.visible = true
+    expect(at()).not.toBe(before)
+  })
+
   it('something added or taken away', () => {
     expect(changes((s) => { (s.root as unknown as { children: unknown[] }).children.pop() })).toBe(true)
   })

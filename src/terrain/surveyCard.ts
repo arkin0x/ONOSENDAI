@@ -10,9 +10,10 @@
  */
 
 import { create } from 'zustand'
-import { terrainSession, useTerrain } from '../store/useTerrain'
+import { groundFor, groundRevisionFor, terrainSession, useTerrain } from '../store/useTerrain'
 import { firstLayerAt } from '../store/terrainShare'
-import { chunkAssay, surveyCard, type SurveyCardData } from '../lib/terrain/assay'
+import { assayBlocks, chunkAssay, neighbourBlocks, surveyCard, type SurveyCardData } from '../lib/terrain/assay'
+import type { GroundRevision } from '../lib/terrain/groundRevision'
 
 interface SurveyCardState {
   /** The chunk whose card is open (its key), or null. */
@@ -49,15 +50,34 @@ export function resetSurveyCards(): void {
   useSurveyCard.setState({ open: null, auto: false })
 }
 
-/** The card for a loaded chunk, and when it was surveyed (ms, or null when not known); null when the chunk has no blocks. */
-export function cardFor(key: string): { card: SurveyCardData; at: number | null } | null {
+/** A survey card, with when the chunk was surveyed (ms, or null when not known) and the ground revision it counts. */
+export interface CardFor { card: SurveyCardData; at: number | null; revision: GroundRevision }
+
+/**
+ * The card for a loaded chunk, at the ground revision you see it at
+ * (store/useTerrain.ts groundRevisionFor), its ground and that ground's type
+ * and K read through groundFor, so the card never counts a revision the chunk
+ * is not. What it counts is what stands: the chunk's blocks with every layer
+ * merged over them (kept per version: lib/terrain/assay.ts chunkAssay) when
+ * they are drawn over that same revision, as they are once built; in the
+ * moment before a chunk is built again at another revision, that revision's
+ * ground itself. Null when the chunk is not loaded or has no blocks.
+ */
+export async function cardFor(key: string): Promise<CardFor | null> {
   const s = terrainSession
   const slot = s?.world.slotByKey(key)
-  if (!s || !slot) return null
-  const assay = chunkAssay(s.world, slot)
+  if (!s || !slot?.blocks) return null
+  const revision = groundRevisionFor(key, s)
+  const ground = await groundFor(key)
+  if (terrainSession !== s || !slot.blocks) return null
+  const assay = (slot.revision ?? 2) === revision && ground.revision === revision
+    ? chunkAssay(s.world, slot)
+    : assayBlocks(ground.blocks, neighbourBlocks(s.world, slot))
   if (!assay) return null
-  const card = surveyCard(assay, slot.ground, { ownsCompiler: !!useTerrain.getState().inventory.compiler })
-  return { card, at: s.surveyedAt?.get(key) ?? firstLayerAt(key) }
+  const card = surveyCard(assay, ground.facts, { ownsCompiler: !!useTerrain.getState().inventory.compiler })
+  // When: your own survey's time where you surveyed it; else the oldest layer drawn there.
+  const mine = s.surveyedKeys.has(key) ? s.revisions.get(key)?.surveyed : undefined
+  return { card, at: mine ? mine * 1000 : firstLayerAt(key), revision: ground.revision }
 }
 
 const MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']

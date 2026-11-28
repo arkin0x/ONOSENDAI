@@ -1558,7 +1558,15 @@ const NO_ANSWER = 'no answer in time'
  * self-check, its holders, the canonical relay's copy). Also so for
  * `written` reads and where the checks are deferred.
  */
-export interface ReadOptions { evenHung?: boolean; offThread?: boolean; stream?: { quietMs: number; capMs: number }; graceMs?: number; written?: boolean; perRelay?: boolean }
+/**
+ * `only`: ask just these relays (normalized), not the whole read set: the
+ * pages of a long chain, after the first answer, from the relays that hold
+ * it (chains.ts chainPages), never a dead one or a mirror.
+ * `onAnswers`: handed each relay's answer, its signatures already checked,
+ * before they are merged: whoever keeps what a read brought by relay
+ * (lib/ownBacklog.ts) hears it there.
+ */
+export interface ReadOptions { evenHung?: boolean; offThread?: boolean; stream?: { quietMs: number; capMs: number }; graceMs?: number; written?: boolean; perRelay?: boolean; only?: string[]; onAnswers?: (answers: RelayAnswer[]) => void }
 
 /** `filter` may be several: one REQ, one EOSE, the union of their matches (NIP-01). */
 async function askOne(url: string, filter: Filter | Filter[], deadline: number, opts: AskOptions = {}): Promise<RelayAnswer> {
@@ -1772,10 +1780,24 @@ async function collect(relays: string[], filter: Filter, maxWait = MAX_WAIT_MS, 
  * `evenHung` asks a hung relay too, either way.
  */
 export async function query(filter: Filter, opts: ReadOptions = {}): Promise<NostrEvent[]> {
-  if (!opts.offThread) return collect(readRelaySet(), filter, MAX_WAIT_MS, opts)
-  // Each relay's answer is checked the moment it is in, not after the slowest one.
-  const checks = answerChecks<RelayAnswer>()
-  return mergeAnswers(await checks.kept(await queryRelays(readRelaySet(), filter, MAX_WAIT_MS, { evenHung: opts.evenHung, perRelay: opts.perRelay, written: opts.written, deferChecks: true, onAnswer: checks.onAnswer })))
+  return mergeAnswers(await askChecked(opts.only ?? readRelaySet(), filter, MAX_WAIT_MS, opts))
+}
+
+/**
+ * Each relay's answer, its signatures checked: in a worker with `offThread`
+ * (each the moment it is in, not after the slowest one), on receipt
+ * otherwise. Handed to `onAnswers` before anyone merges them.
+ */
+async function askChecked(relays: string[], filter: Filter, maxWait: number, opts: ReadOptions): Promise<RelayAnswer[]> {
+  let answers: RelayAnswer[]
+  if (!opts.offThread) {
+    answers = await queryRelays(relays, filter, maxWait, opts)
+  } else {
+    const checks = answerChecks<RelayAnswer>()
+    answers = await checks.kept(await queryRelays(relays, filter, maxWait, { evenHung: opts.evenHung, perRelay: opts.perRelay, written: opts.written, stream: opts.stream, deferChecks: true, onAnswer: checks.onAnswer }))
+  }
+  opts.onAnswers?.(answers)
+  return answers
 }
 
 /**
@@ -1784,7 +1806,7 @@ export async function query(filter: Filter, opts: ReadOptions = {}): Promise<Nos
  * answer" lead to different actions.
  */
 export function queryEach(filter: Filter, maxWait = MAX_WAIT_MS, opts: ReadOptions = {}): Promise<RelayAnswer[]> {
-  return queryRelays(opts.written ? relaySet() : readRelaySet(), filter, maxWait, opts)
+  return askChecked(opts.only ?? (opts.written ? relaySet() : readRelaySet()), filter, maxWait, opts)
 }
 
 /**

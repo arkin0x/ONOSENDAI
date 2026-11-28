@@ -93,6 +93,11 @@ export function assayBlocks(blocks: Uint8Array, around: ReadonlyArray<Uint8Array
   return { counts, seen, strata }
 }
 
+/** The six neighbours' blocks of a loaded chunk, in NEIGHBOURS order: null where none is held. */
+export function neighbourBlocks(world: TerrainWorld, slot: ChunkSlot): Array<Uint8Array | null> {
+  return NEIGHBOURS.map(([dx, dy, dz]) => world.slotAt(slot.off[0] + dx, slot.off[1] + dy, slot.off[2] + dz)?.blocks ?? null)
+}
+
 /** Kept passes, by chunk key: its stamp (its version and its neighbours') and the pass. */
 const kept = new Map<string, { world: TerrainWorld; stamp: string; assay: Assay }>()
 /** How many chunks' passes are kept at once. */
@@ -112,7 +117,7 @@ export function chunkAssay(world: TerrainWorld, slot: ChunkSlot): Assay | null {
   const blocks = slot.blocks
   if (!blocks) return null
   const around = NEIGHBOURS.map(([dx, dy, dz]) => world.slotAt(slot.off[0] + dx, slot.off[1] + dy, slot.off[2] + dz))
-  const stamp = `${slot.version}|${around.map((n) => (n?.blocks ? n.version : '-')).join(',')}`
+  const stamp = `${slot.revision ?? 2}|${slot.version}|${around.map((n) => (n?.blocks ? n.version : '-')).join(',')}`
   const k = kept.get(slot.key)
   if (k && k.world === world && k.stamp === stamp) return k.assay
   const assay = assayBlocks(blocks, around.map((n) => n?.blocks ?? null))

@@ -48,7 +48,7 @@ describe('the counts', () => {
     const built = ground.slice()
     built[idx(4, 4, 4)] = 0 // mined
     built[idx(5, 5, 5)] = GLOWCORE // placed (a Glowcore someone carried in)
-    const merged = applyLayer(ground, encodeLayer(ground, built))!
+    const merged = applyLayer(ground, encodeLayer(ground, built, 0, 2), 2)!
     const a = assayBlocks(merged)
     expect(a.counts[0]).toBe(1)
     expect(a.counts[GLOWCORE]).toBe(1)

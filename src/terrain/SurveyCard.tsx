@@ -16,7 +16,7 @@
  * It closes by the shared ✕, a tap outside it or Esc (hud/modalStack.tsx).
  */
 
-import { useEffect, useMemo, type CSSProperties } from 'react'
+import { useEffect, useState, type CSSProperties } from 'react'
 import { Eye, EyeOff, Layers, Pickaxe, ScrollText } from 'lucide-react'
 import { ModalClose } from '../hud/ui/ModalClose'
 import { Chamfer } from '../hud/ui/Chamfer'
@@ -24,7 +24,7 @@ import { Stacked, useModalStack } from '../hud/modalStack'
 import { useTerrain } from '../store/useTerrain'
 import { blockKind } from '../lib/terrain/blocks'
 import { HARDNESS_MAX, type CardRow } from '../lib/terrain/assay'
-import { cardFor, closeSurveyCard, stampDate, useSurveyCard } from './surveyCard'
+import { cardFor, closeSurveyCard, stampDate, useSurveyCard, type CardFor } from './surveyCard'
 import { Swatch } from './Swatch'
 
 const count = (n: number): string => n.toLocaleString('en-US')
@@ -70,10 +70,17 @@ export function SurveyCard(): JSX.Element | null {
   useModalStack(key !== null, closeSurveyCard)
   // Leaving TERRAIN takes the card with it.
   useEffect(() => () => closeSurveyCard(), [])
-  // One pass over the chunk as it opens (kept per chunk and version: lib/terrain/assay.ts chunkAssay), never per frame.
-  const got = useMemo(() => (key ? cardFor(key) : null), [key, owns])
-  if (!key || !got) return null
-  const { card, at } = got
+  // One pass over the chunk as it opens, at the revision you see it at (kept per chunk and version: lib/terrain/assay.ts
+  // chunkAssay), never per frame. The ground is read through groundFor, which may wait on the blocks worker.
+  const [got, setGot] = useState<{ key: string; card: CardFor } | null>(null)
+  useEffect(() => {
+    if (!key) { setGot(null); return }
+    let live = true
+    void cardFor(key).then((card) => { if (live) setGot(card ? { key, card } : null) }, () => { if (live) setGot(null) })
+    return () => { live = false }
+  }, [key, owns])
+  if (!key || !got || got.key !== key) return null
+  const { card, at, revision } = got.card
   const date = stampDate(at)
   const h = card.hardness
   return (
@@ -124,7 +131,7 @@ export function SurveyCard(): JSX.Element | null {
             {card.common.length > 0
               ? <ul className="survey-card__list">{card.common.map((r) => <Row key={r.id} row={r} />)}</ul>
               : <p className="survey-card__empty">No rock: open space.</p>}
-            <p className="survey-card__foot"><span>What is here, not where.</span><span>{count(card.total)} blocks</span></p>
+            <p className="survey-card__foot"><span>What is here, not where.</span><span>Ground revision {revision} · {count(card.total)} blocks</span></p>
           </div>
         </div>
       </div>

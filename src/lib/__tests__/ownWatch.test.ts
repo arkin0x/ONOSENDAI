@@ -7,7 +7,7 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { outsideChain, forgetOwnWatchMoves, DROP_AFTER_MS, EOSE_WAIT_MS, FRESHEN_WAIT_MS, LIVE_MS, STALL_MS, freshenOwnWatch, ownWatchDeps, unexplainedMoves, ownWatchState, startOwnWatch, stopOwnWatch } from '../ownWatch'
+import { outsideChain, forgetOwnWatchMoves, DROP_AFTER_MS, EOSE_WAIT_MS, FRESHEN_WAIT_MS, LIVE_MS, STALL_MS, freshenOwnWatch, ownWatchDeps, unexplainedMoves, ownWatchState, startOwnWatch, stopOwnWatch, SINCE_LIMIT } from '../ownWatch'
 import type { NostrEvent } from '../events'
 
 type H = Parameters<typeof ownWatchDeps.subscribeOne>[2]
@@ -88,12 +88,12 @@ describe('the standing watch', () => {
     install()
     let since: number | undefined = 1000
     startOwnWatch(PK, () => {}, () => {}, () => since)
-    expect(own(A).filters).toEqual([{ kinds: [3333], authors: [PK], limit: 1 }, { kinds: [3333], authors: [PK], since: 1000 }])
+    expect(own(A).filters).toEqual([{ kinds: [3333], authors: [PK], limit: 1 }, { kinds: [3333], authors: [PK], since: 1000, limit: SINCE_LIMIT }])
     own(A).h.oneose()
     since = 1234
     own(A).h.onclose('socket gone')
     vi.advanceTimersByTime(1_100)
-    expect(own(A).filters[1]).toEqual({ kinds: [3333], authors: [PK], since: 1234 })
+    expect(own(A).filters[1]).toEqual({ kinds: [3333], authors: [PK], since: 1234, limit: SINCE_LIMIT })
     since = undefined
     stopOwnWatch()
     startOwnWatch(PK, () => {}, () => {}, () => since)

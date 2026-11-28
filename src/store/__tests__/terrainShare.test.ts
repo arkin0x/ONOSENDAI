@@ -55,12 +55,18 @@ import { useWalk } from '../useWalk'
 import { setTerrainSession, surveyTarget, terrainSession, useTerrain } from '../useTerrain'
 import {
   AIM_COLORS, BATCH_NEAR, LAYER_CONTENT, RATE_BACKOFF_MS, addCrew, aimAt, chunkRegionKey, confirmTags, flush, liveChanged, readChunks,
-  removeCrew, resetShare, retireDeviceKey, sceneDraws, setShareDeps, useShare,
+  removeCrew, resetShare, retireDeviceKey, sceneDraws, setShareDeps, shownRevision, useShare,
 } from '../terrainShare'
+import { groundFor, groundRevisionFor } from '../useTerrain'
+import { setGroundWriteRevisionForTests } from '../../lib/terrain/groundRevision'
+import { SURVEYED, foldChunk, openTerrainDb, readOwner } from '../../lib/terrain/terrainDb'
+import { encodeLayer } from '../../lib/terrain/layer'
+import { putMany } from '../../lib/idb'
+import BLOCKS from '../../lib/__tests__/fixtures/deck0009-blocks-vectors.json'
 import { builderRecord, forgetBuilderRecords, namedKey } from '../../lib/terrain/builderKey'
 import { fixTags, onActionSigned } from '../../lib/terrain/builderTags'
 import { chunkKey, chunkOf, type ChunkBase } from '../../lib/terrain/coords'
-import { generate } from '../../lib/terrain/generate'
+import { generate, type GroundRevision } from '../../lib/terrain/generate'
 import { EMPTY } from '../../lib/terrain/blocks'
 import { readLayer, type KeyStatus } from '../../lib/terrain/layerReader'
 import { keyStatusOn } from '../../lib/terrain/builderStatus'
@@ -138,7 +144,7 @@ beforeEach(async () => {
     publish: async (ev) => { sentAt.set(ev.id, Date.now()); published.push(ev); hold(ev); return { ok: true } },
     query: async (f) => held.filter((e) => matches(f, e)),
     keyStatus: async (author, keys) => new Map<string, KeyStatus>(keys.map((k) => [k, builderKeyValid(k, held.filter((e) => e.pubkey === author && e.kind === 3333)) ? 'valid' : 'void'])),
-    ground: async (b) => generate(b).blocks,
+    ground: async (b, r) => generate(b, null, r).blocks,
     muted: () => muted,
     follows: async () => follows,
     othersNear: () => near,
@@ -469,11 +475,11 @@ describe('reading by the Stack', () => {
     return { pubkey, builder, sk }
   }
 
-  async function layerBy(who: { pubkey: string; builder: Uint8Array }, base: ChunkBase, cells: Record<number, number>, createdAt: number, crew: string[] = []): Promise<void> {
-    const g = generate(base).blocks
+  async function layerBy(who: { pubkey: string; builder: Uint8Array }, base: ChunkBase, cells: Record<number, number>, createdAt: number, crew: string[] = [], revision: GroundRevision = 2, surveyed = createdAt): Promise<void> {
+    const g = generate(base, null, revision).blocks
     const values = g.slice()
     for (const [c, v] of Object.entries(cells)) values[Number(c)] = v
-    const plain = nextPlaintext(null, base.plane as 0 | 1, values, g, crew)!
+    const plain = nextPlaintext(null, base.plane as 0 | 1, values, g, { revision, surveyed }, crew)!
     const { key, lookupId } = chunkRegionKey(base)
     hold(finalizeEvent({ kind: LAYER_KIND, created_at: createdAt, tags: layerTags({ lookupId, author: who.pubkey, encrypted: await encryptForRegion(key, plaintextJson(plain)) }), content: '' }, who.builder) as unknown as NostrEvent)
   }
@@ -682,7 +688,7 @@ describe('reading by the Stack', () => {
     // The owner places a block without surveying; a stranger surveys the chunk.
     const values = g.slice()
     values[air] = 8
-    const plain = { planes: [encodePlane(p.plane, false, values, g, new Set())], cobuilders: [] }
+    const plain = { planes: [encodePlane(p.plane, false, values, g, { revision: 2, surveyed: 0 }, new Set())], cobuilders: [] }
     const { key, lookupId } = chunkRegionKey(base)
     hold(finalizeEvent({ kind: LAYER_KIND, created_at: 1_790_000_100, tags: layerTags({ lookupId, author: owner.pubkey, encrypted: await encryptForRegion(key, plaintextJson(plain)) }), content: '' }, owner.builder) as unknown as NostrEvent)
     await layerBy(stranger(), base, {}, 1_790_000_200)
@@ -914,3 +920,251 @@ async function terrainOpenedAgain(): Promise<void> {
   await terrainOpened()
   await settle(50)
 }
+
+describe('the ground\'s revision (DECK-0009 revision 3: a chunk keeps the revision it was first surveyed at)', () => {
+  /** The DECK's vector chunks where revisions 2 and 3 differ: a karst chunk of K 9 (a cinder vent and Glowcore) and a frozen one (a vent of five). */
+  const vec = (name: string) => BLOCKS.revision_3.chunks.find((c) => c.name === name)!
+  const K9: ChunkBase = { x: BigInt(vec('vent-glowcore-k9').X), y: BigInt(vec('vent-glowcore-k9').Y), z: BigInt(vec('vent-glowcore-k9').Z), plane: 0 }
+  const V5: ChunkBase = { x: BigInt(vec('vent-5').X), y: BigInt(vec('vent-5').Y), z: BigInt(vec('vent-5').Z), plane: 0 }
+  const g = (b: ChunkBase, r: GroundRevision): Uint8Array => generate(b, null, r).blocks
+
+  /** A place in a chunk open under both revisions, to stand in. */
+  function openPlace(b: ChunkBase): { x: bigint; y: bigint; z: bigint; plane: 0 } {
+    const a = g(b, 2), c = g(b, 3)
+    for (let o = 32767; o >= 0; o--) if (a[o] === EMPTY && c[o] === EMPTY) return { x: b.x + BigInt(o & 31), y: b.y + BigInt(o >> 10), z: b.z + BigInt((o >> 5) & 31), plane: 0 }
+    throw new Error('no open cell')
+  }
+
+  function stranger(): { pubkey: string; builder: Uint8Array } {
+    const sk = generateSecretKey()
+    const pubkey = getPublicKey(sk)
+    const builder = generateSecretKey()
+    const st = spawnTemplate(pubkey, 1_790_000_000)
+    hold(finalizeEvent({ ...st, tags: [...st.tags, ['builder', getPublicKey(builder)]] }, sk) as unknown as NostrEvent)
+    return { pubkey, builder }
+  }
+
+  async function layerAt(who: { pubkey: string; builder: Uint8Array }, base: ChunkBase, revision: GroundRevision, createdAt: number, cells: Record<number, number> = {}, surveyed = createdAt): Promise<void> {
+    const ground = g(base, revision)
+    const values = ground.slice()
+    for (const [c, v] of Object.entries(cells)) values[Number(c)] = v
+    const plain = nextPlaintext(null, 0, values, ground, { revision, surveyed })!
+    const { key, lookupId } = chunkRegionKey(base)
+    hold(finalizeEvent({ kind: LAYER_KIND, created_at: createdAt, tags: layerTags({ lookupId, author: who.pubkey, encrypted: await encryptForRegion(key, plaintextJson(plain)) }), content: '' }, who.builder) as unknown as NostrEvent)
+  }
+
+  /** Gone as a reload leaves it (nothing in memory), then TERRAIN opened again where you stand. */
+  async function reloadAt(p: { x: bigint; y: bigint; z: bigint; plane: number }): Promise<void> {
+    if (T().active) await T().exit()
+    await settle(100)
+    setTerrainSession(null)
+    useTerrain.setState({ active: false, loading: false })
+    resetShare()
+    sceneDraws(true)
+    standAt(p)
+    await T().enter()
+    await settle(200)
+  }
+
+  const myLayers = (): NostrEvent[] => published.filter((e) => e.kind === LAYER_KIND && e.tags.some((t) => t[0] === 'p' && t[1] === me()))
+  const ownOf = (key: string): Uint8Array => terrainSession!.world.slotByKey(key)!.own!
+  const rowOf = async (key: string) => { const db = await openTerrainDb(); try { return (await readOwner(db, me())).revisions.get(key) } finally { db.close() } }
+
+  // An identity of its own, LIVE, whose signer is its own: the describes before switch npubs and go LOCAL.
+  beforeEach(async () => {
+    await useCyberspace.getState().useNsec(nip19.nsecEncode(generateSecretKey()))
+    if (!useCyberspace.getState().live) useCyberspace.getState().setLive(true)
+    await settle(50)
+  })
+  afterEach(() => setGroundWriteRevisionForTests(null))
+
+  it('in this release a fresh survey is revision 2, and every surveyed plane names `surveyed`, its first version\'s created_at, carried forward', async () => {
+    await named(true, openPlace(K9))
+    const key = await surveyHere()
+    const slot = terrainSession!.world.slotByKey(key)!
+    expect(slot.revision).toBe(2)
+    expect(slot.generated).toEqual(g(K9, 2))
+    expect(groundRevisionFor(key)).toBe(2)
+    expect((await groundFor(key)).blocks).toEqual(g(K9, 2))
+    expect(mineSome(2)).toBe(2)
+    await flush('test')
+    expect(myLayers()).toHaveLength(1)
+    const first = (await opened(myLayers()[0], K9)).planes[0]
+    expect(first).toMatchObject({ survey: true, ground: 2, surveyed: myLayers()[0].created_at })
+    expect(mineSome(1)).toBe(1)
+    await flush('test')
+    expect(myLayers()).toHaveLength(2)
+    const second = (await opened(myLayers()[1], K9)).planes[0]
+    expect(myLayers()[1].created_at).toBeGreaterThan(myLayers()[0].created_at)
+    expect(second.surveyed).toBe(first.surveyed)
+    expect(second.ground).toBe(2)
+    expect(await rowOf(key)).toMatchObject({ revision: 2 })
+  })
+
+  it('once the write revision is 3, a fresh survey reveals revision 3, names it, and reads back against it', async () => {
+    setGroundWriteRevisionForTests(3)
+    await named(true, openPlace(K9))
+    const key = await surveyHere()
+    const slot = terrainSession!.world.slotByKey(key)!
+    expect(slot.revision).toBe(3)
+    expect(slot.blocks).toEqual(g(K9, 3))
+    expect(groundRevisionFor(key)).toBe(3)
+    expect(await groundFor(key)).toMatchObject({ revision: 3, blocks: g(K9, 3) })
+    expect(mineSome(2)).toBe(2)
+    await flush('test')
+    const ev = myLayers().at(-1)!
+    const pl = (await opened(ev, K9)).planes[0]
+    expect(pl.ground).toBe(3)
+    const { key: rk, lookupId } = chunkRegionKey(K9)
+    const r = await readLayer(ev, { verify: (e) => verifyEvent(e as never), key: rk, lookupId, ground: async (_p, rev) => g(K9, rev), keyStatus: async () => 'valid' })
+    if (r.status !== 'counted') throw new Error(r.status)
+    // Only your two changes, read against revision 3's ground.
+    expect(r.layer.planes[0].changed).toHaveLength(2)
+    expect(await rowOf(key)).toMatchObject({ revision: 3 })
+  })
+
+  it('a reload keeps your revision 2 and revision 3 chunks as they were, whichever revision this release writes', async () => {
+    // Revision 2, in this release.
+    await named(true, openPlace(K9))
+    const k9 = await surveyHere()
+    mineSome(3)
+    const own9 = ownOf(k9).slice()
+    // Revision 3, once the write revision is flipped.
+    setGroundWriteRevisionForTests(3)
+    await reloadAt(openPlace(V5))
+    const v5 = await surveyHere()
+    mineSome(2)
+    const own5 = ownOf(v5).slice()
+    expect(terrainSession!.world.slotByKey(v5)!.revision).toBe(3)
+    // Back where revision 2 was surveyed: still revision 2, every change kept, though 3 is written now.
+    await reloadAt(openPlace(K9))
+    expect(terrainSession!.world.slotByKey(k9)!.revision).toBe(2)
+    expect(ownOf(k9)).toEqual(own9)
+    // And the revision 3 chunk after flipping back to 2: still revision 3.
+    setGroundWriteRevisionForTests(2)
+    await reloadAt(openPlace(V5))
+    expect(terrainSession!.world.slotByKey(v5)!.revision).toBe(3)
+    expect(ownOf(v5)).toEqual(own5)
+  })
+
+  it('a chunk surveyed before revision 3 (its row names no revision) is revision 2, its layer read against it', async () => {
+    setGroundWriteRevisionForTests(3)
+    const p = openPlace(K9)
+    standAt(p)
+    await T().enter()
+    await settle(100)
+    const key = chunkKey(K9)
+    const ground = g(K9, 2)
+    const mine = ground.slice()
+    let rock = -1
+    for (let o = 0; o < 32768 && rock < 0; o++) if (ground[o] !== EMPTY) rock = o
+    mine[rock] = EMPTY
+    // As a release before revision 3 kept them: a row with no revision and a layer of `ground: 2`.
+    const db = await openTerrainDb()
+    await putMany(db, SURVEYED, [{ rowKey: `${me()}|${key}`, owner: me(), chunk: key, t: Date.now() - 60_000 }])
+    await foldChunk(db, me(), key, encodeLayer(ground, mine, 0, 2), [], Date.now())
+    db.close()
+    await reloadAt(p)
+    const slot = terrainSession!.world.slotByKey(key)!
+    expect(slot.revision).toBe(2)
+    expect(slot.own).toEqual(mine)
+    expect(slot.blocks).toEqual(mine)
+  })
+
+  for (const [theirs, write] of [[3, 2], [2, 3]] as const) {
+    it(`someone else surveyed it at revision ${theirs}: you are shown revision ${theirs}, and your first change there writes ${theirs} (this release writes ${write})`, async () => {
+      setGroundWriteRevisionForTests(write)
+      await layerAt(stranger(), K9, theirs, 1_790_000_100)
+      await named(true, openPlace(K9))
+      await readChunks([K9])
+      await settle(300)
+      const key = chunkKey(K9)
+      const slot = terrainSession!.world.slotByKey(key)!
+      expect(slot.revision).toBe(theirs)
+      expect(slot.blocks).toEqual(g(K9, theirs))
+      expect(shownRevision(key)).toBe(theirs)
+      expect(groundRevisionFor(key)).toBe(theirs)
+      expect(mineSome(1)).toBe(1)
+      await flush('test')
+      expect((await opened(myLayers().at(-1)!, K9)).planes[0].ground).toBe(theirs)
+      expect(await rowOf(key)).toMatchObject({ revision: theirs })
+    })
+  }
+
+  it('the base revision goes by rank before date: whom you follow at revision 2 decides over an earlier stranger at revision 3', async () => {
+    const friend = stranger(), early = stranger()
+    await layerAt(early, K9, 3, 1_790_000_100)
+    await layerAt(friend, K9, 2, 1_790_000_500)
+    follows = [friend.pubkey]
+    await named(true, openPlace(K9))
+    await terrainOpenedAgain()
+    await readChunks([K9])
+    await settle(300)
+    const key = chunkKey(K9)
+    expect(shownRevision(key)).toBe(2)
+    expect(terrainSession!.world.slotByKey(key)!.blocks).toEqual(g(K9, 2))
+    // Without the follow, both are strangers: the earlier survey decides.
+    follows = []
+    await terrainOpenedAgain()
+    await readChunks([K9])
+    await settle(300)
+    expect(shownRevision(key)).toBe(3)
+    expect(terrainSession!.world.slotByKey(key)!.blocks).toEqual(g(K9, 3))
+  })
+
+  it('a first layer here under a new key, where your other device surveyed earlier at revision 2: it names revision 2, and your blocks move to it (§5.6)', async () => {
+    setGroundWriteRevisionForTests(3)
+    await named(true, openPlace(K9))
+    const key = await surveyHere()
+    expect(terrainSession!.world.slotByKey(key)!.revision).toBe(3)
+    expect(mineSome(1)).toBe(1)
+    const minedHere = [...ownOf(key)].findIndex((v, o) => v !== g(K9, 3)[o])
+    // Your other device: a builder key you named, and its layer here, surveyed earlier at revision 2, with one rock mined.
+    const other = generateSecretKey()
+    hold(await sign({ kind: 3333, created_at: Math.floor(Date.now() / 1000), tags: [['A', 'hop'], ['builder', getPublicKey(other)]], content: '' }))
+    const g2 = g(K9, 2)
+    let theirRock = -1
+    for (let o = 32767; o >= 0 && theirRock < 0; o--) if (g2[o] !== EMPTY && o !== minedHere) theirRock = o
+    await layerAt({ pubkey: me(), builder: other }, K9, 2, 1_790_000_100, { [theirRock]: EMPTY })
+    await flush('test')
+    await settle(300)
+    const mine = myLayers().filter((e) => e.pubkey !== getPublicKey(other)).at(-1)!
+    const pl = (await opened(mine, K9)).planes[0]
+    expect(pl).toMatchObject({ ground: 2, surveyed: 1_790_000_100 })
+    const slot = terrainSession!.world.slotByKey(key)!
+    expect(slot.revision).toBe(2)
+    expect(slot.generated).toEqual(g2)
+    // Both changes kept, everything else revision 2's ground.
+    const want = g2.slice()
+    want[minedHere] = EMPTY
+    want[theirRock] = EMPTY
+    expect(slot.own).toEqual(want)
+    expect(await rowOf(key)).toMatchObject({ revision: 2, surveyed: 1_790_000_100 })
+    // And it reads back as exactly those two changes, against revision 2.
+    const { key: rk, lookupId } = chunkRegionKey(K9)
+    const r = await readLayer(mine, { verify: (e) => verifyEvent(e as never), key: rk, lookupId, ground: async (_p, rev) => g(K9, rev), keyStatus: async () => 'valid' })
+    if (r.status !== 'counted') throw new Error(r.status)
+    expect(r.layer.planes[0].changed).toEqual([minedHere, theirRock].sort((x, y) => x - y))
+  })
+
+  it('the mixed chunk: your revision 2 survey stays the base; a stranger\'s revision 3 layer mines one cell, read against its own ground', async () => {
+    const X = BLOCKS.base_revision.mixed
+    await named(true, openPlace(K9))
+    const key = await surveyHere()
+    await layerAt(stranger(), K9, 3, 1_790_000_100, { [32 * 32 * X.first_differing_cell.y + 32 * X.first_differing_cell.z + X.first_differing_cell.x]: 0 })
+    await readChunks([K9])
+    await settle(300)
+    expect(shownRevision(key)).toBe(2)
+    const s = terrainSession!
+    const at = (x: number, y: number, z: number) => s.world.blockCs(Number(K9.x - s.world.origin.x) + x, Number(K9.y - s.world.origin.y) + y, Number(K9.z - s.world.origin.z) + z)
+    const f = X.first_differing_cell, n = X.shown_at_second_differing_cell
+    expect(at(f.x, f.y, f.z)).toBe(X.shown_at_first_differing_cell)
+    expect(at(n.x, n.y, n.z)).toBe(n.value)
+    // Every other cell is your revision 2 ground.
+    const blocks = s.world.slotByKey(key)!.blocks!
+    const g2 = g(K9, 2)
+    let other = 0
+    for (let o = 0; o < 32768; o++) if (blocks[o] !== g2[o]) other++
+    expect(other).toBe(1)
+  })
+})

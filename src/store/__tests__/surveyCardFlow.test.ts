@@ -28,7 +28,8 @@ vi.mock('../../lib/relay', () => ({
 
 import { useCyberspace } from '../useCyberspace'
 import { useWalk } from '../useWalk'
-import { cardChunkHere, setTerrainSession, terrainSession, useTerrain } from '../useTerrain'
+import { cardChunkHere, groundRevisionFor, setTerrainSession, terrainSession, useTerrain } from '../useTerrain'
+import { setGroundWriteRevisionForTests } from '../../lib/terrain/groundRevision'
 import { chunkKey, chunkOf } from '../../lib/terrain/coords'
 import { generate } from '../../lib/terrain/generate'
 import { EMPTY } from '../../lib/terrain/blocks'
@@ -73,16 +74,17 @@ describe('the survey card in the store', () => {
     const key = headKey()
     const s = terrainSession!
     expect(cardChunkHere()).toBeNull()
-    const t0 = Date.now()
+    const t0 = Math.floor(Date.now() / 1000)
     await T().survey(key)
     const slot = s.world.slotByKey(key)!
-    const g = generate(slot.base)
+    const g = generate(slot.base, null, slot.revision)
     expect(slot.ground).toEqual({ family: g.family, maxK: g.maxK, meanK: g.meanK, top: g.top })
-    expect(s.surveyedAt?.get(key)).toBeGreaterThanOrEqual(t0)
+    expect(s.revisions.get(key)!.surveyed).toBeGreaterThanOrEqual(t0)
     // CARD: you stand in it, and it is surveyed.
     expect(cardChunkHere()).toBe(key)
-    const got = cardFor(key)!
-    expect(got.at).toBe(s.surveyedAt!.get(key))
+    const got = (await cardFor(key))!
+    expect(got.at).toBe(s.revisions.get(key)!.surveyed * 1000)
+    expect(got.revision).toBe(groundRevisionFor(key))
     expect(got.card.ground?.family).toBe(g.family)
     const direct = scan(slot.blocks!)
     for (const r of [...got.card.finds, ...got.card.common]) expect(r.count).toBe(direct.get(r.id))
@@ -100,30 +102,55 @@ describe('the survey card in the store', () => {
     for (let o = 1024; o < 11 * 1024 && !cell; o++) if (slot.blocks![o] !== EMPTY && slot.blocks![o - 1024] !== EMPTY) cell = [o & 31, o >> 10, (o >> 5) & 31]
     expect(cell).not.toBeNull()
     const id = s.world.blockCs(...cell!)
-    const before = cardFor(key)!.card
+    const before = (await cardFor(key))!.card
     const count = (c: typeof before, k: number): number => [...c.finds, ...c.common].find((r) => r.id === k)?.count ?? 0
     expect(T().mine(hitAt(...cell!))).toBe(true)
-    const mined = cardFor(key)!.card
+    const mined = (await cardFor(key))!.card
     expect(count(mined, id)).toBe(count(before, id) - 1)
     expect(mined.total).toBe(before.total - 1)
     // Placed back where it was, on the top face of the block below: the count is whole again.
     T().assignSlot(id)
     expect(T().place({ cell: [cell![0], cell![1] - 1, cell![2]], normal: [0, 1, 0], distance: 1 })).toBe(true)
-    expect(count(cardFor(key)!.card, id)).toBe(count(before, id))
-    expect(cardFor(key)!.card.total).toBe(before.total)
+    const back = (await cardFor(key))!.card
+    expect(count(back, id)).toBe(count(before, id))
+    expect(back.total).toBe(before.total)
   })
 
   it('the survey time is kept across a reload, for the card\'s date', async () => {
     await T().enter()
     const key = headKey()
     await T().survey(key)
-    const at = terrainSession!.surveyedAt!.get(key)!
+    const at = terrainSession!.revisions.get(key)!.surveyed
     await T().exit()
     await settle()
     reload()
     await T().enter()
     await terrainSession!.ready
-    expect(terrainSession!.surveyedAt?.get(key)).toBe(at)
+    expect(terrainSession!.revisions.get(key)?.surveyed).toBe(at)
+    if (!terrainSession!.world.slotByKey(key)?.blocks) await settle(200)
+    expect((await cardFor(key))?.at).toBe(at * 1000)
+  })
+
+  it('a chunk at ground revision 3 is counted at revision 3: its type, K and blocks are that revision\'s', async () => {
+    setGroundWriteRevisionForTests(3)
+    try {
+      await T().enter()
+      const key = headKey()
+      await T().survey(key)
+      const slot = terrainSession!.world.slotByKey(key)!
+      expect(slot.revision).toBe(3)
+      expect(groundRevisionFor(key)).toBe(3)
+      const g3 = generate(slot.base, null, 3)
+      const got = (await cardFor(key))!
+      expect(got.revision).toBe(3)
+      expect(got.card.ground?.family).toBe(g3.family)
+      expect(got.card.hardness).toEqual({ max: g3.maxK, mean: g3.meanK })
+      const direct = scan(slot.blocks!)
+      for (const r of [...got.card.finds, ...got.card.common]) expect(r.count).toBe(direct.get(r.id))
+      expect(got.card.total).toBe([...direct.values()].reduce((a, b) => a + b, 0))
+    } finally {
+      setGroundWriteRevisionForTests(null)
+    }
   })
 
   it('a survey that completes opens its card by itself, once', async () => {

@@ -82,8 +82,8 @@ function fieldWithGlowcore(at: number | null): string {
   b[idx(10, 10, 10)] = 42
   world.setBlocks(slot.key, b, b.slice())
   slot.ground = { family: 'volcanic', maxK: 11, meanK: 7.6, top: 7 }
-  const surveyedAt = new Map(at === null ? [] : [[slot.key, at]])
-  setTerrainSession({ world, surveyedAt, surveyedKeys: new Set([slot.key]), building: new Set() } as unknown as TerrainSession)
+  const revisions = new Map([[slot.key, { revision: 2, surveyed: at === null ? 0 : Math.floor(at / 1000) }]])
+  setTerrainSession({ world, revisions, surveyedKeys: new Set([slot.key]), building: new Set() } as unknown as TerrainSession)
   return slot.key
 }
 
@@ -187,6 +187,7 @@ describe('the card', () => {
       expect(m.says('Volcanic')).toBe(true)
       expect(m.says('ASSAY')).toBe(true)
       expect(m.says('27 NOV 2026')).toBe(true)
+      expect(m.says('Ground revision 2')).toBe(true)
       expect(stampDate(at)).toBe('27 NOV 2026')
       expect(m.says('Glowcore here: the Compiler needs one.')).toBe(true)
       const rows = m.all().filter((h) => String(h.props.className ?? '').split(' ').includes('survey-row'))

@@ -200,7 +200,7 @@ describe('SURVEY', () => {
     const kept = await readKept(db, A, [key])
     db.close()
     const gen = generate(chunkOf(HEAD.x, HEAD.y, HEAD.z, 0)).blocks
-    expect(applyLayer(gen, kept.layers[0].layer)).toEqual(before)
+    expect(applyLayer(gen, kept.layers[0].layer, 2)).toEqual(before)
   })
 
   it('follows you: walk on across chunks and the chunks round you are always there to survey', async () => {

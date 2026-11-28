@@ -28,6 +28,7 @@
  * Space to jump (or up), E or Enter for TAKE and OPEN, Shift, Q or C down.
  */
 
+import { GAME_CANVAS, markSceneCanvas } from '../scene/sceneCanvas'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { KeyRound } from 'lucide-react'
@@ -248,7 +249,7 @@ function GameCanvas({ session, at, look, items }: { session: GameSession; at: Po
   // bag is open, so it follows the item wherever the bag puts it, and before that where the game says the key lies (GameKeyBag).
   const ring = door ? (game.keyBag && !holdsDoorKey(session, items) && !progress.doorOpen ? { at: lying[0]?.at ?? game.keyBag.at, lift: 0 } : null) : game.key && !taken ? { at: game.key.at, lift: 1 } : null
   return (
-    <Canvas camera={{ fov: 70, near: 0.05, far: 400, position: [me[0], me[1], me[2] + CAMERA_DISTANCE] }} dpr={[1, 2]} gl={{ antialias: true }} style={{ background: BG }}>
+    <Canvas camera={{ fov: 70, near: 0.05, far: 400, position: [me[0], me[1], me[2] + CAMERA_DISTANCE] }} dpr={[1, 2]} gl={{ antialias: true }} style={{ background: BG }} onCreated={({ gl }) => markSceneCanvas(gl.domElement, GAME_CANVAS)}>
       <fog attach="fog" args={[BG, 6, 60]} />
       <ambientLight intensity={0.9} />
       <directionalLight position={[10, 18, 6]} intensity={1.1} />

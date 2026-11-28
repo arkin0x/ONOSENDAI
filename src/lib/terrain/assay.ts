@@ -18,9 +18,15 @@
  * - chunkAssay: the same, kept per chunk and per version of it and of its six
  *   neighbours, so opening the card again costs nothing and nothing counts per
  *   frame.
+ * - minedBlocks and chunkMined: what YOU took out of the chunk's ground
+ *   (owner, 2026-11-28: "how many of the blocks in the chunk you've mined and
+ *   how many are left"): each cell of the base ground your own blocks hold as
+ *   open space or another block, counted by the ground's kind. Kept per chunk
+ *   and version like the pass.
  * - surveyCard: the card itself: the ground type with its signature rock,
- *   every kind sorted rarest first, the hardness (terrain K, plainly named)
- *   and a gentle line for each recipe block that is here.
+ *   every kind sorted rarest first with how many are left and how many you
+ *   mined, the hardness (terrain K, plainly named) and a gentle line for each
+ *   recipe block that is here.
  *
  * Pure: nothing here reads a store or the clock.
  */
@@ -111,6 +117,7 @@ let kept = new WeakMap<ChunkSlot, { around: ReadonlyArray<ChunkSlot | null>; sta
 /** For tests: forget every kept pass. */
 export function forgetAssays(): void {
   kept = new WeakMap()
+  keptMined = new WeakMap()
 }
 
 /**
@@ -128,6 +135,56 @@ export function chunkAssay(world: TerrainWorld, slot: ChunkSlot): Assay | null {
   const assay = assayBlocks(blocks, around.map((n) => n?.blocks ?? null))
   kept.set(slot, { around, stamp, assay })
   return assay
+}
+
+/**
+ * What you took out of a chunk's ground, by kind: each cell where the base
+ * ground (`base`, at the revision the card shows) holds a block and your own
+ * blocks (`own`: the ground with your layer and log over it, world.ts
+ * ChunkSlot.own) hold open space or another block. Only your own blocks are
+ * read, so a block someone else mined is never yours. A block you placed and
+ * mined again leaves the cell as its ground was (open space), so it counts
+ * nothing; a Quarry Charge's blast writes your blocks as mining does, so its
+ * cells count.
+ *
+ * Where your blocks stand on another revision's ground than the one shown
+ * (`generated`, the ground `own` was built over; a home owner who surveyed at
+ * another revision), a cell counts only where you changed it (`own` differs
+ * from `generated`, or it is one of your explicit cells, DECK-0009 §5.4): what
+ * mining there carried was the base you were shown (store/useTerrain.ts
+ * yieldOf), so it is the base's kind that is counted.
+ */
+export function minedBlocks(own: Uint8Array, base: Uint8Array, generated: Uint8Array | null = null, explicit: ReadonlySet<number> | null = null): Uint32Array {
+  const mined = new Uint32Array(256)
+  const other = generated && generated !== base ? generated : null
+  for (let c = 0; c < CELLS; c++) {
+    const b = base[c], o = own[c]
+    if (b === 0 || o === b) continue
+    if (other && o === other[c] && !explicit?.has(c)) continue
+    mined[b]++
+  }
+  return mined
+}
+
+/** Kept counts of what you mined, by the chunk's own slot (as `kept`): its stamp, the blocks they were counted from, the counts. */
+let keptMined = new WeakMap<ChunkSlot, { stamp: string; own: Uint8Array; generated: Uint8Array | null; mined: Uint32Array }>()
+
+/**
+ * What you mined in a loaded chunk (minedBlocks), worked out once per version
+ * of it and per base revision shown, else the kept counts. Null where you hold
+ * no blocks of your own there (you never surveyed or built in it).
+ * `base` is the ground at `baseRevision` (store/useTerrain.ts groundFor).
+ */
+export function chunkMined(slot: ChunkSlot, base: Uint8Array, baseRevision: number, explicit: ReadonlySet<number> | null = null): Uint32Array | null {
+  const own = slot.own
+  if (!own) return null
+  const generated = (slot.revision ?? 2) === baseRevision ? null : slot.generated
+  const stamp = `${slot.revision ?? 2}|${baseRevision}|${slot.version}|${explicit ? explicit.size : '-'}`
+  const k = keptMined.get(slot)
+  if (k && k.stamp === stamp && k.own === own && k.generated === generated) return k.mined
+  const mined = minedBlocks(own, base, generated, generated ? explicit : null)
+  keptMined.set(slot, { stamp, own, generated, mined })
+  return mined
 }
 
 /**
@@ -200,7 +257,10 @@ export function hardnessLine(max: number): string {
 export interface CardRow {
   id: number
   name: string
+  /** How many are in the chunk now (LEFT): 0 for a kind you mined out, or one kept on the card while it is open. */
   count: number
+  /** How many you took out of the chunk's ground (MINED). */
+  mined: number
   /** At least one face is open to the air (or behind glass or water). */
   visible: boolean
   /** The rare band or Glowcore. */
@@ -220,8 +280,10 @@ export interface SurveyCardData {
   notes: string[]
   /** The kind each layer is mostly made of, bottom to top (0 for mostly open space). */
   strata: Uint8Array
-  /** Blocks in the chunk, every kind. */
+  /** Blocks in the chunk now, every kind: what is left. */
   total: number
+  /** Blocks you took out of the chunk's ground, every kind. */
+  minedTotal: number
 }
 
 const WORDS = ['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine']
@@ -250,15 +312,25 @@ export function recipeNotes(present: ReadonlyArray<number>, ownsCompiler: boolea
   return out
 }
 
-/** The survey card for a chunk's pass and its ground's facts. */
-export function surveyCard(assay: Assay, facts: GroundFacts | null | undefined, opts: { ownsCompiler?: boolean } = {}): SurveyCardData {
+/**
+ * The survey card for a chunk's pass and its ground's facts. `mined` is what
+ * you took out of it (chunkMined), by kind. A kind is listed while any of it
+ * is left or you mined some, and a kind in `keep` stays listed at 0 (the card
+ * keeps every row it has shown while it is open, so a kind mined out never
+ * jumps off the list).
+ */
+export function surveyCard(assay: Assay, facts: GroundFacts | null | undefined, opts: { ownsCompiler?: boolean; mined?: Uint32Array | null; keep?: Iterable<number> } = {}): SurveyCardData {
   const rows: CardRow[] = []
+  const keep = new Set(opts.keep ?? [])
   let total = 0
+  let minedTotal = 0
   for (let id = 1; id < 256; id++) {
     const n = assay.counts[id]
-    if (!n) continue
+    const m = opts.mined?.[id] ?? 0
     total += n
-    rows.push({ id, name: blockName(id), count: n, visible: assay.seen[id] === 1, prized: PRIZED.has(id) })
+    minedTotal += m
+    if (!n && !m && !keep.has(id)) continue
+    rows.push({ id, name: blockName(id), count: n, mined: m, visible: n > 0 && assay.seen[id] === 1, prized: PRIZED.has(id) })
   }
   rows.sort((a, b) => rankOf(a.id) - rankOf(b.id))
   const look = facts ? GROUND_LOOK[facts.family] : undefined
@@ -268,9 +340,10 @@ export function surveyCard(assay: Assay, facts: GroundFacts | null | undefined, 
     hardness: facts ? { max: facts.maxK, mean: facts.meanK } : null,
     finds: rows.filter((r) => !COMMON.has(r.id)),
     common: rows.filter((r) => COMMON.has(r.id)),
-    notes: recipeNotes(rows.map((r) => r.id), !!opts.ownsCompiler),
+    notes: recipeNotes(rows.filter((r) => r.count > 0).map((r) => r.id), !!opts.ownsCompiler),
     strata: assay.strata,
     total,
+    minedTotal,
   }
 }
 

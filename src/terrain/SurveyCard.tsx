@@ -9,10 +9,18 @@
  *
  * What it says (lib/terrain/assay.ts): the ground type with its signature
  * rock, the hardness (terrain K, out of 16), a gentle line for each recipe
- * block here, then every kind in the chunk, rarest first, with its count and
- * whether any of it shows ("visible") or it is all inside ("buried"). A list
- * only, never where: the finding stays yours. A tap or a slide across the core
- * reads out each layer's kind (Core, below).
+ * block here, then every kind in the chunk, rarest first, with how many you
+ * MINED here and how many are LEFT, and whether any of it shows ("visible")
+ * or it is all inside ("buried"). A list only, never where: the finding stays
+ * yours. A tap or a slide across the core reads out each layer's kind (Core,
+ * below).
+ *
+ * Live (owner, 2026-11-28: "can we make the card live update how many of the
+ * blocks in the chunk you've mined and how many are left total?"): while it is
+ * open it counts again whenever the chunk changes, at most four times a second
+ * (surveyCard.ts watchCard). The numbers sit in fixed columns in tabular
+ * figures, and a kind mined out stays on the list at 0 until the card closes,
+ * so nothing on it moves.
  *
  * It closes by the shared ✕, a tap outside it or Esc (hud/modalStack.tsx).
  */
@@ -25,23 +33,43 @@ import { Stacked, useModalStack } from '../hud/modalStack'
 import { useTerrain } from '../store/useTerrain'
 import { blockKind } from '../lib/terrain/blocks'
 import { AVERAGE_HARDNESS, HARDNESS_MAX, coreLayers, coreSliceAt, hardnessLine, type CardRow } from '../lib/terrain/assay'
-import { cardFor, closeSurveyCard, stampDate, useSurveyCard, type CardFor } from './surveyCard'
+import { cardFor, closeSurveyCard, stampDate, useSurveyCard, watchCard, type CardFor } from './surveyCard'
 import { Swatch } from './Swatch'
 
 const count = (n: number): string => n.toLocaleString('en-US')
 
+/** The line over the lists: "You've mined 214 blocks here · 31,902 left". */
+export function tallyLine(mined: number, left: number): string {
+  const m = mined > 0 ? `You've mined ${count(mined)} ${mined === 1 ? 'block' : 'blocks'} here` : 'You haven\'t mined here yet'
+  return `${m} · ${count(left)} left`
+}
+
 function Row({ row }: { row: CardRow }): JSX.Element {
+  const mark = row.count === 0 ? 'is-gone' : row.visible ? 'is-visible' : 'is-buried'
   return (
     <li className={`survey-row${row.prized ? ' is-prized' : ''}`}>
       <Chamfer size={34}><Swatch id={row.id} size={24} /></Chamfer>
       <span className="survey-row__name">{row.name}</span>
       <span className="survey-row__leader" aria-hidden />
-      <span className={`survey-row__mark${row.visible ? ' is-visible' : ' is-buried'}`}>
+      <span className={`survey-row__mark ${mark}`}>
         {row.visible ? <Eye size={11} strokeWidth={2.25} aria-hidden /> : <EyeOff size={11} strokeWidth={2.25} aria-hidden />}
-        {row.visible ? 'visible' : 'buried'}
+        {row.count === 0 ? 'gone' : row.visible ? 'visible' : 'buried'}
       </span>
-      <span className="survey-row__count">{count(row.count)}</span>
+      <span className={`survey-row__mined${row.mined > 0 ? '' : ' is-none'}`} aria-label={`${count(row.mined)} mined`}>{row.mined > 0 ? count(row.mined) : '-'}</span>
+      <span className="survey-row__count" aria-label={`${count(row.count)} left`}>{count(row.count)}</span>
     </li>
+  )
+}
+
+/** A list's heading, with the two columns' names over the numbers. */
+function Section({ name }: { name: string }): JSX.Element {
+  return (
+    <h3 className="survey-card__section">
+      <span>{name}</span>
+      <span className="survey-card__rule" aria-hidden />
+      <span className="survey-card__section-n">MINED</span>
+      <span className="survey-card__section-n">LEFT</span>
+    </h3>
   )
 }
 
@@ -153,13 +181,33 @@ export function SurveyCard(): JSX.Element | null {
   // Leaving TERRAIN takes the card with it.
   useEffect(() => () => closeSurveyCard(), [])
   // One pass over the chunk as it opens, at the revision you see it at (kept per chunk and version: lib/terrain/assay.ts
-  // chunkAssay), never per frame. The ground is read through groundFor, which may wait on the blocks worker.
+  // chunkAssay), never per frame. The ground is read through groundFor, which may wait on the blocks worker. While it is
+  // open, counted again when the chunk changes (watchCard: at most four times a second), one count at a time.
   const [got, setGot] = useState<{ key: string; card: CardFor } | null>(null)
   useEffect(() => {
     if (!key) { setGot(null); return }
     let live = true
-    void cardFor(key).then((card) => { if (live) setGot(card ? { key, card } : null) }, () => { if (live) setGot(null) })
-    return () => { live = false }
+    let busy = false
+    let again = false
+    // Every kind the open card has listed stays listed, at 0 once it is all gone, so no row jumps off it.
+    const shown = new Set<number>()
+    const recount = (): void => {
+      if (busy) { again = true; return }
+      busy = true
+      const done = (): void => {
+        busy = false
+        if (live && again) { again = false; recount() }
+      }
+      void cardFor(key, shown).then((card) => {
+        if (!live) return
+        if (card) for (const r of [...card.card.finds, ...card.card.common]) shown.add(r.id)
+        setGot(card ? { key, card } : null)
+        done()
+      }, () => { if (live) setGot(null); done() })
+    }
+    recount()
+    const stop = watchCard(key, recount)
+    return () => { live = false; stop() }
   }, [key, owns])
   // On the Escape stack only while the card is drawn: one that could not be read never swallows Esc (review of #956).
   const shown = !!key && !!got && got.key === key
@@ -208,15 +256,16 @@ export function SurveyCard(): JSX.Element | null {
               </ul>
             )}
 
-            <h3 className="survey-card__section"><span>FINDS</span><span className="survey-card__rule" aria-hidden /><span className="survey-card__section-n">COUNTED</span></h3>
+            <p className="survey-card__tally">{tallyLine(card.minedTotal, card.total)}</p>
+            <Section name="FINDS" />
             {card.finds.length > 0
               ? <ul className="survey-card__list">{card.finds.map((r) => <Row key={r.id} row={r} />)}</ul>
               : <p className="survey-card__empty">Nothing rare in this chunk.</p>}
-            <h3 className="survey-card__section"><span>COMMON MATERIALS</span><span className="survey-card__rule" aria-hidden /><span className="survey-card__section-n">COUNTED</span></h3>
+            <Section name="COMMON MATERIALS" />
             {card.common.length > 0
               ? <ul className="survey-card__list">{card.common.map((r) => <Row key={r.id} row={r} />)}</ul>
               : <p className="survey-card__empty">Nothing here: open space.</p>}
-            <p className="survey-card__foot"><span>Survey material audit.</span><span>Ground revision {revision} · {count(card.total)} blocks</span></p>
+            <p className="survey-card__foot"><span>Survey material audit.</span><span>Ground revision {revision}</span></p>
           </div>
         </div>
       </div>

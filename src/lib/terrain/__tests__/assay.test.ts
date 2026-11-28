@@ -5,7 +5,9 @@
  * or walk-through block of another kind, across the chunk's edge too), finds
  * each layer's kind for the core, sorts the card rarest first, says the
  * recipe lines gently, and is worked out once per version, never again
- * until the chunk or a neighbour changes.
+ * until the chunk or a neighbour changes. What you mined (owner, 2026-11-28)
+ * is your own blocks against the base ground at the revision shown: others'
+ * removals and blocks you placed and mined again never count; a blast does.
  */
 
 import { beforeEach, describe, expect, it } from 'vitest'
@@ -15,7 +17,7 @@ import { KINDS } from '../blocks'
 import { TerrainWorld } from '../world'
 import { encodeLayer, applyLayer } from '../layer'
 import {
-  AVERAGE_HARDNESS, COMMON, RARITY, hardnessLine, STRATA_MIN, assayBlocks, assayRuns, chunkAssay, forgetAssays, recipeNotes, surveyCard, type GroundFacts,
+  AVERAGE_HARDNESS, COMMON, RARITY, hardnessLine, STRATA_MIN, assayBlocks, assayRuns, chunkAssay, chunkMined, forgetAssays, minedBlocks, recipeNotes, surveyCard, type GroundFacts,
 } from '../assay'
 
 const GRIDSTONE = 1, UMBERSLATE = 2, RUSTBAND = 5, CINDERROCK = 7, PRISMITE = 8, RIMEGLASS = 10, TIDEWATER = 11, FERROVEIN = 40, COBALTINE = 41, GLOWCORE = 42, VOIDPEARL = 193
@@ -255,5 +257,119 @@ describe('kept per chunk and version', () => {
     n2.version = nv
     const d = chunkAssay(w, again)!
     expect(d).not.toBe(c)
+  })
+})
+
+describe('what you mined', () => {
+  it('is each cell of the base ground your own blocks hold as open space or another block, by the ground\'s kind', () => {
+    const ground = solid()
+    ground[idx(3, 3, 3)] = GLOWCORE
+    ground[idx(0, 31, 0)] = 0
+    const own = ground.slice()
+    own[idx(3, 3, 3)] = 0 // the Glowcore mined
+    own[idx(1, 1, 1)] = 0 // a Gridstone mined
+    own[idx(2, 2, 2)] = RIMEGLASS // a Gridstone mined and Rimeglass put in its place
+    const m = minedBlocks(own, ground)
+    expect(m[GLOWCORE]).toBe(1)
+    expect(m[GRIDSTONE]).toBe(2)
+    expect(m[RIMEGLASS]).toBe(0)
+    expect(m.reduce((a, b) => a + b, 0)).toBe(3)
+  })
+
+  it('a block placed in open space and mined again counts nothing; placed and left counts nothing either', () => {
+    const ground = solid()
+    for (let o = 31 * 1024; o < CELLS; o++) ground[o] = 0
+    const own = ground.slice()
+    own[idx(4, 31, 4)] = GLOWCORE // placed in the air
+    own[idx(4, 31, 4)] = 0 // and mined again
+    own[idx(5, 31, 5)] = CINDERROCK // placed and left
+    expect(minedBlocks(own, ground).reduce((a, b) => a + b, 0)).toBe(0)
+  })
+
+  it('someone else\'s removals are not yours: only your own blocks are read, never what stands', () => {
+    const w = new TerrainWorld(BASE, { right: { axis: 'x', dir: 1 }, up: { axis: 'y', dir: 1 }, out: { axis: 'z', dir: 1 } })
+    const slot = w.slotAt(0, 0, 0, true)!
+    const ground = solid()
+    const merged = ground.slice()
+    merged[idx(6, 6, 6)] = 0 // another builder's layer mined this
+    merged[idx(7, 7, 7)] = 0 // and this
+    w.setBlocks(slot.key, ground, merged)
+    slot.own = ground.slice()
+    slot.own[idx(8, 8, 8)] = 0 // yours
+    slot.revision = 2
+    expect(chunkAssay(w, slot)!.counts[0]).toBe(2)
+    const m = chunkMined(slot, ground, 2)!
+    expect(m[GRIDSTONE]).toBe(1)
+  })
+
+  it('a blast\'s cells count, every kind it took', () => {
+    const ground = solid()
+    ground[idx(10, 10, 10)] = GLOWCORE
+    ground[idx(11, 10, 10)] = FERROVEIN
+    const own = ground.slice()
+    let taken = 0
+    for (let y = 7; y <= 13; y++) for (let z = 7; z <= 13; z++) for (let x = 7; x <= 13; x++) { own[idx(x, y, z)] = 0; taken++ }
+    const m = minedBlocks(own, ground)
+    expect(m[GLOWCORE]).toBe(1)
+    expect(m[FERROVEIN]).toBe(1)
+    expect(m[GRIDSTONE]).toBe(taken - 2)
+  })
+
+  it('at the revision shown: blocks built over another revision\'s ground count only the cells you changed, as the shown base\'s kind', () => {
+    const mine = solid() // the ground your blocks were built over (your own revision)
+    const shown = solid()
+    shown[idx(1, 1, 1)] = PRISMITE // the shown revision differs here, a cell you never touched
+    shown[idx(2, 2, 2)] = COBALTINE // and here, a cell you mined
+    shown[idx(3, 3, 3)] = 0 // open space at the shown revision where yours had rock you mined
+    const own = mine.slice()
+    own[idx(2, 2, 2)] = 0
+    own[idx(3, 3, 3)] = 0
+    own[idx(4, 4, 4)] = 0
+    const m = minedBlocks(own, shown, mine)
+    // What you carried from (2,2,2) was the Cobaltine you were shown; (1,1,1) you never touched; (3,3,3) was open space shown.
+    expect(m[COBALTINE]).toBe(1)
+    expect(m[PRISMITE]).toBe(0)
+    expect(m[GRIDSTONE]).toBe(1)
+    // A cell you mined where your own ground was already open (only the shown revision had rock): counted by its explicit change.
+    const own2 = mine.slice()
+    const open = mine.slice()
+    open[idx(5, 5, 5)] = 0
+    own2[idx(5, 5, 5)] = 0
+    expect(minedBlocks(own2, shown, open)[GRIDSTONE]).toBe(0)
+    expect(minedBlocks(own2, shown, open, new Set([idx(5, 5, 5)]))[GRIDSTONE]).toBe(1)
+  })
+
+  it('kept per version: the same counts until a block changes; none where you hold no blocks of your own', () => {
+    const w = new TerrainWorld(BASE, { right: { axis: 'x', dir: 1 }, up: { axis: 'y', dir: 1 }, out: { axis: 'z', dir: 1 } })
+    const slot = w.slotAt(0, 0, 0, true)!
+    const ground = solid()
+    w.setBlocks(slot.key, ground, ground.slice())
+    expect(chunkMined(slot, ground, 2)).toBeNull()
+    slot.own = ground.slice()
+    const a = chunkMined(slot, ground, 2)!
+    expect(chunkMined(slot, ground, 2)).toBe(a)
+    w.setCs(1, 1, 1, 0)
+    slot.own[idx(1, 1, 1)] = 0
+    const b = chunkMined(slot, ground, 2)!
+    expect(b).not.toBe(a)
+    expect(b[GRIDSTONE]).toBe(1)
+  })
+
+  it('on the card: MINED and LEFT per kind and in all; a kind mined out is listed at 0, and a kept kind stays at 0', () => {
+    const ground = solid()
+    ground[idx(3, 3, 3)] = GLOWCORE
+    const own = ground.slice()
+    own[idx(3, 3, 3)] = 0
+    own[idx(1, 1, 1)] = 0
+    const card = surveyCard(assayBlocks(own), facts, { mined: minedBlocks(own, ground) })
+    expect(card.finds).toEqual([expect.objectContaining({ id: GLOWCORE, count: 0, mined: 1, visible: false })])
+    expect(card.common).toEqual([expect.objectContaining({ id: GRIDSTONE, count: CELLS - 2, mined: 1 })])
+    expect(card.total).toBe(CELLS - 2)
+    expect(card.minedTotal).toBe(2)
+    // Nothing left of it and no recipe line for it.
+    expect(card.notes).toEqual([])
+    // Not mined and none left: gone from a fresh card, but kept on one already showing it.
+    expect(surveyCard(assayBlocks(solid()), facts).finds).toEqual([])
+    expect(surveyCard(assayBlocks(solid()), facts, { keep: [CINDERROCK] }).finds).toEqual([expect.objectContaining({ id: CINDERROCK, count: 0, mined: 0 })])
   })
 })

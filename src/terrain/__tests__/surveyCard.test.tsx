@@ -14,6 +14,11 @@
  *   "id like to tap or slide my finger across the core sample to see the name
  *   of the resource representing the layer"): a tap, a slide past the ends, a
  *   hatched layer, a hover, the arrows, and a readout that never moves the card.
+ * - Live (owner, 2026-11-28: "can we make the card live update how many of
+ *   the blocks in the chunk you've mined and how many are left total?"): MINED
+ *   and LEFT per kind and in all, counted again when the chunk's version moves
+ *   (at most four times a second), a kind gone to 0 kept on the list, and
+ *   nothing on the card moving as the numbers count.
  */
 
 import { readFileSync } from 'node:fs'
@@ -46,15 +51,15 @@ vi.mock('../../store/useTerrain', async (orig) => {
 import { createElement } from 'react'
 import { mount, textOf, type Host, type Mounted } from '../../test/elementRoot'
 import { TerrainView, LONG_PRESS_MS, pressCard, releaseCard, abandonCard } from '../TerrainView'
-import { CORE_CAPTION, SurveyCard } from '../SurveyCard'
-import { setTerrainSession, useTerrain, type TerrainSession } from '../../store/useTerrain'
+import { CORE_CAPTION, SurveyCard, tallyLine } from '../SurveyCard'
+import { setTerrainSession, terrainSession, useTerrain, type TerrainSession } from '../../store/useTerrain'
 import { useCyberspace } from '../../store/useCyberspace'
 import { emptyInventory } from '../../lib/terrain/terrainDb'
 import { TerrainWorld } from '../../lib/terrain/world'
 import { CELLS, idx, type ChunkBase } from '../../lib/terrain/coords'
 import { coreSliceAt, forgetAssays } from '../../lib/terrain/assay'
 import { cancelSurveyHold, useSurveyHold } from '../surveyHold'
-import { openSurveyCard, resetSurveyCards, stampDate, useSurveyCard } from '../surveyCard'
+import { CARD_WATCH_MS, openSurveyCard, resetSurveyCards, stampDate, useSurveyCard, watchCard } from '../surveyCard'
 import { topEscape } from '../../hooks/useEscape'
 
 const wait = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
@@ -79,8 +84,8 @@ async function hold(m: Mounted, ms: number): Promise<void> {
 
 const BASE: ChunkBase = { x: 0x1234567890abcdef12340n, y: 0xfedcba0987654321fed80n, z: 0x0f0f0f0f0f0f0f0f0f0e0n, plane: 0 }
 
-/** A field with one chunk: Gridstone, a buried Glowcore, an open layer on top; `edit` changes its blocks first. */
-function fieldWithGlowcore(at: number | null, edit?: (b: Uint8Array) => void): string {
+/** A field with one chunk: Gridstone, a buried Glowcore, an open layer on top; `edit` changes its blocks first; `own`, your own blocks there. */
+function fieldWithGlowcore(at: number | null, edit?: (b: Uint8Array) => void, own = false): string {
   const world = new TerrainWorld(BASE, { right: { axis: 'x', dir: 1 }, up: { axis: 'y', dir: 1 }, out: { axis: 'z', dir: 1 } })
   const slot = world.slotAt(0, 0, 0, true)!
   const b = new Uint8Array(CELLS).fill(1)
@@ -89,6 +94,7 @@ function fieldWithGlowcore(at: number | null, edit?: (b: Uint8Array) => void): s
   edit?.(b)
   world.setBlocks(slot.key, b, b.slice())
   slot.ground = { family: 'volcanic', maxK: 11, meanK: 7.6, top: 7 }
+  if (own) { slot.own = b.slice(); slot.revision = 2 }
   const revisions = new Map([[slot.key, { revision: 2, surveyed: at === null ? 0 : Math.floor(at / 1000) }]])
   setTerrainSession({ world, revisions, surveyedKeys: new Set([slot.key]), building: new Set() } as unknown as TerrainSession)
   return slot.key
@@ -223,7 +229,8 @@ describe('the card', () => {
       expect(m.says('Richer than the average hardness of 10.')).toBe(true)
       expect(m.says('COMMON MATERIALS')).toBe(true)
       expect(m.says('COMMON ROCK')).toBe(false)
-      expect(m.all().filter((h) => String(h.props.className ?? '').includes('survey-card__section-n')).map(textOf)).toEqual(['COUNTED', 'COUNTED'])
+      expect(m.all().filter((h) => String(h.props.className ?? '').includes('survey-card__section-n')).map(textOf)).toEqual(['MINED', 'LEFT', 'MINED', 'LEFT'])
+      expect(m.says('COUNTED')).toBe(false)
       expect(m.says('Survey material audit.')).toBe(true)
       expect(m.says('What is here')).toBe(false)
       expect(m.says('27 NOV 2026')).toBe(true)
@@ -231,7 +238,9 @@ describe('the card', () => {
       expect(stampDate(at)).toBe('27 NOV 2026')
       expect(m.says('Glowcore here: the Compiler needs one.')).toBe(true)
       const rows = m.all().filter((h) => String(h.props.className ?? '').split(' ').includes('survey-row'))
-      expect(rows.map(textOf)).toEqual([expect.stringMatching(/^Glowcoreburied1$/), expect.stringMatching(/^Gridstonevisible31,743$/)])
+      // Nothing mined: a dim dash under MINED.
+      expect(rows.map(textOf)).toEqual([expect.stringMatching(/^Glowcoreburied-1$/), expect.stringMatching(/^Gridstonevisible-31,743$/)])
+      expect(m.says('You haven\'t mined here yet · 31,744 left')).toBe(true)
       const meter = m.all().find((h) => h.props.role === 'meter')!
       expect(meter.props['aria-valuenow']).toBe(11)
       expect(m.says('11')).toBe(true)
@@ -436,6 +445,133 @@ describe('the core', () => {
       // Only the core takes the finger's slide; the card body still scrolls.
       expect(rule('.survey-card__core')).toMatch(/touch-action: none;/)
       expect(rule('.survey-card__body')).not.toMatch(/touch-action/)
+    } finally {
+      await m.unmount()
+    }
+  })
+})
+
+describe('live: what you mined and what is left', () => {
+  const cls = (h: Host): string[] => String(h.props.className ?? '').split(' ')
+  const rows = (m: Mounted): Host[] => m.all().filter((h) => cls(h).includes('survey-row'))
+  const tally = (m: Mounted): string => textOf(m.all().find((h) => cls(h).includes('survey-card__tally'))!)
+  const slotOf = (key: string) => terrainSession!.world.slotByKey(key)!
+  /** Change a cell in what stands (and in your own blocks too, when `yours`), as a block mined or placed does: a new version. */
+  const change = (key: string, cell: number, id: number, yours: boolean): void => {
+    const slot = slotOf(key)
+    slot.blocks![cell] = id
+    if (yours) slot.own![cell] = id
+    slot.version++
+  }
+
+  it('the tally line says it plainly, one block or many', () => {
+    expect(tallyLine(0, 31902)).toBe('You haven\'t mined here yet · 31,902 left')
+    expect(tallyLine(1, 31902)).toBe('You\'ve mined 1 block here · 31,902 left')
+    expect(tallyLine(214, 31902)).toBe('You\'ve mined 214 blocks here · 31,902 left')
+    expect(/\u2014/.test(tallyLine(214, 31902))).toBe(false)
+  })
+
+  it('counts again as you mine, place and blast, and as others\' layers arrive; only yours are MINED', async () => {
+    const key = fieldWithGlowcore(null, undefined, true)
+    openSurveyCard(key)
+    const m = await mount(createElement(SurveyCard))
+    try {
+      expect(rows(m).map(textOf)).toEqual(['Glowcoreburied-1', 'Gridstonevisible-31,743'])
+      // You mine two Gridstone.
+      change(key, idx(1, 1, 1), 0, true)
+      change(key, idx(2, 1, 1), 0, true)
+      await wait(CARD_WATCH_MS + 80)
+      expect(rows(m).map(textOf)).toEqual(['Glowcoreburied-1', 'Gridstonevisible231,741'])
+      expect(tally(m)).toBe('You\'ve mined 2 blocks here · 31,742 left')
+      // Someone else's layer arrives with a Gridstone mined: one fewer left, still two mined by you.
+      change(key, idx(3, 1, 1), 0, false)
+      await wait(CARD_WATCH_MS + 80)
+      expect(rows(m)[1] && textOf(rows(m)[1])).toBe('Gridstonevisible231,740')
+      // You place a Gridstone in the open layer and mine it again: no more mined from the ground.
+      change(key, idx(5, 31, 5), 1, true)
+      await wait(CARD_WATCH_MS + 80)
+      expect(textOf(rows(m)[1])).toBe('Gridstonevisible231,741')
+      change(key, idx(5, 31, 5), 0, true)
+      await wait(CARD_WATCH_MS + 80)
+      expect(textOf(rows(m)[1])).toBe('Gridstonevisible231,740')
+      // A blast round the Glowcore: 27 cells, the Glowcore and 26 Gridstone.
+      for (let y = 9; y <= 11; y++) for (let z = 9; z <= 11; z++) for (let x = 9; x <= 11; x++) change(key, idx(x, y, z), 0, true)
+      await wait(CARD_WATCH_MS + 80)
+      expect(rows(m).map(textOf)).toEqual(['Glowcoregone10', 'Gridstonevisible2831,714'])
+      expect(tally(m)).toBe('You\'ve mined 29 blocks here · 31,714 left')
+    } finally {
+      await m.unmount()
+    }
+  })
+
+  it('a kind someone else mines to 0 stays on the open card at 0, with no MINED of yours', async () => {
+    const key = fieldWithGlowcore(null, undefined, true)
+    openSurveyCard(key)
+    const m = await mount(createElement(SurveyCard))
+    try {
+      change(key, idx(10, 10, 10), 0, false)
+      await wait(CARD_WATCH_MS + 80)
+      expect(rows(m).map(textOf)).toEqual(['Glowcoregone-0', 'Gridstonevisible-31,743'])
+      expect(m.says('Nothing rare in this chunk.')).toBe(false)
+    } finally {
+      await m.unmount()
+    }
+  })
+
+  it('the card watches the version at most four times a second, however many blocks change, and not at all when none do', () => {
+    vi.useFakeTimers()
+    try {
+      const key = fieldWithGlowcore(null, undefined, true)
+      const seen = vi.fn()
+      const stop = watchCard(key, seen)
+      vi.advanceTimersByTime(2000)
+      expect(seen).not.toHaveBeenCalled()
+      // A blast's worth of changes inside one window: one count.
+      for (let i = 0; i < 300; i++) change(key, i, 0, true)
+      vi.advanceTimersByTime(CARD_WATCH_MS)
+      expect(seen).toHaveBeenCalledTimes(1)
+      // Mining every 10 ms for a second: no more than four counts.
+      seen.mockClear()
+      for (let t = 0; t < 1000; t += 10) { change(key, 1000 + t, 0, true); vi.advanceTimersByTime(10) }
+      expect(seen.mock.calls.length).toBeLessThanOrEqual(1000 / CARD_WATCH_MS)
+      expect(seen.mock.calls.length).toBeGreaterThan(0)
+      expect(CARD_WATCH_MS).toBeGreaterThanOrEqual(250)
+      // A neighbour coming in counts again too (its edge may show or hide a face).
+      seen.mockClear()
+      const n = terrainSession!.world.slotAt(1, 0, 0, true)!
+      terrainSession!.world.setBlocks(n.key, new Uint8Array(CELLS).fill(1), new Uint8Array(CELLS).fill(1))
+      vi.advanceTimersByTime(CARD_WATCH_MS)
+      expect(seen).toHaveBeenCalledTimes(1)
+      stop()
+      change(key, 5000, 0, true)
+      vi.advanceTimersByTime(2000)
+      expect(seen).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('nothing moves as it counts: the same rows in the same shape, fixed number columns, one fixed tally line', async () => {
+    const key = fieldWithGlowcore(null, undefined, true)
+    openSurveyCard(key)
+    const m = await mount(createElement(SurveyCard))
+    try {
+      const shape = (): string[] => rows(m).map((r) => r.children.map((c) => (typeof c === 'string' ? c : cls(c)[0])).join(' '))
+      const was = shape()
+      expect(was[0]).toBe('chamfer survey-row__name survey-row__leader survey-row__mark survey-row__mined survey-row__count')
+      for (let y = 9; y <= 11; y++) for (let z = 9; z <= 11; z++) for (let x = 9; x <= 11; x++) change(key, idx(x, y, z), 0, true)
+      await wait(CARD_WATCH_MS + 80)
+      expect(shape()).toEqual(was)
+      const css = readFileSync(new URL('../../styles.css', import.meta.url), 'utf8')
+      const rule = (sel: string): string => css.match(new RegExp(`\\n${sel.replace(/[.]/g, '\\.')} \\{([^}]*)\\}`))?.[1] ?? ''
+      // MINED and LEFT in fixed widths at the row's end, the headers exactly as wide.
+      expect(rule('.survey-row')).toMatch(/grid-template-columns: [^;]* 40px 46px;/)
+      expect(css).toMatch(/\.survey-card__section-n:nth-last-child\(2\) \{ width: 40px; \}/)
+      expect(css).toMatch(/\.survey-card__section-n:last-child \{ width: 46px; \}/)
+      for (const sel of ['.survey-row__mined', '.survey-row__count']) expect(css.match(new RegExp(`\\n${sel.replace(/[.]/g, '\\.')} \\{([^}]*)\\}`))?.[1] ?? '').toMatch(/font-variant-numeric: tabular-nums;/)
+      expect(rule('.survey-card__tally')).toMatch(/\bheight: 14px;/)
+      expect(rule('.survey-card__tally')).toMatch(/white-space: nowrap;/)
+      expect(rule('.survey-card__tally')).toMatch(/font-variant-numeric: tabular-nums;/)
     } finally {
       await m.unmount()
     }

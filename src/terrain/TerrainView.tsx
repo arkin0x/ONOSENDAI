@@ -5,7 +5,8 @@
  * they are, and the scene is cyberspace's own; this adds only the tools:
  *
  * - SURVEY (G) fills the chunk you stand in, or the next one in reach the way
- *   you look, with its generated ground.
+ *   you look, with its generated ground. Standing in a surveyed chunk, its
+ *   slot is CARD: the chunk's survey card (SurveyCard.tsx), what it holds.
  * - MINE (Q, a click or a tap on a block) and PLACE (E, a right click or a
  *   act on the block under the cross, or under the pointer: a tap mines, PLACE places.
  * - The hotbar, 1 to 9, and the bag (I): what you carry, on this device, and
@@ -21,8 +22,8 @@
  */
 
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
-import { Backpack, Bomb, Box, Hammer, HandFist, Radar } from 'lucide-react'
-import { HINT_DONE, headNow, offsetOf, surveyTarget as targetNow, terrainSession, useTerrain } from '../store/useTerrain'
+import { Backpack, Bomb, Box, Hammer, HandFist, Radar, ScrollText } from 'lucide-react'
+import { HINT_DONE, cardChunkHere, headNow, offsetOf, surveyTarget as targetNow, terrainSession, useTerrain } from '../store/useTerrain'
 import { useWalk } from '../store/useWalk'
 import { terrainCursor } from '../scene/TerrainLayer'
 import { SURVEY_HOLD_MS, cancelSurveyHold, flashSurvey, startSurveyHold, useSurveyHold } from './surveyHold'
@@ -53,6 +54,9 @@ import { recordAtCursor } from '../lib/blueprint/capture'
 import { previewColor, previewLine, useSmashPreview } from '../lib/blueprint/smashPreview'
 import { useAirPlace } from '../store/useAirPlace'
 import { AirStepper } from './AirStepper'
+import { Swatch } from './Swatch'
+import { SurveyCard } from './SurveyCard'
+import { autoOpenSurveyCard, openSurveyCard } from './surveyCard'
 
 /** A press held this long without moving places (a long press). */
 export const LONG_PRESS_MS = 420
@@ -77,13 +81,6 @@ function hereKey(): string | null {
 /** The chunk SURVEY would fill now (store/useTerrain.ts surveyTarget). */
 export function surveyTarget(): string | null {
   return targetNow()
-}
-
-function Swatch({ id, size = 22 }: { id: number; size?: number }): JSX.Element {
-  const k = blockKind(id)
-  const url = k ? tileUrl(k) : ''
-  const style = { '--sw-face': k?.color ?? 'transparent', '--sw-edge': k?.edge ?? 'transparent', width: size, height: size, ...(url ? { backgroundImage: `url(${url})` } : {}) } as CSSProperties
-  return <span className={`terrain-swatch${k?.glow ? ' terrain-swatch--glow' : ''}`} style={style} aria-hidden />
 }
 
 /**
@@ -364,14 +361,17 @@ export function SmashPreviewLabel(): JSX.Element {
   )
 }
 
-/** The survey target, looked at a few times a second (it follows the body and the look). */
-function useSurveyTarget(): string | null {
-  const [target, setTarget] = useState<string | null>(null)
+/** The survey target, and the surveyed chunk you stand in (its card), looked at a few times a second (they follow the body and the look). */
+function useSurveyTarget(): { target: string | null; card: string | null } {
+  const [now, setNow] = useState<{ target: string | null; card: string | null }>({ target: null, card: null })
   useEffect(() => {
-    const t = window.setInterval(() => setTarget(surveyTarget()), 250)
+    const t = window.setInterval(() => {
+      const target = surveyTarget(), card = cardChunkHere()
+      setNow((was) => (was.target === target && was.card === card ? was : { target, card }))
+    }, 250)
     return () => clearInterval(t)
   }, [])
-  return target
+  return now
 }
 
 export function TerrainView({ covered = false }: { covered?: boolean }): JSX.Element | null {
@@ -544,8 +544,16 @@ export function surveyChunk(key: string | null): boolean {
   const st = useTerrain.getState()
   if (!key) { st.say('Everything here is surveyed.'); return false }
   const before = st.surveying.includes(key)
-  void st.survey(key)
-  return !before && useTerrain.getState().surveying.includes(key)
+  const done = Promise.resolve(st.survey(key))
+  const taken = !before && useTerrain.getState().surveying.includes(key)
+  // The survey done, its card opens by itself, once (surveyCard.ts): not after a failure, nor once TERRAIN has closed.
+  if (taken) {
+    void done.then(() => {
+      const s = terrainSession
+      if (useTerrain.getState().active && s?.surveyedKeys.has(key) && s.world.slotByKey(key)?.blocks) autoOpenSurveyCard(key)
+    })
+  }
+  return taken
 }
 
 /**
@@ -556,7 +564,57 @@ export function surveyChunk(key: string | null): boolean {
 export function holdSurvey(): void {
   if (useSurveyHold.getState().since !== null) return
   // The glow flashes only once the survey has taken the chunk, never over one it turned down.
-  startSurveyHold((key) => { if (surveyChunk(key) && key) flashSurvey(key) }, performance.now(), surveyTarget())
+  startSurveyHold((key) => {
+    // A hold that began as CARD is over: its press goes with it, so the next tap on CARD opens the card (review of #956).
+    if (cardPress?.surveying) cardPress = null
+    if (surveyChunk(key) && key) flashSurvey(key)
+  }, performance.now(), surveyTarget())
+}
+
+/**
+ * CARD, in SURVEY's slot while you stand in a surveyed chunk (owner,
+ * 2026-11-27: "Inside the already-surveyed region, the survey button should
+ * change to Card and pressing it shows the card"). A tap (or G) opens the
+ * card at once as it lifts. Held past a tap (LONG_PRESS_MS) while a chunk
+ * ahead the way you look is open to survey, it becomes SURVEY's 5 second
+ * hold for that chunk, ring, glow and all, so surveying onward from your own
+ * ground still works; let go before the end and nothing is surveyed.
+ */
+let cardPress: { timer: ReturnType<typeof setTimeout> | null; surveying: boolean } | null = null
+
+/** CARD pressed (the button, or G). */
+export function pressCard(): void {
+  // A press left over (its lift landed elsewhere, on a card that opened over the button) never swallows this one.
+  abandonCard()
+  const press: { timer: ReturnType<typeof setTimeout> | null; surveying: boolean } = { timer: null, surveying: false }
+  press.timer = setTimeout(() => {
+    press.timer = null
+    if (cardPress !== press || !surveyTarget()) return
+    press.surveying = true
+    holdSurvey()
+  }, LONG_PRESS_MS)
+  cardPress = press
+}
+
+/** CARD let go: a tap opens the card; a hold that turned into SURVEY's ends it (cancelled unless complete). True when a CARD press was under way. */
+export function releaseCard(): boolean {
+  const press = cardPress
+  if (!press) return false
+  cardPress = null
+  if (press.timer !== null) clearTimeout(press.timer)
+  if (press.surveying) { cancelSurveyHold(); return true }
+  const key = cardChunkHere()
+  if (key) openSurveyCard(key)
+  return true
+}
+
+/** A finger sliding off CARD, a lost focus or the fold: nothing opens and a survey hold it started is cancelled. */
+export function abandonCard(): void {
+  const press = cardPress
+  if (!press) return
+  cardPress = null
+  if (press.timer !== null) clearTimeout(press.timer)
+  if (press.surveying) cancelSurveyHold()
 }
 
 /**
@@ -579,7 +637,7 @@ export function terrainKeys(on: EventTarget): () => void {
     if (st.sheet) return
     const slot = slotKey(e.code)
     if (slot !== null) { take(); st.selectSlot(slot); return }
-    if (e.code === 'KeyG') { take(); if (!e.repeat) holdSurvey(); return }
+    if (e.code === 'KeyG') { take(); if (!e.repeat) { if (cardChunkHere() && st.surveying.length === 0 && useSurveyHold.getState().since === null) pressCard(); else holdSurvey() } return }
     if (e.code === 'KeyF') { take(); if (!e.repeat) holdSmash(); return }
     if (e.code === 'KeyR' && useBlueprintTool.getState().capturing) { take(); if (!e.repeat) recordAtCursor(); return }
     if (e.code === 'KeyQ') { take(); if (!e.repeat) terrainInput.action = { kind: 'mine', at: null }; return }
@@ -588,10 +646,10 @@ export function terrainKeys(on: EventTarget): () => void {
   // G held: letting it up before the bar fills cancels the survey.
   const up = (ev: Event): void => {
     const code = (ev as KeyboardEvent).code
-    if (code === 'KeyG') cancelSurveyHold()
+    if (code === 'KeyG' && !releaseCard()) cancelSurveyHold()
     if (code === 'KeyF') cancelSmashHold()
   }
-  const blur = (): void => { cancelSurveyHold(); cancelSmashHold() }
+  const blur = (): void => { abandonCard(); cancelSurveyHold(); cancelSmashHold() }
   on.addEventListener('keydown', down, true)
   on.addEventListener('keyup', up, true)
   const win = typeof window !== 'undefined' ? window : null
@@ -600,6 +658,7 @@ export function terrainKeys(on: EventTarget): () => void {
     on.removeEventListener('keydown', down, true)
     on.removeEventListener('keyup', up, true)
     win?.removeEventListener('blur', blur)
+    abandonCard()
     cancelSurveyHold()
     cancelSmashHold()
   }
@@ -615,7 +674,7 @@ function TerrainScreen({ covered }: { covered: boolean }): JSX.Element {
   const hint = useTerrain((s) => s.hint)
   const loading = useTerrain((s) => s.loading)
   const surveying = useTerrain((s) => s.surveying.length > 0)
-  const target = useSurveyTarget()
+  const { target, card } = useSurveyTarget()
   const standing = standingWords(loading, surveying, target)
   // Loading or surveying is said under the cross while it lasts; nothing else is, so the scene stays clear.
   const catching = loading || surveying
@@ -630,8 +689,10 @@ function TerrainScreen({ covered }: { covered: boolean }): JSX.Element {
   const compiling = useCompiling()
   const here = usePrizesHere()
   const capturing = useBlueprintTool((s) => s.capturing)
+  // CARD in SURVEY's slot: standing in a surveyed chunk, while no survey is held or under way (those show SURVEY's own state).
+  const showCard = !!card && !holding && !surveying
   // A SURVEY or SMASH hold the fold hides would never hear its finger lift: it ends there.
-  useEffect(() => { if (folded) { cancelSurveyHold(); cancelSmashHold() } }, [folded])
+  useEffect(() => { if (folded) { abandonCard(); cancelSurveyHold(); cancelSmashHold() } }, [folded])
   // A tour run guides TERRAIN itself (tutorial/terrainRoute.ts): its own three steps wait until after, their slot kept.
   const touring = useTutorial((s) => s.active)
 
@@ -702,10 +763,13 @@ function TerrainScreen({ covered }: { covered: boolean }): JSX.Element {
           </button>
         </span>
         <AirStepper />
+        {/* SURVEY's slot: CARD while you stand in a surveyed chunk (a tap shows its survey card; held, it surveys the next
+            chunk ahead), SURVEY (a hold) while a chunk is open to survey, empty with neither. One button in every state,
+            so nothing moves and a hold that began as CARD still hears its finger lift. */}
         <span className="terrain-tools__slot terrain-tools__slot--survey">
-          {(target || surveying || holding) && (
+          {(card || target || surveying || holding) && (
             <button
-              className={`terrain-act terrain-act--survey${holding ? ' is-holding' : ''}`}
+              className={`terrain-act terrain-act--survey${holding ? ' is-holding' : ''}${showCard ? ' is-card' : ''}`}
               style={{ ['--hold-ms' as string]: `${SURVEY_HOLD_MS}ms` }}
               disabled={surveying}
               {...noCallout}
@@ -713,15 +777,18 @@ function TerrainScreen({ covered }: { covered: boolean }): JSX.Element {
                 e.preventDefault(); e.stopPropagation()
                 // Let go of the implicit capture, so a finger sliding off the button leaves it and cancels.
                 try { e.currentTarget.releasePointerCapture(e.pointerId) } catch { /* not captured */ }
-                if (!surveying) holdSurvey()
+                if (surveying) return
+                if (showCard) pressCard()
+                else holdSurvey()
               }}
-              onPointerUp={cancelSurveyHold}
-              onPointerLeave={cancelSurveyHold}
-              onPointerCancel={cancelSurveyHold}
-              title="Hold to fill this chunk with the ground everyone computes the same (hold G)"
-              aria-label="Hold to survey (hold G)"
+              onPointerUp={() => { if (!releaseCard()) cancelSurveyHold() }}
+              onPointerLeave={() => { abandonCard(); cancelSurveyHold() }}
+              onPointerCancel={() => { abandonCard(); cancelSurveyHold() }}
+              title={showCard ? 'This chunk\'s survey card: what it holds (G). Hold to survey the next chunk the way you look' : 'Hold to fill this chunk with the ground everyone computes the same (hold G)'}
+              aria-label={showCard ? 'Survey card (G)' : 'Hold to survey (hold G)'}
             >
-              <Radar size={15} strokeWidth={2.25} aria-hidden />{surveying ? '...' : holding ? 'Surveying' : 'SURVEY'}<Key>G</Key>
+              {showCard ? <ScrollText size={15} strokeWidth={2.25} aria-hidden data-icon="card" /> : <Radar size={15} strokeWidth={2.25} aria-hidden data-icon="survey" />}
+              {surveying ? '...' : holding ? 'Surveying' : showCard ? 'CARD' : 'SURVEY'}<Key>G</Key>
               <span className="terrain-act__bar" aria-hidden />
             </button>
           )}
@@ -734,6 +801,7 @@ function TerrainScreen({ covered }: { covered: boolean }): JSX.Element {
       <PrizeCard />
       <PrizePicker here={here} />
       <PrizeFlights />
+      <SurveyCard />
     </div>
   )
 }

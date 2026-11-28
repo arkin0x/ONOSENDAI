@@ -15,9 +15,10 @@
 
 import { decryptForRegion } from '../shardCrypto'
 import {
-  LAYER_MAX_BYTES, decodePlane, freeTextWithinBounds, layerShape, parsePlaintext, serializedBytes,
+  LAYER_MAX_BYTES, decodePlane, freeTextWithinBounds, layerShape, parsePlaintext, planeGroundRevision, serializedBytes,
   type DecodedPlane, type LayerPlaintext, type StackLayer,
 } from './blockLayer'
+import type { GroundRevision } from './groundRevision'
 import type { NostrEvent } from '../events'
 
 /** What the author's movement actions say of a builder key: valid, void (retired or never named), or not known yet. */
@@ -28,8 +29,8 @@ export interface ReadDeps {
   /** The chunk's region key and lookup id. */
   key: Uint8Array
   lookupId: string
-  /** The revision 2 ground of the chunk in a plane. */
-  ground: (plane: 0 | 1) => Promise<Uint8Array>
+  /** The chunk's ground in a plane at a revision (each surveyed plane is read against its own: DECK-0009 §3.10). */
+  ground: (plane: 0 | 1, revision: GroundRevision) => Promise<Uint8Array>
   /** Whether `builder` is valid for `author` (§4.4). */
   keyStatus: (author: string, builder: string) => Promise<KeyStatus>
 }
@@ -56,7 +57,8 @@ export async function readLayer(ev: NostrEvent, d: ReadDeps): Promise<ReadResult
   if (!plain) return drop('plaintext')
   const planes: DecodedPlane[] = []
   for (const pl of plain.planes) {
-    const dp = decodePlane(pl, await d.ground(pl.plane))
+    const r = planeGroundRevision(pl)
+    const dp = decodePlane(pl, r === null ? null : await d.ground(pl.plane, r), ev.created_at)
     if (dp === null) return drop('plane')
     if (dp !== 'aside') planes.push(dp)
   }

@@ -81,6 +81,7 @@ const TOUCHED = [
   'hud/blueprint/BlueprintsModal.tsx',
   'hud/blueprint/ExamineSheet.tsx',
   'terrain/PrizePanel.tsx',
+  'terrain/SurveyCard.tsx',
   'terrain/TerrainView.tsx',
   'terrain/CrewPanel.tsx',
   'hud/ActionModal.tsx',

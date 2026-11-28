@@ -24,9 +24,11 @@
  */
 
 import { CELLS, chunkInSpace, chunkKey, idx, type ChunkBase } from './coords'
+import type { GroundRevision } from './groundRevision'
 import { EMPTY } from './blocks'
 import { FOOT, aroundIndex, lightReaches } from './light'
 import type { AxisDirection, ViewAxes, AxisName } from '../space'
+import type { GroundFacts } from './assay'
 
 /** Blocks of reach past the chunk's walls, on each axis (DECK-0009 §6.2). */
 export const REACH = 16
@@ -78,12 +80,16 @@ export interface ChunkSlot {
   /** Inside the axes. A chunk past an axis end is never surveyed. */
   inSpace: boolean
   surveyed: boolean
-  /** The generated ground, once surveyed and generated. */
+  /** The generated ground, once surveyed and generated: at the chunk's own revision where you surveyed, else at the base revision you are shown (store/useTerrain.ts). */
   generated: Uint8Array | null
+  /** The ground revision `generated` is (DECK-0009 §3.10). */
+  revision?: GroundRevision
   /** What stands: the ground with your layer and log over it, and everyone else's shared layers merged under them (store/terrainShare.ts). Null until generated. */
   blocks: Uint8Array | null
   /** Your own blocks alone: the ground with your layer and log over it, what your layer is written from. Null where you have not surveyed. */
   own?: Uint8Array | null
+  /** What the generator said of its ground (its type and hardness), for the survey card (assay.ts); absent until generated. */
+  ground?: GroundFacts | null
   /** Changed since it was last meshed. */
   dirty: boolean
   /** Its light (light.ts) may have changed since it was last worked out: a block within its reach changed, or a chunk came or went. */

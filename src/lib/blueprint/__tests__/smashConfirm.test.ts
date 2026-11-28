@@ -200,14 +200,12 @@ describe('the confirm before a wasted smash, on the real smash path', () => {
     expect(present(again)).toBe(0)
   })
 
-  it('on a placed block instead of the ground: a bigger build, no near miss, but the placed Glowcore still asks', async () => {
+  it('on a placed block instead of the ground: the confirm says it is touching another block', async () => {
     const t = await build('platform')
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     holdSmash()
     vi.advanceTimersByTime(BARE_HOLD_MS)
-    const ask = useSmashConfirm.getState().ask
-    expect(ask?.miss).toBeNull()
-    expect(ask?.words).toMatch(/^This won't compile\..* including placed Glowcore\. Smash anyway\?$/)
+    expect(useSmashConfirm.getState().ask?.words).toMatch(/^This is the Compiler, but it is touching another block, so it won't compile\./)
     answerSmash(false)
     expect(present(t)).toBe(5)
   })

@@ -92,28 +92,28 @@ describe("the owner's build: a correct T resting on the floor", () => {
 })
 
 describe('other near misses', () => {
-  it('a placed block touching it at a corner makes a bigger build, never a near miss (only the recipe\'s blocks count)', () => {
+  it('a placed block touching it at a corner: TOUCHING A BLOCK', () => {
     const m = t([0, 5, 0])
     m.set(key([3, 8, 1]), GRIDSTONE) // corner to the right Rustband at (2, 7, 0)
     const read = reader(m)
-    expect(nearMiss(read, [1, 6, 0])).toBeNull()
     const p = smashPreview(read, [1, 6, 0], true)!
-    expect(p.miss).toBeNull()
-    // Six blocks, four wide: too big for a bare hand, said as that.
-    expect(previewLine(p.state, p.cells.length, previewCause(p))).toBe('BREAKS 5 · TOO BIG FOR A BARE HAND')
+    expect(p.state).toBe('breaks')
+    // The block is outside the bare hand's box round the hit, so only the T's five go.
+    expect(previewLine(p.state, p.cells.length, previewCause(p))).toBe('BREAKS 5 · TOUCHING A BLOCK')
+    expect(nearMissLine(p.miss!)).toBe('That was the Compiler, but it touched another block. Build it with a gap all round.')
   })
 
-  it('a placed block in the T\'s empty corner: a bigger build, no near miss', () => {
+  it('a placed block in the T\'s empty corner touches it too', () => {
     const m = t([0, 5, 0])
     m.set(key([0, 5, 0]), GRIDSTONE)
-    expect(nearMiss(reader(m), [1, 6, 0])).toBeNull()
+    expect(nearMiss(reader(m), [1, 6, 0])?.touching).toBe('block')
   })
 
-  it('a block beside it that is natural ground: TOUCHING THE GROUND, when the world can tell (else it counts as built)', () => {
+  it('a block beside it that is natural ground: TOUCHING THE GROUND, when the world can tell (else a placed block)', () => {
     const m = t([0, 5, 0])
     m.set(key([3, 6, 0]), GRIDSTONE)
     const natural = (x: number, y: number, z: number): boolean => key([x, y, z]) === '3,6,0'
-    expect(nearMiss(reader(m), [1, 6, 0])).toBeNull()
+    expect(nearMiss(reader(m), [1, 6, 0])?.touching).toBe('block')
     expect(nearMiss(reader(m), [1, 6, 0], natural)?.touching).toBe('ground')
   })
 
@@ -160,16 +160,13 @@ describe('other near misses', () => {
     expect(previewLine(p.state, p.cells.length, missCause(p.miss!))).toBe('BREAKS 5 · TOUCHING THE GROUND')
   })
 
-  it('on a placed platform: a bigger build, so no near miss; the placed Glowcore still brings up the confirm', () => {
-    const m = t([0, 0, 0])
-    for (let x = -1; x <= 3; x++) for (let z = -1; z <= 1; z++) m.set(key([x, -1, z]), GRIDSTONE)
-    const placed = new Set([...m.keys()])
-    const natural = (x: number, y: number, z: number): boolean => y < 0 && !placed.has(key([x, y, z]))
+  it('on a small placed platform (3 blocks) laid on the ground: TOUCHING A BLOCK, not the ground', () => {
+    const m = t([0, 1, 0])
+    for (let x = 0; x <= 2; x++) m.set(key([x, 0, 0]), GRIDSTONE)
     const read = reader(m, ground)
-    const p = smashPreview(read, [1, 1, 0], true, natural)!
-    expect(p.miss).toBeNull()
-    expect(previewLine(p.state, p.cells.length, previewCause(p))).toBe('BREAKS 5')
-    expect(smashAsk(read, [1, 1, 0], true, natural)!.words).toBe("This won't compile. It breaks 5 blocks, including placed Glowcore. Smash anyway?")
+    const p = smashPreview(read, [1, 2, 0], true, nat)!
+    expect(previewLine(p.state, p.cells.length, previewCause(p))).toBe('BREAKS 5 · TOUCHING A BLOCK')
+    expect(nearMissLine(p.miss!)).toBe('That was the Compiler, but it touched another block. Build it with a gap all round.')
   })
 
   it('the Quarry Charge mirrored across X is turned (bare); mirrored across Y or Z it is the same recipe', () => {
@@ -262,37 +259,52 @@ describe("isolated means touching no block on a face, edge or corner (the owner'
     }
   })
 
-  it('a block at a corner of it does touch: it joins the group, which is no longer the T, and is no near miss', () => {
+  it('a block at a corner of it does touch: it joins the group, which is no longer the T, so TOUCHING A BLOCK', () => {
     const m = t([0, 1, 0])
     m.set(key([-1, 4, 1]), GRIDSTONE) // corner to the left Rustband at (0, 3, 0)
     const read = reader(m, ground)
     const g = smashGroup(read, [1, 2, 0], true)
     expect(g.cells).toHaveLength(6)
-    // Four wide: too wide for a bare hand; the placed Glowcore still asks.
+    // Four wide: too wide for a bare hand, so it only breaks, said as a near miss.
     const p = smashPreview(read, [1, 2, 0], true, nat)!
-    expect(p.miss).toBeNull()
-    expect(previewLine(p.state, p.cells.length, previewCause(p))).toBe('BREAKS 5 · TOO BIG FOR A BARE HAND')
-    expect(smashAsk(read, [1, 2, 0], true, nat)!.words).toMatch(/^This won't compile\. It is too big for a bare hand/)
-    // With the Compiler the six compile as the shape they are: no warning and no question.
+    expect(previewLine(p.state, p.cells.length, previewCause(p))).toBe('BREAKS 5 · TOUCHING A BLOCK')
+    expect(smashAsk(read, [1, 2, 0], true, nat)!.words).toMatch(/^This is the Compiler, but it is touching another block, so it won't compile\./)
+    // With the Compiler the six touch nothing else, so they compile as another shape: a near miss all the same.
     const held = smashPreview(read, [1, 2, 0], false, nat)!
-    expect(previewLine(held.state, held.cells.length, previewCause(held))).toBe('COMPILES')
-    expect(smashAsk(read, [1, 2, 0], false, nat)).toBeNull()
+    expect(previewLine(held.state, held.cells.length, previewCause(held))).toBe('COMPILES · TOUCHING A BLOCK')
+    expect(smashAsk(read, [1, 2, 0], false, nat)!.words).toMatch(/^This is the Compiler, but it is touching another block, so it won't make the Compiler\./)
   })
 })
 
-describe('a near miss only when the struck build is exactly a recipe\'s blocks (coordinator\'s ruling)', () => {
-  it('a larger player build holding the T\'s shape: no near miss and no recipe question, in either hand', () => {
-    const m = t([0, 1, 0], true) // turned, so alone it would be TURNED THE WRONG WAY
-    m.set(key([0, 4, 1]), FERROVEIN) // one more block on top of the Glowcore
-    const read = reader(m, ground)
-    expect(nearMiss(read, [0, 2, 1], nat)).toBeNull()
-    const held = smashPreview(read, [0, 2, 1], false, nat)!
-    expect(held.state).toBe('compiles')
-    expect(previewCause(held)).toBeNull()
-    expect(smashAsk(read, [0, 2, 1], false, nat)).toBeNull()
-    // Without the extra block it is the near miss again.
-    m.delete(key([0, 4, 1]))
-    expect(nearMiss(read, [0, 2, 1], nat)?.turned).toBe(true)
+describe('a near miss only when the struck build is a recipe and at most 3 placed blocks besides (coordinator\'s ruling on #973)', () => {
+  /** The T lifted, with `n` placed Gridstone in a row out from the handle's foot, clear of the ground: each touches the build. */
+  const withExtra = (n: number): Read => {
+    const m = t([0, 1, 0])
+    for (let i = 0; i < n; i++) m.set(key([2 + i, 1, 0]), GRIDSTONE)
+    return reader(m, ground)
+  }
+
+  it('3 extra placed blocks: still the T built wrong, TOUCHING A BLOCK', () => {
+    expect(nearMiss(withExtra(3), [1, 2, 0], nat)).toMatchObject({ recipe: 'compiler', touching: 'block' })
+    expect(nearMiss(withExtra(1), [1, 2, 0], nat)?.touching).toBe('block')
+  })
+
+  it('4 extra placed blocks: a player\'s own build that holds the T\'s shape, so no near miss and no recipe question', () => {
+    const read = withExtra(4)
+    expect(nearMiss(read, [1, 2, 0], nat)).toBeNull()
+    expect(previewCause(smashPreview(read, [1, 2, 0], false, nat)!)).toBeNull()
+    // With the Compiler it compiles as the shape it is, so nothing asks.
+    expect(smashAsk(read, [1, 2, 0], false, nat)).toBeNull()
+  })
+
+  it('the same on a turned T: 3 extra warns TURNED THE WRONG WAY, 4 extra says nothing', () => {
+    const turned = (n: number): Read => {
+      const m = t([0, 1, 0], true)
+      for (let i = 0; i < n; i++) m.set(key([0, 4 + i, 1]), FERROVEIN) // a stack on top of the Glowcore
+      return reader(m, ground)
+    }
+    expect(nearMiss(turned(3), [0, 2, 1], nat)?.turned).toBe(true)
+    expect(nearMiss(turned(4), [0, 2, 1], nat)).toBeNull()
   })
 
   it('the recipe\'s materials in a shape that is no turn of it: no near miss', () => {

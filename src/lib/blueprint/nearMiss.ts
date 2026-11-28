@@ -108,12 +108,19 @@ function allPoses(): Array<{ id: RecipeId; name: string; poses: Pose[] }> {
   return poses
 }
 
-/** The most blocks in a game recipe: a build with more is never one (nearMiss). */
+/** The most blocks in a game recipe. */
 const RECIPE_MAX = Math.max(...RECIPES.map((r) => r.recipe.cells.filter((id) => id).length))
+/**
+ * How many placed blocks past a recipe's own its build may hold and still be called a near miss (coordinator's ruling
+ * on #973): a T on a small platform, or with a stray block at a corner, is a recipe built wrong; a build with 4 or
+ * more blocks besides is a player's own build that happens to hold a recipe's shape.
+ */
+export const NEAR_MISS_EXTRA = 3
 
 /**
  * The struck build's blocks, counted by material: the placed blocks (not natural ground) reachable from `hit` through
- * faces, edges and corners. Null past RECIPE_MAX blocks (it is no recipe), or when the hit is natural ground.
+ * faces, edges and corners. Null past RECIPE_MAX + NEAR_MISS_EXTRA blocks (it can be no near miss), or when the hit is
+ * natural ground.
  */
 function placedCounts(read: Read, hit: Cell, natural?: (x: number, y: number, z: number) => boolean): Map<number, number> | null {
   const placed = (x: number, y: number, z: number): boolean => read(x, y, z) !== 0 && !natural?.(x, y, z)
@@ -128,7 +135,7 @@ function placedCounts(read: Read, hit: Cell, natural?: (x: number, y: number, z:
       if (seen.has(k) || !placed(c[0], c[1], c[2])) continue
       seen.add(k)
       q.push(c)
-      if (q.length > RECIPE_MAX) return null
+      if (q.length > RECIPE_MAX + NEAR_MISS_EXTRA) return null
     }
   }
   const out = new Map<number, number>()
@@ -136,12 +143,13 @@ function placedCounts(read: Read, hit: Cell, natural?: (x: number, y: number, z:
   return out
 }
 
-/** Whether counted blocks are exactly a recipe's: the same count of every material, nothing more. */
-function sameCounts(counts: ReadonlyMap<number, number>, recipe: Arrangement): boolean {
+/** Whether counted blocks hold a recipe's: at least its count of every material, and at most NEAR_MISS_EXTRA more blocks. */
+function holdsRecipe(counts: ReadonlyMap<number, number>, recipe: Arrangement): boolean {
   const needs = recipeNeeds(recipe)
-  if (Object.keys(needs).length !== counts.size) return false
-  for (const [id, n] of counts) if (needs[id] !== n) return false
-  return true
+  let need = 0, have = 0
+  for (const [id, n] of Object.entries(needs)) { if ((counts.get(Number(id)) ?? 0) < n) return false; need += n }
+  for (const n of counts.values()) have += n
+  return have - need <= NEAR_MISS_EXTRA
 }
 
 /**
@@ -149,10 +157,10 @@ function sameCounts(counts: ReadonlyMap<number, number>, recipe: Arrangement): b
  * make what it makes; null when no recipe is there, or when it is there and makes it. `natural` says whether a cell is
  * natural ground (TERRAIN's generated ground, unchanged); without it nothing touching counts as the ground.
  *
- * Only when the struck build is the recipe's blocks and no more (coordinator's ruling on #969's follow-ups): the placed
- * blocks connected to the hit, counted by material, must equal the recipe's, so a larger build that holds a recipe's
- * shape, or a recipe with a placed block touching it, is never called a near miss. Natural ground is not part of the
- * build, so a recipe resting on it still is (TOUCHING THE GROUND).
+ * Only when the struck build is the recipe's blocks and at most NEAR_MISS_EXTRA more (coordinator's ruling on #973):
+ * the placed blocks connected to the hit, counted by material, must hold the recipe's, with no more than 3 besides. A
+ * T on a small platform or with a stray block is TOUCHING A BLOCK; a larger build that holds a recipe's shape is never
+ * called a near miss. Natural ground is not part of the build, so a recipe resting on it is TOUCHING THE GROUND.
  */
 export function nearMiss(read: Read, hit: Cell, natural?: (x: number, y: number, z: number) => boolean): NearMiss | null {
   const hitId = read(hit[0], hit[1], hit[2])
@@ -161,7 +169,7 @@ export function nearMiss(read: Read, hit: Cell, natural?: (x: number, y: number,
   if (!counts) return null
   let best: NearMiss | null = null
   for (const r of allPoses()) {
-    if (!sameCounts(counts, RECIPES.find((x) => x.id === r.id)!.recipe)) continue
+    if (!holdsRecipe(counts, RECIPES.find((x) => x.id === r.id)!.recipe)) continue
     for (const pose of r.poses) for (const b of pose.blocks) {
       if (b[3] !== hitId) continue
       const lo = [hit[0] - b[0], hit[1] - b[1], hit[2] - b[2]] as const
@@ -179,9 +187,8 @@ export function nearMiss(read: Read, hit: Cell, natural?: (x: number, y: number,
 
 /**
  * What touches a recipe at `lo`: a block, not one of its own, on a face, edge or corner of one of its blocks (the
- * owner's isolation rule). Since nearMiss asks only when the placed build is the recipe's blocks alone, a placed block
- * touching it makes a bigger build and no near miss, so only natural ground is found here now: "a block" is no longer
- * reached, and kept so the rule reads whole. A block in its box that touches nothing does not count (arrangement.ts).
+ * owner's isolation rule): natural ground is "the ground", any placed block "a block". A block in its box that touches
+ * nothing does not count (arrangement.ts gather).
  */
 function touchOf(read: Read, lo: readonly [number, number, number], pose: Pose, natural?: (x: number, y: number, z: number) => boolean): 'ground' | 'block' | null {
   const mine = new Set(pose.blocks.map(([x, y, z]) => `${x},${y},${z}`))

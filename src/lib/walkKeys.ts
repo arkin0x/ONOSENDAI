@@ -9,21 +9,21 @@
  * keys (W up, S down, R far, F near, Space commit); this map is only read
  * while walking.
  *
- * | Key | Step | The WALK pad's key (hud/TouchControls.tsx walkPad) |
+ * | Key | Step | On a phone |
  * |---|---|---|
- * | W | forward | FORWARD |
- * | S | back | BACKWARD |
- * | A / D | left / right | the side arrows |
- * | Space | up one cell, the view's up | JUMP |
+ * | W | forward | the stick pushed up (hud/WalkStick.tsx) |
+ * | S | back | the stick pushed down |
+ * | A / D | left / right | the stick pushed left or right |
+ * | Space | up one cell, the view's up | JUMP (hud/TouchControls.tsx walkPad) |
  * | C | down one cell, the view's down | DOWN |
  * | R / F | up / down one cell along the camera's own up, as WASD go by the camera | (none) |
- * | W or S with A or D held | 45 degrees to that side of the way you face | FORWARD or BACK held with a side arrow |
+ * | W or S with A or D held | 45 degrees to that side of the way you face | the stick pushed on a diagonal (the nearest of 8 ways, lib/walkStick.ts) |
  *
  * Forward and back go the way you face, snapped to 8 directions: a diagonal
  * when the facing is 22.5 to 45 degrees off the nearest axis, one step on
  * both axes, and a slide along a wall you are angled into
  * (lib/walkSlide.ts); A and D go along the facing's right the same way. The
- * pad's keys do the same. A held key walks from the press on, its own
+ * stick does the same. A held key walks from the press on, its own
  * repeats ignored (store/walkHold.ts, walkHeldDir below).
  *
  * Under GRAVITY (store/useWalk.ts) up is a jump and down does nothing; Z,

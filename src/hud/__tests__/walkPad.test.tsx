@@ -83,7 +83,7 @@ import { useWalk } from '../../store/useWalk'
 import { useShards } from '../../store/useShards'
 import { useViewFly } from '../../lib/viewFly'
 import { walkKeyDown, walkKeysReleased } from '../../hooks/useKeyboard'
-import { walkFacing } from '../../lib/walkEye'
+import { setFingerInput } from '../../hooks/useFingerInput'
 import { currentPadMode } from '../../store/padMode'
 import { viewEarth } from '../HyperspacePanel'
 import { placeSpawn } from '../../store/fixtures/placeSpawn'
@@ -157,24 +157,37 @@ describe('the WALK pad', () => {
     }
   })
 
-  it('has FORWARD, BACKWARD, the sides, JUMP and DOWN, and no scale keys or readout', () => {
+  it('has GRAVITY, JUMP and DOWN, no level keys (the stick took their place, owner 2026-11-28), and no scale keys or readout', () => {
     useWalk.getState().enter()
-    expect(cells()).toEqual(['gravity', 'forward', 'left', 'backward', 'right', 'jump', 'down'])
+    expect(cells()).toEqual(['gravity', 'jump', 'down'])
     expect(drawn().some((b) => b.props.className === 'touchpad__hub')).toBe(false)
-    expect(find('touchpad__key--forward').props.title).toBe('Forward (W)')
-    // Plain forward again: no end zones, and the label says only what it is.
-    expect((find('touchpad__key--forward').props as { 'aria-label'?: string })['aria-label']).toBe('Forward (W)')
-    expect(drawn().some((b) => /touchpad__zone/.test(b.props.className ?? ''))).toBe(false)
-    expect(find('touchpad__key--backward').props.title).toBe('Backward (S)')
-    expect(find('touchpad__key--jump').props.children).toContain('JUMP')
+    expect(drawn().some((b) => /touchpad__key--(forward|backward|left|right)\b/.test(b.props.className ?? ''))).toBe(false)
+    // JUMP and DOWN wear their words under lucide icons.
+    const sub = (cls: string): unknown => (find(cls).props.children as ReactNode[]).find((k) => isValidElement(k) && (k as Btn).props.className === 'touchpad__sub')
+    expect((sub('touchpad__key--jump') as Btn).props.children).toBe('JUMP')
+    expect((sub('touchpad__key--down') as Btn).props.children).toBe('DOWN')
+  })
+
+  it('the walk pad\'s box holds the stick\'s resting place with a finger, and W A S D with a mouse or keys (hooks/useFingerInput.ts)', () => {
+    useWalk.getState().enter()
+    const isType = (name: string) => (b: Btn): boolean => typeof b.type === 'function' && (b.type as { name?: string }).name === name
+    setFingerInput(true)
+    const home = drawn().find(isType('WalkStickHome'))
+    expect(home).toBeTruthy()
+    expect((home!.props as { finger?: boolean }).finger).toBe(true)
+    expect(drawn().some(isType('WalkStickZone'))).toBe(true)
+    setFingerInput(false)
+    expect((drawn().find(isType('WalkStickHome'))!.props as { finger?: boolean }).finger).toBe(false)
+    // No stick zone with a mouse: WASD walks.
+    expect(drawn().some(isType('WalkStickZone'))).toBe(false)
+    useWalk.getState().exit()
+    setFingerInput(true)
+    expect(drawn().some(isType('WalkStickZone'))).toBe(false)
+    expect(drawn().some(isType('WalkStickHome'))).toBe(false)
   })
 
   // Each key from a fresh WALK at the same head, against its keyboard key.
   const pairs: Array<[string, string]> = [
-    ['touchpad__key--forward', 'KeyW'],
-    ['touchpad__key--backward', 'KeyS'],
-    ['touchpad__key--left', 'KeyA'],
-    ['touchpad__key--right', 'KeyD'],
     ['touchpad__key--jump', 'Space'],
     ['touchpad__key--jump', 'KeyR'],
     ['touchpad__key--down', 'KeyC'],
@@ -196,7 +209,7 @@ describe('the WALK pad', () => {
     })
   }
 
-  it('FORWARD and BACKWARD are opposite, and JUMP and DOWN are opposite', () => {
+  it('JUMP and DOWN are opposite', () => {
     const home = S().position
     const delta = (cls: string): bigint[] => {
       useWalk.getState().enter()
@@ -205,27 +218,7 @@ describe('the WALK pad', () => {
       useWalk.getState().exit()
       return [c.x - home.x, c.y - home.y, c.z - home.z]
     }
-    expect(delta('touchpad__key--backward')).toEqual(delta('touchpad__key--forward').map((d) => -d))
     expect(delta('touchpad__key--down')).toEqual(delta('touchpad__key--jump').map((d) => -d))
-  })
-
-  it('FORWARD and BACKWARD go the way you face, as W and S do: at 45 degrees, diagonally, mirrored', () => {
-    const home = S().position
-    const delta = (act: () => void): bigint[] => {
-      useWalk.getState().enter()
-      useCyberspace.setState({ screenAxes: { right: { axis: 'x', dir: 1 }, up: { axis: 'y', dir: 1 }, out: { axis: 'z', dir: 1 } } })
-      const t = Math.PI / 4
-      Object.assign(walkFacing, { valid: true, forward: { x: Math.sin(t), y: 0, z: -Math.cos(t) }, right: { x: Math.cos(t), y: 0, z: Math.sin(t) } })
-      act()
-      const c = S().cursor
-      useWalk.getState().exit()
-      walkFacing.valid = false
-      return [c.x - home.x, c.y - home.y, c.z - home.z]
-    }
-    expect(delta(() => press(find('touchpad__key--forward')))).toEqual([1n, 0n, -1n])
-    expect(delta(() => press(find('touchpad__key--backward')))).toEqual([-1n, 0n, 1n])
-    expect(delta(() => keyDown('KeyW'))).toEqual([1n, 0n, -1n])
-    expect(delta(() => keyDown('KeyS'))).toEqual([-1n, 0n, 1n])
   })
 
   it('under GRAVITY DOWN stays on and says it absorbs a bounce (review of #649), and JUMP says jump', () => {
@@ -242,7 +235,7 @@ describe('the WALK pad', () => {
   })
 })
 
-describe('JUMP and DOWN in their own row, on the right since the swap (arkinox, 2026-11-10; owner, 2026-11-14)', () => {
+describe('GRAVITY, JUMP and DOWN on the right (arkinox, 2026-11-10; owner, 2026-11-14 and 2026-11-28)', () => {
   /** The keys drawn inside the element with class `cls`. */
   const inside = (cls: string): string[] => {
     const box = find(cls)
@@ -258,62 +251,93 @@ describe('JUMP and DOWN in their own row, on the right since the swap (arkinox, 
     return out
   }
 
-  it('JUMP and DOWN are in their own cluster, and the pad keeps GRAVITY, FORWARD, the sides and BACK', () => {
+  it('GRAVITY, JUMP and DOWN are in the right cluster, and the walk pad holds no key', () => {
     useWalk.getState().enter()
-    expect(inside('walkside')).toEqual(['jump', 'down'])
-    expect(inside('touchpad')).toEqual(['gravity', 'forward', 'left', 'backward', 'right'])
+    expect(inside('walkside')).toEqual(['gravity', 'jump', 'down'])
+    expect(inside('touchpad')).toEqual([])
   })
 
-  it('under GRAVITY too, and no JUMP row outside WALK or while placing', () => {
+  it('under GRAVITY too; no JUMP or DOWN while placing; no cluster outside WALK', () => {
     useWalk.getState().enter()
     useWalk.getState().setGravity(true)
-    expect(inside('walkside')).toEqual(['jump', 'down'])
+    expect(inside('walkside')).toEqual(['gravity', 'jump', 'down'])
     useShards.setState({ pending: { type: 'message', text: 'hi' } })
+    expect(cells()).not.toContain('jump')
     expect(drawn().some((b) => b.props.className === 'walkside')).toBe(false)
     useShards.getState().cancelDeploy()
     useWalk.getState().exit()
     expect(drawn().some((b) => b.props.className === 'walkside')).toBe(false)
   })
 
-  it('the stylesheet mirrors WALK: the walk pad on the left over the menu button, JUMP and DOWN on the right at the pad\'s height (lifted with it), the LOOK ball above them, and the pad without a JUMP row', () => {
+  it('the stylesheet: the stick\'s place on the left over the menu button; on the right GRAVITY directly over the commit block, a clear gap, then round JUMP and DOWN on a thumb\'s arc, DOWN lower and outboard, and the LOOK ball above', () => {
     const css = readFileSync(resolve(__dirname, '../../styles.css'), 'utf8')
     const rule = (sel: string): string => {
       const at = css.indexOf(`\n${sel} {`)
-      expect(at).toBeGreaterThan(-1)
+      expect(at, sel).toBeGreaterThan(-1)
       return css.slice(at, css.indexOf('}', at))
     }
+    const px = (name: string): number => Number(new RegExp(`${name}: (\\d+)px;`).exec(css)?.[1])
     // Owner, 2026-11-14: movement on the left, look and jump on the right.
     expect(rule('.touchpad--mode-walk')).toContain('left: var(--walkpad-left);')
     expect(rule('.touchpad--mode-walk')).toContain('right: auto;')
+    // The box takes no touch: the stick's zone under it does.
+    expect(rule('.touchpad--mode-walk')).toContain('pointer-events: none;')
     expect(css).toContain('--walkpad-left: var(--menu-left);')
-    // Right of the HOSAKA mark while it breathes over the menu button.
     expect(rule('.app:has(.hosaka-pulse)')).toContain('--walkpad-left: calc(var(--menu-left) + var(--menu-size) + var(--routeov-gap));')
-    // Only WALK's pad: every other mode keeps the shared right edge.
     expect(rule('.touchpad,\n.touchops')).toContain('right: var(--controls-right);')
-    // After the shared rule, or its right edge would win and stretch the walk pad between the two.
     expect(css.indexOf('\n.touchpad--mode-walk {')).toBeGreaterThan(css.indexOf('\n.touchpad,\n.touchops {'))
+    // The zone: under every button (the pad is 103, the LOOK ball 100), on the left only.
+    expect(rule('.walkstick')).toContain('z-index: 99;')
+    expect(rule('.walkstick')).toContain('left: 0;')
+    expect(rule('.walkstick')).toContain('touch-action: none;')
+    expect(rule('.walkstick')).toContain('width: min(50vw, 340px);')
+    // The right cluster: the controls' edge and width, lifted over the commit block.
     expect(rule('.walkside')).toContain('right: var(--controls-right);')
     expect(rule('.walkside')).not.toContain('left:')
-    expect(rule('.walkside')).toContain('bottom: var(--walkside-bottom);')
-    expect(rule('.walkside')).toContain('grid-template-areas: "down jump jump";')
-    expect(css).not.toContain('.app:has(.hosaka-pulse) .walkside')
+    expect(rule('.walkside')).toContain('bottom: calc(var(--walkside-bottom) + var(--walkside-lift));')
+    expect(rule('.walkside')).toContain('width: var(--walkside-width);')
     expect(css).toContain('--walkside-bottom: 92px;')
-    // The pad's own bottom, which JUMP and DOWN sat on, and the walk pad still does.
     expect(rule('.touchpad')).toContain('bottom: 92px;')
-    // The LOOK ball on the right: at the pad's height, a gap above JUMP and DOWN while they are drawn.
+    // The commit block is 14 + 40 + 4 + 26 = 84px tall: GRAVITY directly over it, the block's own 4px gap
+    // (owner, 2026-11-28: "The gravity button should go directly above the mode buttons and then have a gap
+    // between it and the jump and down buttons"), JUMP and DOWN 24px or more over GRAVITY.
+    expect(css).toContain('.touchops {\n  bottom: 14px;\n  display: grid;\n  grid-template-columns: 56px 62px;\n  grid-template-rows: 40px 26px;')
+    expect(css).toContain('--walkside-lift: -4px;')
+    expect(92 - 4 - (14 + 40 + 4 + 26)).toBe(4)
+    expect(px('--arc-gap')).toBeGreaterThanOrEqual(24)
+    // Round, larger than the old 38px keys, JUMP the larger and higher, inboard; DOWN lower and outboard.
+    const last = (sel: string): string => { const at = css.lastIndexOf(`\n${sel} {`); return css.slice(at, css.indexOf('}', at)) }
+    const jump = last('.walkside .touchpad__key--jump')
+    const down = last('.walkside .touchpad__key--down')
+    expect(rule('.walkside .touchpad__key--jump,\n.walkside .touchpad__key--down')).toContain('border-radius: 50%;')
+    expect(jump).toContain('left: 0;')
+    expect(jump).toContain('bottom: calc(var(--gravity-h) + var(--arc-gap) + var(--jump-rise));')
+    expect(down).toContain('right: 0;')
+    expect(down).toContain('bottom: calc(var(--gravity-h) + var(--arc-gap));')
+    expect(px('--jump-size')).toBeGreaterThanOrEqual(60)
+    expect(px('--down-size')).toBeGreaterThan(38)
+    expect(px('--down-size')).toBeLessThanOrEqual(px('--jump-size'))
+    expect(px('--jump-rise')).toBeGreaterThan(0)
+    // The two circles do not touch: JUMP's centre (r, rise + r), DOWN's (W - d, d) in the 122px column.
+    const j = px('--jump-size') / 2
+    const d = px('--down-size') / 2
+    const gap = Math.hypot((122 - d) - j, (px('--jump-rise') + j) - d) - j - d
+    expect(gap).toBeGreaterThanOrEqual(6)
+    // GRAVITY across the bottom of the column, over the commit block, the arc gap under JUMP and DOWN.
+    expect(rule('.walkside .touchpad__key--gravity')).toContain('bottom: 0;')
+    expect(css).toContain('--walkside-h: calc(var(--gravity-h) + var(--arc-gap) + var(--jump-rise) + var(--jump-size));')
+    // SPACE and C printed with a mouse only.
+    expect(css).toContain('@media (hover: hover) and (pointer: fine) {\n  .walkside .touchpad__key--jump .touchpad__keyhint,')
+    // The LOOK ball a gap above the cluster; beside it on a short screen.
     expect(rule('.orbsquare.walklook')).toContain('right: var(--controls-right);')
-    expect(rule('.orbsquare.walklook')).not.toContain('left:')
-    expect(rule('.orbsquare.walklook')).toContain('bottom: var(--walkside-bottom);')
-    expect(rule('.app:has(.walkside) .orbsquare.walklook')).toContain('bottom: calc(var(--walkside-bottom) + var(--walkside-key) + var(--routeov-gap));')
+    expect(rule('.orbsquare.walklook')).toContain('bottom: calc(var(--walkside-bottom) + var(--walkside-lift) + var(--walkside-h) + var(--routeov-gap));')
+    expect(css).toContain('@media (max-height: 520px) {\n  .orbsquare.walklook {\n    right: calc(var(--controls-right) + var(--walkside-width) + var(--routeov-gap));\n    bottom: max(calc(50% + 18px), calc(var(--walkside-bottom) + var(--walkside-lift)));')
     expect(css).not.toContain('.app:has(.hosaka-pulse) .walklook')
-    // The open chat (from 641px wide) starts past the walk pad.
     expect(css).toContain('.app:has(.touchpad--mode-walk) .chatdock {\n    left: calc(var(--walkpad-left) + var(--controls-width) + var(--routeov-gap) + var(--hud-mid));')
-    expect(css).not.toContain('.app:has(.walkside) .chatdock')
-    // The pad lifted for the chain status strip: the row, and the ball on it, go up with it.
     expect(rule('.app:has(.touchpad.is-lifted)')).toContain('--walkside-bottom: 116px;')
     expect(css).toContain('.touchpad.is-lifted {\n  bottom: 116px;')
-    expect(rule('.touchpad--mode-walk')).not.toContain('jump')
-    expect(css).not.toContain('.touchpad__zone')
+    // Reduced motion: nothing of the stick fades.
+    expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\) \{\n  \.walkstick__base,/)
   })
 })
 

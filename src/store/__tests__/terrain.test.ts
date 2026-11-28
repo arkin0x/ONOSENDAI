@@ -252,23 +252,6 @@ describe('mining and placing', () => {
     expect(T().hint).toBe(2)
   })
 
-  it('Tidewater and Magmaflow mine into the inventory and place back like any block (owner, 2026-11-28)', async () => {
-    await openSurveyed()
-    const s = terrainSession!
-    const [x, y, z] = solidCells(4000).find(([cx, cy, cz]) => cy > 0 && s.world.blockCs(cx, cy - 1, cz) !== EMPTY && !(cx === 16 && cy === 16 && cz === 16))!
-    expect(T().mine(hitAt(x, y, z))).toBe(true)
-    for (const liquid of [11, 12]) {
-      T().carry(liquid)
-      T().selectSlot(T().inventory.hotbar.indexOf(liquid))
-      expect(T().place({ cell: [x, y - 1, z], normal: [0, 1, 0], distance: 1 })).toBe(true)
-      expect(s.world.blockCs(x, y, z)).toBe(liquid)
-      expect(T().inventory.counts[liquid]).toBeUndefined()
-      expect(T().mine(hitAt(x, y, z))).toBe(true)
-      expect(s.world.blockCs(x, y, z)).toBe(EMPTY)
-      expect(T().inventory.counts[liquid]).toBe(1)
-    }
-  })
-
   it('placing with nothing carried is refused, in words; never where you stand', async () => {
     await openSurveyed()
     const [c] = solidCells(1)

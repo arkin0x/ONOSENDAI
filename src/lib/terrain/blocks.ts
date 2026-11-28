@@ -87,11 +87,6 @@ export function solid(id: number): boolean {
   return id !== EMPTY && !DECK_TO_KIND[id]?.passable
 }
 
-/** Whether a cell with this id is a liquid (Tidewater, Magmaflow): a block there, but walked through. */
-export function liquid(id: number): boolean {
-  return !!DECK_TO_KIND[id]?.passable
-}
-
 /** Whether a cell with this id is seen through (drawn in the see-through pass). */
 export function clear(id: number): boolean {
   return !!DECK_TO_KIND[id]?.clear

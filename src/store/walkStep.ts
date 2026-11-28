@@ -14,7 +14,7 @@
  * Standing means a blocking face is less than a gibson below you, which is
  * where the constraint stops a walker coming down onto a floor, and where
  * the Maze Kit puts its avatar ("one gibson above the sill"). Only while you
- * stand does a level press (X or Z) do more than it did:
+ * stand, and only under GRAVITY, does a level press (X or Z) do more than it did:
  *
  * | Case | What the press does |
  * |---|---|
@@ -22,7 +22,17 @@
  * | a blocking face is in the way | the same step lifted by 1 gibson, else by 2: the lift must be clear (headroom), the step at the lifted height must be clear, and you must stand where it lands (on top of what was in the way); the smallest lift whose step is clear is taken |
  * | no lift up to 2 works | the step stops short, as before: a wall, a riser of 3 or more, a ceiling in the way, or a parapet or a rail with nothing to stand on beyond it |
  * | after the step a blocking floor is 1 or 2 gibsons further down than standing height | it settles onto it, so you are standing again |
- * | no blocking floor within that | you stay at your height, as before: this is not gravity |
+ * | no blocking floor within that | you stay at your height, as before |
+ *
+ * With GRAVITY off you fly, and a level press keeps your height (arkinox,
+ * 2026-11-28: "When I have gravity off, when I am flying near blocks
+ * underneath me, I seem to stick to them and I fall into holes, even though
+ * gravity is off"): the step is exactly the one stepLimit gives, with no
+ * settle down onto a floor or into a hole, and no lift up onto what is in
+ * the way either. A block in the way holds you at its face, as a wall does,
+ * and Up (Space) takes you over it: a lift you did not ask for is a change of
+ * height in flight, the same surprise as a settle, and with Up a key away it
+ * saves nothing. Floors and walls still hold, as every face does.
  *
  * A press of 2 to 16 gibsons (zoom 2^1 to 2^4, up to one tile) is walked
  * here as 1-gibson substeps, each with its step-up and step-down, so a coarse
@@ -51,8 +61,7 @@
  *
  * Up, down, the floor and the lift are along the walker's gravity, `down`
  * (lib/walkDown.ts: the axis nearest the screen's down, arkinox
- * 2026-11-10), cyberspace -Y unless the view is turned. With gravity off it
- * is always -Y, as it was.
+ * 2026-11-10), cyberspace -Y unless the view is turned.
  */
 
 import { clampAxis, type AxisDirection, type AxisName, type Position } from '../lib/space'
@@ -141,12 +150,14 @@ function settled(at: Position, items: readonly WallItem[], gravity: boolean, dow
 /**
  * Where a WALK press of `length` gibsons from `from`, along `axis` in
  * direction `dir`, goes among `items`: the walls' stop short, with the
- * step-up and step-down above while you stand on a blocking floor and step
- * level. With `gravity`, a press off an edge stops on the first gibson past it.
- * `down` is the walker's gravity: a press along its axis is the plain step.
+ * step-up and step-down above under `gravity` while you stand on a blocking
+ * floor and step level, and a press off an edge stopping on the first gibson
+ * past it. With gravity off, always the walls' stop short: you keep your
+ * height. `down` is the walker's gravity: a press along its axis is the
+ * plain step.
  */
 export function walkStep(from: Position, axis: AxisName, dir: 1 | -1, length: bigint, items: readonly WallItem[], gravity = false, down: AxisDirection = WORLD_DOWN): WalkStep {
-  if (axis === down.axis || length > STEP_SUBSTEP_MAX || !standing(from, items, gravity, down)) {
+  if (!gravity || axis === down.axis || length > STEP_SUBSTEP_MAX || !standing(from, items, gravity, down)) {
     const wall = stepLimit(from, axis, dir, length, items)
     return stopOf(moved(from, axis, dir, wall.reach), wall)
   }
@@ -160,16 +171,9 @@ export function walkStep(from: Position, axis: AxisName, dir: 1 | -1, length: bi
     if (next === null) return lift?.lid ? { to: at, by: lift.lid } : stopOf(at, ahead)
     const floor = settled(next, items, gravity, down)
     at = floor.at
-    // Off an edge higher than a step-down, with no floor near: the rest of
-    // the press is the plain step, at this height. Under gravity the press
-    // ends here instead, and the fall starts from this gibson.
-    if (!floor.standing) {
-      if (gravity) break
-      const rest = length - n - 1n
-      if (rest === 0n) break
-      const wall = stepLimit(at, axis, dir, rest, items)
-      return stopOf(moved(at, axis, dir, wall.reach), wall)
-    }
+    // Off an edge higher than a step-down, with no floor near: the press
+    // ends here, and the fall starts from this gibson.
+    if (!floor.standing) break
   }
   return { to: at, by: null }
 }

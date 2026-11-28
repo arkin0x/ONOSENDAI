@@ -39,12 +39,14 @@
  * at a coarse one), or, with no room left, does not step at all. Only a press asks; HOP, VIEW and BUILD never do, and nothing about
  * a move that is proved or signed changes.
  *
- * Standing on such a shard, a level press climbs a riser of up to 2
+ * Under GRAVITY, standing on such a shard, a level press climbs a riser of up to 2
  * gibsons and settles onto a floor up to 2 below (store/walkStep.ts, arkinox
  * 2026-10-23), so a stair is one press per gibson forward. The segment is
  * then one heading that rises and falls, still published as one straight
  * hop: a flight of stairs is one event instead of one per turn, at the same
- * work per axis (spec §4.8). Off a floor, nothing changes: this is not gravity.
+ * work per axis (spec §4.8). Off a floor, nothing changes. With gravity off
+ * you fly and keep your height: no climb and no settle, only the walls
+ * (arkinox, 2026-11-28).
  *
  * Forward and backward go the way you face, snapped to 8 directions
  * (arkinox, RULED 2026-11-03; lib/walkSlide.ts, where the whole decision
@@ -455,7 +457,7 @@ export const useWalk = create<WalkState>((set, get) => ({
     const items = wallItemsAt(cs.plane, from)
     // A shard that constrains WALK (DECK-0003 §1.12, store/walkWalls.ts):
     // the step stops short of its face (a gibson short at a fine zoom), or does not go.
-    // Standing on such a shard, a level step also climbs what is in its way
+    // Under gravity, standing on such a shard, a level step also climbs what is in its way
     // (2 gibsons at most) and settles onto a floor up to 2 below (store/walkStep.ts).
     const stepAlong = stepperFor(items, gravity, g)
     takeWallWait()

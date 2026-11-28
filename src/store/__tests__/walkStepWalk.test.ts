@@ -2,9 +2,11 @@
  * walkStepWalk.test.ts - the step-up in the walk store: a flight of Maze Kit
  * stairs, walked with one key at one press per gibson, is ONE open segment
  * and ONE hop on the chain, straight from the foot to the head (the same
- * work per axis as its steps would cost, in fewer events); a riser of 3 is a
- * WALL; a stair without collision is walked through at the same height; and
- * a press up or down still turns, closing the segment as before.
+ * work per axis as its steps would cost, in fewer events), under GRAVITY;
+ * with gravity off the stair is flown, at your height, never climbed or
+ * settled down; a riser of 3 is a WALL; a stair without collision is walked
+ * through at the same height; and a press up or down still turns, closing
+ * the segment as before.
  */
 import { provedFor } from '../fixtures/provedHop'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -77,6 +79,7 @@ describe('WALK up a stair', () => {
   beforeEach(async () => {
     posted.length = 0
     useWalk.getState().exit()
+    useWalk.getState().setGravity(false)
     useShards.setState({ worldItems: worldItemsOriginal })
     clearWalls()
     useCyberspace.setState({ cloudPrefs: { ...useCyberspace.getState().cloudPrefs, mode: 'off' }, scaleExp: 0 })
@@ -90,6 +93,8 @@ describe('WALK up a stair', () => {
   it('the grand stair: one key, one press per gibson, one segment, one hop', async () => {
     // The walker at the stair's foot doorway: x 0, standing on the floor (y -8) at z 8.
     world(start, stair(), [0, 7, -8])
+    // The step-up and step-down are gravity's (store/walkStep.ts).
+    useWalk.getState().setGravity(true)
     useWalk.getState().enter()
     useCyberspace.setState({ screenAxes: AXES })
     for (let k = 1; k <= 16; k++) {
@@ -118,12 +123,35 @@ describe('WALK up a stair', () => {
   it('and down again: the same one segment, settling onto every tread', async () => {
     // The walker at the head: standing on the top landing (y 8) at z -8.
     world(start, stair(), [0, -9, 8])
+    useWalk.getState().setGravity(true)
     useWalk.getState().enter()
     useCyberspace.setState({ screenAxes: AXES })
     for (let k = 0; k < 16; k++) useWalk.getState().press('toward')
     expect(moved(start)).toEqual([0, -16, 16])
     expect(useWalk.getState().queue).toHaveLength(0)
     expect(useWalk.getState().open).toMatchObject({ axis: 'z', dir: 1, from: start })
+  })
+
+  it('gravity off, the stair is flown, not climbed: the first riser holds you at your height, and down from the head you fly on level', () => {
+    world(start, stair(), [0, 7, -8])
+    useWalk.getState().enter()
+    useCyberspace.setState({ screenAxes: AXES })
+    for (let k = 0; k < 16; k++) useWalk.getState().press('away')
+    const up = moved(start)
+    expect(up[1]).toBe(0)
+    expect(up[2]).toBeGreaterThan(-16)
+    expect(useToast.getState().toast).toMatchObject({ label: 'WALL' })
+    useWalk.getState().exit()
+    useToast.setState({ toast: null })
+    // At the head, on the top landing: off its edge the walk goes on at the same height, over the stair.
+    world(start, stair(), [0, -9, 8])
+    useCyberspace.setState({ cursor: { ...start } })
+    useWalk.getState().enter()
+    useCyberspace.setState({ screenAxes: AXES })
+    for (let k = 0; k < 16; k++) useWalk.getState().press('toward')
+    // Out over the flight (it starts a gibson ahead), never down onto a tread.
+    expect(moved(start)[1]).toBe(0)
+    expect(moved(start)[2]).toBeGreaterThanOrEqual(8)
   })
 
   it('a press up turns, and closes the segment, as before', () => {

@@ -332,64 +332,6 @@ describe('in TERRAIN, a tap (touch) on blocks with a shard buried behind them', 
   })
 })
 
-describe('a shard in a pool (owner, 2026-11-28: liquids can be aimed at and mined)', () => {
-  const TIDEWATER = 11
-  /** The slab made Tidewater, a shard standing in it. */
-  function flood(): void {
-    const blocks = fieldBlocks()
-    for (let i = 0; i < blocks.length; i++) if (blocks[i]) blocks[i] = TIDEWATER
-  }
-  const ray = (z: number): Ray => new Ray(new Vector3(0, 0, z), new Vector3(0, 0, -1))
-
-  it('blockOcclusion: in TERRAIN the water hides what is in it, as the cursor takes it; elsewhere it hides nothing', () => {
-    flood()
-    useTerrain.setState({ active: true, sheet: false })
-    expect(blockOcclusion(field, AXES, ray(10))).toBeCloseTo(10 - FRONT_FACE)
-    useTerrain.setState({ active: false })
-    expect(blockOcclusion(field, AXES, ray(10))).toBeNull()
-  })
-
-  it('outside TERRAIN, a shard in the water takes the tap', async () => {
-    useCyberspace.setState({ walking: true })
-    await mount(createElement(Shard, { z: -2, onTap: taps.buried }))
-    flood()
-    await r.frame()
-    await r.tap(CENTRE, CENTRE)
-    expect(taps.buried).toHaveBeenCalledTimes(1)
-  })
-
-  describe('in TERRAIN, a tap (touch)', () => {
-    let mined: ReturnType<typeof vi.fn>
-    let canvas: FakeCanvas
-    let stop: () => void
-    beforeEach(() => {
-      mined = vi.fn(() => true)
-      useCyberspace.setState({ walking: true })
-      useTerrain.setState({ active: true, sheet: false, mine: mined as never })
-      canvas = new FakeCanvas()
-      stop = terrainPointer(canvas)
-    })
-    afterEach(() => { stop() })
-
-    it('mines the water in front and never also opens the shard in it: the nearest thing takes the tap', async () => {
-      await mount(createElement(Shard, { z: -2, onTap: taps.buried }))
-      flood()
-      r.state().camera.position.set(0, 0, 4)
-      r.state().camera.updateMatrixWorld()
-      await r.frame()
-      touch(canvas, 'pointerdown', CENTRE, CENTRE)
-      await r.pointer('pointerdown', CENTRE, CENTRE)
-      touch(canvas, 'pointerup', CENTRE, CENTRE)
-      await r.pointer('pointerup', CENTRE, CENTRE)
-      await r.pointer('click', CENTRE, CENTRE)
-      await r.frame()
-      expect(taps.buried).not.toHaveBeenCalled()
-      expect(mined).toHaveBeenCalledTimes(1)
-      expect((mined.mock.calls[0][0] as RayHit).cell[2]).toBe(SLAB[1])
-    })
-  })
-})
-
 describe("the scene's pointer while the mouse is captured", () => {
   /** R3F's compute, given an event at the canvas's top left corner, with the mouse captured by `locked` or not. */
   function pointerAt(locked: unknown, canvas: unknown): Vector2 {

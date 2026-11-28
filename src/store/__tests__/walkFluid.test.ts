@@ -9,6 +9,8 @@
  * - the jump still rises 5 and the double jump 3;
  * - a wall at an angle is slid along, and the anchor never enters it;
  * - a ramp is walked up standing on it, a step at a time;
+ * - with gravity off it flies at its height: no settle into a hole, no climb
+ *   onto a riser, held at walls and floors (arkinox, 2026-11-28);
  * - crossing N gibsons makes N legal steps, in order, proved as a chain;
  * - fluid WALK pauses itself 21 events ahead and comes back on at 15 if it
  *   was on, a switch by hand wins, the sync limit off means no pause, the
@@ -286,6 +288,72 @@ describe('gravity off: forward follows the whole look (arkinox, 2026-11-27)', ()
     expect(at[1]).toBeGreaterThan(2)
     expect(at[2]).toBeLessThan(-2)
     expect(Math.abs(Math.abs(at[1]) - Math.abs(at[2]))).toBeLessThanOrEqual(2)
+  })
+})
+
+describe('gravity off: flying keeps its height over blocks (arkinox, 2026-11-28: "I seem to stick to them and I fall into holes, even though gravity is off")', () => {
+  /** Facing -Z, pitched `deg` degrees down. */
+  function lookDown(deg: number): void {
+    const r = (deg * Math.PI) / 180
+    walkFacing.forward = { x: 0, y: -Math.sin(r), z: -Math.cos(r) }
+    walkFacing.right = { x: 1, y: 0, z: 0 }
+    walkFacing.valid = true
+  }
+
+  /** Hold W for `ms`, then let go and rest: every anchor height on the way, from `start`. */
+  function hold(ms: number): Set<number> {
+    const ys = new Set<number>()
+    down('KeyW')
+    for (let t = 0; t < ms; t += 16) { frame(16); ys.add(rel(start)[1]) }
+    up('KeyW')
+    for (let t = 0; t < 500; t += 16) { frame(16); ys.add(rel(start)[1]) }
+    return ys
+  }
+
+  it('a gibson over a floor with holes 1 and 2 deep and a riser 1 high: no settle, no snap, held by the riser', async () => {
+    // A floor 1 under the walker (it stands), cut 1 deep from z -2 to -4 and 2 deep from -5 to -7, then a riser 1 high from -9.
+    world(start,
+      [boxes('Floor', 'all', [[[-40, -2, -2], [40, -1, 40]], [[-40, -3, -4], [40, -2, -2]], [[-40, -2, -5], [40, -1, -4]], [[-40, -4, -7], [40, -3, -5]], [[-40, -2, -40], [40, -1, -7]]]), [0, 0, 0]],
+      [boxes('Riser', 'all', [[[-40, -1, -40], [40, 0, -9]]]), [0, 0, 0]],
+    )
+    face(0)
+    walk(false)
+    await wallsBuilt()
+    expect(standing(start, wallItemsAt(useCyberspace.getState().plane, start))).toBe(true)
+    const ys = hold(2500)
+    expect([...ys]).toEqual([0])
+    // Held by the riser's face, a gibson short of it: never on top of it.
+    expect(rel(start)[2]).toBe(-8)
+    expect(fallState()).toBeNull()
+  })
+
+  it('looking down, forward flies down along the look and stops on the floor, never into it', async () => {
+    world(start, [boxes('Floor', 'all', [[[-40, -4, -40], [40, -3, 40]]]), [0, 0, 0]])
+    walk(false)
+    await wallsBuilt()
+    lookDown(45)
+    hold(3000)
+    const c = rel(start)
+    // Down to standing over the floor (its top at -3), and on along -Z while it went.
+    expect(c[1]).toBe(-2)
+    expect(c[2]).toBeLessThan(-2)
+    const cur = useCyberspace.getState().cursor
+    expect(stepLimit(cur, 'y', -1, 1n, wallItemsAt(useCyberspace.getState().plane, cur)).reach).toBe(0n)
+  })
+
+  it('under gravity the same holes are stepped down into and the riser climbed, as before', async () => {
+    world(start,
+      [boxes('Floor', 'all', [[[-40, -2, -2], [40, -1, 40]], [[-40, -3, -4], [40, -2, -2]], [[-40, -2, -40], [40, -1, -4]]]), [0, 0, 0]],
+      [boxes('Riser', 'all', [[[-40, -1, -40], [40, 0, -6]]]), [0, 0, 0]],
+    )
+    face(0)
+    walk(true)
+    await wallsBuilt()
+    const ys = hold(2500)
+    // Down into the dip (-1), and up onto the riser (+1).
+    expect(ys.has(-1)).toBe(true)
+    expect(rel(start)[1]).toBe(1)
+    expect(rel(start)[2]).toBeLessThan(-6)
   })
 })
 

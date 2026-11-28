@@ -20,6 +20,13 @@
  *   still compiles, in either hand, as the arrangement it is, but it
  *   is not the recipe and makes nothing unless someone made a blueprint of
  *   that shape: it is a near miss all the same (review of #969).
+ * - wrong: the recipe's shape, every cell filled, but a block or two of the
+ *   wrong kind (owner's third smash, 2026-11-28: a Rustband where the
+ *   Quarry Charge's top Umberslate goes). It compiles, in either hand, as the
+ *   arrangement it is, and makes nothing: the preview said plain COMPILES.
+ *   At most WRONG_MAX(recipe) blocks may differ (one in the Compiler's five,
+ *   two in the Quarry Charge's seven), so a build of the same shape in other
+ *   blocks is not called a near miss.
  *
  * And for any build, not only the game's: too big for a bare hand, an
  * isolated construction longer than a bare hand's reach of 3 on some axis
@@ -59,6 +66,8 @@ export interface NearMiss {
   turned: boolean
   /** What touches it: natural ground, another block, or nothing. */
   touching: 'ground' | 'block' | null
+  /** Blocks of the wrong kind in the recipe's shape: what is there, and what goes there. Empty when every block is right. */
+  wrong: Array<{ is: number; should: number }>
 }
 
 /** One orientation of a recipe: its blocks as offsets from its box's low corner, its size, and whether it is turned. */
@@ -100,6 +109,11 @@ export function posesOf(recipe: Arrangement): Pose[] {
     out.push({ size: a.size, blocks: blocksOf(a), turned: !sameArrangement(a, recipe) })
   }
   return out
+}
+
+/** The most wrong blocks a build of a recipe's shape may have and still be called that recipe: one in five, two in seven. */
+export function wrongMax(pose: Pick<Pose, 'blocks'>): number {
+  return Math.floor((pose.blocks.length - 1) / 3)
 }
 
 let poses: Array<{ id: RecipeId; name: string; poses: Pose[] }> | null = null
@@ -177,10 +191,32 @@ export function nearMiss(read: Read, hit: Cell, natural?: (x: number, y: number,
       const touching = touchOf(read, lo, pose, natural)
       // Isolated and the right way round: it compiles in either hand (every game recipe fits a bare hand's reach).
       if (!touching && !pose.turned) return null
-      const m: NearMiss = { recipe: r.id, name: r.name, turned: pose.turned, touching }
+      const m: NearMiss = { recipe: r.id, name: r.name, turned: pose.turned, touching, wrong: [] }
       // The right way round wins over a turned reading of the same blocks.
       if (!best || (best.turned && !m.turned)) best = m
     }
+  }
+  return best ?? wrongBlocks(read, hit, natural)
+}
+
+/**
+ * A recipe's shape at `hit` with every cell filled but a block or two of the wrong kind (at most wrongMax), the hit
+ * one of its cells whatever it holds; null when none. Fewest wrong blocks first, then the right way round.
+ */
+function wrongBlocks(read: Read, hit: Cell, natural?: (x: number, y: number, z: number) => boolean): NearMiss | null {
+  let best: NearMiss | null = null
+  for (const r of allPoses()) for (const pose of r.poses) for (const b of pose.blocks) {
+    const lo = [hit[0] - b[0], hit[1] - b[1], hit[2] - b[2]] as const
+    const wrong: Array<{ is: number; should: number }> = []
+    let filled = true
+    for (const [x, y, z, id] of pose.blocks) {
+      const v = read(lo[0] + x, lo[1] + y, lo[2] + z)
+      if (!v) { filled = false; break }
+      if (v !== id) wrong.push({ is: v, should: id })
+    }
+    if (!filled || !wrong.length || wrong.length > wrongMax(pose)) continue
+    const m: NearMiss = { recipe: r.id, name: r.name, turned: pose.turned, touching: touchOf(read, lo, pose, natural), wrong }
+    if (!best || wrong.length < best.wrong.length || (wrong.length === best.wrong.length && best.turned && !m.turned)) best = m
   }
   return best
 }
@@ -225,14 +261,15 @@ export function tooBigBare(read: Read, hit: Cell, bare: boolean, g: Pick<Gathere
 }
 
 /** The one cause the preview names, most important first. */
-export type MissCause = 'turned' | 'ground' | 'block' | 'big'
+export type MissCause = 'wrong' | 'turned' | 'ground' | 'block' | 'big'
 
 export function missCause(m: NearMiss): MissCause {
-  return m.turned ? 'turned' : m.touching === 'ground' ? 'ground' : 'block'
+  return m.wrong.length ? 'wrong' : m.turned ? 'turned' : m.touching === 'ground' ? 'ground' : 'block'
 }
 
 /** The preview's tail after BREAKS (or COMPILES) and the count. */
 export const CAUSE_WORDS: Readonly<Record<MissCause, string>> = {
+  wrong: 'A BLOCK IS WRONG',
   turned: 'TURNED THE WRONG WAY',
   ground: 'TOUCHING THE GROUND',
   block: 'TOUCHING A BLOCK',
@@ -245,6 +282,14 @@ export const TOO_BIG_LINE = 'Nothing compiled. That build is too big for a bare 
 /** Why a near miss will not compile, in the past (after the smash) or the present (before it). */
 function reasons(m: NearMiss, past: boolean): string {
   const why: string[] = []
+  // The same wrong block in the same kind's places, said once: "two Rustbands were where Umberslates go".
+  const same = new Map<string, { is: number; should: number; n: number }>()
+  for (const w of m.wrong) { const k = `${w.is}>${w.should}`; const e = same.get(k); if (e) e.n++; else same.set(k, { ...w, n: 1 }) }
+  for (const w of same.values()) {
+    why.push(w.n === 1
+      ? `${article(blockName(w.is))} ${past ? 'was' : 'is'} where ${article(blockName(w.should))} goes`
+      : `${countWord(w.n)} ${plural(blockName(w.is))} ${past ? 'were' : 'are'} where ${plural(blockName(w.should))} go`)
+  }
   if (m.turned) why.push(past ? 'it was turned the wrong way' : 'it is turned the wrong way')
   if (m.touching === 'ground') why.push(past ? 'it touched the ground' : 'it is touching the ground')
   if (m.touching === 'block') why.push(past ? 'it touched another block' : 'it is touching another block')
@@ -253,14 +298,35 @@ function reasons(m: NearMiss, past: boolean): string {
 
 /** How to build it so it compiles. */
 function fixOf(m: NearMiss): string {
-  return m.turned && m.touching ? ' Build it as the card shows, with a gap all round.'
-    : m.turned ? ' Build it as the card shows.'
+  const asCard = m.turned || m.wrong.length > 0
+  return asCard && m.touching ? ' Build it as the card shows, with a gap all round.'
+    : asCard ? ' Build it as the card shows.'
       : ' Build it with a gap all round.'
 }
 
 /** The line after the smash: "That was the Compiler, but it touched the ground. Build it with a gap all round." */
 export function nearMissLine(m: NearMiss): string {
-  return `That was ${m.name}, but ${reasons(m, true)}.${fixOf(m)}`
+  return `That was ${nearly(m)}${m.name}, but ${reasons(m, true)}.${fixOf(m)}`
+}
+
+/** "nearly " when blocks are of the wrong kind: it was the recipe's shape, not the recipe. */
+function nearly(m: NearMiss): string {
+  return m.wrong.length ? 'nearly ' : ''
+}
+
+/** "two", "three", or the number. */
+function countWord(n: number): string {
+  return ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven'][n] ?? String(n)
+}
+
+/** "Rustbands", "Canopy glasses". */
+function plural(name: string): string {
+  return /(s|x|ch|sh)$/i.test(name) ? `${name}es` : `${name}s`
+}
+
+/** "a Rustband", "an Umberslate". */
+function article(name: string): string {
+  return `${/^[aeiou]/i.test(name) ? 'an' : 'a'} ${name}`
 }
 
 /** Recipe materials too rare to lose without asking: the rare band, Glowcore and Cinderrock. */
@@ -299,5 +365,5 @@ export function confirmWords(count: number, rare: readonly string[], miss: NearM
   const big = tooBig ? ' It is too big for a bare hand, which compiles builds up to 3 blocks on every side.' : ''
   if (!miss) return `This won't compile.${big} It breaks ${blocks}${incl}. Smash anyway?`
   const outcome = compiled ? `it won't make ${MAKES[miss.recipe]}` : "it won't compile"
-  return `This is ${miss.name}, but ${reasons(miss, false)}, so ${outcome}.${fixOf(miss)} Smashing breaks ${blocks}${incl}. Smash anyway?`
+  return `This is ${nearly(miss)}${miss.name}, but ${reasons(miss, false)}, so ${outcome}.${fixOf(miss)} Smashing breaks ${blocks}${incl}. Smash anyway?`
 }

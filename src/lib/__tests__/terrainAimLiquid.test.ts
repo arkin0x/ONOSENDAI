@@ -43,6 +43,17 @@ describe('the cursor and liquids', () => {
     expect(aimed(row(TIDEWATER, TIDEWATER, EMPTY, EMPTY, TIDEWATER, GRIDSTONE))).toBe(4)
   })
 
+  it('from inside a pool, stops at a different liquid touching it (Magmaflow beside Tidewater)', () => {
+    expect(aimed(row(TIDEWATER, TIDEWATER, MAGMAFLOW, GRIDSTONE))).toBe(2)
+    expect(aimed(row(MAGMAFLOW, TIDEWATER, GRIDSTONE))).toBe(1)
+  })
+
+  it('cast from open space (where a ray enters the blocks), takes a liquid in its very first cell', () => {
+    const hit = raycast([0, 0, 0], [1, 0, 0], 8, aimTest(row(TIDEWATER, GRIDSTONE), true))
+    expect(hit?.cell).toEqual([0, 0, 0])
+    expect(hit?.distance).toBe(0)
+  })
+
   it('still stops at solid blocks first, and at nothing past its reach', () => {
     expect(aimed(row(EMPTY, GRIDSTONE, TIDEWATER))).toBe(1)
     expect(aimed(row(EMPTY, EMPTY, EMPTY, EMPTY, EMPTY, EMPTY, EMPTY, EMPTY, EMPTY, EMPTY, TIDEWATER))).toBe(null)

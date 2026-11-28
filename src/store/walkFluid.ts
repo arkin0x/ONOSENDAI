@@ -8,7 +8,7 @@
  *
  * | Part | What happens |
  * |---|---|
- * | input | what is held (store/walkHold.ts heldNow), or a tap's short nudge, is the way to go: forward and the sides along the way you face, laid flat across gravity; with gravity off, forward and back go along the whole look (pitch included), the sides stay level, and JUMP and DOWN push up and down |
+ * | input | what is held (store/walkHold.ts heldNow, its level push analog by heldLevel so the phone's stick goes as far and as fast as it is pushed), or a tap's short nudge, is the way to go: forward and the sides along the way you face, laid flat across gravity; with gravity off, forward and back go along the whole look (pitch included; the stick's forward too), the sides stay level, and JUMP and DOWN push up and down |
  * | speed | it picks up toward FLUID_MAX_SPEED, and slows to a stop when let go; the parked slowdown (store/walkLimits.ts SYNC_SLOWDOWN_ON, off since 2026-11-22) would ease the cap from 15 events ahead of the chain (store/walkAhead.ts eventsAhead, lib/fluidWalk.ts syncSpeedFactor) |
  * | the fluid pause | 21 events ahead of the chain fluid WALK switches itself off and the walk goes on as the step WALK; at 15 or fewer it comes back on (store/fluidSwitch.ts fluidPauseCheck, checked here whenever the count can change) |
  * | the anchor | when the smooth position passes half a step from its gibson's middle, the walk takes one legal step there (store/useWalk.ts fluidCross): a straight step, or a diagonal near a corner; the step goes to the chain as a press's would, so the chain only ever sees whole gibsons |
@@ -34,7 +34,7 @@ import { WORLD_DOWN, heightOf, raised, upOf } from '../lib/walkDown'
 import { useCyberspace } from './useCyberspace'
 import { fluidCross, fallState, setWalkerMoving, useWalk, walkDown } from './useWalk'
 import { clearFluidPause, fluidNudge, fluidOn, fluidPauseCheck, useFluidWalk } from './fluidSwitch'
-import { heldNow } from './walkHold'
+import { heldLevel, heldNow } from './walkHold'
 import { aheadOfState, eventsAhead } from './walkAhead'
 import { walkLimitsOn, walkSpeedFactor } from './walkLimits'
 import { useLayers } from './useLayers'
@@ -863,7 +863,9 @@ function whole(res: { from: Position; to: Position }, a: AxisName, length: bigin
 /** What is held now (or a tap's nudge), as the way to go. */
 function wishNow(now: number, gravity: boolean, g: AxisDirection): Vec {
   if (!walkInputOpen()) return zero()
-  let d = heldNow()
+  // The level push is analog (walkHold heldLevel): the keys as -1, 0 or 1, the phone's stick as far as it is pushed.
+  const level = heldLevel()
+  let d: { fwd: number; strafe: number; vert: number; view?: boolean } = { ...heldNow(), fwd: level.fwd, strafe: level.strafe }
   const pushes = (x: { fwd: number; strafe: number; vert: number }): boolean => x.fwd !== 0 || x.strafe !== 0 || (!gravity && x.vert !== 0)
   if (!pushes(d) && now < fluidNudge.until) d = { fwd: sgn(fluidNudge.fwd), strafe: sgn(fluidNudge.strafe), vert: sgn(fluidNudge.vert), view: fluidNudge.view }
   if (!pushes(d)) return zero()

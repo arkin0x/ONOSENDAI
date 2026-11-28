@@ -4904,18 +4904,15 @@ select.avatars__input option:checked {
 .orbsquare.walklook {
   position: fixed;
   right: var(--controls-right);
-  /* The pad's own height (92px, lifted with it), clear of the commit block
-     under it, while JUMP and DOWN are not drawn. */
-  bottom: var(--walkside-bottom);
+  /* A gap above GRAVITY, JUMP and DOWN (.walkside), which are always drawn
+     with it in WALK (review of #654; owner, 2026-11-28). The HOSAKA mark
+     breathes in the other corner, over the menu button, so it never moves
+     the ball. */
+  /* Computed here, not on :root, so the TERRAIN lift and the chain strip's lift (set on .app) count. */
+  bottom: calc(var(--walkside-bottom) + var(--walkside-lift) + var(--walkside-h) + var(--routeov-gap));
   z-index: 100;
   width: 112px;
   height: 112px;
-}
-/* With WALK's JUMP and DOWN drawn (.walkside, with the pad), a gap above
-   them (review of #654). The HOSAKA mark breathes in the other corner, over
-   the menu button, so it no longer moves the ball. */
-.app:has(.walkside) .orbsquare.walklook {
-  bottom: calc(var(--walkside-bottom) + var(--walkside-key) + var(--routeov-gap));
 }
 .orbsquare.walklook .benchorb--inside { padding-bottom: 10px; }
 @media (max-height: 520px) {
@@ -12130,120 +12127,315 @@ a.feed__act { text-decoration: none; }
   border-color: rgba(255, 59, 107, 0.4);
 }
 
-/* GRAVITY (store/useWalk.ts): a chip across the top of the WALK pad, lit
- * while gravity is on. Its own row, so no key a hand knows moves.
- *
- * WALK's own keys (TouchControls walkPad; arkinox, 2026-11-02): no scale.
- * FORWARD is one large key across the row FAR, up and NEAR held, taller than
- * the rest; BACKWARD stands where down was, under it, between the sides.
- * JUMP and DOWN have gone to their own row (.walkside; arkinox, 2026-11-10;
- * on the right since 2026-11-14), so the pad is those three rows and nothing more: anchored at
- * the bottom, the sides and BACK now stand where JUMP and DOWN stood. */
+/* WALK's left (owner, 2026-11-28; hud/WalkStick.tsx): the walk pad's box
+ * is the stick's resting place, one 122px square on the menu button's left
+ * edge, where GRAVITY, FORWARD, the sides and BACK stood. It takes no touch
+ * itself: the stick's zone under it (.walkstick) does, so a thumb landing
+ * on the resting ring, or anywhere round it, takes the stick. */
 .touchpad--mode-walk {
   /* On the left in WALK, on the menu button's left edge at the pad's own
      height, which clears the button (see "WALK's controls, mirrored"). */
   left: var(--walkpad-left);
   right: auto;
-  grid-template-rows: 22px 54px 38px;
-  grid-template-areas:
-    "gravity gravity  gravity"
-    "forward forward  forward"
-    "left    backward right";
+  display: block;
+  width: var(--walkside-width);
+  height: var(--walkside-width);
+  pointer-events: none;
 }
-.touchpad__key--forward,
-.touchpad__key--backward {
-  flex-direction: column;
-  gap: 2px;
-  color: var(--fg, #c8f5ff);
+.walkstick-slot { display: block; width: 100%; height: 100%; }
+
+/* The stick (hud/WalkStick.tsx), in WALK's red and TERRAIN's mint. Its
+ * ring is chamfered like the HUD's plates (an octagon, flat sides square to
+ * the screen), with a notch at each of the 8 ways the step WALK goes, a dot
+ * for the dead zone, and an arc on the rim that points the way it walks, as
+ * bright as the push. The knob is a small chamfered plate, glowing. */
+.walkstick,
+.walkstick-home { --stick-rgb: 255, 59, 107; }
+.walkstick.is-terrain,
+.walkstick-home.is-terrain { --stick-rgb: var(--terrain-mode-rgb); }
+
+/* The zone: invisible, the lower left of the scene, under every button
+ * (the menu button, CHAT, the walk pad's box and TERRAIN's tools all stand
+ * over it), from just under the resting ring up past it. Half the screen
+ * wide in WALK, at most 340px; in TERRAIN only up to the tools' column, so
+ * a ring is never drawn under PLACE or SMASH. */
+.walkstick {
+  position: fixed;
+  left: 0;
+  bottom: calc(var(--walkside-bottom) - 16px);
+  width: min(50vw, 340px);
+  height: min(46vh, 360px);
+  z-index: 99;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
 }
-.touchpad__key--forward { grid-area: forward; }
-.touchpad__key--backward { grid-area: backward; }
-.touchpad__key--backward .touchpad__sub { font-size: 6px; }
-.touchpad__key--jump {
-  grid-area: jump;
-  font-size: 10px;
-  letter-spacing: 0.18em;
+.walkstick.is-terrain {
+  bottom: var(--walkside-bottom);
+  width: calc(var(--walkpad-left) + var(--walkside-width) + 2px);
+}
+.walkstick__base {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 112px;
+  height: 112px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 220ms ease-out;
+  will-change: transform, opacity;
+}
+.walkstick__base.is-on { opacity: 1; transition: opacity 120ms ease-out; }
+.walkstick__ring { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.walkstick__plate {
+  fill: rgba(6, 14, 22, 0.42);
+  stroke: rgba(var(--stick-rgb), 0.7);
+  stroke-width: 1.5;
+}
+.walkstick__track { fill: none; stroke: rgba(var(--stick-rgb), 0.22); stroke-width: 1; }
+.walkstick__notch { stroke: rgba(var(--stick-rgb), 0.45); stroke-width: 1.5; stroke-linecap: square; }
+.walkstick__notch.is-axis { stroke: rgba(255, 255, 255, 0.6); }
+.walkstick__dead { fill: none; stroke: rgba(255, 255, 255, 0.28); stroke-width: 1; stroke-dasharray: 2 2; }
+.walkstick__dir {
+  transform: rotate(var(--stick-a, 0rad));
+  opacity: var(--stick-m, 0);
+  transition: opacity 90ms linear;
+}
+.walkstick__dir path {
+  fill: none;
+  stroke: rgb(var(--stick-rgb));
+  stroke-width: 5;
+  stroke-linecap: butt;
+  filter: drop-shadow(0 0 4px rgba(var(--stick-rgb), 0.9));
+}
+.walkstick__knob {
+  position: absolute;
+  left: 32px;
+  top: 32px;
+  width: 48px;
+  height: 48px;
+  will-change: transform;
+}
+.walkstick__knobface {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  filter: drop-shadow(0 0 6px rgba(var(--stick-rgb), 0.65)) drop-shadow(0 2px 4px rgba(0, 0, 0, 0.6));
+}
+.walkstick__knobface polygon {
+  fill: rgba(var(--stick-rgb), 0.34);
+  stroke: rgb(var(--stick-rgb));
+  stroke-width: 2;
+}
+.walkstick__knobface circle { fill: #fff; }
+
+/* At rest: the same ring, faint, where the walk pad stood, MOVE in white in
+ * it (as LOOK names its ball). Held, it steps back while the live ring
+ * shows where the thumb is. */
+.walkstick-home {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.55;
+  transition: opacity 220ms ease-out;
+}
+.walkstick-home.is-held { opacity: 0.12; transition: opacity 120ms ease-out; }
+.walkstick-home .walkstick__ring { width: 112px; height: 112px; inset: auto; }
+.walkstick-home .walkstick__dir { display: none; }
+.walkstick-home__word {
+  position: relative;
+  font-size: 9px;
   font-weight: 700;
+  letter-spacing: 0.22em;
+  padding-left: 0.22em;
+  color: #fff;
+  text-shadow: 0 0 3px #000, 0 1px 3px #000;
+}
+.walkstick-home:not(.walkstick-home--keys) .walkstick-home__word { margin-top: 50px; }
+/* A mouse or keys: W A S D as keycaps, chamfered, MOVE under them. */
+.walkstick-home--keys { flex-direction: column; gap: 8px; opacity: 0.9; }
+.walkstick-home__caps {
+  display: grid;
+  grid-template-columns: repeat(3, 28px);
+  grid-template-rows: 28px 28px;
+  gap: 4px;
+  grid-template-areas: ". w ." "a s d";
+}
+.walkstick-home__cap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+  text-shadow: 0 1px 2px #000;
+  background: linear-gradient(rgba(var(--stick-rgb), 0.18), rgba(var(--stick-rgb), 0.18)), rgba(6, 14, 22, 0.72);
+  clip-path: polygon(5px 0, 100% 0, 100% calc(100% - 5px), calc(100% - 5px) 100%, 0 100%, 0 5px);
+  box-shadow: inset 0 0 0 1px rgba(var(--stick-rgb), 0.55);
+}
+.walkstick-home__cap--w { grid-area: w; }
+.walkstick-home__cap--a { grid-area: a; }
+.walkstick-home__cap--s { grid-area: s; }
+.walkstick-home__cap--d { grid-area: d; }
+@media (prefers-reduced-motion: reduce) {
+  .walkstick__base,
+  .walkstick__base.is-on,
+  .walkstick__dir,
+  .walkstick-home,
+  .walkstick-home.is-held { transition: none; }
 }
 /* A WALK key that is off reads as off rather than as broken. (DOWN under
  * GRAVITY is on: it absorbs a bounce.) */
-.touchpad--mode-walk .touchpad__key:disabled,
 .walkside .touchpad__key:disabled { opacity: 0.35; cursor: default; }
 
 /* WALK's controls, mirrored (owner, 2026-11-14: "swap the left and right
  * WALK controls. Movement should be on the left, and look/jump should be on
- * the right"). JUMP and DOWN (TouchControls walkPad `side`; arkinox,
- * 2026-11-10) keep the two cells and the width they had as the pad's bottom
- * row and its height (the pad's 92px), now in the bottom right column on
- * the controls' right edge, over the commit block; the LOOK ball stands a
- * gap above them (.orbsquare.walklook). The row reads as the mirror of its
- * old place: JUMP on the outer edge, DOWN inboard.
+ * the right"): the stick's resting place on the left, on the menu button's
+ * left edge at 92px, above the button's top (68px on a phone, 60px on a
+ * desktop). While a HOSAKA job runs its mark breathes in that spot above the
+ * menu button, so the pad steps right of it, at the same height. Only WALK's
+ * pad moves: HOP, VIEW and BUILD keep theirs on the right, and the commit
+ * block (WALK, the mode, LOCAL and LIVE) stays under the right column in
+ * every mode.
  *
- * The walk pad takes their old place on the left, on the menu button's left
- * edge at the same 92px, above the button's top (68px on a phone, 60px on
- * a desktop).
- * While a HOSAKA job runs its mark breathes in that spot above the menu
- * button, so the pad steps right of it, at the same height, as JUMP and
- * DOWN did. Only WALK's pad moves: HOP, VIEW and BUILD keep theirs on the
- * right, and the commit block (WALK, the mode, LOCAL and LIVE) stays under
- * the right column in every mode. */
+ * The right (owner, 2026-11-28: "Gravity button can move to the right side
+ * above down/jump. Make the down and jump buttons slightly higher so there
+ * is space between them and the mode buttons ... make them larger and
+ * round, like a game controller, and angle them for comfort (down button
+ * slightly lower than jump)"): in the controls' column (122px), a clear gap
+ * (--walkside-lift; 26px) above the commit block, JUMP and DOWN round on a
+ * right thumb's arc, JUMP (64px) higher and inboard, DOWN (52px) lower and
+ * outboard, and GRAVITY across the column above them. The LOOK ball stands
+ * a gap above GRAVITY (on a short screen beside them). */
 :root {
   --walkside-bottom: 92px;
-  --walkside-key: 38px;
   /* Three 38px cells and two 4px gaps, the pad's own width. */
   --walkside-width: 122px;
   /* The walk pad's left edge: the menu button's. */
   --walkpad-left: var(--menu-left);
+  --jump-size: 64px;
+  --down-size: 52px;
+  /* JUMP's bottom over DOWN's: the arc's rise. */
+  --jump-rise: 16px;
+  --gravity-h: 24px;
+  /* From the walk pad's bottom (8px over the commit block) to JUMP and DOWN's: a 26px gap over WALK, the mode and HOP. */
+  --walkside-lift: 18px;
+  --walkside-h: calc(var(--jump-rise) + var(--jump-size) + 10px + var(--gravity-h));
 }
 .app:has(.hosaka-pulse) {
   --walkpad-left: calc(var(--menu-left) + var(--menu-size) + var(--routeov-gap));
 }
 /* The pad lifted a row for the chain status strip (.touchpad.is-lifted,
-   116px): the row keeps level with the pad's bottom row, and the LOOK ball,
-   which stands on the same number, goes up with it (review of #654). */
+   116px): the right column keeps its gap over the taller commit block, and
+   the LOOK ball, which stands on the same number, goes up with it (review
+   of #654). */
 .app:has(.touchpad.is-lifted) {
   --walkside-bottom: 116px;
 }
 .walkside {
   position: fixed;
   right: var(--controls-right);
-  bottom: var(--walkside-bottom);
+  bottom: calc(var(--walkside-bottom) + var(--walkside-lift));
   z-index: 103;
-  display: grid;
-  grid-template-columns: repeat(3, var(--walkside-key));
-  grid-template-rows: var(--walkside-key);
-  gap: 4px;
-  grid-template-areas: "down jump jump";
+  width: var(--walkside-width);
+  height: var(--walkside-h);
   transition: bottom 160ms ease;
   touch-action: none;
   user-select: none;
   -webkit-user-select: none;
 }
-.walkside .touchpad__key { touch-action: none; }
+.walkside .touchpad__key { position: absolute; touch-action: none; }
 .walkside .touchpad__key:not(:active) {
   background-image: linear-gradient(rgba(255, 59, 107, 0.18), rgba(255, 59, 107, 0.18));
   border-color: rgba(255, 59, 107, 0.4);
+}
+/* JUMP and DOWN: round face buttons, a dark plate with a ring in the mode's
+ * color, an inner ring and a soft glow; the icon over the word, white. */
+.walkside .touchpad__key--jump,
+.walkside .touchpad__key--down {
+  --face-rgb: 255, 59, 107;
+  flex-direction: column;
+  gap: 2px;
+  border-radius: 50%;
+  color: #fff;
+  border-width: 1.5px;
+  box-shadow: 0 0 10px rgba(var(--face-rgb), 0.28), inset 0 0 0 3px rgba(6, 14, 22, 0.55), inset 0 0 0 4px rgba(var(--face-rgb), 0.3);
+}
+.walkside .touchpad__key--jump:not(:active),
+.walkside .touchpad__key--down:not(:active) { border-color: rgba(var(--face-rgb), 0.75); }
+.walkside .touchpad__key--jump:active,
+.walkside .touchpad__key--down:active {
+  background: rgba(var(--face-rgb), 0.38);
+  border-color: rgb(var(--face-rgb));
+  box-shadow: 0 0 16px rgba(var(--face-rgb), 0.6), inset 0 0 0 3px rgba(6, 14, 22, 0.35), inset 0 0 0 4px rgba(var(--face-rgb), 0.6);
+}
+.walkside .touchpad__key--jump svg,
+.walkside .touchpad__key--down svg { filter: drop-shadow(0 1px 2px #000); }
+.walkside .touchpad__key--jump {
+  left: 0;
+  bottom: var(--jump-rise);
+  width: var(--jump-size);
+  height: var(--jump-size);
+}
+.walkside .touchpad__key--down {
+  right: 0;
+  bottom: 0;
+  width: var(--down-size);
+  height: var(--down-size);
+}
+.walkside .touchpad__sub {
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  padding-left: 0.14em;
+  opacity: 1;
+  text-shadow: 0 1px 2px #000;
+}
+/* SPACE and C on a desktop only: a phone has no keys. */
+.walkside .touchpad__key--jump .touchpad__keyhint,
+.walkside .touchpad__key--down .touchpad__keyhint { display: none; }
+@media (hover: hover) and (pointer: fine) {
+  .walkside .touchpad__key--jump .touchpad__keyhint,
+  .walkside .touchpad__key--down .touchpad__keyhint { display: block; bottom: 5px; }
 }
 /* From 641px wide the open chat stands at the bottom beside the menu button
    and the controls stay up beside it (store/usePad.ts CHAT_COVERS_PAD): it
    starts past the walk pad on the left instead of over it (stepped right of
    the HOSAKA mark with it). On the right it already stops short of the
-   controls' column, which JUMP, DOWN and the LOOK ball now share. */
+   controls' column, which GRAVITY, JUMP, DOWN and the LOOK ball share. */
 @media (min-width: 641px) {
   .app:has(.touchpad--mode-walk) .chatdock {
     left: calc(var(--walkpad-left) + var(--controls-width) + var(--routeov-gap) + var(--hud-mid));
   }
 }
+/* GRAVITY: a chip across the top of the right column, lit while gravity is
+ * on, clear of JUMP by 10px so a jump never grazes it. */
 .touchpad__key--gravity {
-  grid-area: gravity;
   font-size: 9px;
   letter-spacing: 0.14em;
   color: var(--dim, #7fa6bd);
 }
-.touchpad--mode-walk .touchpad__key--gravity.is-on:not(:active) {
+.walkside .touchpad__key--gravity {
+  left: 0;
+  right: 0;
+  top: 0;
+  height: var(--gravity-h);
+}
+.walkside .touchpad__key--gravity.is-on:not(:active) {
   color: #fff;
   background-image: linear-gradient(rgba(255, 59, 107, 0.55), rgba(255, 59, 107, 0.55));
   border-color: rgba(255, 120, 150, 0.9);
+}
+/* A short screen (a phone on its side): the LOOK ball beside the column, level with JUMP and DOWN, not above GRAVITY. */
+@media (max-height: 520px) {
+  .orbsquare.walklook {
+    right: calc(var(--controls-right) + var(--walkside-width) + var(--routeov-gap));
+    bottom: calc(var(--walkside-bottom) + var(--walkside-lift));
+  }
 }
 
 /* BUILD: white, the build cursor's color (--build; lib/palette.ts BUILD), as
@@ -13865,6 +14057,7 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
 .flyorbs,
 .chatdock__chip,
 .touchpad--mode-walk,
+.walkstick,
 .routeov,
 .deploybar {
   translate: var(--hud-shift-l) 0;
@@ -14809,7 +15002,7 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
    the hotbar a slim row just over the LOOK ball and the walk pad. WALK's controls stay where they are. */
 .terrainview {
   --terrain-orb: 112px;
-  --terrain-orb-bottom: calc(var(--walkside-bottom) + var(--walkside-key) + var(--routeov-gap));
+  --terrain-orb-bottom: calc(var(--walkside-bottom) + var(--walkside-lift) + var(--walkside-h) + var(--routeov-gap));
 }
 @media (max-height: 520px) {
   .terrainview { --terrain-orb: 88px; }
@@ -15453,6 +15646,12 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
 .touchpad--terrain .touchpad__key:active,
 .app:has(.touchpad--terrain) .walkside .touchpad__key:active {
   background: rgba(var(--terrain-mode-rgb), 0.3);
+  border-color: var(--terrain-mode);
+}
+.app:has(.touchpad--terrain) .walkside :is(.touchpad__key--jump, .touchpad__key--down) { --face-rgb: var(--terrain-mode-rgb); }
+.app:has(.touchpad--terrain) .walkside .touchpad__key--gravity.is-on:not(:active) {
+  color: #05070d;
+  background-image: linear-gradient(rgba(var(--terrain-mode-rgb), 0.85), rgba(var(--terrain-mode-rgb), 0.85));
   border-color: var(--terrain-mode);
 }
 

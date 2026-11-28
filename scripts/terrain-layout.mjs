@@ -19,6 +19,11 @@
  * hint among them), and the preview line in the same place with and without a hold. Nothing reaches a relay: every
  * socket is answered here. With SHOTS=<dir>, a screenshot of each phone with the bag open is saved there.
  *
+ * The stick (owner, 2026-11-28; hud/WalkStick.tsx): the walk pad's box (`pad`) is the stick's resting place, GRAVITY
+ * stands in the right cluster (`jump`, .walkside) above JUMP and DOWN, and on a touch screen the stick's zone
+ * (.walkstick, under every button by design) must reach none of TERRAIN's tools, the hotbar, the right cluster, the
+ * LOOK ball or the commit block. scripts/walk-layout.mjs checks the cluster's arc and its gap over the commit block.
+ *
  * Usage: start the dev server (npm run dev -- --port 5197), then
  *   node scripts/terrain-layout.mjs [http://localhost:5197/]
  * Exit 1 on any overlap.
@@ -167,6 +172,17 @@ for (const size of SIZES) {
       else console.log(`${label0}: nothing of TERRAIN's over the menu`)
     }
     const label = `${size.name}${menu ? ', menu open' : ''}`
+    // The stick's zone (touch screens only): under the walk pad's box by design, clear of everything else it could take a touch from.
+    if (size.touch && !menu) {
+      const zone = await page.evaluate(`(${box.toString()})(${JSON.stringify({ zone: '.walkstick' })})`)
+      if (!zone.zone) { bad++; console.log(`${label}: no stick zone`) }
+      else {
+        const z = zone.zone
+        const under = ['hotbar', 'survey', 'place', 'smash', 'jump', 'look', 'commit', 'air', 'chat', 'menu'].filter((k) => rects[k] && z.l < rects[k].r && rects[k].l < z.r && z.t < rects[k].b && rects[k].t < z.b)
+        if (under.length) { bad++; console.log(`${label}: the stick zone reaches ${under.join(', ')}`) }
+        else console.log(`${label}: the stick zone clear`)
+      }
+    }
     const missing = (menu && size.w < 1101 ? ['menu'] : ['hotbar', 'place', 'pad', 'menu', 'air']).filter((k) => !rects[k])
     if (missing.length) { bad++; console.log(`${label}: missing ${missing.join(', ')}`) }
     const keys = Object.keys(rects).filter((k) => rects[k])

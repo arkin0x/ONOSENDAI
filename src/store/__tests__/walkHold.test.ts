@@ -54,7 +54,10 @@ vi.mock('../../lib/relay', async (orig) => {
 
 import { useCyberspace } from '../useCyberspace'
 import { WALK_SETTLE_MS, fallState, tickFall, useWalk } from '../useWalk'
-import { WALK_HOLD_MS, holding } from '../walkHold'
+import { STICK_SOURCE, WALK_HOLD_MS, heldLevel, heldNow, holding, stickHold } from '../walkHold'
+import { StickTracker, stickPeriod } from '../../lib/walkStick'
+import { walkHeldDir } from '../../lib/walkKeys'
+import type { MoveName } from '../../lib/moves'
 import { useShards } from '../useShards'
 import { clearWalls } from '../walkWalls'
 import { useCalibration } from '../../lib/calibration'
@@ -92,9 +95,17 @@ function done(req: (typeof posted)[number]) {
 
 const key = (code: string, extra: { repeat?: boolean } = {}) => ({ code, ctrlKey: false, shiftKey: false, altKey: false, metaKey: false, preventDefault: () => {}, ...extra })
 
-/** The WALK pad's key for `cell`, and a pointer on it `across` of the way from its left (0 to 1). */
+/**
+ * The level directions' pad keys, as FORWARD, BACK and the side keys were
+ * before the stick took their place (owner, 2026-11-28): any `pad:` source
+ * holding a direction, which is what the rules about pad holds are about.
+ */
+const LEVEL: Record<string, MoveName> = { forward: 'away', backward: 'toward', left: 'left', right: 'right' }
+const levelKey = (cell: string): PadKey | null => (LEVEL[cell] ? { cell, glyph: null, title: cell, act: () => {}, hold: walkHeldDir(LEVEL[cell]) } : null)
+
+/** The WALK pad's key for `cell` (JUMP, DOWN), or a level direction's (levelKey), and a pointer on it `across` of the way from its left (0 to 1). */
 const pad = (cell: string): PadKey => {
-  const k = walkPad(false, () => () => {}).find((b) => b.cell === cell)
+  const k = levelKey(cell) ?? walkPad(false, () => () => {}).find((b) => b.cell === cell)
   if (!k) throw new Error(`no ${cell}`)
   return k
 }
@@ -239,45 +250,8 @@ describe('two directions held go diagonally', () => {
   })
 })
 
-describe('the touch pad', () => {
-  it('FORWARD has no zones: pressed at either end or the middle it goes straight forward, and nothing follows a sliding thumb', () => {
-    walk()
-    face(0)
-    const fwd = padHold(pad('forward'))
-    expect(Object.keys(fwd)).not.toContain('onPointerMove')
-    for (const [across, n] of [[0.98, 1], [0.02, 2], [0.5, 3]] as const) {
-      fwd.onPointerDown(pointer(across))
-      expect(moved(start)).toEqual([0, 0, -n])
-      fwd.onPointerUp()
-    }
-    expect(pad('forward').label).toBeUndefined()
-    expect(pad('forward').title).toBe('Forward (W)')
-  })
-
-  it('FORWARD held with a side arrow is the diagonal too; BACK with a side the same backward', () => {
-    walk()
-    face(0)
-    const fwd = padHold(pad('forward'))
-    const right = padHold(pad('right'))
-    fwd.onPointerDown(pointer(0.5))
-    right.onPointerDown(pointer())
-    vi.advanceTimersByTime(WALK_HOLD_MS)
-    expect(moved(start)).toEqual([2, 0, -3])
-    right.onPointerUp()
-    fwd.onPointerUp()
-
-    const back = padHold(pad('backward'))
-    const left = padHold(pad('left'))
-    const at = moved(start)
-    back.onPointerDown(pointer())
-    left.onPointerDown(pointer())
-    const m = moved(start)
-    expect([m[0] - at[0], m[2] - at[2]]).toEqual([-1, 2])
-    back.onPointerUp()
-    left.onPointerUp()
-  })
-
-  it('a held pad key walks from the press on, and pointerup, pointercancel or leave stops it', () => {
+describe('a pad hold', () => {
+  it('walks from the press on, and pointerup, pointercancel or leave stops it', () => {
     walk()
     face(0)
     for (const end of ['onPointerUp', 'onPointerCancel', 'onPointerLeave', 'onLostPointerCapture'] as const) {
@@ -292,6 +266,166 @@ describe('the touch pad', () => {
       vi.advanceTimersByTime(WALK_HOLD_MS * 5)
       expect(moved(start)[2]).toBe(before - 3)
     }
+  })
+})
+
+describe('the stick (hud/WalkStick.tsx; owner, 2026-11-28)', () => {
+  const R = 48
+  /** A finger on the stick: lands at (x, y), then each drag goes to stickHold as the zone sends it. */
+  function finger(x = 40, y = 600) {
+    const t = new StickTracker(() => R)
+    t.down(7, x, y)
+    stickHold({ fwd: 0, strafe: 0, mag: 0 }, null)
+    return {
+      to: (dx: number, dy: number) => { const s = t.move(7, x + dx, y + dy)!; stickHold(s.vec, s.dir); return s },
+      lift: () => { t.up(7); stickHold({ fwd: 0, strafe: 0, mag: 0 }, null) },
+    }
+  }
+  beforeEach(() => {
+    // The beat's pace is brought forward by the clock too.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] })
+  })
+
+  it('landing walks nothing, wherever the finger lands; a drag past the dead zone steps at once', () => {
+    walk()
+    face(0)
+    const f = finger(2, 700)
+    expect(holding()).toBe(false)
+    f.to(0, -4)
+    expect(holding()).toBe(false)
+    vi.advanceTimersByTime(WALK_HOLD_MS * 5)
+    expect(moved(start)).toEqual([0, 0, 0])
+    f.to(0, -R)
+    expect(moved(start)).toEqual([0, 0, -1])
+    f.lift()
+  })
+
+  it('a full push steps at the keys\' pace, a light push slower', () => {
+    walk()
+    face(0)
+    const f = finger()
+    f.to(0, -R)
+    vi.advanceTimersByTime(WALK_HOLD_MS * 4)
+    expect(moved(start)).toEqual([0, 0, -5])
+    f.lift()
+    const at = moved(start)[2]
+    const g = finger()
+    const s = g.to(0, -(0.12 * R + 0.25 * (R - 0.12 * R)))
+    expect(s.vec.mag).toBeCloseTo(0.25, 6)
+    const slow = stickPeriod(0.25, WALK_HOLD_MS)
+    expect(slow).toBeGreaterThan(WALK_HOLD_MS * 1.5)
+    expect(moved(start)[2]).toBe(at - 1)
+    vi.advanceTimersByTime(Math.ceil(slow) * 3)
+    expect(moved(start)[2]).toBe(at - 4)
+    // Pushed all the way: the next beat comes at the keys' pace from the last one, not the slow one.
+    g.to(0, -R)
+    vi.advanceTimersByTime(WALK_HOLD_MS)
+    expect(moved(start)[2]).toBe(at - 5)
+    g.lift()
+  })
+
+  it('the nearest of 8 ways, the way you face: up-right is the diagonal, as W and D held', () => {
+    walk()
+    face(0)
+    const f = finger()
+    f.to(R, -R)
+    expect(moved(start)).toEqual([1, 0, -1])
+    vi.advanceTimersByTime(WALK_HOLD_MS)
+    expect(moved(start)).toEqual([2, 0, -2])
+    // Straight down the screen: back.
+    f.to(0, R)
+    vi.advanceTimersByTime(WALK_HOLD_MS)
+    expect(moved(start)).toEqual([2, 0, -1])
+    f.lift()
+    // Facing 90 degrees right (+X), up the screen is +X.
+    face(90)
+    const at = moved(start)
+    const g = finger()
+    g.to(0, -R)
+    expect(moved(start)[0] - at[0]).toBe(1)
+    g.lift()
+  })
+
+  it('let go, or back inside the dead zone: the walk stops at once', () => {
+    walk()
+    face(0)
+    const f = finger()
+    f.to(0, -R)
+    vi.advanceTimersByTime(WALK_HOLD_MS)
+    f.to(0, -2)
+    expect(holding()).toBe(false)
+    vi.advanceTimersByTime(WALK_HOLD_MS * 5)
+    expect(moved(start)).toEqual([0, 0, -2])
+    f.to(0, -R)
+    f.lift()
+    expect(holding()).toBe(false)
+    vi.advanceTimersByTime(WALK_HOLD_MS * 5)
+    expect(moved(start)).toEqual([0, 0, -3])
+  })
+
+  it('level only: whatever way it is pushed, it holds nothing up or down', () => {
+    walk()
+    face(0)
+    const f = finger()
+    for (let a = 0; a < 360; a += 30) {
+      const r = (a * Math.PI) / 180
+      f.to(R * Math.cos(r), R * Math.sin(r))
+      expect(heldNow().vert).toBe(0)
+    }
+    vi.advanceTimersByTime(WALK_HOLD_MS * 6)
+    expect(moved(start)[1]).toBe(0)
+    f.lift()
+  })
+
+  it('JUMP held with the stick: both walk, each its own finger, and lifting JUMP never stops the stick', () => {
+    walk()
+    face(0)
+    const f = finger()
+    f.to(0, -R)
+    const jump = padHold(pad('jump'))
+    jump.onPointerDown(pointer())
+    expect(heldNow().vert).toBe(1)
+    expect(heldNow().fwd).toBe(1)
+    jump.onPointerUp()
+    expect(holding()).toBe(true)
+    const at = moved(start)[2]
+    vi.advanceTimersByTime(WALK_HOLD_MS * 2)
+    expect(moved(start)[2]).toBe(at - 2)
+    f.lift()
+    expect(holding()).toBe(false)
+  })
+
+  it('WASD unchanged: the keys alone give heldLevel what heldNow gives, and the stick\'s source is a pad one', () => {
+    walk()
+    face(0)
+    walkKeyDown(key('KeyW'))
+    walkKeyDown(key('KeyD'))
+    expect(heldLevel()).toEqual({ fwd: 1, strafe: 1 })
+    expect(moved(start)).toEqual([1, 0, -2])
+    vi.advanceTimersByTime(WALK_HOLD_MS)
+    expect(moved(start)).toEqual([2, 0, -3])
+    walkKeysReleased()
+    expect(STICK_SOURCE.startsWith('pad:')).toBe(true)
+  })
+
+  it('the menu covering the scene: the stick holds nothing, and a hold under it is let go at the next beat', () => {
+    walk()
+    face(0)
+    setMenuCovering(true)
+    const f = finger()
+    f.to(0, -R)
+    expect(holding()).toBe(false)
+    expect(moved(start)).toEqual([0, 0, 0])
+    f.lift()
+    setMenuCovering(false)
+    const g = finger()
+    g.to(0, -R)
+    expect(moved(start)).toEqual([0, 0, -1])
+    setMenuCovering(true)
+    vi.advanceTimersByTime(WALK_HOLD_MS * 5)
+    expect(holding()).toBe(false)
+    expect(moved(start)).toEqual([0, 0, -1])
+    g.lift()
   })
 })
 
@@ -528,7 +662,7 @@ describe('the pad\'s DOWN under GRAVITY absorbs a bounce (review of #649)', () =
     for (let t = 0; t < ms; t += 16) { clock += 16; vi.advanceTimersByTime(16); tickFall() }
   }
   const gpad = (cell: string): PadKey => {
-    const k = walkPad(true, () => () => {}).find((b) => b.cell === cell)
+    const k = levelKey(cell) ?? walkPad(true, () => () => {}).find((b) => b.cell === cell)
     if (!k) throw new Error(`no ${cell}`)
     return k
   }
@@ -595,7 +729,7 @@ describe('GRAVITY with holds (review of #651)', () => {
     for (let t = 0; t < ms; t += 16) { clock += 16; tickFall() }
   }
   const gpad = (cell: string): PadKey => {
-    const k = walkPad(true, () => () => {}).find((b) => b.cell === cell)
+    const k = levelKey(cell) ?? walkPad(true, () => () => {}).find((b) => b.cell === cell)
     if (!k) throw new Error(`no ${cell}`)
     return k
   }

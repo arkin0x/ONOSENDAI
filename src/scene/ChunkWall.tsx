@@ -272,7 +272,8 @@ export function ChunkWall({ session = () => terrainSession }: ChunkWallProps): J
       const face = k.faces[f]
       strength[f] = face.strength
       if (face.strength <= 0) continue
-      const [ua, va] = FACE_AXES[face.axis]
+      const axes = FACE_AXES[face.axis]
+      const ua = axes[0], va = axes[1]
       const plane = k.lo[face.axis] + (face.side < 0 ? 0 : CHUNK_SIDE)
       const c = (u.uCentre.value as Vector3[])[f]
       c.set(k.at[0], k.at[1], k.at[2]).setComponent(face.axis, plane)

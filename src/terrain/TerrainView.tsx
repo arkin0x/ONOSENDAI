@@ -56,6 +56,7 @@ import { useBlueprintTool } from '../store/useBlueprintTool'
 import { recordAtCursor } from '../lib/blueprint/capture'
 import { previewColor, previewLine, useSmashPreview } from '../lib/blueprint/smashPreview'
 import { CAUSE_WORDS } from '../lib/blueprint/nearMiss'
+import { SCENE_CANVAS } from '../scene/sceneCanvas'
 import { SmashConfirm } from './SmashConfirm'
 import { useAirPlace } from '../store/useAirPlace'
 import { AirStepper } from './AirStepper'
@@ -350,12 +351,14 @@ export function SmashPreviewLabel(): JSX.Element {
   const state = useSmashPreview((s) => s.state)
   const count = useSmashPreview((s) => s.count)
   const cause = useSmashPreview((s) => s.cause)
+  const label = useSmashPreview((s) => s.label)
   return (
     <div className="terrain-smash-preview" aria-live="off">
       {state && (
         <span className={`terrain-smash-preview__text terrain-smash-preview__text--${state}${cause ? ' terrain-smash-preview__text--near' : ''}`}>
           <span className="terrain-smash-preview__mark" style={{ background: previewColor(state, cause) }} aria-hidden />
-          {cause ? <>{previewLine(state, count)}<span className="terrain-smash-preview__why" style={{ color: previewColor(state, cause) }}>{' · '}{CAUSE_WORDS[cause]}</span></> : previewLine(state, count)}
+          {cause === 'big' ? <>{previewLine(state, count)}<span className="terrain-smash-preview__why" style={{ color: previewColor(state, cause) }}>{' · '}{CAUSE_WORDS[cause]}</span></>
+            : cause ? <span className="terrain-smash-preview__why" style={{ color: previewColor(state, cause) }}>{label}</span> : label}
         </span>
       )}
     </div>
@@ -390,7 +393,10 @@ const LONG_MS = LONG_PRESS_MS
 /** Whether an event is on the cyberspace scene's canvas (not the compass's, not a HUD's). */
 function onScene(e: Event): HTMLCanvasElement | null {
   const t = e.target as HTMLElement | null
-  if (!t || t.tagName !== 'CANVAS' || t.closest('.compass-3d, .benchorb, .orbsquare')) return null
+  // The main scene's canvas only (scene/Scene.tsx marks it): a tap on any other canvas, such as a blueprint's drawing in
+  // a menu or the examine sheet, never mines the block that happens to lie at that point of the view behind it (owner,
+  // 2026-11-28: "a block is missing and I feel like it's getting toggled when I'm going to menus").
+  if (!t || t.tagName !== 'CANVAS' || t.dataset?.scene !== SCENE_CANVAS || t.closest('.compass-3d, .benchorb, .orbsquare')) return null
   return t as HTMLCanvasElement
 }
 

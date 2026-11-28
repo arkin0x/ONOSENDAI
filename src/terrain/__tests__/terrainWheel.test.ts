@@ -15,6 +15,7 @@ import { AIR_DEFAULT, AIR_MAX, AIR_MIN } from '../../lib/terrain/airPlace'
 
 class FakeCanvas extends EventTarget {
   tagName = 'CANVAS'
+  dataset = { scene: 'main' }
   closest(): null { return null }
 }
 class FakePanel extends EventTarget {

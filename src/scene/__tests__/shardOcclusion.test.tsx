@@ -251,6 +251,7 @@ describe('your own avatar, which takes a tap only when nothing else wants it', (
 /** A stand-in for the scene's canvas, the size of the R3F root, for TERRAIN's own pointer. */
 class FakeCanvas extends EventTarget {
   tagName = 'CANVAS'
+  dataset = { scene: 'main' }
   closest(): null { return null }
   getBoundingClientRect(): { left: number; top: number; width: number; height: number } { return { left: 0, top: 0, width: 800, height: 800 } }
 }

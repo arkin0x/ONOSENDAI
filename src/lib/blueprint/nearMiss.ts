@@ -46,9 +46,9 @@
  * round"; never the words for upright posture.
  */
 
-import { arrangementFrom, fitsIsolated, type Cell, type Gathered } from './arrangement'
+import { arrangementFrom, fitsIsolated, gather, type Cell, type Gathered } from './arrangement'
 import { cellAt, type Arrangement } from './format'
-import { CINDERROCK, COMPILER_RECIPE, GLOWCORE, QUARRY_CHARGE_RECIPE, recipeNeeds, sameArrangement } from './recipes'
+import { CINDERROCK, COMPILER_RECIPE, GLOWCORE, QUARRY_CHARGE_RECIPE, sameArrangement } from './recipes'
 import { blockName } from '../terrain/blocks'
 import { PRIZED } from '../terrain/assay'
 
@@ -68,6 +68,8 @@ export interface NearMiss {
   touching: 'ground' | 'block' | null
   /** Blocks of the wrong kind in the recipe's shape: what is there, and what goes there. Empty when every block is right. */
   wrong: Array<{ is: number; should: number }>
+  /** Cells of the recipe's shape left empty. */
+  missing: number
 }
 
 /** One orientation of a recipe: its blocks as offsets from its box's low corner, its size, and whether it is turned. */
@@ -133,94 +135,145 @@ const RECIPE_MAX = Math.max(...RECIPES.map((r) => r.recipe.cells.filter((id) => 
  */
 export const NEAR_MISS_EXTRA = 3
 
+/** The reach a game recipe is judged in: every game recipe fits a bare hand's 3, so either hand gathers it the same. */
+const RECIPE_REACH = 3
+
+/** The game recipe an arrangement is, exactly (its own blocks, the right way round), or null. */
+export function recipeOf(a: Arrangement | null): RecipeId | null {
+  if (!a) return null
+  for (const r of RECIPES) if (sameArrangement(a, r.recipe)) return r.id
+  return null
+}
+
 /**
- * The struck build's blocks, counted by material: the placed blocks (not natural ground) reachable from `hit` through
- * faces, edges and corners. Null past RECIPE_MAX + NEAR_MISS_EXTRA blocks (it can be no near miss), or when the hit is
- * natural ground.
+ * Whether a game recipe is built at `hit` but will not make what it makes; null when no recipe is there, or when it is
+ * there and makes it. The same answer from every block of the build (owner, 2026-11-28: "it shouldn't matter which
+ * block you're pointing at"):
+ *
+ * - An isolated build (the gather's arrangement, the same from each of its blocks) is judged as a whole against every
+ *   turn and mirror of each recipe: the recipe itself is no near miss; the recipe turned, or with up to wrongMax
+ *   blocks of the wrong kind or cells left empty, and nothing extra, is (arrangementMiss).
+ * - A build that touches something is a near miss when a recipe's blocks are there exactly, in some orientation, the
+ *   hit one of them, with at most NEAR_MISS_EXTRA placed blocks touching it besides (touchingMiss).
+ *
+ * Natural ground counts as a block of the build like any other: a natural Umberslate where the recipe wants one is
+ * that Umberslate (the owner's Quarry Charge, 2026-11-28, kept a natural Umberslate as its base).
  */
-function placedCounts(read: Read, hit: Cell, natural?: (x: number, y: number, z: number) => boolean): Map<number, number> | null {
-  const placed = (x: number, y: number, z: number): boolean => read(x, y, z) !== 0 && !natural?.(x, y, z)
-  if (!placed(hit[0], hit[1], hit[2])) return null
-  const seen = new Set<string>([`${hit[0]},${hit[1]},${hit[2]}`])
-  const q: Array<readonly [number, number, number]> = [hit]
-  for (let i = 0; i < q.length; i++) {
+export function nearMiss(read: Read, hit: Cell, natural?: (x: number, y: number, z: number) => boolean): NearMiss | null {
+  if (!read(hit[0], hit[1], hit[2])) return null
+  const g = gather(read, hit, RECIPE_REACH)
+  if (recipeOf(g.arrangement)) return null
+  return (g.arrangement && arrangementMiss(g.arrangement)) || touchingMiss(read, hit, natural)
+}
+
+/**
+ * An isolated arrangement against every orientation of each game recipe: null when it is a recipe exactly or near
+ * none; else the closest (fewest wrong and missing, the right way round first). Its blocks must all lie in the recipe's
+ * shape (an extra block is another build), with at most wrongMax blocks of the wrong kind and wrongMax cells empty.
+ */
+export function arrangementMiss(a: Arrangement): NearMiss | null {
+  if (recipeOf(a)) return null
+  const mine = blocksOf(a)
+  let best: NearMiss | null = null
+  let bestCost = Infinity
+  for (const r of allPoses()) for (const pose of r.poses) {
+    const max = wrongMax(pose)
+    if (mine.length < pose.blocks.length - max) continue
+    if (a.size[0] > pose.size[0] || a.size[1] > pose.size[1] || a.size[2] > pose.size[2]) continue
+    const want = new Map(pose.blocks.map(([x, y, z, id]) => [`${x},${y},${z}`, id]))
+    for (let ox = 0; ox <= pose.size[0] - a.size[0]; ox++) for (let oy = 0; oy <= pose.size[1] - a.size[1]; oy++) for (let oz = 0; oz <= pose.size[2] - a.size[2]; oz++) {
+      const wrong: Array<{ is: number; should: number }> = []
+      let extra = false
+      for (const [x, y, z, id] of mine) {
+        const should = want.get(`${x + ox},${y + oy},${z + oz}`)
+        if (should === undefined) { extra = true; break }
+        if (should !== id) wrong.push({ is: id, should })
+      }
+      if (extra || wrong.length > max) continue
+      const missing = pose.blocks.length - mine.length
+      if (missing > max || (!wrong.length && !missing && !pose.turned)) continue
+      const cost = wrong.length + missing + (pose.turned ? 0.5 : 0)
+      if (cost < bestCost) { bestCost = cost; best = { recipe: r.id, name: r.name, turned: pose.turned && !wrong.length && !missing, touching: null, wrong, missing } }
+    }
+  }
+  return best
+}
+
+/**
+ * A recipe's blocks exactly at `hit`, in some orientation, touching something: what touches it (natural ground is "the
+ * ground", a placed block "a block"), and whether it is turned. The placed blocks touching the recipe's cells, counted
+ * from those cells (not from the hit, so every block of it gives the same answer), may be at most NEAR_MISS_EXTRA.
+ */
+function touchingMiss(read: Read, hit: Cell, natural?: (x: number, y: number, z: number) => boolean): NearMiss | null {
+  let best: NearMiss | null = null
+  for (const at of anchorsOf(read, hit, natural)) {
+    const m = touchingAt(read, at, natural)
+    if (m === 'recipe') return null
+    if (m && (!best || (best.turned && !m.turned))) best = m
+  }
+  return best
+}
+
+/**
+ * Where a recipe's blocks are looked for: the hit, and when it is a placed block, the placed blocks connected to it (a
+ * few at most), so a stray block stuck to a recipe finds the recipe too and every block of the build says the same.
+ */
+function anchorsOf(read: Read, hit: Cell, natural?: (x: number, y: number, z: number) => boolean): Cell[] {
+  const out: Cell[] = [hit]
+  if (natural?.(hit[0], hit[1], hit[2])) return out
+  const seen = new Set([`${hit[0]},${hit[1]},${hit[2]}`])
+  for (let i = 0; i < out.length; i++) {
+    const [x, y, z] = out[i]
+    for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
+      const c: Cell = [x + dx, y + dy, z + dz]
+      const k = `${c[0]},${c[1]},${c[2]}`
+      if (seen.has(k)) continue
+      seen.add(k)
+      if (!read(c[0], c[1], c[2]) || natural?.(c[0], c[1], c[2])) continue
+      out.push(c)
+      if (out.length > RECIPE_MAX + NEAR_MISS_EXTRA) return [hit]
+    }
+  }
+  return out
+}
+
+/** A recipe's blocks exactly at `at` (one of them), touching something or turned; 'recipe' when it is there isolated and the right way round. */
+function touchingAt(read: Read, at: Cell, natural?: (x: number, y: number, z: number) => boolean): NearMiss | 'recipe' | null {
+  const hitId = read(at[0], at[1], at[2])
+  let best: NearMiss | null = null
+  for (const r of allPoses()) for (const pose of r.poses) for (const b of pose.blocks) {
+    if (b[3] !== hitId) continue
+    const lo = [at[0] - b[0], at[1] - b[1], at[2] - b[2]] as const
+    if (!pose.blocks.every(([x, y, z, id]) => read(lo[0] + x, lo[1] + y, lo[2] + z) === id)) continue
+    const touching = touchOf(read, lo, pose, natural)
+    if (!touching && !pose.turned) return 'recipe'
+    if (extraPlaced(read, lo, pose, natural) > NEAR_MISS_EXTRA) continue
+    const m: NearMiss = { recipe: r.id, name: r.name, turned: pose.turned, touching, wrong: [], missing: 0 }
+    // The right way round wins over a turned reading of the same blocks.
+    if (!best || (best.turned && !m.turned)) best = m
+  }
+  return best
+}
+
+/** The placed blocks (not natural ground) connected to a recipe's cells at `lo`, not counting its own; stops past NEAR_MISS_EXTRA. */
+function extraPlaced(read: Read, lo: readonly [number, number, number], pose: Pose, natural?: (x: number, y: number, z: number) => boolean): number {
+  const own = new Set(pose.blocks.map(([x, y, z]) => `${lo[0] + x},${lo[1] + y},${lo[2] + z}`))
+  const seen = new Set(own)
+  const q: Array<readonly [number, number, number]> = pose.blocks.map(([x, y, z]) => [lo[0] + x, lo[1] + y, lo[2] + z] as const)
+  let extra = 0
+  for (let i = 0; i < q.length && extra <= NEAR_MISS_EXTRA && q.length <= RECIPE_MAX + NEAR_MISS_EXTRA + 1; i++) {
     const [x, y, z] = q[i]
     for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
       const c = [x + dx, y + dy, z + dz] as const
       const k = `${c[0]},${c[1]},${c[2]}`
-      if (seen.has(k) || !placed(c[0], c[1], c[2])) continue
+      if (seen.has(k)) continue
       seen.add(k)
+      if (!read(c[0], c[1], c[2]) || natural?.(c[0], c[1], c[2])) continue
+      extra++
       q.push(c)
-      if (q.length > RECIPE_MAX + NEAR_MISS_EXTRA) return null
     }
   }
-  const out = new Map<number, number>()
-  for (const [x, y, z] of q) { const id = read(x, y, z); out.set(id, (out.get(id) ?? 0) + 1) }
-  return out
-}
-
-/** Whether counted blocks hold a recipe's: at least its count of every material, and at most NEAR_MISS_EXTRA more blocks. */
-function holdsRecipe(counts: ReadonlyMap<number, number>, recipe: Arrangement): boolean {
-  const needs = recipeNeeds(recipe)
-  let need = 0, have = 0
-  for (const [id, n] of Object.entries(needs)) { if ((counts.get(Number(id)) ?? 0) < n) return false; need += n }
-  for (const n of counts.values()) have += n
-  return have - need <= NEAR_MISS_EXTRA
-}
-
-/**
- * Whether a game recipe is built at `hit` (its blocks exactly, in some orientation, the hit one of them) but will not
- * make what it makes; null when no recipe is there, or when it is there and makes it. `natural` says whether a cell is
- * natural ground (TERRAIN's generated ground, unchanged); without it nothing touching counts as the ground.
- *
- * Only when the struck build is the recipe's blocks and at most NEAR_MISS_EXTRA more (coordinator's ruling on #973):
- * the placed blocks connected to the hit, counted by material, must hold the recipe's, with no more than 3 besides. A
- * T on a small platform or with a stray block is TOUCHING A BLOCK; a larger build that holds a recipe's shape is never
- * called a near miss. Natural ground is not part of the build, so a recipe resting on it is TOUCHING THE GROUND.
- */
-export function nearMiss(read: Read, hit: Cell, natural?: (x: number, y: number, z: number) => boolean): NearMiss | null {
-  const hitId = read(hit[0], hit[1], hit[2])
-  if (!hitId) return null
-  const counts = placedCounts(read, hit, natural)
-  if (!counts) return null
-  let best: NearMiss | null = null
-  for (const r of allPoses()) {
-    if (!holdsRecipe(counts, RECIPES.find((x) => x.id === r.id)!.recipe)) continue
-    for (const pose of r.poses) for (const b of pose.blocks) {
-      if (b[3] !== hitId) continue
-      const lo = [hit[0] - b[0], hit[1] - b[1], hit[2] - b[2]] as const
-      if (!pose.blocks.every(([x, y, z, id]) => read(lo[0] + x, lo[1] + y, lo[2] + z) === id)) continue
-      const touching = touchOf(read, lo, pose, natural)
-      // Isolated and the right way round: it compiles in either hand (every game recipe fits a bare hand's reach).
-      if (!touching && !pose.turned) return null
-      const m: NearMiss = { recipe: r.id, name: r.name, turned: pose.turned, touching, wrong: [] }
-      // The right way round wins over a turned reading of the same blocks.
-      if (!best || (best.turned && !m.turned)) best = m
-    }
-  }
-  return best ?? wrongBlocks(read, hit, natural)
-}
-
-/**
- * A recipe's shape at `hit` with every cell filled but a block or two of the wrong kind (at most wrongMax), the hit
- * one of its cells whatever it holds; null when none. Fewest wrong blocks first, then the right way round.
- */
-function wrongBlocks(read: Read, hit: Cell, natural?: (x: number, y: number, z: number) => boolean): NearMiss | null {
-  let best: NearMiss | null = null
-  for (const r of allPoses()) for (const pose of r.poses) for (const b of pose.blocks) {
-    const lo = [hit[0] - b[0], hit[1] - b[1], hit[2] - b[2]] as const
-    const wrong: Array<{ is: number; should: number }> = []
-    let filled = true
-    for (const [x, y, z, id] of pose.blocks) {
-      const v = read(lo[0] + x, lo[1] + y, lo[2] + z)
-      if (!v) { filled = false; break }
-      if (v !== id) wrong.push({ is: v, should: id })
-    }
-    if (!filled || !wrong.length || wrong.length > wrongMax(pose)) continue
-    const m: NearMiss = { recipe: r.id, name: r.name, turned: pose.turned, touching: touchOf(read, lo, pose, natural), wrong }
-    if (!best || wrong.length < best.wrong.length || (wrong.length === best.wrong.length && best.turned && !m.turned)) best = m
-  }
-  return best
+  return extra
 }
 
 /**
@@ -263,20 +316,32 @@ export function tooBigBare(read: Read, hit: Cell, bare: boolean, g: Pick<Gathere
 }
 
 /** The one cause the preview names, most important first. */
-export type MissCause = 'wrong' | 'turned' | 'ground' | 'block' | 'big'
+export type MissCause = 'missing' | 'wrong' | 'turned' | 'ground' | 'block' | 'big'
 
 export function missCause(m: NearMiss): MissCause {
-  return m.wrong.length ? 'wrong' : m.turned ? 'turned' : m.touching === 'ground' ? 'ground' : 'block'
+  return m.missing ? 'missing' : m.wrong.length ? 'wrong' : m.turned ? 'turned' : m.touching === 'ground' ? 'ground' : 'block'
 }
 
 /** The preview's tail after BREAKS (or COMPILES) and the count. */
 export const CAUSE_WORDS: Readonly<Record<MissCause, string>> = {
-  wrong: 'A BLOCK IS WRONG',
-  turned: 'TURNED THE WRONG WAY',
-  ground: 'TOUCHING THE GROUND',
-  block: 'TOUCHING A BLOCK',
+  missing: 'MISSING A BLOCK',
+  wrong: 'WRONG BLOCK',
+  turned: 'TURNED',
+  ground: 'NOT AIR GAPPED',
+  block: 'NOT AIR GAPPED',
   big: 'TOO BIG FOR A BARE HAND',
 }
+
+/** A near miss's label by the cross, in the warning red, never COMPILES: "WRONG BLOCK", "2 WRONG BLOCKS", "MISSING A BLOCK". */
+export function missLabel(m: NearMiss): string {
+  const c = missCause(m)
+  if (c === 'missing' && m.missing > 1) return `MISSING ${m.missing} BLOCKS`
+  if (c === 'wrong' && m.wrong.length > 1) return `${m.wrong.length} WRONG BLOCKS`
+  return CAUSE_WORDS[c]
+}
+
+/** What an exact game recipe that will yield says by the cross, in place of COMPILES: its prize. */
+export const PRIZE_LABEL: Readonly<Record<RecipeId, string>> = { compiler: 'COMPILER', quarry: 'QUARRY CHARGE' }
 
 /** The line after a bare-handed smash of a build too big for it. */
 export const TOO_BIG_LINE = 'Too big for bare hands: 3x3x3 at most. The Compiler takes 16x16x16.'
@@ -292,6 +357,7 @@ function reasons(m: NearMiss): string {
       ? `${article(blockName(w.is))} where ${article(blockName(w.should))} goes`
       : `${countWord(w.n)} ${plural(blockName(w.is))} where ${plural(blockName(w.should))} go`)
   }
+  if (m.missing) why.push(m.missing === 1 ? 'a block missing' : `${countWord(m.missing)} blocks missing`)
   if (m.turned) why.push('turned the wrong way')
   return list(why)
 }

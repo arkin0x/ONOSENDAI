@@ -20,6 +20,7 @@
  * gone.
  */
 
+import { markSceneCanvas } from './sceneCanvas'
 import { Canvas, useThree } from '@react-three/fiber'
 import { sceneEvents } from './sceneEvents'
 import { GlowWorldCanvas } from './PointBillboards'
@@ -1497,7 +1498,7 @@ export const Scene = memo(function Scene(): JSX.Element {
       // A lost context is said in the console (lib/glContext). Shader
       // programs are compiled once, not again at every cut (lib/keepPrograms).
       // On the stream, a loss that does not come back reloads (lib/tv/broadcast).
-      onCreated={({ gl, scene }) => { watchContext(gl.domElement, 'main view'); recoverLostContext(gl.domElement); keepPrograms(gl, scene); sortWithoutBoxing(gl) }}
+      onCreated={({ gl, scene }) => { markSceneCanvas(gl.domElement); watchContext(gl.domElement, 'main view'); recoverLostContext(gl.domElement); keepPrograms(gl, scene); sortWithoutBoxing(gl) }}
     >
       {/* Draws the view: frameloop "never" and this, every frame or none past 60 a second when nothing moves. */}
       <FrameDriver />

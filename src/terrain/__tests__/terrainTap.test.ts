@@ -14,6 +14,7 @@ import { terrainInput } from '../terrainInput'
 /** A stand-in for the scene's canvas: what the handler reads of an event's target. */
 class FakeCanvas extends EventTarget {
   tagName = 'CANVAS'
+  dataset = { scene: 'main' }
   closest(): null { return null }
   getBoundingClientRect(): { left: number; top: number; width: number; height: number } { return { left: 0, top: 0, width: 400, height: 800 } }
 }
@@ -61,5 +62,34 @@ describe('a tap on the scene', () => {
     expect(usePad.getState().open).toBe(false)
     tapScene()
     expect(usePad.getState().open).toBe(true)
+  })
+})
+
+/** Another canvas on the page: a blueprint's drawing in a menu or the examine sheet. */
+class SchematicCanvas extends EventTarget {
+  tagName = 'CANVAS'
+  dataset = {}
+  closest(): null { return null }
+  getBoundingClientRect(): { left: number; top: number; width: number; height: number } { return { left: 0, top: 0, width: 120, height: 120 } }
+}
+
+describe('a tap on a schematic in a menu (owner, 2026-11-28: "a block is missing ... when I\'m going to menus")', () => {
+  it('never mines the block behind it in TERRAIN; the scene still does', () => {
+    useTerrain.setState({ active: true, sheet: false })
+    const schematic = new SchematicCanvas()
+    const stopA = terrainPointer(schematic)
+    try {
+      tap(schematic)
+      expect(terrainInput.action).toBeNull()
+    } finally { stopA() }
+    const canvas = new FakeCanvas()
+    const stopB = terrainPointer(canvas)
+    try {
+      tap(canvas)
+      expect(terrainInput.action?.kind).toBe('mine')
+    } finally {
+      stopB()
+      useTerrain.setState({ active: false })
+    }
   })
 })

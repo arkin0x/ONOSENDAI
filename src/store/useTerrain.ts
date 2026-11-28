@@ -468,7 +468,7 @@ export const useTerrain = create<TerrainState>((set, get) => ({
     if (isSolid(s.world.blockCs(dx, dy, dz))) return false
     const slot = s.world.slotAtCs(dx, dy, dz)
     // Never where you stand: the walk's own gibson. Asked first, so a refused place never surveys the chunk for you.
-    if (walkerAt(s, cell)) { get().say('You are standing there: step back to place it.'); return false }
+    if (walkerAt(s, cell)) { get().say('Step back to place it.'); return false }
     if (!surveyShown(s, slot)) { get().say('Survey this chunk first.'); return false }
     if (isQuarry(id)) {
       // A charge is placed like a block but is not one: it arms where it stands and writes nothing until its blast (store/useQuarry.ts).

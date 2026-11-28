@@ -970,6 +970,12 @@ describe('the ground\'s revision (DECK-0009 revision 3: a chunk keeps the revisi
   const ownOf = (key: string): Uint8Array => terrainSession!.world.slotByKey(key)!.own!
   const rowOf = async (key: string) => { const db = await openTerrainDb(); try { return (await readOwner(db, me())).revisions.get(key) } finally { db.close() } }
 
+  // An identity of its own, LIVE, whose signer is its own: the describes before switch npubs and go LOCAL.
+  beforeEach(async () => {
+    await useCyberspace.getState().useNsec(nip19.nsecEncode(generateSecretKey()))
+    if (!useCyberspace.getState().live) useCyberspace.getState().setLive(true)
+    await settle(50)
+  })
   afterEach(() => setGroundWriteRevisionForTests(null))
 
   it('in this release a fresh survey is revision 2, and every surveyed plane names `surveyed`, its first version\'s created_at, carried forward', async () => {

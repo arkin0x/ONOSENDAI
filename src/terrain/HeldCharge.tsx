@@ -1,25 +1,29 @@
 /**
  * HeldCharge.tsx - the Quarry Charge in your hand while it is the chosen
- * slot in TERRAIN: the Tri-Pack itself (lib/blueprint/quarryModel.ts), drawn
- * on a canvas of its own the whole screen wide, under every control, as the
- * held Compiler is (HeldCompiler.tsx): it never clips into the world and
- * never takes a tap.
+ * slot in TERRAIN: the Tri-Pack itself (lib/blueprint/quarryModel.ts), held
+ * exactly where a carried block is (owner, 2026-11-28: "the quarry charge
+ * should be held in the bottom right like the blocks are").
  *
- * At rest it stands in the bottom right corner, tilted toward you as if held
- * up in the right hand, turning a little this way and that so its three
- * charges and their wires catch the light, its hub ring turning on its own
- * (the model's motion). It breathes and bobs with a walk on the page's own
- * motion (styles.css), and dips each time one is placed. With reduced motion
- * it holds still, and the model's ring with it. Hidden with none left.
+ * Its box is the carried block's own (.terrain-held, TerrainView.tsx
+ * HeldBlock): the same corner, the same size, partly off the bottom right of
+ * the screen, under every control and the menu, never taking a tap, and
+ * hidden with the block's rules (the pad put away, the bag open on a phone).
+ * Its canvas is a little larger than that box and centred on it, so the
+ * model, tilted toward you as the block is, fits the block's footprint
+ * (heldChargeFit: HELD_SHARE of the box at its tallest or widest). It sways
+ * with a walk and dips when one is placed exactly as the block does (styles.
+ * css terrain-held-sway's steps and terrain-held-dip, 2D, so the canvas is
+ * never skewed), and is otherwise still but for its hub ring turning (the
+ * model's motion). With reduced motion it holds still, ring and all. Hidden
+ * with none left.
  *
  * The canvas is made once a visit and kept while the charges are owned, only
  * hidden for another slot, so its WebGL context is not made again on every
- * change of slot. It draws only while shown.
+ * change of slot or every placing. It draws only while shown.
  */
 
-import { Canvas, useFrame, useThree } from '@react-three/fiber'
-import { useEffect, useMemo, useRef } from 'react'
-import type { Group } from 'three'
+import { Canvas, useThree } from '@react-three/fiber'
+import { useEffect, useRef, useState } from 'react'
 import type { ShardModel } from 'sno-core/shards'
 import { ShardMesh } from '../scene/ShardMesh'
 import { ShardLights } from '../scene/shardLight'
@@ -30,19 +34,33 @@ import { useReducedMotion } from '../hooks/useReducedMotion'
 
 const FOV = 40
 const HALF_TAN = Math.tan((FOV * Math.PI) / 360)
-/** How far in front of the eye it stands. */
+/** How far in front of the eye it is held. */
 const DEPTH = 4
-/** How tall it looks: a share of the screen's height, and at most a share of its width (a phone held upright). */
-const HEIGHT_SHARE = 0.3
-const WIDTH_SHARE = 0.36
-/** Its tilt toward you and its turn, radians; and how far it sways either side. */
-const TILT = 0.32
-const TURN = -0.55
-const SWAY = 0.32
-/** A dip when one is placed, ms. */
-const DIP_MS = 260
+/** The canvas's side, in carried-block boxes (styles.css .terrain-held-charge__view), centred on the box. */
+export const VIEW_SHARE = 2.2
+/** How large it is drawn: at its tallest or widest, this many carried-block boxes (the tilted cube's own reach). */
+export const HELD_SHARE = 1.2
+/** Its tilt toward you and its turn, radians (about the carried block's 20 and 36 degrees), and its lean. */
+export const TILT = 0.34
+export const TURN = -0.6
+export const LEAN = -0.08
 
-/** Draws every frame while shown (the model's ring turns, and so does the charge), otherwise nothing. */
+/**
+ * How the model sits in its canvas: scaled so that, tilted and turned, its
+ * tallest or widest reach is HELD_SHARE of the carried block's box, and
+ * moved so its middle is the canvas's (the box's middle).
+ */
+export function heldChargeFit(box: { min: readonly number[]; max: readonly number[] } = QUARRY_BOX): { scale: number; centre: [number, number, number]; depth: number } {
+  const w = box.max[0] - box.min[0], h = box.max[1] - box.min[1], d = box.max[2] - box.min[2]
+  const tall = h * Math.cos(TILT) + d * Math.abs(Math.sin(TILT))
+  const wide = w * Math.cos(TURN) + d * Math.abs(Math.sin(TURN))
+  // The canvas, VIEW_SHARE boxes across, is 2 * DEPTH * HALF_TAN units across at the model's depth.
+  const target = (2 * DEPTH * HALF_TAN * HELD_SHARE) / VIEW_SHARE
+  const centre: [number, number, number] = [(box.max[0] + box.min[0]) / 2, (box.max[1] + box.min[1]) / 2, (box.max[2] + box.min[2]) / 2]
+  return { scale: target / Math.max(tall, wide), centre, depth: DEPTH }
+}
+
+/** Draws every frame while shown (the model's hub ring turns), otherwise nothing. */
 function Pacer({ shown, still }: { shown: boolean; still: boolean }): null {
   const invalidate = useThree((s) => s.invalidate)
   useEffect(() => {
@@ -57,36 +75,13 @@ function Pacer({ shown, still }: { shown: boolean; still: boolean }): null {
   return null
 }
 
-function Held({ shard, still, dipAt }: { shard: ShardModel; still: boolean; dipAt: { current: number } }): JSX.Element {
-  const holder = useRef<Group>(null)
-  const size = useThree((s) => s.size)
-  const fit = useMemo(() => {
-    const h = QUARRY_BOX.max[1] - QUARRY_BOX.min[1]
-    const centre: [number, number, number] = [0, (QUARRY_BOX.max[1] + QUARRY_BOX.min[1]) / 2, (QUARRY_BOX.max[2] + QUARRY_BOX.min[2]) / 2]
-    const halfH = DEPTH * HALF_TAN
-    const halfW = halfH * (size.width / Math.max(1, size.height))
-    // Its height on screen, in the eye's units: a share of the height, held to a share of the width.
-    const tall = Math.min(2 * halfH * HEIGHT_SHARE, 2 * halfW * WIDTH_SHARE)
-    // In the bottom right, left of the right-hand column of controls (as the carried block stands), its feet a little
-    // past the bottom of the screen.
-    // On a phone held upright the bottom third of the screen is the pad's (and LOOK's ball on the right): it stands just
-    // over it, at the right edge.
-    const upright = size.width < size.height
-    return { scale: tall / h, centre, x: halfW - tall * (upright ? 0.6 : 1.05), y: upright ? -halfH * 0.2 + tall * 0.5 : -halfH + tall * 0.45 }
-  }, [size.width, size.height])
-  useFrame(() => {
-    const g = holder.current
-    if (!g) return
-    const t = performance.now()
-    const dip = Math.max(0, 1 - (t - dipAt.current) / DIP_MS)
-    const sway = still ? 0 : Math.sin(t / 1400) * SWAY
-    g.position.set(fit.x, fit.y - dip * 0.25, -DEPTH)
-    g.rotation.set(TILT + dip * 0.25, TURN + sway, -0.08, 'XYZ')
-  })
+const FIT = heldChargeFit()
+
+function Held({ shard, still }: { shard: ShardModel; still: boolean }): JSX.Element {
   return (
-    <group ref={holder}>
-      <group scale={fit.scale}>
-        <group position={[-fit.centre[0], -fit.centre[1], -fit.centre[2]]}>
+    <group position={[0, 0, -FIT.depth]} rotation={[TILT, TURN, LEAN, 'XYZ']}>
+      <group scale={FIT.scale}>
+        <group position={[-FIT.centre[0], -FIT.centre[1], -FIT.centre[2]]}>
           <ShardMesh shard={shard} lit still={still} />
         </group>
       </group>
@@ -103,22 +98,27 @@ export function HeldCharge({ shown = true }: { shown?: boolean }): JSX.Element |
   const on = shown && left > 0
   // The armed look is read now, so a charge placed draws it at once (scene/QuarryFx.tsx).
   useEffect(() => { void quarryArmedModel() }, [])
-  // A dip each time one is placed (the count goes down).
-  const dipAt = useRef(-Infinity)
+  // A dip each time one is placed (the count goes down): the carried block's dip, its two names taking turns so it
+  // starts again without making the canvas again.
+  const [dip, setDip] = useState(0)
   const was = useRef(left)
   useEffect(() => {
-    if (left < was.current) dipAt.current = performance.now()
+    if (left < was.current) setDip((d) => d + 1)
     was.current = left
   }, [left])
   if (!shard) return null
   return (
-    <div className={`terrain-held-charge${walking ? ' is-walking' : ''}`} aria-hidden style={on ? undefined : { visibility: 'hidden' }}>
-      <div className="terrain-held-charge__sway">
-        <Canvas dpr={[1, 2]} frameloop="demand" gl={{ alpha: true, antialias: true, premultipliedAlpha: true }} camera={{ fov: FOV, near: 0.05, far: 40, position: [0, 0, 0] }} style={{ pointerEvents: 'none' }}>
-          <Pacer shown={on} still={still} />
-          <ShardLights />
-          <Held shard={shard} still={still} dipAt={dipAt} />
-        </Canvas>
+    <div className={`terrain-held terrain-held--charge${walking ? ' is-walking' : ''}`} aria-hidden style={on ? undefined : { visibility: 'hidden' }}>
+      <div className={`terrain-held-charge__dip${dip ? (dip % 2 ? ' is-dip-a' : ' is-dip-b') : ''}`}>
+        <div className="terrain-held-charge__sway">
+          <div className="terrain-held-charge__view">
+            <Canvas dpr={[1, 2]} frameloop="demand" gl={{ alpha: true, antialias: true, premultipliedAlpha: true }} camera={{ fov: FOV, near: 0.05, far: 40, position: [0, 0, 0] }} style={{ pointerEvents: 'none' }}>
+              <Pacer shown={on} still={still} />
+              <ShardLights />
+              <Held shard={shard} still={still} />
+            </Canvas>
+          </div>
+        </div>
       </div>
     </div>
   )

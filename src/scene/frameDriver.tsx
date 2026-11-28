@@ -14,6 +14,7 @@
 
 import { useSmashFx } from '../store/useSmashFx'
 import { fuseBurning, useQuarry } from '../store/useQuarry'
+import { dropsFlying } from '../store/quarryHoming'
 import { useBlueprints } from '../store/useBlueprints'
 import { smashBusy } from '../lib/blueprint/shatter'
 import { advance, useThree } from '@react-three/fiber'
@@ -57,6 +58,8 @@ export function viewBusy(): boolean {
   if (smashBusy(useSmashFx.getState().show, performance.now())) return true
   // A Quarry Charge's fuse burning: it blinks and counts down (scene/QuarryFx.tsx).
   if (fuseBurning()) return true
+  // Quarry drops flying to you (store/quarryHoming.ts): they move every frame until carried.
+  if (dropsFlying()) return true
   for (const _ in useOpenCeremony.getState().playing) return true
   return false
 }

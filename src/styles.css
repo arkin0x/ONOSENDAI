@@ -14793,6 +14793,14 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
   font-weight: 700;
   text-shadow: 0 1px 2px #000;
 }
+.terrain-slot__count.is-bump { animation: terrain-count-bump 280ms ease-out; }
+/* A count that grew (terrain/TerrainView.tsx SlotCount): up a little and mint, then back. */
+@keyframes terrain-count-bump {
+  35% { transform: translateY(-2px) scale(1.4); color: var(--terrain); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .terrain-slot__count.is-bump { animation: none; }
+}
 .terrain-slot--bag { --terrain-line: rgba(124, 255, 196, 0.55); color: var(--terrain); }
 .terrain-slot--bag .terrain-slot__num { color: #fff; }
 
@@ -16033,23 +16041,33 @@ body:has(.terrainview.is-folded) .terrain-held { visibility: hidden; }
 .terrain-kind--quarry.is-out { color: rgba(255, 255, 255, 0.4); cursor: default; }
 .terrain-kind--quarry.is-out .chamfer { --chamfer-line: rgba(255, 255, 255, 0.2); }
 .terrain-sheet__grid--tools { margin-bottom: 10px; }
-/* The charge carried (terrain/HeldCharge.tsx): the Tri-Pack on a canvas the whole screen wide, under every control and
-   the menu, never taking a tap, as the held Compiler is; it breathes, and bobs with a walk, on the page's own motion. */
-.terrain-held-charge {
-  position: fixed;
-  inset: -16px;
-  z-index: 0;
-  overflow: hidden;
+/* The charge carried (terrain/HeldCharge.tsx): in the carried block's own box (.terrain-held, which places it, sizes it
+   and hides it), on a canvas VIEW_SHARE boxes across centred on that box, so the tilted Tri-Pack fills the block's
+   footprint. It sways with a walk and dips when one is placed on the block's own steps and timing, in 2D so the canvas
+   is never skewed; the two dip names take turns so a dip starts again without making the canvas again. */
+.terrain-held-charge__dip,
+.terrain-held-charge__sway { width: 100%; height: 100%; }
+.terrain-held-charge__dip.is-dip-a { animation: terrain-held-dip 220ms ease-out; }
+.terrain-held-charge__dip.is-dip-b { animation: terrain-held-charge-dip 220ms ease-out; }
+@keyframes terrain-held-charge-dip { 40% { transform: translateY(14px) rotate(-8deg); } }
+.terrain-held.is-walking .terrain-held-charge__sway { animation: terrain-held-charge-sway 900ms ease-in-out infinite alternate; }
+@keyframes terrain-held-charge-sway {
+  from { transform: translate(-3px, 0) rotate(0deg); }
+  to { transform: translate(3px, -5px) rotate(2deg); }
+}
+.terrain-held-charge__view {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 220%;
+  height: 220%;
+  transform: translate(-50%, -50%);
   pointer-events: none;
 }
-.terrain-held-charge__sway { width: 100%; height: 100%; animation: terrain-compiler-breathe 3.6s ease-in-out infinite alternate; }
-.terrain-held-charge.is-walking .terrain-held-charge__sway { animation: terrain-compiler-bob 460ms ease-in-out infinite alternate; }
 @media (prefers-reduced-motion: reduce) {
-  .terrain-held-charge .terrain-held-charge__sway { animation: none; }
-}
-body:has(.terrainview.is-folded) .terrain-held-charge { visibility: hidden; }
-@media (max-width: 1099px) {
-  body:has(.terrainview.is-bag) .terrain-held-charge { visibility: hidden; }
+  .terrain-held.is-walking .terrain-held-charge__sway,
+  .terrain-held-charge__dip.is-dip-a,
+  .terrain-held-charge__dip.is-dip-b { animation: none; }
 }
 /* The Tri-Pack's picture in the hotbar and the bag: its dark ground dropped into the slot's (screen), its light kept. */
 .terrain-slot__charge { width: 30px; height: 30px; margin: -4px 0 -2px; mix-blend-mode: screen; pointer-events: none; }

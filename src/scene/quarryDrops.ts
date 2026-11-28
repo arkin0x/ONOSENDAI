@@ -3,14 +3,19 @@
  * draws them; store/useQuarry.ts holds them; lib/terrain/quarry.ts the
  * rules). Every block a blast took floats as a small copy of itself in its
  * own cell, turning slowly and bobbing, and shrinking and rising as it fades
- * in its last seconds.
+ * in its last seconds. A drop flying to you (store/quarryHoming.ts) speeds
+ * up from its cell to your body's middle on a slight arc, turning faster and
+ * shrinking a little as it arrives; with reduced motion it fades where it is.
  *
  * One InstancedMesh per block kind, in the TERRAIN field's frame. The
  * turning, the bob and the fade are the vertex shader's, from one time
  * uniform shared by every kind and two numbers per drop (its phase and when
  * it evaporates), so a frame only sets the time (`tick`). The instances are
- * written again only when the drops change or the field moves its origin
- * (`update`), and a kind's arrays are made again only when it needs more
+ * written again only when the drops change, a drop sets off, or the field
+ * moves its origin (`update`); a flight is worked in the shader from when it
+ * set off, how far it had to go and the body's middle (one uniform), with the
+ * same numbers lib/terrain/quarry.ts flightShare uses, so it arrives exactly
+ * when the store carries it, and a kind's arrays are made again only when it needs more
  * room than it has (doubling). Nothing is made in a frame that only draws.
  *
  * The drops blend without touching alpha (shardFaces.ts NO_BLOOM_BLEND): they
@@ -20,7 +25,8 @@
 import { BoxGeometry, DataTexture, DynamicDrawUsage, Group, InstancedBufferAttribute, InstancedMesh, Matrix4, NearestFilter, RGBAFormat, ShaderMaterial, Vector3 } from 'three'
 import { DECK_TO_KIND, UNKNOWN_KIND, type BlockKind } from '../lib/terrain/blocks'
 import { makeTile } from '../lib/terrain/tiles'
-import { DROP_FADE_MS, DROP_SIZE, type Drop } from '../lib/terrain/quarry'
+import { DROP_FADE_MS, DROP_SIZE, HOME_ACCEL, HOME_MAX_SPEED, HOME_REDUCED_MS, type Drop } from '../lib/terrain/quarry'
+import type { Flight } from '../store/quarryHoming'
 import { NO_BLOOM_BLEND } from './shardFaces'
 
 /** The page's clock for the shader, in seconds from when this loaded: small numbers, so a float keeps them exact. */
@@ -29,23 +35,54 @@ export const secondsOf = (wallMs: number): number => (wallMs - EPOCH) / 1000
 
 const DROP_VERTEX = /* glsl */ `
   attribute vec2 aDrop;
+  // A flight: when it set off (seconds, -1 for none), how far it had to go (cells), its arc's lean, and 1 for reduced motion.
+  attribute vec4 aHome;
   uniform float uTime;
   uniform float uFade;
+  uniform vec3 uBody;
+  uniform float uAccel;
+  uniform float uVmax;
+  uniform float uReduced;
   varying vec2 vUv;
   varying float vShade;
   varying float vLevel;
+  float flownAt(float t) {
+    float tv = uVmax / uAccel;
+    return t < tv ? 0.5 * uAccel * t * t : 0.5 * uAccel * tv * tv + uVmax * (t - tv);
+  }
   void main() {
-    // Turning slowly about the up axis, each drop at its own phase.
-    float a = uTime * 0.9 + aDrop.x;
+    // How much of its flight it has made (lib/terrain/quarry.ts flightShare), 0 while it floats.
+    float prog = 0.0;
+    bool reduced = aHome.w > 0.5;
+    if (aHome.x >= 0.0) {
+      float e = uTime - aHome.x;
+      if (e > 0.0) prog = reduced ? clamp(e / uReduced, 0.0, 1.0) : aHome.y > 0.0001 ? clamp(flownAt(e) / aHome.y, 0.0, 1.0) : 1.0;
+    }
+    float flying = reduced ? 0.0 : prog;
+    // Turning slowly about the up axis, each drop at its own phase, and faster as it flies.
+    float a = uTime * 0.9 + aDrop.x + flying * flying * 6.0;
     float c = cos(a), s = sin(a);
     vec3 p = vec3(c * position.x + s * position.z, position.y, -s * position.x + c * position.z);
     vec3 n = vec3(c * normal.x + s * normal.z, normal.y, -s * normal.x + c * normal.z);
-    // Whole until its last seconds, then shrinking as it fades.
+    // Whole until its last seconds, then shrinking as it fades; gone once it arrives (or, reduced, as it fades out).
     vLevel = clamp((aDrop.y - uTime) / uFade, 0.0, 1.0);
-    p *= 0.35 + 0.65 * vLevel;
+    if (reduced) vLevel *= 1.0 - prog;
+    if (prog >= 0.999) vLevel = 0.0;
+    p *= (0.35 + 0.65 * vLevel) * (1.0 - 0.45 * flying * flying);
     vec4 w = instanceMatrix * vec4(p, 1.0);
-    // The bob, in cells, and a little rise as it evaporates.
-    w.y += 0.07 * sin(uTime * 2.1 + aDrop.x * 1.7) + 0.25 * (1.0 - vLevel);
+    // The bob, in cells, and a little rise as it evaporates; the bob settles as it flies.
+    w.y += (0.07 * sin(uTime * 2.1 + aDrop.x * 1.7)) * (1.0 - flying) + 0.25 * (1.0 - vLevel);
+    if (flying > 0.0) {
+      // From its cell to the body's middle on a slight arc: up, and leaning to one side of the line.
+      vec3 p0 = instanceMatrix[3].xyz;
+      vec3 d = uBody - p0;
+      vec3 across = cross(d, vec3(0.0, 1.0, 0.0));
+      float l = length(across);
+      across = l > 0.001 ? across / l : vec3(1.0, 0.0, 0.0);
+      vec3 mid = p0 + 0.5 * d + vec3(0.0, 0.3 * aHome.y, 0.0) + across * (aHome.z * 0.35 * aHome.y);
+      float u = flying, v = 1.0 - flying;
+      w.xyz += v * v * p0 + 2.0 * v * u * mid + u * u * uBody - p0;
+    }
     vShade = n.y > 0.5 ? 1.0 : n.y < -0.5 ? 0.5 : abs(n.x) > 0.5 ? 0.78 : 0.66;
     vUv = uv;
     gl_Position = projectionMatrix * modelViewMatrix * w;
@@ -91,7 +128,7 @@ function raw(hex: string): Vector3 {
 }
 
 /** One kind's drops on the GPU. */
-export interface KindDrops { mesh: InstancedMesh; drop: InstancedBufferAttribute; material: ShaderMaterial; texture: DataTexture; capacity: number }
+export interface KindDrops { mesh: InstancedMesh; drop: InstancedBufferAttribute; home: InstancedBufferAttribute; material: ShaderMaterial; texture: DataTexture; capacity: number }
 
 const UNIT_BOX = new BoxGeometry(1, 1, 1)
 const scratch = new Matrix4()
@@ -102,8 +139,10 @@ export class DropField {
   readonly kinds = new Map<number, KindDrops>()
   /** The time every kind's shader reads, in seconds (secondsOf). */
   readonly time = { value: 0 }
+  /** The body's middle in the field's cells, where a flying drop goes: every kind's shader reads it. */
+  readonly body = { value: new Vector3() }
   /** What the instances were last written for. */
-  private built: { version: number; field: unknown; plane: number } = { version: -1, field: null, plane: -1 }
+  private built: { version: number; field: unknown; plane: number; homing: number } = { version: -1, field: null, plane: -1, homing: -1 }
   /** How many times the instances were written (for tests: a frame that only draws writes none). */
   writes = 0
 
@@ -112,22 +151,23 @@ export class DropField {
   }
 
   /**
-   * The drops as they are: written again only when `version` or the field
-   * (`field`, its `origin` and `plane`) differs from the last time. True when
-   * they were written.
+   * The drops as they are: written again only when `version`, the flights'
+   * `homingVersion` or the field (`field`, its `origin` and `plane`) differs
+   * from the last time. True when they were written.
    */
-  update(field: { world: { origin: { x: bigint; y: bigint; z: bigint } }; plane: number }, drops: readonly Drop[], version: number): boolean {
+  update(field: { world: { origin: { x: bigint; y: bigint; z: bigint } }; plane: number }, drops: readonly Drop[], version: number, flights?: ReadonlyMap<Drop, Flight>, homingVersion = 0): boolean {
     const b = this.built
-    if (b.version === version && b.field === field && b.plane === field.plane) return false
-    b.version = version; b.field = field; b.plane = field.plane
-    this.write(field.world.origin, field.plane, drops)
+    if (b.version === version && b.field === field && b.plane === field.plane && b.homing === homingVersion) return false
+    b.version = version; b.field = field; b.plane = field.plane; b.homing = homingVersion
+    this.write(field.world.origin, field.plane, drops, flights)
     this.writes++
     return true
   }
 
-  /** The frame: only the time moves. */
-  tick(wallMs: number): void {
+  /** The frame: only the time moves, and the body flying drops go to (field cells). */
+  tick(wallMs: number, body?: { x: number; y: number; z: number }): void {
     this.time.value = secondsOf(wallMs)
+    if (body) this.body.value.set(body.x, body.y, body.z)
   }
 
   /** A kind's mesh, made or grown to hold `n` drops. */
@@ -140,13 +180,19 @@ export class DropField {
     const texture = tileTexture(kind)
     const material = new ShaderMaterial({
       vertexShader: DROP_VERTEX, fragmentShader: DROP_FRAGMENT,
-      uniforms: { uTime: this.time, uFade: { value: DROP_FADE_MS / 1000 }, uMap: { value: texture }, uEdge: { value: raw(kind.edge) } },
+      uniforms: {
+        uTime: this.time, uFade: { value: DROP_FADE_MS / 1000 }, uMap: { value: texture }, uEdge: { value: raw(kind.edge) },
+        uBody: this.body, uAccel: { value: HOME_ACCEL }, uVmax: { value: HOME_MAX_SPEED }, uReduced: { value: HOME_REDUCED_MS / 1000 },
+      },
       transparent: true, depthWrite: true, toneMapped: false, ...NO_BLOOM_BLEND,
     })
     const geometry = UNIT_BOX.clone()
     const drop = new InstancedBufferAttribute(new Float32Array(capacity * 2), 2)
     drop.setUsage(DynamicDrawUsage)
     geometry.setAttribute('aDrop', drop)
+    const home = new InstancedBufferAttribute(new Float32Array(capacity * 4).fill(-1), 4)
+    home.setUsage(DynamicDrawUsage)
+    geometry.setAttribute('aHome', home)
     const mesh = new InstancedMesh(geometry, material, capacity)
     mesh.instanceMatrix.setUsage(DynamicDrawUsage)
     // Its bounds are one box at the origin; where the drops float is the instances'.
@@ -156,7 +202,7 @@ export class DropField {
     mesh.raycast = () => {}
     mesh.count = 0
     this.group.add(mesh)
-    const k = { mesh, drop, material, texture, capacity }
+    const k = { mesh, drop, home, material, texture, capacity }
     this.kinds.set(id, k)
     return k
   }
@@ -168,8 +214,8 @@ export class DropField {
     k.texture.dispose()
   }
 
-  /** Every drop's instance: where it floats in this field, its size, its phase and when it evaporates. */
-  private write(o: { x: bigint; y: bigint; z: bigint }, plane: number, drops: readonly Drop[]): void {
+  /** Every drop's instance: where it floats in this field, its size, its phase, when it evaporates and its flight. */
+  private write(o: { x: bigint; y: bigint; z: bigint }, plane: number, drops: readonly Drop[], flights?: ReadonlyMap<Drop, Flight>): void {
     const byKind = new Map<number, Drop[]>()
     for (const d of drops) {
       if (d.plane !== plane) continue
@@ -186,11 +232,15 @@ export class DropField {
         k.mesh.setMatrixAt(i, scratch)
         // A phase from its cell, so neighbours never bob in step.
         k.drop.setXY(i, (((x * 12.9898 + y * 78.233 + z * 37.719) % 6.2832) + 6.2832) % 6.2832, secondsOf(d.expires))
+        const f = flights?.get(d)
+        if (f) k.home.setXYZW(i, Math.max(0, secondsOf(f.start)), f.len, f.side, f.reduced ? 1 : 0)
+        else k.home.setXYZW(i, -1, 0, 0, 0)
       })
       k.mesh.count = list.length
       k.mesh.visible = true
       k.mesh.instanceMatrix.needsUpdate = true
       k.drop.needsUpdate = true
+      k.home.needsUpdate = true
     }
   }
 

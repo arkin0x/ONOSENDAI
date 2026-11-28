@@ -2,8 +2,10 @@
  * quarry.ts - the Quarry Charge's rules, without the app (DECK-0010 §8.6;
  * owner, 2026-11-27):
  *
- * - Placed like a block, it arms with a fuse of FUSE_MS: it blinks and beeps,
- *   faster and faster, with the seconds counting down over it.
+ * - Placed like a block, it arms with a fuse of FUSE_MS (10 seconds; owner,
+ *   2026-11-28: "lets set a 10 second fuse on them"): the seconds count down
+ *   over it the whole way, it blinks and beeps once a second, then faster and
+ *   faster through the last FUSE_FINAL_MS.
  * - Then it blasts the BLAST_SIDE by BLAST_SIDE by BLAST_SIDE cells centred
  *   on its own cell (blastCells), as mining those cells would (store/
  *   useTerrain.ts blast): your own layer only, the reach and the chunks you
@@ -11,7 +13,10 @@
  * - Each block it takes that mining would have carried becomes a drop: a
  *   small floating copy of the block in its own cell, for DROP_LIFE_MS, kept
  *   on this device only (never published), fading out over its last
- *   DROP_FADE_MS. Walking into its cell collects it.
+ *   DROP_FADE_MS. Walking into its cell collects it, and so does coming
+ *   within HOME_RADIUS of it: it flies to you (owner, 2026-11-28: "we need
+ *   the floating collectible blocks to heat seek the player within 7
+ *   gibsons"; flightMs and flightShare).
  *
  * Drops are kept by their cell in cyberspace (whole gibsons, as decimal
  * strings) and their plane, so they survive the field moving its origin and a
@@ -24,7 +29,9 @@ export type Cell = [number, number, number]
 
 /* ---- The charge's feel. The owner tunes these to taste (2026-11-27). ---- */
 /** The fuse, in milliseconds: from placing to the blast. */
-export const FUSE_MS = 3000
+export const FUSE_MS = 10_000
+/** The fuse's last stretch, in milliseconds: the beeps and the blinking quicken through it to the blast. */
+export const FUSE_FINAL_MS = 3000
 /** The blast's box: this many cells on every axis, centred on the charge. */
 export const BLAST_SIDE = 7
 /** How long a drop floats before it evaporates, in milliseconds. */
@@ -33,6 +40,15 @@ export const DROP_LIFE_MS = 10 * 60 * 1000
 export const DROP_FADE_MS = 5000
 /** A drop's side, in blocks. */
 export const DROP_SIZE = 0.34
+/** How near a drop must be to fly to you, in gibsons (blocks), from its middle to your body's (owner, 2026-11-28). */
+export const HOME_RADIUS = 7
+/** A drop's flight: it speeds up at this many gibsons a second, every second, to at most HOME_MAX_SPEED gibsons a second. */
+export const HOME_ACCEL = 30
+export const HOME_MAX_SPEED = 14
+/** The most a drop waits before it sets off, in milliseconds: the nearer go first, with a little chance in it, so a cloud streams in. */
+export const HOME_STAGGER_MS = 420
+/** With reduced motion a drop does not fly: it fades where it is over this many milliseconds, then is carried. */
+export const HOME_REDUCED_MS = 160
 /* ---- end of the owner's tuning ---- */
 
 /** Cells from the centre to the blast's edge. */
@@ -48,15 +64,20 @@ export function blastCells(centre: readonly [number, number, number]): Cell[] {
 }
 
 /**
- * When the fuse beeps, in milliseconds from the moment it is placed: slow at
- * first, quicker and quicker, the last one just before the blast.
+ * When the fuse beeps, in milliseconds from the moment it is placed: once a
+ * second, with the countdown, until its last FUSE_FINAL_MS, then quicker and
+ * quicker, the last one just before the blast. A fuse no longer than
+ * FUSE_FINAL_MS is all quickening.
  */
 export function beepTimes(fuseMs: number = FUSE_MS): number[] {
   const out: number[] = []
-  for (let t = 0; t < fuseMs - 40;) {
+  const calm = Math.max(0, fuseMs - FUSE_FINAL_MS)
+  for (let t = 0; t < calm; t += 1000) out.push(t)
+  const final = fuseMs - calm
+  for (let t = calm; t < fuseMs - 40;) {
     out.push(t)
-    const left = 1 - t / fuseMs
-    t += 70 + 480 * left * left
+    const left = (fuseMs - t) / final
+    t += 70 + 330 * left * left
   }
   return out
 }
@@ -74,7 +95,7 @@ export function blinkLit(ms: number, beeps: readonly number[] = FUSE_BEEPS): boo
   return false
 }
 
-/** The whole seconds left on the fuse, as the countdown shows them: 3, 2, 1, and 0 once it is over. */
+/** The whole seconds left on the fuse, as the countdown shows them: 10, 9, ... 1, and 0 once it is over. */
 export function secondsLeft(ms: number, fuseMs: number = FUSE_MS): number {
   return Math.max(0, Math.ceil((fuseMs - ms) / 1000))
 }
@@ -146,4 +167,54 @@ export function stepCells(from: readonly [number, number, number] | null, to: re
 /** The cells a body standing in `feet` takes: its own and the one above (the head). */
 export function bodyAt(feet: readonly [number, number, number]): Cell[] {
   return [[feet[0], feet[1], feet[2]], [feet[0], feet[1] + 1, feet[2]]]
+}
+
+/* ---- Drops flying to you (owner, 2026-11-28) ---- */
+
+/** The distance from a drop's middle to the body's, in gibsons. No allocation: the frame asks it of every drop. */
+export function homeDistance(dx: number, dy: number, dz: number): number {
+  return Math.sqrt(dx * dx + dy * dy + dz * dz)
+}
+
+/** Whether a drop this far away flies to you: within HOME_RADIUS, the edge counted. */
+export const homesFrom = (distance: number): boolean => distance <= HOME_RADIUS
+
+/** How far a drop has flown `ms` after it set off, in gibsons: speeding up at HOME_ACCEL to HOME_MAX_SPEED, then steady. */
+export function flown(ms: number): number {
+  const t = Math.max(0, ms) / 1000
+  const tv = HOME_MAX_SPEED / HOME_ACCEL
+  return t < tv ? 0.5 * HOME_ACCEL * t * t : 0.5 * HOME_ACCEL * tv * tv + HOME_MAX_SPEED * (t - tv)
+}
+
+/** How long a drop takes to fly `distance` gibsons, in milliseconds (flown's inverse); with reduced motion, HOME_REDUCED_MS. */
+export function flightMs(distance: number, reduced = false): number {
+  if (reduced) return HOME_REDUCED_MS
+  const d = Math.max(0, distance)
+  const tv = HOME_MAX_SPEED / HOME_ACCEL
+  const dv = 0.5 * HOME_ACCEL * tv * tv
+  return 1000 * (d <= dv ? Math.sqrt((2 * d) / HOME_ACCEL) : tv + (d - dv) / HOME_MAX_SPEED)
+}
+
+/** How much of its flight a drop has made `ms` after it set off, 0 to 1 (the shader works the same from the same numbers). */
+export function flightShare(ms: number, distance: number, reduced = false): number {
+  if (ms <= 0) return 0
+  if (reduced || distance <= 1e-6) return Math.min(1, ms / flightMs(distance, reduced))
+  return Math.min(1, flown(ms) / distance)
+}
+
+/** A number from 0 to 1 that is a drop's own, from its cell (a cheap hash: neighbours differ). */
+export function dropChance(x: number, y: number, z: number): number {
+  const v = Math.sin(x * 12.9898 + y * 78.233 + z * 37.719) * 43758.5453
+  return v - Math.floor(v)
+}
+
+/**
+ * How long a drop this far away waits before it sets off, in milliseconds:
+ * the nearer sooner, with its own chance, at most HOME_STAGGER_MS. None with
+ * reduced motion.
+ */
+export function homeDelay(distance: number, chance: number, reduced = false): number {
+  if (reduced) return 0
+  const near = Math.max(0, Math.min(1, distance / HOME_RADIUS))
+  return HOME_STAGGER_MS * (0.55 * near + 0.45 * Math.max(0, Math.min(1, chance)))
 }

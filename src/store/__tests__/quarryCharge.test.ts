@@ -176,7 +176,7 @@ describe('placing, the fuse and the blast', () => {
     Q().detonate(Q().charges[0].id)
   })
 
-  it('burns FUSE_MS (3 seconds), then blasts', async () => {
+  it('burns FUSE_MS (10 seconds), then blasts', async () => {
     await openSurveyed()
     const g = groundAt(6, 6)
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
@@ -187,7 +187,7 @@ describe('placing, the fuse and the blast', () => {
     vi.advanceTimersByTime(1)
     expect(Q().charges).toHaveLength(0)
     expect(terrainSession!.world.blockCs(...g)).toBe(EMPTY)
-    expect(FUSE_MS).toBe(3000)
+    expect(FUSE_MS).toBe(10_000)
   })
 
   it('clears exactly the 7 by 7 by 7 cells centred on the charge, as mining would, in your own layer; the rest stands', async () => {

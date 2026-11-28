@@ -9,11 +9,15 @@
  *     fuse (FUSE_BEEPS, so the light and the sound keep time), its hub ring
  *     turning faster and faster as the fuse runs out (its own motion clock,
  *     scene/animMotion.ts AnimClock, sped up for it alone), and the seconds
- *     left over it, white with a dark edge, never hidden by the blocks.
+ *     left over it the whole fuse (10 to 1), white with a dark edge, never
+ *     hidden by the blocks, drawn larger through the last FUSE_FINAL_MS as
+ *     the beeps quicken.
  *     Reduced motion holds the ring still, as it does every motion;
  *   - the drops (scene/quarryDrops.ts): every block the blast took, as a
  *     small copy of itself in its own cell, one InstancedMesh per kind,
- *     turning, bobbing and fading in the shader; a frame sets only the time.
+ *     turning, bobbing and fading in the shader; a frame sets only the time
+ *     and the body's middle, and asks store/quarryHoming.ts which set off
+ *     toward it and which arrived (the flights are the shader's too).
  *
  * Nothing is made per frame. The lamp's glow adds its light and blooms.
  */
@@ -26,7 +30,8 @@ import type { ShardModel } from 'sno-core/shards'
 import { terrainSession, type TerrainSession } from '../store/useTerrain'
 import { useCyberspace } from '../store/useCyberspace'
 import { useQuarry, type ArmedCharge } from '../store/useQuarry'
-import { FUSE_MS, blinkLit, secondsLeft } from '../lib/terrain/quarry'
+import { FUSE_FINAL_MS, FUSE_MS, blinkLit, secondsLeft } from '../lib/terrain/quarry'
+import { bodyPoint, flights, homing, tickHoming } from '../store/quarryHoming'
 import { ITEM_ORANGE } from '../lib/blueprint/itemMark'
 import { QUARRY_BOX, QUARRY_LAMP, useQuarryModel } from '../lib/blueprint/quarryModel'
 import { DropField } from './quarryDrops'
@@ -42,7 +47,8 @@ function digitTexture(d: number): CanvasTexture | null {
   c.width = 128; c.height = 128
   const g = c.getContext('2d')
   if (!g) return null
-  g.font = '700 92px ui-monospace, "SFMono-Regular", Menlo, monospace'
+  // Two digits (10) narrower, so they fit the same square.
+  g.font = `700 ${d >= 10 ? 70 : 92}px ui-monospace, "SFMono-Regular", Menlo, monospace`
   g.textAlign = 'center'
   g.textBaseline = 'middle'
   g.lineWidth = 14
@@ -68,6 +74,14 @@ function glowTexture(): CanvasTexture | null {
   g.fillRect(0, 0, 64, 64)
   return new CanvasTexture(c)
 }
+
+/** The countdown's digits: every whole second of the fuse, 1 to 10. */
+export const COUNTDOWN = Math.ceil(FUSE_MS / 1000)
+/** The countdown's size over a charge, in blocks, and through the fuse's last FUSE_FINAL_MS. */
+export const DIGIT_SIZE = 0.6
+export const DIGIT_SIZE_FINAL = 0.78
+/** The countdown's size `ms` into the fuse: larger as the beeps quicken. */
+export const digitSize = (ms: number): number => (FUSE_MS - ms <= FUSE_FINAL_MS ? DIGIT_SIZE_FINAL : DIGIT_SIZE)
 
 /** The most charges drawn burning at once; more still blast, unseen. */
 const CHARGES_DRAWN = 8
@@ -133,8 +147,12 @@ function PlacedCharge({ charge, model, standIn, glow, digits }: { charge: ArmedC
     const ms = performance.now() - charge.armedAt
     l.visible = blinkLit(ms)
     const left = secondsLeft(ms, FUSE_MS)
-    d.visible = left >= 1 && left <= 3
-    if (d.visible) d.material = digits[left - 1]
+    d.visible = left >= 1 && left <= digits.length
+    if (d.visible) {
+      d.material = digits[left - 1]
+      const k = digitSize(ms)
+      d.scale.set(k, k, 1)
+    }
   })
   return (
     <group ref={group}>
@@ -151,7 +169,7 @@ function PlacedCharge({ charge, model, standIn, glow, digits }: { charge: ArmedC
         </group>
       )}
       <sprite ref={lamp} material={glow} scale={[0.9, 0.9, 1]} position={[QUARRY_LAMP[0] * SCALE, LIFT + QUARRY_LAMP[1] * SCALE, QUARRY_LAMP[2] * SCALE]} renderOrder={15} visible={false} raycast={() => {}} />
-      <sprite ref={digit} material={digits[2]} scale={[0.6, 0.6, 1]} position={[0, STANDS + 0.45, 0]} renderOrder={16} visible={false} raycast={() => {}} />
+      <sprite ref={digit} material={digits[digits.length - 1]} scale={[DIGIT_SIZE, DIGIT_SIZE, 1]} position={[0, STANDS + 0.45, 0]} renderOrder={16} visible={false} raycast={() => {}} />
     </group>
   )
 }
@@ -168,7 +186,7 @@ export function QuarryFx({ axes }: { axes: ViewAxes }): JSX.Element {
   const look = useMemo(() => {
     const glowMap = glowTexture()
     const glow = new SpriteMaterial({ map: glowMap, color: ITEM_ORANGE, blending: AdditiveBlending, depthWrite: false, depthTest: false, transparent: true, toneMapped: false })
-    const digits = [1, 2, 3].map((d) => new SpriteMaterial({ map: digitTexture(d), depthWrite: false, depthTest: false, transparent: true, toneMapped: false }))
+    const digits = Array.from({ length: COUNTDOWN }, (_, i) => i + 1).map((d) => new SpriteMaterial({ map: digitTexture(d), depthWrite: false, depthTest: false, transparent: true, toneMapped: false }))
     const standIn: StandIn = { casing: new MeshBasicMaterial({ color: '#1d2224', toneMapped: false }), band: new MeshBasicMaterial({ color: ITEM_ORANGE, toneMapped: false }) }
     return { glow, glowMap, digits, standIn }
   }, [])
@@ -192,9 +210,14 @@ export function QuarryFx({ axes }: { axes: ViewAxes }): JSX.Element {
     if (!s || !on) return
     fieldMatrix(s, axes, zoom, f.matrix)
     f.matrixWorldNeedsUpdate = true
-    // The drops: written again only when they change or the field does; a frame moves only their time.
-    drops.update(s, q.owner === s.owner ? q.drops : NO_DROPS, q.version)
-    drops.tick(Date.now())
+    // The drops flying to you: those within reach set off, those arrived are carried (store/quarryHoming.ts).
+    const now = Date.now()
+    if (q.drops.length) tickHoming(now)
+    const st = useQuarry.getState()
+    // The drops: written again only when they change, one sets off, or the field changes; a frame moves only their time
+    // and the body's middle they fly to.
+    drops.update(s, st.owner === s.owner ? st.drops : NO_DROPS, st.version, flights, homing.version)
+    drops.tick(now, bodyPoint.valid ? bodyPoint : undefined)
   })
 
   return (

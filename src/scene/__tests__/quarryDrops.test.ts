@@ -10,8 +10,10 @@
 import inspector from 'node:inspector'
 import { describe, expect, it } from 'vitest'
 import { InstancedMesh } from 'three'
-import { DropField } from '../quarryDrops'
-import { BLAST_HALF, BLAST_SIDE, DROP_FADE_MS, DROP_LIFE_MS, FUSE_BEEPS, FUSE_MS, beepTimes, blastCells, blinkLit, bodyAt, dropLevel, makeDrop, secondsLeft, stepCells, tidyDrops, type Drop } from '../../lib/terrain/quarry'
+import { DropField, secondsOf } from '../quarryDrops'
+import type { Flight } from '../../store/quarryHoming'
+import { COUNTDOWN, DIGIT_SIZE, DIGIT_SIZE_FINAL, digitSize } from '../QuarryFx'
+import { BLAST_HALF, BLAST_SIDE, DROP_FADE_MS, DROP_LIFE_MS, FUSE_BEEPS, FUSE_FINAL_MS, FUSE_MS, HOME_ACCEL, HOME_MAX_SPEED, HOME_REDUCED_MS, beepTimes, blastCells, blinkLit, bodyAt, dropLevel, makeDrop, secondsLeft, stepCells, tidyDrops, type Drop } from '../../lib/terrain/quarry'
 
 const post = <T>(s: inspector.Session, method: string, params?: object): Promise<T> =>
   new Promise((resolve, reject) => { s.post(method, params as never, (e, r) => (e ? reject(e) : resolve(r as T))) })
@@ -46,18 +48,42 @@ describe('the rules', () => {
     }
   })
 
-  it('the fuse beeps faster and faster to its end; the lamp lights on each beep; the countdown says 3, 2, 1', () => {
+  it('the fuse is 10 seconds: a beep a second with the countdown, then faster and faster through the last 3; the lamp lights on each beep', () => {
+    expect(FUSE_MS).toBe(10_000)
+    expect(FUSE_FINAL_MS).toBe(3000)
     const t = beepTimes(FUSE_MS)
     expect(t[0]).toBe(0)
     expect(t[t.length - 1]).toBeLessThan(FUSE_MS)
-    const gaps = t.slice(1).map((v, i) => v - t[i])
+    expect(FUSE_BEEPS).toEqual(t)
+    // Calm: on every whole second until the last 3, so the lamp and the countdown keep time and no second passes unmarked.
+    expect(t.filter((v) => v < FUSE_MS - FUSE_FINAL_MS)).toEqual([0, 1000, 2000, 3000, 4000, 5000, 6000])
+    // The last 3 seconds: quicker and quicker, every gap shorter than a calm second, none longer than the one before.
+    const last = t.filter((v) => v >= FUSE_MS - FUSE_FINAL_MS)
+    expect(last[0]).toBe(FUSE_MS - FUSE_FINAL_MS)
+    const gaps = last.slice(1).map((v, i) => v - last[i])
+    expect(gaps[0]).toBeLessThan(1000)
     for (let i = 1; i < gaps.length; i++) expect(gaps[i]).toBeLessThanOrEqual(gaps[i - 1])
     expect(gaps[0]).toBeGreaterThan(3 * gaps[gaps.length - 1])
-    expect(FUSE_BEEPS).toEqual(t)
+    // No gap anywhere longer than a second.
+    const all = [...t, FUSE_MS].slice(1).map((v, i) => v - t[i])
+    expect(Math.max(...all)).toBeLessThanOrEqual(1000)
     expect(blinkLit(10)).toBe(true)
-    expect(blinkLit(t[1] - 5)).toBe(false)
+    expect(blinkLit(500)).toBe(false)
+    expect(blinkLit(1010)).toBe(true)
     expect(blinkLit(-1)).toBe(false)
-    expect([0, 999, 1001, 2001, 2999, 3000].map((ms) => secondsLeft(ms))).toEqual([3, 3, 2, 1, 1, 0])
+    // A short fuse is all quickening, as before.
+    const short = beepTimes(3000)
+    expect(short[0]).toBe(0)
+    expect(short[1] - short[0]).toBeLessThan(1000)
+  })
+
+  it('the countdown shows every second of the fuse, 10 down to 1, larger through the last 3', () => {
+    expect([0, 1, 999, 1000, 1001, 6999, 7000, 7001, 8001, 9001, 9999, 10_000].map((ms) => secondsLeft(ms))).toEqual([10, 10, 10, 9, 9, 4, 3, 3, 2, 1, 1, 0])
+    expect(COUNTDOWN).toBe(10)
+    expect(digitSize(0)).toBe(DIGIT_SIZE)
+    expect(digitSize(6999)).toBe(DIGIT_SIZE)
+    expect(digitSize(7000)).toBe(DIGIT_SIZE_FINAL)
+    expect(DIGIT_SIZE_FINAL).toBeGreaterThan(DIGIT_SIZE)
   })
 
   it('a drop lasts ten minutes, fading over its last seconds', () => {
@@ -135,6 +161,38 @@ describe('the drops on the GPU', () => {
     const moved = { world: { origin: { x: 999n, y: 2000n, z: 3000n } }, plane: 0 }
     expect(f.update(moved, drops, 2)).toBe(true)
     expect(f.kinds.get(1)!.mesh.instanceMatrix.array[12]).toBe(1.5)
+    f.dispose()
+  })
+
+  it('a drop flying is written into its instance once, when it sets off: when, how far, its lean; a frame moves only the time and the body', async () => {
+    const f = new DropField()
+    const drops = full()
+    f.update(field, drops, 1)
+    const k = f.kinds.get(1)!
+    // None flying: every instance says so.
+    expect(k.home.array[0]).toBe(-1)
+    const now = Date.now()
+    const flights = new Map<Drop, Flight>([[drops[0], { start: now + 100, arrive: now + 700, len: 5.5, side: -0.4, reduced: false }]])
+    expect(f.update(field, drops, 1, flights, 0)).toBe(false)
+    expect(f.update(field, drops, 1, flights, 1)).toBe(true)
+    expect(k.home.array[0]).toBeCloseTo(secondsOf(now + 100), 2)
+    expect(k.home.array[1]).toBeCloseTo(5.5)
+    expect(k.home.array[2]).toBeCloseTo(-0.4)
+    expect(k.home.array[3]).toBe(0)
+    expect(k.home.array[4]).toBe(-1)
+    // The shader works the flight from the same numbers as lib/terrain/quarry.ts.
+    const u = k.material.uniforms
+    expect(u.uAccel.value).toBe(HOME_ACCEL)
+    expect(u.uVmax.value).toBe(HOME_MAX_SPEED)
+    expect(u.uReduced.value).toBeCloseTo(HOME_REDUCED_MS / 1000)
+    expect(u.uBody).toBe(f.body)
+    const body = { x: 3, y: 4.5, z: -2 }
+    const frame = (): void => { f.update(field, drops, 1, flights, 1); f.tick(Date.now(), body) }
+    await allocatedKb(() => { for (let i = 0; i < 5000; i++) frame() })
+    const kb = await allocatedKb(() => { for (let i = 0; i < 5000; i++) frame() })
+    expect((kb * 1024) / 5000).toBeLessThan(64)
+    expect([f.body.value.x, f.body.value.y, f.body.value.z]).toEqual([3, 4.5, -2])
+    expect(f.writes).toBe(2)
     f.dispose()
   })
 

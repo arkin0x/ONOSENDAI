@@ -60,6 +60,8 @@ import { AirStepper } from './AirStepper'
 import { Swatch } from './Swatch'
 import { SurveyCard } from './SurveyCard'
 import { autoOpenSurveyCard, openSurveyCard } from './surveyCard'
+import { carriedAcross } from './chunkStay'
+import { StayChip } from './StayChip'
 
 /** A press held this long without moving places (a long press). */
 export const LONG_PRESS_MS = 420
@@ -559,13 +561,15 @@ export function holdSurvey(): void {
 let cardPress: { timer: ReturnType<typeof setTimeout> | null; surveying: boolean } | null = null
 
 /** CARD pressed (the button, or G). */
-export function pressCard(): void {
+export function pressCard(now: number = performance.now()): void {
   // A press left over (its lift landed elsewhere, on a card that opened over the button) never swallows this one.
   abandonCard()
   const press: { timer: ReturnType<typeof setTimeout> | null; surveying: boolean } = { timer: null, surveying: false }
   press.timer = setTimeout(() => {
     press.timer = null
     if (cardPress !== press || !surveyTarget()) return
+    // Carried across into another chunk while held (a walk out of the chunk you were digging): it never surveys there (chunkStay.ts).
+    if (carriedAcross(now)) return
     press.surveying = true
     holdSurvey()
   }, LONG_PRESS_MS)
@@ -768,6 +772,8 @@ function TerrainScreen({ covered }: { covered: boolean }): JSX.Element {
               <span className="terrain-act__bar" aria-hidden />
             </button>
           )}
+          {/* STAY IN THIS CHUNK is on: its lock, a tap lets go (StayChip.tsx). Over the frame's cut corner, taking no room. */}
+          <StayChip />
         </span>
       </div>
 

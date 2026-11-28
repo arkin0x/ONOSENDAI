@@ -26,11 +26,17 @@
  * figures, and a kind mined out stays on the list at 0 until the card closes,
  * so nothing on it moves.
  *
+ * STAY IN THIS CHUNK, at the top (owner, 2026-11-28: walking into the next
+ * chunk by accident while digging this one for a resource): a switch that
+ * holds you inside this chunk's edge while it is on (terrain/chunkStay.ts),
+ * in TERRAIN's mint, the colour of the wall it raises. Only for the chunk you
+ * stand in; never offered during the tutorial's tour.
+ *
  * It closes by the shared ✕, a tap outside it or Esc (hud/modalStack.tsx).
  */
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react'
-import { Layers, Pickaxe, ScrollText } from 'lucide-react'
+import { Layers, Lock, LockOpen, Pickaxe, ScrollText } from 'lucide-react'
 import { ModalClose } from '../hud/ui/ModalClose'
 import { Chamfer } from '../hud/ui/Chamfer'
 import { Stacked, useModalStack } from '../hud/modalStack'
@@ -39,6 +45,8 @@ import { blockKind } from '../lib/terrain/blocks'
 import { AVERAGE_HARDNESS, HARDNESS_MAX, coreLayers, coreSliceAt, hardnessLine, type CardRow } from '../lib/terrain/assay'
 import { cardFor, closeSurveyCard, stampDate, useSurveyCard, watchCard, type CardFor } from './surveyCard'
 import { Swatch } from './Swatch'
+import { chunkHere, leaveStay, stayIn, useChunkStay, useStayKey } from './chunkStay'
+import { useTutorial } from '../store/useTutorial'
 
 const count = (n: number): string => n.toLocaleString('en-US')
 
@@ -187,9 +195,46 @@ function Core({ strata }: { strata: Uint8Array }): JSX.Element {
   )
 }
 
+/** The words under STAY IN THIS CHUNK, by state: on, offered, or not here. */
+export const STAY_ON = 'The edge holds you while you dig. Tap to let go.'
+export const STAY_OFF = 'Hold yourself inside this chunk while you dig.'
+export const STAY_AWAY = 'Stand in this chunk to stay in it.'
+
+/**
+ * STAY IN THIS CHUNK: a switch row, the lock's icon in a chamfer, its name and
+ * one line, and the switch. Its height is the same in every state, so nothing
+ * on the card moves when it is flipped.
+ */
+export function StayRow({ chunk }: { chunk: string }): JSX.Element {
+  const stay = useStayKey()
+  // Where you stand changes only on a crossing (chunkStay.ts), so this re-renders only then.
+  const here = useChunkStay((s) => s.here) ?? chunkHere()
+  const on = stay === chunk
+  const away = !on && here !== chunk
+  const flip = (): void => { if (on) leaveStay(); else stayIn(chunk) }
+  return (
+    <button
+      type="button"
+      className={`survey-stay${on ? ' is-on' : ''}`}
+      role="switch"
+      aria-checked={on}
+      disabled={away}
+      onClick={flip}
+    >
+      <span className="survey-stay__icon" aria-hidden>{on ? <Lock size={16} strokeWidth={2.25} /> : <LockOpen size={16} strokeWidth={2.25} />}</span>
+      <span className="survey-stay__text">
+        <span className="survey-stay__name">STAY IN THIS CHUNK</span>
+        <span className="survey-stay__line">{on ? STAY_ON : away ? STAY_AWAY : STAY_OFF}</span>
+      </span>
+      <span className="survey-stay__switch" aria-hidden><span className="survey-stay__knob" /></span>
+    </button>
+  )
+}
+
 export function SurveyCard(): JSX.Element | null {
   const key = useSurveyCard((s) => s.open)
   const owns = useTerrain((s) => !!s.inventory.compiler)
+  const touring = useTutorial((s) => s.active)
   // Leaving TERRAIN takes the card with it.
   useEffect(() => () => closeSurveyCard(), [])
   // One pass over the chunk as it opens, at the revision you see it at (kept per chunk and version: lib/terrain/assay.ts
@@ -238,6 +283,7 @@ export function SurveyCard(): JSX.Element | null {
             <ModalClose onClose={closeSurveyCard} title="Close (Esc)" />
           </div>
           <div className="survey-card__body">
+            {!touring && <StayRow chunk={got.key} />}
             <Core strata={card.strata} />
             <div className="survey-card__facts">
               <div className="survey-card__ground">

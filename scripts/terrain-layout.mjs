@@ -7,7 +7,8 @@
  * wide screen, where the scene stays beside it) open, and checks that the
  * boxes of the hotbar, SURVEY (with its hold bar), PLACE, CHAT, the walk
  * pad, the menu button, JUMP and DOWN, the LOOK ball, the commit block, the
- * carried block, the first-visit hint and the ghost block's distance stepper (its slot is always kept, so it is measured
+ * carried block, the first-visit hint, STAY IN THIS CHUNK's lock by CARD (switched on for the run; it stands in SURVEY's
+ * slot, so only that pair may meet) and the ghost block's distance stepper (its slot is always kept, so it is measured
  * shown, as when the ghost block is out) do not intersect. SURVEY is measured by its slot, kept whether it is offered or
  * not. The tools stand two by two on every screen (owner, 2026-11-27: "place distance adjustment should be under place
  * button; survey can go to the right of it under smash"): PLACE and SMASH on top, level, the stepper under PLACE and
@@ -54,9 +55,12 @@ const BOXES = {
   hint: '.terrain-hint__box',
   air: '.terrain-air',
   airhint: '.terrain-air__hint',
+  stay: '.terrain-stay-chip',
 }
+/** Pairs that stand one in the other by design: STAY IN THIS CHUNK's lock is pinned in SURVEY's slot (terrain/StayChip.tsx). */
+const NESTED = new Set(['stay x survey', 'survey x stay'])
 /** TERRAIN's own HUD: with the menu open none may stand over its columns (hidden under it on a phone, as WALK's pad is). */
-const TERRAIN = { hotbar: '.terrain-hotbar', survey: '.terrain-tools__slot--survey', place: '.terrain-act--place', hint: '.terrain-hint__box', cross: '.terrain-crosshair', air: '.terrain-air' }
+const TERRAIN = { hotbar: '.terrain-hotbar', survey: '.terrain-tools__slot--survey', place: '.terrain-act--place', hint: '.terrain-hint__box', cross: '.terrain-crosshair', air: '.terrain-air', stay: '.terrain-stay-chip' }
 // The carried block (.terrain-held) is under everything by design, menu included, so it is not measured.
 
 /** What stands round the cross: the smash preview's line, the message's text, the hold ring and its name plate. */
@@ -95,7 +99,7 @@ async function crossStack(page, label) {
     const over = []
     for (const k of mine) for (const [o, b] of Object.entries(all)) {
       const a = got[k]
-      if (o === k || !b || (mine.includes(o) && o < k)) continue
+      if (o === k || !b || (mine.includes(o) && o < k) || NESTED.has(`${k} x ${o}`)) continue
       // The ring stands round the cross, inside nothing else of the stack.
       const at = (r) => `${Math.round(r.t)}-${Math.round(r.b)}`
       if (a.l < b.r && b.l < a.r && a.t < b.b && b.t < a.b) over.push(`${k} ${at(a)} x ${o} ${at(b)}`)
@@ -145,6 +149,8 @@ for (const size of SIZES) {
     await page.waitForTimeout(3500)
     // A block in hand, so the carried block is drawn and measured too.
     await page.evaluate(async () => { const m = await import('/src/store/useTerrain.ts'); const inv = m.useTerrain.getState().inventory; m.useTerrain.setState({ inventory: { ...inv, hotbar: [8, ...inv.hotbar.slice(1)], counts: { ...inv.counts, 8: 5 }, slot: 0 } }) })
+    // STAY IN THIS CHUNK on, so its lock by CARD is measured too (terrain/StayChip.tsx).
+    await page.evaluate(async () => { const m = await import('/src/terrain/chunkStay.ts'); m.stayIn(m.chunkHere()) })
     // The ghost block's distance stepper, shown in its kept slot (it shows while the ghost block is out: terrain/AirStepper.tsx).
     await page.addStyleTag({ content: '.terrainview:not(.is-covered):not(.is-folded):not(.is-bag) .terrain-tools__slot--air.is-off { visibility: visible !important; }' })
     await page.waitForTimeout(500)
@@ -167,13 +173,13 @@ for (const size of SIZES) {
       else console.log(`${label0}: nothing of TERRAIN's over the menu`)
     }
     const label = `${size.name}${menu ? ', menu open' : ''}`
-    const missing = (menu && size.w < 1101 ? ['menu'] : ['hotbar', 'place', 'pad', 'menu', 'air']).filter((k) => !rects[k])
+    const missing = (menu && size.w < 1101 ? ['menu'] : ['hotbar', 'place', 'pad', 'menu', 'air', 'stay']).filter((k) => !rects[k])
     if (missing.length) { bad++; console.log(`${label}: missing ${missing.join(', ')}`) }
     const keys = Object.keys(rects).filter((k) => rects[k])
     const hits = []
     for (let i = 0; i < keys.length; i++) for (let j = i + 1; j < keys.length; j++) {
       const a = rects[keys[i]], b = rects[keys[j]]
-      if (a.l < b.r && b.l < a.r && a.t < b.b && b.t < a.b) hits.push(`${keys[i]} x ${keys[j]}`)
+      if (a.l < b.r && b.l < a.r && a.t < b.b && b.t < a.b && !NESTED.has(`${keys[i]} x ${keys[j]}`)) hits.push(`${keys[i]} x ${keys[j]}`)
     }
     if (hits.length) { bad++; console.log(`${label}: OVERLAP ${hits.join('; ')}`) }
     else console.log(`${label}: clear (${keys.join(', ')})`)

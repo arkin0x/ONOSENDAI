@@ -17204,3 +17204,92 @@ div.bpt-tile__hit { cursor: default; }
 /* CARD in SURVEY's slot: the field card's amber, so it reads as another thing than the mint SURVEY hold. */
 .terrain-act--survey.is-card { --terrain-line: var(--sv-btn, #ffb547); color: var(--sv-btn, #ffb547); }
 .terrain-act--survey.is-card:active::before { background: rgba(255, 181, 71, 0.22); }
+
+/* ===== chunk edge: STAY IN THIS CHUNK (terrain/chunkStay.ts) ===== */
+/* The lock by CARD while STAY IN THIS CHUNK is on (terrain/StayChip.tsx): a small mint tag pinned over the corner the
+   frame's chamfer cuts, the lock in dark ink, taking no room of its own (nothing moves when it comes or goes). Its tap
+   area reaches a little further into CARD's corner, never over SMASH or the stepper beside it. */
+.terrain-tools__slot--survey { position: relative; }
+.terrain-stay-chip {
+  position: absolute;
+  top: -3px;
+  left: -3px;
+  z-index: 2;
+  width: 16px;
+  height: 16px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  color: #03140c;
+  background: var(--terrain);
+  clip-path: polygon(0 0, 100% 0, 100% calc(100% - 5px), calc(100% - 5px) 100%, 0 100%);
+  filter: drop-shadow(0 0 4px rgba(124, 255, 196, 0.75));
+  pointer-events: auto;
+  cursor: pointer;
+  touch-action: none;
+}
+.terrain-stay-chip::after { content: ""; position: absolute; inset: 0 -7px -7px 0; }
+.terrain-stay-chip:focus-visible { outline: 1px solid #fff; outline-offset: 1px; }
+
+/* STAY IN THIS CHUNK on the survey card (terrain/SurveyCard.tsx StayRow): a switch row in the card's own ink, turning
+   TERRAIN's mint when on, the colour of the wall it raises. One height in every state. */
+.survey-stay {
+  display: grid;
+  grid-template-columns: 30px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  margin: 0 0 12px;
+  padding: 8px 10px;
+  border: 0;
+  color: var(--sv-ink);
+  font: inherit;
+  text-align: left;
+  background: rgba(211, 154, 60, 0.08);
+  box-shadow: inset 0 0 0 1px var(--sv-rule);
+  clip-path: polygon(6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%, 0 6px);
+  cursor: pointer;
+}
+.survey-stay:disabled { cursor: default; opacity: 0.62; }
+.survey-stay:focus-visible { box-shadow: inset 0 0 0 1px var(--sv-amber), 0 0 0 2px rgba(255, 181, 71, 0.25); }
+.survey-stay__icon {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  color: var(--sv-amber);
+  background: rgba(0, 0, 0, 0.35);
+  box-shadow: inset 0 0 0 1px rgba(255, 181, 71, 0.4);
+  clip-path: polygon(6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%, 0 6px);
+}
+.survey-stay__text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.survey-stay__name { font-size: 11px; font-weight: 700; letter-spacing: 0.16em; color: var(--sv-amber); }
+.survey-stay__line { font-size: 10px; line-height: 1.35; color: var(--sv-dim); min-height: 2.7em; }
+.survey-stay__switch {
+  position: relative;
+  width: 36px;
+  height: 18px;
+  background: rgba(0, 0, 0, 0.45);
+  box-shadow: inset 0 0 0 1px rgba(255, 181, 71, 0.45);
+  clip-path: polygon(4px 0, 100% 0, 100% calc(100% - 4px), calc(100% - 4px) 100%, 0 100%, 0 4px);
+}
+.survey-stay__knob {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 12px;
+  height: 12px;
+  background: var(--sv-ochre);
+  clip-path: polygon(3px 0, 100% 0, 100% calc(100% - 3px), calc(100% - 3px) 100%, 0 100%, 0 3px);
+  transition: transform 160ms ease, background-color 160ms ease;
+}
+.survey-stay.is-on { background: rgba(124, 255, 196, 0.08); box-shadow: inset 0 0 0 1px rgba(124, 255, 196, 0.5); }
+.survey-stay.is-on .survey-stay__icon { color: #7cffc4; box-shadow: inset 0 0 0 1px rgba(124, 255, 196, 0.6); filter: drop-shadow(0 0 5px rgba(124, 255, 196, 0.45)); }
+.survey-stay.is-on .survey-stay__name { color: #7cffc4; }
+.survey-stay.is-on .survey-stay__switch { box-shadow: inset 0 0 0 1px rgba(124, 255, 196, 0.7); background: rgba(124, 255, 196, 0.16); }
+.survey-stay.is-on .survey-stay__knob { transform: translateX(18px); background: #7cffc4; }
+@media (prefers-reduced-motion: reduce) {
+  .survey-stay__knob { transition: none; }
+}
+/* ===== end chunk edge ===== */

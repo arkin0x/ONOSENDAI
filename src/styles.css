@@ -17121,21 +17121,38 @@ div.bpt-tile__hit { cursor: default; }
   align-items: center;
   gap: 8px;
   margin: 16px 0 6px;
+  padding-right: 4px;
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.22em;
   color: var(--sv-amber);
 }
 .survey-card__rule { flex: 1 1 auto; height: 1px; background: var(--sv-rule); }
-/* The column header over the counts. */
-.survey-card__section-n { color: var(--sv-dim); font-size: 8px; font-weight: 400; letter-spacing: 0.16em; }
+/* The column headers over the counts, MINED and LEFT: each exactly as wide as its column in the rows below. */
+.survey-card__section-n { flex: none; text-align: right; color: var(--sv-dim); font-size: 8px; font-weight: 400; letter-spacing: 0.16em; }
+.survey-card__section-n:nth-last-child(2) { width: 40px; }
+.survey-card__section-n:last-child { width: 46px; }
+/* What you mined here and what is left: one line, one fixed height, tabular figures, so a count going up never moves the card. */
+.survey-card__tally {
+  height: 14px;
+  margin: 14px 0 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 10px;
+  line-height: 14px;
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+  color: var(--sv-ink);
+}
 .survey-card__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
 .survey-card__empty { margin: 0; font-size: 11px; color: var(--sv-dim); }
 
 /* One kind: its block, its name, a dotted leader to its count, as an assay sheet's line. */
 .survey-row {
   display: grid;
-  grid-template-columns: 34px minmax(0, auto) minmax(8px, 1fr) auto 4.2em;
+  /* Swatch, name, leader, mark, then MINED and LEFT in fixed widths: the numbers never move as they count. */
+  grid-template-columns: 34px minmax(0, auto) minmax(4px, 1fr) auto 40px 46px;
   align-items: center;
   gap: 8px;
   min-height: 38px;
@@ -17154,7 +17171,10 @@ div.bpt-tile__hit { cursor: default; }
 }
 .survey-row__mark.is-visible { color: var(--sv-ink); opacity: 0.85; }
 .survey-row__mark.is-buried { color: var(--sv-copper); }
-.survey-row__count { text-align: right; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--sv-ink); }
+.survey-row__mark.is-gone { color: var(--sv-dim); }
+.survey-row__mined { text-align: right; font-size: 11px; font-variant-numeric: tabular-nums; color: var(--sv-amber); white-space: nowrap; }
+.survey-row__mined.is-none { color: var(--sv-dim); opacity: 0.6; }
+.survey-row__count { text-align: right; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--sv-ink); white-space: nowrap; }
 /* The rare band and Glowcore: lit a little, as a find is. */
 .survey-row.is-prized { background: linear-gradient(90deg, rgba(255, 181, 71, 0.12), transparent 75%); }
 .survey-row.is-prized .survey-row__name { color: var(--sv-amber); font-weight: 700; text-shadow: 0 0 8px rgba(255, 181, 71, 0.35); }

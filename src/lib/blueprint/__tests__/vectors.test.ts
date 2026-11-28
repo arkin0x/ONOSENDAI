@@ -44,7 +44,7 @@ describe('DECK-0010 vectors', () => {
     }
   }, 60_000)
 
-  it('gathers (DECK-0010 9e806b1): the group, isolation, the arrangement and its box and lookup, bare-handed and with the Compiler', async () => {
+  it('gathers (DECK-0010 §4.2 as cyberspace #129 words it): the group, isolation, the arrangement and its box and lookup, bare-handed and with the Compiler', async () => {
     type G = { name: string; world: Cell4[]; hit: [number, number, number]; bare: boolean; reach: number; group: Cell4[]; isolated: boolean; arrangement: boolean; box?: { x: number; y: number; z: number }; lookup?: string }
     const cases = vectors.gather as unknown as G[]
     expect(cases.length).toBeGreaterThanOrEqual(21)

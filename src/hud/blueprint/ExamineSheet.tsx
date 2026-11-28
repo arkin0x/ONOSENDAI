@@ -61,6 +61,7 @@ import {
 import { PRIZE_VIEWS_SHOWN, type FinderView, type LockKind, type PrizeReveal, type PrizeView } from '../../lib/blueprint/format'
 import { ITEM_ORANGE } from '../../lib/blueprint/itemMark'
 import { blockKind } from '../../lib/terrain/blocks'
+import { GAME_AIR_LINE, GAME_CONSTRUCTION, GAME_CONSTRUCTION_SHORT } from '../../lib/blueprint/gameCard'
 import { tileUrl } from '../../lib/terrain/tiles'
 import { Chamfer } from '../ui/Chamfer'
 import { ModalClose } from '../ui/ModalClose'
@@ -89,6 +90,8 @@ export interface ExamineBlueprint {
   revision?: number
   /** An item blueprint (lib/blueprint/itemMark): an orange ITEM chip beside its name. */
   item?: boolean
+  /** The game's own (the Compiler's or the Quarry Charge's): CONSTRUCTION says how to build it isolated. */
+  game?: boolean
 }
 
 /** For a maker examining their own blueprint: the whole arrangement and the prize's real name, if it has one to give. */
@@ -173,14 +176,16 @@ export function materialsWords(known: number, unknown: number): string {
   return `${known} known / ${unknown} unknown`
 }
 
-/** CONSTRUCTION, in the summary, the title block, the BLUEPRINTS list and the card. */
-export function constructionWords(lock: LockKind, height?: number): string {
+/** CONSTRUCTION, in the summary, the title block, the BLUEPRINTS list and the card; a game blueprint's says to build it isolated. */
+export function constructionWords(lock: LockKind, height?: number, game = false): string {
+  if (game) return GAME_CONSTRUCTION
   if (lock !== 'location') return 'May be built anywhere'
   return height !== undefined && Number.isFinite(height) ? `Must be built in a specific h${height} region` : 'Must be built in a specific region'
 }
 
-/** CONSTRUCTION in the title block, short: "Anywhere" or "h5 region" ("region" with no height). */
-export function constructionShort(lock: LockKind, height?: number): string {
+/** CONSTRUCTION in the title block, short: "Anywhere" or "h5 region" ("region" with no height); "In the air" for the game's own. */
+export function constructionShort(lock: LockKind, height?: number, game = false): string {
+  if (game) return GAME_CONSTRUCTION_SHORT
   if (lock !== 'location') return 'Anywhere'
   return height !== undefined && Number.isFinite(height) ? `h${height} region` : 'region'
 }
@@ -363,7 +368,7 @@ export function ExamineSheet({ bp, maker, onClose }: { bp: ExamineBlueprint; mak
     { axis: 'x', name: 'FROM +X', dims: `${sz} Z × ${sy} Y`, caption: '+Z on the right · Y up' },
   ]
 
-  const construction = constructionWords(bp.lock, bp.height)
+  const construction = constructionWords(bp.lock, bp.height, bp.game)
   const rev = revisionMark(bp.revision)
   const date = dateOf(bp.drawnAt)
   const note = bp.description.trim() || (bp.prize.reveal === 'hidden' ? 'No word about the prize. Build it and see.' : '')
@@ -433,7 +438,7 @@ export function ExamineSheet({ bp, maker, onClose }: { bp: ExamineBlueprint; mak
                 </div>
                 <dl className="bp-ex__settings">
                   <div><dt>MATERIALS</dt><dd>{materialsWords(finderShown, finderHidden)}</dd></div>
-                  <div><dt>CONSTRUCTION</dt><dd>{construction}</dd></div>
+                  <div><dt>CONSTRUCTION</dt><dd>{construction}{bp.game && <span className="bp-ex__air">{GAME_AIR_LINE}</span>}</dd></div>
                   <div><dt>PRIZE</dt><dd>{prizeShort(bp.prize.reveal, !!prizeName)}</dd></div>
                 </dl>
                 {/* Only while something is unknown to a finder: the same in FINDER and MAKER, so switching moves nothing. */}
@@ -561,7 +566,7 @@ export function ExamineSheet({ bp, maker, onClose }: { bp: ExamineBlueprint; mak
                     <div><span>DRAWN BY</span>{bp.maker}</div>
                     <div><span>DATE</span>{date}</div>
                     <div><span>SHEET</span>1 OF 1</div>
-                    <div><span>CONSTRUCTION</span>{constructionShort(bp.lock, bp.height)}</div>
+                    <div><span>CONSTRUCTION</span>{constructionShort(bp.lock, bp.height, bp.game)}</div>
                     <div><span>VOLUME</span>{sx} × {sy} × {sz}</div>
                     <div><span>REVISION</span>{rev}</div>
                   </div>

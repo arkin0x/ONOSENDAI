@@ -16,9 +16,23 @@ export const QUARRY_LOOKUP = 'e12e7f66a13349efa89ad831967ef367411d0c9831081b8d42
 /** What its prize is called. */
 export const QUARRY_NAME = 'Quarry Charges'
 /** What a game blueprint says where DEPLOY would be. */
-export const GAME_NO_DEPLOY = 'Everyone gets this one. Build it to make your Compiler.'
+export const GAME_NO_DEPLOY = 'Everyone gets this one. Build it in the air with a gap all round, then smash it to make your Compiler.'
 /** What the Quarry Charge's blueprint says there. */
-export const QUARRY_NO_DEPLOY = 'Everyone gets this one. Build it, then smash it with the Compiler for seven Quarry Charges.'
+export const QUARRY_NO_DEPLOY = 'Everyone gets this one. Build it in the air with a gap all round, then smash it for seven Quarry Charges.'
+/**
+ * CONSTRUCTION on a game blueprint's card and examine sheet, in place of "May be built anywhere" (owner's lost
+ * Glowcore, 2026-11-28: his Compiler rested on the floor, so it was not isolated and compiled nothing). The owner's
+ * wording: "a gap all round", "isolated", "not touching any other block".
+ */
+export const GAME_CONSTRUCTION = 'Build it with a gap all round: no block may touch it, not even at an edge or corner.'
+/** Short, where the title block has room for a word or two. */
+export const GAME_CONSTRUCTION_SHORT = 'In the air'
+/**
+ * How to place a block in open air (store/airSwitch.ts, terrain/AirStepper.tsx): the ghost block shows at the cross when
+ * you aim at empty space with a block in hand, at the distance the number under PLACE shows; tapping that number turns
+ * air placing off and on.
+ */
+export const GAME_AIR_LINE = 'To place a block in open air, aim at empty space with a block in hand. If no ghost block shows, turn on air placing by tapping the number under PLACE.'
 /** Whether a card is the game's own (never placed, never put in a chest). */
 export const isGameCard = (card: { source?: string }): boolean => card.source === 'game'
 /** What a game card says where DEPLOY would be: its own line. */

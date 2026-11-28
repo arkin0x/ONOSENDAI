@@ -6,11 +6,14 @@
  * is every occupied cell reachable from the hit through faces, edges or
  * corners, placed or natural ground alike, searched far enough that a build
  * of at most n on every axis is found whole wherever it is hit (owner,
- * 2026-11-27). It is isolated when every other cell of its box grown by one
- * is empty: a block that touches it, one that sits in a notch, or ground it
- * stands on all leave it not isolated. Only an isolated group of at most n on
- * every axis is an arrangement, with a key and a lookup; any other group is
- * smashed with nothing compiled (gather).
+ * 2026-11-27). It is isolated when it touches no other block on faces, edges
+ * or corners (the owner's ruling; DECK-0010 §4.2 as cyberspace #129 words
+ * it): the group is the whole 26-connected component. A block elsewhere in
+ * its box grown by one that touches nothing does not count (the Compiler
+ * repro, 2026-11-28: the old rule failed a T beside such a block). Ground
+ * under it, or a block at an edge or corner, leaves it not isolated. Only an
+ * isolated group of at most n on every axis is an arrangement, with a key and
+ * a lookup; any other group is smashed with nothing compiled (gather).
  *
  * Cells are cyberspace offsets (any integer frame whose axes are
  * cyberspace's); `read` gives the block id at one, 0 for open space.
@@ -27,7 +30,7 @@ export interface Gathered {
   /** The group's box: its low corner in the read frame and its size. */
   lo: [number, number, number]
   size: [number, number, number]
-  /** Nothing else in the box grown by one: an arrangement, with a key. */
+  /** No block outside the group touches it on a face, edge or corner (it is its whole 26-connected component). */
   isolated: boolean
   /** The arrangement in its box when isolated, else null. */
   arrangement: Arrangement | null
@@ -47,8 +50,9 @@ function boxOf(cells: ReadonlyArray<Cell>): { lo: [number, number, number]; size
  *
  * 1. The group is flood-filled from the hit through faces, edges and corners within (2n - 1) cells on each axis
  *    centred on the hit, so a group at most n on every axis is found whole wherever it is hit.
- * 2. Isolated (its box grown by one otherwise empty) and at most n on every axis: a construction, with an arrangement,
- *    as if struck in its middle.
+ * 2. Isolated (no other block touches it on a face, edge or corner, so it is its whole 26-connected component) and at
+ *    most n on every axis: a construction, with an arrangement, as if struck in its middle. A block the window's edge
+ *    cut it off from counts as touching: the component goes on past what was looked at.
  * 3. Otherwise the group is smashed all the same, with nothing compiled: too long (isolated, but more than n on an
  *    axis), or touching something (not isolated). DECK-0010 §4 (9e806b1) and its gather vectors.
  */
@@ -57,8 +61,9 @@ export function gather(read: (x: number, y: number, z: number) => number, hit: C
   const far = n - 1
   const group = flood(read, hit, far, far)
   const { lo, size } = boxOf(group.cells)
-  const isolated = isolatedIn(read, group.has, lo, size)
-  // An arrangement only when it stands alone and fits the reach on every axis.
+  // Inside the window every touching block joined the group, so it is isolated unless one touched it from past the edge.
+  const isolated = !group.cut
+  // An arrangement only when it is isolated and fits the reach on every axis.
   const arrangement = isolated && size.every((v) => v <= n) ? arrangementOf(read, group.cells, lo, size) : null
   return { cells: group.cells, lo, size, isolated, arrangement }
 }
@@ -76,8 +81,12 @@ export function smashCells(read: (x: number, y: number, z: number) => number, hi
   return flood(read, hit, below, above).cells
 }
 
-/** The occupied cells reachable from `hit` through faces, edges and corners, never more than `below` under or `above` over it on any axis. */
-function flood(read: (x: number, y: number, z: number) => number, hit: Cell, below: number, above: number): { cells: Array<[number, number, number]>; has: (x: number, y: number, z: number) => boolean } {
+/**
+ * The occupied cells reachable from `hit` through faces, edges and corners, never more than `below` under or `above`
+ * over it on any axis; `cut` when a block past the window's edge touches one of them (the component goes on past what
+ * was looked at, so it is not isolated: gather).
+ */
+function flood(read: (x: number, y: number, z: number) => number, hit: Cell, below: number, above: number): { cells: Array<[number, number, number]>; has: (x: number, y: number, z: number) => boolean; cut: boolean } {
   // What was looked at, in a grid over the window (one byte a cell: 1 looked at, 2 in the group), not a set of strings:
   // the Compiler's window is 31 by 31 by 31, and the smash preview works it out each time the aim rests on a new block.
   // A reach under one looks at the struck block alone, as the set of strings did (review of #948: a reach of 0 threw).
@@ -91,27 +100,20 @@ function flood(read: (x: number, y: number, z: number) => number, hit: Cell, bel
     x >= x0 && x <= hit[0] + above && y >= y0 && y <= hit[1] + above && z >= z0 && z <= hit[2] + above
   grid[at(hit[0], hit[1], hit[2])] = 2
   const cells: Array<[number, number, number]> = [[hit[0], hit[1], hit[2]]]
+  let cut = false
   for (let i = 0; i < cells.length; i++) {
     const [x, y, z] = cells[i]
     for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
       if (!dx && !dy && !dz) continue
       const nx = x + dx, ny = y + dy, nz = z + dz
-      if (!inside(nx, ny, nz)) continue
+      if (!inside(nx, ny, nz)) { if (!cut && read(nx, ny, nz) !== 0) cut = true; continue }
       const k = at(nx, ny, nz)
       if (grid[k]) continue
       grid[k] = 1
       if (read(nx, ny, nz) !== 0) { cells.push([nx, ny, nz]); grid[k] = 2 }
     }
   }
-  return { cells, has: (x, y, z) => inside(x, y, z) && grid[at(x, y, z)] === 2 }
-}
-
-/** Whether the box grown by one holds nothing but the group. */
-function isolatedIn(read: (x: number, y: number, z: number) => number, inGroup: (x: number, y: number, z: number) => boolean, lo: Cell, size: readonly [number, number, number]): boolean {
-  for (let y = lo[1] - 1; y <= lo[1] + size[1]; y++) for (let z = lo[2] - 1; z <= lo[2] + size[2]; z++) for (let x = lo[0] - 1; x <= lo[0] + size[0]; x++) {
-    if (read(x, y, z) !== 0 && !inGroup(x, y, z)) return false
-  }
-  return true
+  return { cells, has: (x, y, z) => inside(x, y, z) && grid[at(x, y, z)] === 2, cut }
 }
 
 /** The arrangement of a group in its box: the group's own blocks, every other cell empty. */

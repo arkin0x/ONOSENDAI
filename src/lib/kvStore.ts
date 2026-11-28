@@ -120,6 +120,8 @@ export const MOVED_PREFIXES: readonly string[] = [
   'onosendai:air-place:',
   // TERRAIN's inventory record per player (store/inventorySync.ts): this device's id, every device's counts, the migration mark.
   'onosendai:inventory:',
+  // TERRAIN's "Don't ask again" for a smash that would waste recipe materials, per player (lib/blueprint/smashConfirm.ts).
+  'onosendai:smash-ask-off:',
 ]
 
 /**

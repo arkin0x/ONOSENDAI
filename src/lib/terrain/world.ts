@@ -176,6 +176,13 @@ export class TerrainWorld {
     return slot?.blocks ? slot.blocks[cell] : EMPTY
   }
 
+  /** Whether the block at a cs offset is natural ground: the generated block, unchanged (a placed or a mined cell is not). */
+  naturalCs(dx: number, dy: number, dz: number): boolean {
+    const { slot, cell } = this.locate(dx, dy, dz)
+    const g = slot?.generated
+    return !!g && !!slot?.blocks && g[cell] !== EMPTY && slot.blocks[cell] === g[cell]
+  }
+
   /** A view cell's cs offsets. */
   toCs(i: number, j: number, k: number): [number, number, number] {
     const out: [number, number, number] = [0, 0, 0]

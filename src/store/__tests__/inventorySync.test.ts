@@ -749,7 +749,7 @@ describe('a device folded into retired by another', () => {
     const id = localFor(me).device
     const rk = newRecordKey()
     const wrapped = nip44.encrypt(bytesToHex(rk), selfKey)
-    const folded: InventoryRecord = { devices: {}, tools: {}, retired: { ids: { [id]: 1 }, a: { 3: 5 }, s: {} } }
+    const folded: InventoryRecord = { devices: {}, tools: {}, retired: { ['f'.repeat(16)]: { ids: { [id]: 1 }, a: { 3: 5 }, s: {} } } }
     await relay.publish(finalizeEvent(recordTemplate(sealRecord(encodeRecord(folded), rk, wrapped), onRelay()!.ev.created_at + 5), sk) as unknown as NostrEvent)
     await syncInventory(false)
     expect(localFor(me).device).not.toBe(id)
@@ -758,5 +758,34 @@ describe('a device folded into retired by another', () => {
     await syncInventory()
     expect(totalsOf(onRelay()!.rec)['3']).toBe(7)
     expect(d.inv.counts[3]).toBe(7)
+  })
+})
+
+describe('a device folded while it held numbers it had not written', () => {
+  it('starts its new id with them, its entry less its last write: never lost, never counted twice (5 written, 2 not, 7 in all)', async () => {
+    const d = device()
+    await as(d)
+    mine(3, 5)
+    await syncInventory()
+    const id = localFor(me).device
+    // Two more while LOCAL: not written.
+    d.live = false
+    await as(d, {}, false)
+    mine(3, 2)
+    d.live = true
+    await as(d, {}, false)
+    // Meanwhile another device folded this one, holding what it last wrote (5).
+    const rk = newRecordKey()
+    const wrapped = nip44.encrypt(bytesToHex(rk), selfKey)
+    const folded: InventoryRecord = { devices: {}, tools: {}, retired: { ['f'.repeat(16)]: { ids: { [id]: 1 }, a: { 3: 5 }, s: {} } } }
+    await relay.publish(finalizeEvent(recordTemplate(sealRecord(encodeRecord(folded), rk, wrapped), onRelay()!.ev.created_at + 5), sk) as unknown as NostrEvent)
+    await syncInventory(false)
+    const now = localFor(me)
+    expect(now.device).not.toBe(id)
+    expect(now.rec.devices[now.device].a['3']).toBe(2)
+    expect(totalsOf(inventoryRecordFor(me))['3']).toBe(7)
+    expect(isDirty(me)).toBe(true)
+    await syncInventory()
+    expect(totalsOf(onRelay()!.rec)['3']).toBe(7)
   })
 })

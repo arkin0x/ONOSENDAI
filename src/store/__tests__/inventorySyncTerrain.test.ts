@@ -48,7 +48,7 @@ import { useBlueprints } from '../useBlueprints'
 import { takeToy } from '../../lib/blueprint/smashRun'
 import { COMPILER_ID, QUARRY_ID, carriedInto, emptyInventory, openTerrainDb, writeInventory, type Inventory } from '../../lib/terrain/terrainDb'
 import { CHARGE, COMPILER, totalsOf } from '../../lib/inventoryRecord'
-import { inventoryRecordFor, localFor, resetInventorySync, setInventoryDeps, syncInventory, type InventoryDeps } from '../inventorySync'
+import { inventoryRecordFor, inventorySettled, localFor, resetInventorySync, setInventoryDeps, syncInventory, type InventoryDeps } from '../inventorySync'
 
 const HEAD = { x: 0x1234567890abcdef12350n, y: 0xfedcba0987654321fed90n, z: 0x0f0f0f0f0f0f0f0f0f0f0n }
 const T = () => useTerrain.getState()
@@ -206,6 +206,45 @@ describe('the field\'s load reads the record', () => {
     const kept = await readOwner(db, A)
     db.close()
     expect(kept.inventory.counts).toEqual({ 3: 3, 5: 2 })
+  })
+})
+
+describe('the row on disk carries this device\'s entry from the first load (review of #972)', () => {
+  /** What the TERRAIN database holds for A, read from disk. */
+  async function rowOnDisk(): Promise<Inventory> {
+    const db = await openTerrainDb()
+    const { readOwner } = await import('../../lib/terrain/terrainDb')
+    const kept = await readOwner(db, A)
+    db.close()
+    return kept.inventory
+  }
+
+  it('load the page, do nothing, close it, lose the sync record, load again: 10, not 20', async () => {
+    await keep(carriedInto(emptyInventory(), 3, 10))
+    const here = device()
+    // The page loads: the field reads what it kept (TERRAIN never opened, nothing done), then the page closes.
+    await syncTerrain()
+    await inventorySettled()
+    await settle()
+    const row = await rowOnDisk()
+    expect(row.own?.d).toBe(localFor(A).device)
+    expect(row.own?.a['3']).toBe(10)
+    await syncInventory()
+    // The sync record is lost; TERRAIN's row stays.
+    here.m.delete(`onosendai:inventory:${A}`)
+    reload()
+    onScreen()
+    device(here)
+    await syncTerrain()
+    await inventorySettled()
+    await settle()
+    expect(T().inventory.counts[3]).toBe(10)
+    expect(totalsOf(inventoryRecordFor(A))['3']).toBe(10)
+    await syncInventory()
+    // What the relay holds, read by a device with nothing of its own.
+    device(memStorage())
+    await syncInventory(false)
+    expect(totalsOf(inventoryRecordFor(A))['3']).toBe(10)
   })
 })
 

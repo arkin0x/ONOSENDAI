@@ -806,6 +806,9 @@ function makeField(owner: string, plane: number, at: Position): TerrainSession {
       if (compilerGranted() && !inventory.compiler) inventory = withCompiler(inventory, 'granted')
       else if (!compilerGranted() && inventory.compiler === 'granted') inventory = withoutCompiler(inventory)
       useTerrain.setState({ inventory, hint: kept.hint })
+      // What the load changed (this device's entry beside the counts, the totals across your devices) is kept in the row at
+      // once, not only at the next change: the entry is what stops a lost sync record from counting the bag twice (review of #972).
+      if (inventory !== kept.inventory) keep(writeInventory(db, owner, inventory))
       s.kept = 'ready'
       nudgeInventory('read')
       for (const f of quarryHooks.fieldReady) { try { f(s) } catch { /* one listener failing never stops the field */ } }

@@ -241,7 +241,7 @@ describe('retired devices: the record kept under the size limit', () => {
   it('merging a folded copy with an unfolded one counts nothing twice; a retired device showing up again is dropped', () => {
     const now = T0 + 400 * 86_400
     const r = crowd(30, T0)
-    const folded = foldIdle(r, '', now, 2500)
+    const folded = foldIdle(r, 'f'.repeat(16), now, 2500)
     expect(sameRecord(folded, r)).toBe(false)
     expect(totalsOf(mergeRecords(r, folded))).toEqual(totalsOf(r))
     expect(totalsOf(mergeRecords(folded, r))).toEqual(totalsOf(r))
@@ -262,5 +262,68 @@ describe('retired devices: the record kept under the size limit', () => {
     // Devices changed within RETIRE_IDLE_S are never folded, so a crowd of fresh ones still fails loudly.
     const fresh = crowd(420, now - RETIRE_IDLE_S / 2)
     expect(() => planRecord(fresh, '', now)).toThrow()
+  })
+})
+
+describe('folds by two devices (review of #972)', () => {
+  const now = T0 + 400 * 86_400
+  const F = 'f0f0f0f0f0f0f0f0'
+  const G = 'e0e0e0e0e0e0e0e0'
+  const X = '1111111111111111'
+  const Y = '2222222222222222'
+  const Z = '3333333333333333'
+  const dev = (n: number, u: number) => ({ a: { 3: n }, s: {}, u })
+  /** Fold exactly the idlest device of `r` (that it may fold) into `folder`'s entry. */
+  const foldOne = (r: InventoryRecord, folder: string): InventoryRecord => foldIdle(r, folder, now, 0, 1)
+
+  it('a later fold from a stale view never takes newer numbers away: 18, never 16', () => {
+    // X 5, Y 6 (both idle), Z 7. F folds X first and writes it.
+    const base: InventoryRecord = { devices: { [X]: dev(5, T0), [Y]: dev(6, T0 + 1), [Z]: dev(7, now) }, tools: {} }
+    const relay = foldOne(base, F)
+    expect(Object.keys(relay.retired![F].ids)).toEqual([X])
+    // G's copy is stale (X at 3). It reads the relay first, as every write does, then folds: X is already F's.
+    const stale: InventoryRecord = { devices: { [X]: dev(3, T0), [Y]: dev(6, T0 + 1), [Z]: dev(7, now) }, tools: {} }
+    const seen = mergeRecords(stale, relay)
+    expect(seen.devices[X]).toBeUndefined()
+    const g = foldOne(seen, G)
+    expect(Object.keys(g.retired![G].ids)).toEqual([Y])
+    expect(totalsOf(g)['3']).toBe(18)
+    expect(totalsOf(mergeRecords(relay, g))['3']).toBe(18)
+    expect(totalsOf(mergeRecords(g, stale))['3']).toBe(18)
+  })
+
+  it('two folds made apart, by two devices from one base, are both kept: 18, never 15', () => {
+    const base: InventoryRecord = { devices: { [X]: dev(5, T0), [Y]: dev(6, T0 + 1), [Z]: dev(7, now) }, tools: {} }
+    // F folds X; G, from a copy that already lost track of X's being idle (it is newer there), folds Y.
+    const f = foldOne(base, F)
+    const g = foldOne({ ...base, devices: { ...base.devices, [X]: dev(5, now) } }, G)
+    expect(Object.keys(g.retired![G].ids)).toEqual([Y])
+    for (const m of [mergeRecords(f, g), mergeRecords(g, f)]) {
+      expect(totalsOf(m)['3']).toBe(18)
+      expect(Object.keys(m.retired!).sort()).toEqual([G, F].sort())
+      expect(Object.keys(m.devices)).toEqual([Z])
+    }
+  })
+
+  it('one folder\'s entry only grows: an older copy of it merges by the larger, per id and per number', () => {
+    const base: InventoryRecord = { devices: { [X]: dev(5, T0), [Y]: dev(6, T0 + 1), [Z]: dev(7, now) }, tools: {} }
+    const once = foldOne(base, F)
+    const twice = foldOne(once, F)
+    expect(Object.keys(twice.retired![F].ids).sort()).toEqual([X, Y].sort())
+    expect(totalsOf(mergeRecords(once, twice))['3']).toBe(18)
+    expect(totalsOf(mergeRecords(twice, once))['3']).toBe(18)
+    expect(totalsOf(mergeRecords(base, twice))['3']).toBe(18)
+  })
+
+  it('never folds a device another folder already folded, nor itself', () => {
+    const base: InventoryRecord = { devices: { [X]: dev(5, T0), [Y]: dev(6, T0 + 1), [F]: dev(1, T0 - 5) }, tools: {}, retired: { [G]: { ids: { [Z]: 0 }, a: { 3: 7 }, s: {} } } }
+    // Z shows up again in devices on some stale copy: dropped, never folded twice.
+    const withZ = validRecord({ v: 1, devices: { ...base.devices, [Z]: dev(7, T0) }, tools: {}, retired: base.retired })
+    expect(withZ.devices[Z]).toBeUndefined()
+    const all = foldIdle(base, F, now, 10)
+    expect(all.devices[F]).toBeDefined()
+    expect(Object.keys(all.retired![F].ids).sort()).toEqual([X, Y].sort())
+    expect(totalsOf(all)['3']).toBe(19)
+    expect(isRetired(all, Z)).toBe(true)
   })
 })

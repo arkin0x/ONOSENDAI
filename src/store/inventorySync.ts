@@ -81,7 +81,7 @@ import { bytesToHex, hexToBytes, type EventTemplate, type NostrEvent } from '../
 import { kvMode, kvStorage, kvUpdate } from '../lib/kvStore'
 import {
   INVENTORY_D, INVENTORY_KIND, collectedKinds, decodeRecord, deltaFromInventory, deltaOf, emptyDelta, emptyRecord, heldAfter, inventoryFrom, isDeviceId, isRetired,
-  mergeRecords, newDeviceId, newRecordKey, newestRecord, openRecord, planRecord, recordContent, recordTemplate, sameRecord, sealRecord, validRecord, withDelta,
+  mergeRecords, newDeviceId, newRecordKey, newestRecord, openRecord, planRecord, recordContent, recordTemplate, sameRecord, sealRecord, validDevice, validRecord, withDelta,
   type DeviceInventory, type InventoryDelta, type InventoryRecord,
 } from '../lib/inventoryRecord'
 import { emptyInventory, type Inventory, type OwnEntry } from '../lib/terrain/terrainDb'
@@ -173,6 +173,8 @@ export interface InventoryLocal {
   syncedAt: number
   /** created_at of this device's last write: a read older than it is a stale copy. */
   wroteAt: number
+  /** This device's entry as its last write carried it: what a fold of it holds at most (RETIRED DEVICES, lib/inventoryRecord.ts). */
+  written?: DeviceInventory
 }
 
 export type InventorySyncStatus = 'idle' | 'syncing' | 'synced' | 'off' | 'local' | 'unsupported' | 'error'
@@ -222,6 +224,7 @@ function parse(raw: string | null): InventoryLocal | null {
     return {
       v: 1, device: v.device, rec: validRecord(v.rec), migrated: v.migrated === true, restored: v.restored === true, real: num(v.real), syncedReal: num(v.syncedReal),
       own: num(v.own), syncedOwn: num(v.syncedOwn), ownTried: num(v.ownTried), triedAt: num(v.triedAt), syncedAt: num(v.syncedAt), wroteAt: num(v.wroteAt),
+      ...(v.written ? { written: validDevice(v.written) ?? undefined } : {}),
     }
   } catch { return null }
 }
@@ -518,10 +521,26 @@ const sameDevice = (a: DeviceInventory | undefined, b: DeviceInventory | undefin
 /** The relay's record folded into this device's (a function of the record as stored: TWO TABS above). */
 function mergeIn(remote: InventoryRecord, now: number): Change {
   return (l) => {
-    const rec = mergeRecords(l.rec, remote)
-    // Folded into `retired` by another device (it was idle long enough): a new id, its entry afresh (RETIRED DEVICES, lib/inventoryRecord.ts).
-    const device = isRetired(rec, l.device) ? newDeviceId() : l.device
-    const out: InventoryLocal = { ...l, device, rec, syncedAt: now, restored: false, migrated: l.migrated || l.restored }
+    let rec = mergeRecords(l.rec, remote)
+    let device = l.device
+    let written = l.written
+    // Folded into `retired` by another device (it was idle long enough): a new id, started with what this device had not
+    // yet written, its entry less its last write (RETIRED DEVICES, lib/inventoryRecord.ts). The fold holds at most that
+    // write, so this may count a little less, never twice.
+    if (isRetired(rec, l.device)) {
+      const mine = l.rec.devices[l.device] ?? { a: {}, s: {}, u: 0 }
+      const last = l.written ?? mine
+      const less = (x: Record<string, number>, y: Record<string, number>): Record<string, number> => {
+        const out: Record<string, number> = {}
+        for (const [k, n] of Object.entries(x)) if (n - (y[k] ?? 0) > 0) out[k] = n - (y[k] ?? 0)
+        return out
+      }
+      device = newDeviceId()
+      written = undefined
+      rec = { ...rec, devices: { ...rec.devices, [device]: { a: less(mine.a, last.a), s: less(mine.s, last.s), u: Math.floor(now / 1000) } } }
+    }
+    const out: InventoryLocal = { ...l, device, rec, written, syncedAt: now, restored: false, migrated: l.migrated || l.restored }
+    if (device !== l.device && Object.keys(rec.devices[device].a).length + Object.keys(rec.devices[device].s).length > 0) return { ...out, real: Math.max(l.real, l.syncedReal) + 1 }
     if (sameRecord(rec, remote)) return { ...out, syncedReal: l.real, syncedOwn: l.own }
     // The relay behind on this device's own entry (another device wrote over its write, or a restore): dirty again.
     if (!sameDevice(rec.devices[device], remote.devices[device]) && l.real <= l.syncedReal) return { ...out, real: l.syncedReal + 1 }
@@ -564,13 +583,14 @@ async function syncOnce(D: InventoryDeps, write: boolean, throttled: boolean): P
   if (remote.createdAt < local.wroteAt && D.now() / 1000 - local.wroteAt < STALE_PATIENCE_S) return done('error', STALE)
   let plan: { text: string; rec: InventoryRecord }
   try { plan = planRecord(local.rec, local.device, nowS) } catch (err) { return done('error', err instanceof Error ? err.message : String(err)) }
-  // The idlest devices folded to fit (RETIRED DEVICES): kept that way here too.
-  const folded = plan.rec !== local.rec ? plan.rec : null
+  // The idlest devices folded to fit (RETIRED DEVICES) go only into the event: this device takes the fold from the relay,
+  // once it is there, like any other change, so a fold that never lands is never kept here.
   const real = local.real
   const own = local.own
+  const writing = plan.rec.devices[local.device]
   // The throttle counts tries, so a refusal is not asked again until the next window (and the fast one is spent).
   const triedAt = D.now()
-  await change(me, (l) => ({ ...l, ...(folded ? { rec: mergeRecords(l.rec, folded) } : {}), triedAt, ownTried: Math.max(l.ownTried, own) }), D)
+  await change(me, (l) => ({ ...l, triedAt, ownTried: Math.max(l.ownTried, own) }), D)
   local = localFor(me, D)
   let key = remote.key
   if (!key && made && made.me === me) key = { wrapped: made.wrapped, key: made.key }
@@ -601,7 +621,7 @@ async function syncOnce(D: InventoryDeps, write: boolean, throttled: boolean): P
   const res = await D.publish(ev)
   if (!res.ok) return done('error', `Your inventory was not saved to the relay (${res.reason}).`)
   const syncedAt = D.now()
-  await change(me, (l) => ({ ...l, syncedReal: Math.max(l.syncedReal, real), syncedOwn: Math.max(l.syncedOwn, own), syncedAt, wroteAt: ev.created_at }), D)
+  await change(me, (l) => ({ ...l, syncedReal: Math.max(l.syncedReal, real), syncedOwn: Math.max(l.syncedOwn, own), syncedAt, wroteAt: ev.created_at, ...(writing && l.device === local.device ? { written: writing } : {}) }), D)
   useInventorySync.setState({ status: 'synced', note: null })
   return { wrote: true }
 }

@@ -14,7 +14,10 @@ import { Matrix4, Vector3 } from 'three'
 import { CELLS, idx } from '../terrain/coords'
 import { aroundIndex, BRIGHT_BLOCK, brightness, computeLight, EMIT, lightAt, lightTables, type Around } from '../terrain/light'
 import { computeHeldLight, fillHeldPass, glowingKinds, heldAt, heldChunks, heldCorner, heldGlow, heldGlowLook, heldLightSource, heldShine, HELD_BYTES, HELD_REACH, HELD_SIDE } from '../terrain/heldLight'
-import { COMPILER_ID } from '../terrain/terrainDb'
+import { COMPILER_ID, QUARRY_ID, type Inventory } from '../terrain/terrainDb'
+import { B, generate } from '../terrain/generate'
+import type { ChunkBase } from '../terrain/coords'
+import M from './fixtures/deck0009-blocks-vectors.json'
 import { EYE_LAMP, LIGHT_FLOOR, makeTerrainMaterial } from '../../terrain/terrainMaterial'
 import { EYE_SLACK, HeldLightDriver, eyeCell } from '../../scene/heldLight'
 
@@ -55,6 +58,18 @@ describe('on and off as the slot changes', () => {
     expect(heldLightSource(inv([GLOWCORE, STONE, 0], 1, counts))).toBeNull()
     expect(heldLightSource(inv([GLOWCORE, STONE, 0], 2, counts))).toBeNull()
     expect(heldLightSource(inv([GLOWCORE, STONE, 0], 0, { ...counts, [GLOWCORE]: 0 }))).toBeNull()
+  })
+
+  it('is out with the Compiler or the Quarry Charges in hand, beside a Glowcore in the bar, and on again on the Glowcore\'s slot', () => {
+    const bar = [COMPILER_ID, QUARRY_ID, GLOWCORE, 0]
+    // The charges are counted apart (`charges`), but a stray count under their id must not make them a light either.
+    const counts = { [GLOWCORE]: 4, [QUARRY_ID]: 3 }
+    const at = (slot: number): Inventory => ({ ...inv(bar, slot, counts), charges: 3 })
+    expect(heldLightSource(at(0))).toBeNull()
+    expect(heldLightSource(at(1))).toBeNull()
+    expect(heldLightSource(at(2))?.name).toBe('Glowcore')
+    expect(heldGlow(QUARRY_ID)).toBeNull()
+    expect(heldGlow(COMPILER_ID)).toBeNull()
   })
 
   it('puts the light on the blocks and takes it off them, and off again when TERRAIN closes or Block shading is off', () => {
@@ -202,6 +217,54 @@ describe('the same light a placed block gives', () => {
     const lamp = EYE_LAMP.light * (1 - 4 / EYE_LAMP.reach) ** 2
     expect(wall).toBeGreaterThan(0.6)
     expect(wall).toBeGreaterThan(10 * lamp)
+  })
+})
+
+describe('on revision-3 ground', () => {
+  // A chunk of revision 3 ground (DECK-0009 #128) that grows Glowcore, which revision 2 never placed there.
+  const c = M.revision_3.chunks.find((v) => v.name === 'vent-glowcore-k9')!
+  const base: ChunkBase = { x: BigInt(c.X), y: BigInt(c.Y), z: BigInt(c.Z), plane: c.plane }
+  const ground = generate(base, null, 3).blocks
+  const solid = (): Uint8Array => new Uint8Array(CELLS).fill(STONE)
+  const emits = (id: number): boolean => tables.emit[3 * id] + tables.emit[3 * id + 1] + tables.emit[3 * id + 2] > 0
+
+  it('grows Glowcore, which lights your way once mined and carried', () => {
+    const found = new Set(ground)
+    expect(found.has(B.GLOWCORE)).toBe(true)
+    // Every kind in this ground lights your hand exactly when it glows as a placed block.
+    for (const id of found) if (id) expect(heldGlow(id) !== null).toBe(emits(id))
+    expect(heldLightSource(inv([B.GLOWCORE], 0, { [B.GLOWCORE]: 1 }))?.level).toBe(15)
+  })
+
+  it('lights its caves as a Magmaflow placed at the eye would, cell for cell, across the whole chunk', () => {
+    // The ground's own glowing blocks swapped for dark ones that let light through or stop it alike, so the only light is the one in hand.
+    const b = ground.slice()
+    for (let i = 0; i < CELLS; i++) if (emits(b[i])) b[i] = tables.pass[b[i]] ? B.TIDEWATER : STONE
+    // The open cell nearest the chunk's middle.
+    let eye: [number, number, number] | null = null, best = Infinity
+    for (let y = 0; y < 32; y++) for (let z = 0; z < 32; z++) for (let x = 0; x < 32; x++) {
+      if (!tables.pass[b[idx(x, y, z)]]) continue
+      const d = Math.abs(x - 16) + Math.abs(y - 16) + Math.abs(z - 16)
+      if (d < best) { best = d; eye = [x, y, z] }
+    }
+    expect(eye).not.toBeNull()
+    const e = eye!
+    const pass = fillHeldPass((cx, cy, cz) => (cx === 0 && cy === 0 && cz === 0 ? b : solid()), heldCorner(e), new Uint8Array(HELD_SIDE ** 3))
+    const mine = computeHeldLight(pass, heldGlow(MAGMAFLOW)!.rgb)
+    const placed = b.slice(); placed[idx(...e)] = MAGMAFLOW
+    const theirs = computeLight(Array.from({ length: 27 }, (_, i) => (i === aroundIndex(0, 0, 0) ? placed : solid())), null, tables)
+    let lit = 0
+    for (let y = 0; y < 32; y++) for (let z = 0; z < 32; z++) for (let x = 0; x < 32; x++) {
+      const dx = x - e[0], dy = y - e[1], dz = z - e[2]
+      if (Math.max(Math.abs(dx), Math.abs(dy), Math.abs(dz)) > HELD_REACH) {
+        expect(lightAt(theirs, x, y, z)).toEqual([0, 0, 0])
+        continue
+      }
+      const h = heldAt(mine, dx + HELD_REACH, dy + HELD_REACH, dz + HELD_REACH)
+      expect(h).toEqual(lightAt(theirs, x, y, z))
+      if (h[0] > 0) lit++
+    }
+    expect(lit).toBeGreaterThan(0)
   })
 })
 

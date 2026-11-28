@@ -80,7 +80,7 @@ import { isQuarry, placeable } from '../lib/terrain/terrainDb'
 import { ITEM_ORANGE } from '../lib/blueprint/itemMark'
 import { useSurveyHold } from '../terrain/surveyHold'
 import { edgeSegments, outlineLines, outlineMaterial as sharedOutline, sizeOutline } from './hiddenParts'
-import { HeldLightDriver, eyeCell } from './heldLight'
+import { HeldLightDriver, eyeCell, type HeldFrame } from './heldLight'
 import { heldLightSource } from '../lib/terrain/heldLight'
 
 /** Chunks meshing at once. */
@@ -200,10 +200,14 @@ function Chunks({ axes }: { axes: ViewAxes }): JSX.Element {
   const held = useMemo(() => new HeldLightDriver(made), [made])
   const heldField = useRef(new Matrix4())
   const heldEye = useRef<[number, number, number]>([NaN, NaN, NaN])
+  /** What each frame tells it, filled in place: nothing is made per frame. */
+  const heldAsk = useRef<HeldFrame>({ world: null, version: 0, glow: null, shading: false, eye: heldEye.current })
   useEffect(() => {
-    if (!import.meta.env.DEV) return
-    ;(window as unknown as { __heldLight?: HeldLightDriver }).__heldLight = held
-    return () => { delete (window as unknown as { __heldLight?: HeldLightDriver }).__heldLight }
+    // The dev probe (scripts/held-light-shots.mjs reads it): only in the dev build, only where there is a page.
+    if (!import.meta.env.DEV || typeof window === 'undefined') return
+    const w = window as unknown as { __heldLight?: HeldLightDriver }
+    w.__heldLight = held
+    return () => { delete w.__heldLight }
   }, [held])
   const dropLight = (slot: ChunkSlot): void => {
     const l = lights.current.get(slot)
@@ -266,7 +270,13 @@ function Chunks({ axes }: { axes: ViewAxes }): JSX.Element {
     if (replace) for (const [slot, ms] of meshes.current) for (const m of ms) { fieldMatrix(s, axes, zoom, m.matrix, [32 * slot.off[0], 32 * slot.off[1], 32 * slot.off[2]]); m.matrixWorldNeedsUpdate = true }
     if (replace) fieldMatrix(s, axes, zoom, heldField.current)
     const st = useTerrain.getState()
-    held.frame({ world: st.active ? s.world : null, version: s.version, glow: st.active ? heldLightSource(st.inventory) : null, shading, eye: eyeCell(state.camera.position, heldField.current, heldEye.current) })
+    const ask = heldAsk.current
+    ask.world = st.active ? s.world : null
+    ask.version = s.version
+    ask.glow = st.active ? heldLightSource(st.inventory) : null
+    ask.shading = shading
+    ask.eye = eyeCell(state.camera.position, heldField.current, heldEye.current)
+    held.frame(ask)
     const holdOver = holdUntil.current !== null && performance.now() >= holdUntil.current
     if (s.version === seen.current && inFlight.current.size === 0 && lightFlight.current.size === 0 && !holdOver) return
     seen.current = s.version

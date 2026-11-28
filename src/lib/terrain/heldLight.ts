@@ -24,7 +24,7 @@
  * and block light.
  */
 
-import { isCompiler, type Inventory } from './terrainDb'
+import { isCompiler, isQuarry, type Inventory } from './terrainDb'
 import { BRIGHT_BLOCK, EMIT, MAX_LIGHT, lightTables, type LightTables } from './light'
 import { KINDS } from './blocks'
 
@@ -73,10 +73,10 @@ export function glowingKinds(): HeldGlow[] {
   return KINDS.map((k) => heldGlow(k.id)).filter((g): g is HeldGlow => g !== null).sort((a, b) => b.level - a.level)
 }
 
-/** The glowing block in hand, or null: the chosen slot holds a kind that glows, and you carry at least one (an empty slot, none left, the Compiler: none). */
+/** The glowing block in hand, or null: the chosen slot holds a kind that glows, and you carry at least one (an empty slot, none left, the Compiler, the Quarry Charges: none). */
 export function heldLightSource(inv: Pick<Inventory, 'hotbar' | 'slot' | 'counts'>): HeldGlow | null {
   const id = inv.hotbar[inv.slot]
-  if (!id || isCompiler(id) || (inv.counts[id] ?? 0) <= 0) return null
+  if (!id || isCompiler(id) || isQuarry(id) || (inv.counts[id] ?? 0) <= 0) return null
   return heldGlow(id)
 }
 

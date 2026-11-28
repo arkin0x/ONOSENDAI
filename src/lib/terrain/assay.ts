@@ -30,6 +30,7 @@ import { blockName, clearTable } from './blocks'
 import type { ChunkSlot, TerrainWorld } from './world'
 import { NEIGHBOURS } from './world'
 import { COMPILER_RECIPE, QUARRY_CHARGE_RECIPE, recipeNeeds } from '../blueprint/recipes'
+import { MAXK_AT_LEAST } from './generate'
 
 /** What one pass over a chunk finds. */
 export interface Assay {
@@ -176,6 +177,24 @@ export interface GroundFacts {
 
 /** The highest terrain K: the hardness bar's full length. */
 export const HARDNESS_MAX = 16
+
+/**
+ * The average hardness of a chunk, as the card shows it (its costliest cube's
+ * terrain K), over every chunk: the mean of MAXK_AT_LEAST's measured shares
+ * (the mean of a count is the sum of its tail), rounded. 10.
+ */
+export const AVERAGE_HARDNESS = Math.round(MAXK_AT_LEAST.slice(1).reduce((a, b) => a + b, 0))
+
+/**
+ * The line under the hardness bar (owner, 2026-11-28: "Richer than the
+ * average hardness of 10"): richer, about the same, or leaner than the
+ * average chunk.
+ */
+export function hardnessLine(max: number): string {
+  if (max > AVERAGE_HARDNESS) return `Richer than the average hardness of ${AVERAGE_HARDNESS}.`
+  if (max < AVERAGE_HARDNESS) return `Leaner than the average hardness of ${AVERAGE_HARDNESS}.`
+  return `About the average hardness of ${AVERAGE_HARDNESS}.`
+}
 
 /** One line of the card's list. */
 export interface CardRow {

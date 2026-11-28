@@ -56,6 +56,7 @@ import { useBlueprintTool } from '../store/useBlueprintTool'
 import { recordAtCursor } from '../lib/blueprint/capture'
 import { previewColor, previewLine, useSmashPreview } from '../lib/blueprint/smashPreview'
 import { CAUSE_WORDS } from '../lib/blueprint/nearMiss'
+import { SCENE_CANVAS } from '../scene/sceneCanvas'
 import { SmashConfirm } from './SmashConfirm'
 import { useAirPlace } from '../store/useAirPlace'
 import { AirStepper } from './AirStepper'
@@ -359,22 +360,24 @@ function useCompiling(): boolean {
 
 /**
  * What a smash at the cross would do, in one line just over the hold ring's place (scene/SmashPreview.tsx pulses the
- * blocks): COMPILES for a construction, BREAKS and the count for anything else, with a mark in the pulse's colour, and
- * for a game recipe built wrong why, in the warning red ("BREAKS 5 · TOUCHING THE GROUND": lib/blueprint/nearMiss.ts). Its
- * slot is always there, whether a ring is up or not, so nothing moves when it or a hold comes and goes (styles.css
- * --terrain-over-cross). Over the cross (beside the ring on a screen on its side) it never covers the first-visit
- * steps, SMASH or LOOK.
+ * blocks): the preview's label (lib/blueprint/smashPreview.ts previewLabel), with a mark in the pulse's colour: a game
+ * recipe's prize in mint, a recipe built wrong in the warning red ("MISSING A BLOCK", "NOT AIR GAPPED"), COMPILES for
+ * any other construction, BREAKS and the count for anything else. Its slot is always there, whether a ring is up or
+ * not, so nothing moves when it or a hold comes and goes (styles.css --terrain-over-cross). Over the cross (beside the
+ * ring on a screen on its side) it never covers the first-visit steps, SMASH or LOOK.
  */
 export function SmashPreviewLabel(): JSX.Element {
   const state = useSmashPreview((s) => s.state)
   const count = useSmashPreview((s) => s.count)
   const cause = useSmashPreview((s) => s.cause)
+  const label = useSmashPreview((s) => s.label)
   return (
     <div className="terrain-smash-preview" aria-live="off">
       {state && (
         <span className={`terrain-smash-preview__text terrain-smash-preview__text--${state}${cause ? ' terrain-smash-preview__text--near' : ''}`}>
           <span className="terrain-smash-preview__mark" style={{ background: previewColor(state, cause) }} aria-hidden />
-          {cause ? <>{previewLine(state, count)}<span className="terrain-smash-preview__why" style={{ color: previewColor(state, cause) }}>{' · '}{CAUSE_WORDS[cause]}</span></> : previewLine(state, count)}
+          {cause === 'big' ? <>{previewLine(state, count)}<span className="terrain-smash-preview__why" style={{ color: previewColor(state, cause) }}>{' · '}{CAUSE_WORDS[cause]}</span></>
+            : cause ? <span className="terrain-smash-preview__why" style={{ color: previewColor(state, cause) }}>{label}</span> : label}
         </span>
       )}
     </div>
@@ -409,7 +412,10 @@ const LONG_MS = LONG_PRESS_MS
 /** Whether an event is on the cyberspace scene's canvas (not the compass's, not a HUD's). */
 function onScene(e: Event): HTMLCanvasElement | null {
   const t = e.target as HTMLElement | null
-  if (!t || t.tagName !== 'CANVAS' || t.closest('.compass-3d, .benchorb, .orbsquare')) return null
+  // The main scene's canvas only (scene/Scene.tsx marks it): a tap on any other canvas, such as a blueprint's drawing in
+  // a menu or the examine sheet, never mines the block that happens to lie at that point of the view behind it (owner,
+  // 2026-11-28: "a block is missing and I feel like it's getting toggled when I'm going to menus").
+  if (!t || t.tagName !== 'CANVAS' || t.dataset?.scene !== SCENE_CANVAS || t.closest('.compass-3d, .benchorb, .orbsquare')) return null
   return t as HTMLCanvasElement
 }
 
@@ -439,15 +445,9 @@ export function mouseLocked(): boolean {
   return !!el && el.tagName === 'CANVAS'
 }
 
-/** The scene's canvas: the largest that is not a control's own (the compass, the LOOK ball, the workshop, a card's shard). */
+/** The main scene's canvas, by its mark (scene/sceneCanvas.ts). */
 function sceneCanvas(): HTMLCanvasElement | null {
-  let best: HTMLCanvasElement | null = null, area = 0
-  for (const c of Array.from(document.querySelectorAll('canvas'))) {
-    if (c.closest('.compass-3d, .benchorb, .orbsquare, .workshop, .thumbstage, .shardspin, .modal')) continue
-    const r = c.getBoundingClientRect()
-    if (r.width * r.height > area) { area = r.width * r.height; best = c }
-  }
-  return best
+  return document.querySelector<HTMLCanvasElement>(`canvas[data-scene="${SCENE_CANVAS}"]`)
 }
 
 function lockMouse(canvas: HTMLCanvasElement | null = sceneCanvas()): void {

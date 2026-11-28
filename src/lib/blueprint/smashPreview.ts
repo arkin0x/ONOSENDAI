@@ -13,13 +13,12 @@
  * its reach of 3 (owner, 2026-11-28; smash.ts compiles); a longer isolated
  * build says TOO BIG FOR A BARE HAND.
  *
- * A set that is one of the game's own recipes built wrong (nearMiss.ts:
- * touching the ground or a block, or turned the wrong way) says why in the
- * warning red: "BREAKS 5 · TOUCHING THE
- * GROUND" (owner's lost Glowcore, 2026-11-28). An isolated turned recipe
- * still compiles, in either hand, as the shape it is, so it says "COMPILES ·
- * TURNED THE WRONG WAY": it will be compiled, but it is not the recipe
- * (review of #969).
+ * The words (previewLabel, coordinator's ruling of 2026-11-28): one of the
+ * game's own recipes, exactly, names its prize ("QUARRY CHARGE",
+ * "COMPILER"); a recipe built wrong (nearMiss.ts) never says COMPILES, only
+ * what is wrong, in the warning red ("WRONG BLOCK", "MISSING A BLOCK",
+ * "TURNED", "NOT AIR GAPPED"); any other isolated build says COMPILES; the
+ * rest BREAKS and the count. The same words from every block of a build.
  *
  * COMPILES means the set is a construction the smash will compile: its key is
  * made and its lookup checked. It never says whether a blueprint matches:
@@ -37,7 +36,7 @@
 import { create } from 'zustand'
 import type { Cell } from './arrangement'
 import { compiles, smashGroup } from './smash'
-import { CAUSE_WORDS, missCause, nearMiss, tooBigBare, type MissCause, type NearMiss } from './nearMiss'
+import { CAUSE_WORDS, PRIZE_LABEL, missCause, missLabel, nearMiss, recipeOf, tooBigBare, type MissCause, type NearMiss, type RecipeId } from './nearMiss'
 
 /** What the smash would do with the set: compile it (a construction), or only break it. */
 export type PreviewState = 'compiles' | 'breaks'
@@ -67,6 +66,10 @@ export interface Preview {
   bare: boolean
   cells: Array<[number, number, number]>
   state: PreviewState
+  /** The game recipe the set is, exactly, when it will yield (nearMiss.ts recipeOf): its prize is named. */
+  prize: RecipeId | null
+  /** The words by the cross (previewLabel), worked out once with the preview, never per frame. */
+  label: string
   /** A game recipe built wrong (nearMiss.ts); null otherwise. */
   miss: NearMiss | null
   /** Bare-handed, an isolated build longer than the bare reach of 3 (nearMiss.ts tooBigBare). */
@@ -97,7 +100,7 @@ export function inSet(p: Pick<Preview, 'hit' | 'keys'>, x: number, y: number, z:
 
 /**
  * What a smash at `hit` would do, by the smash's own function (smash.ts smashGroup); null when nothing is there.
- * `natural` tells natural ground (nearMiss.ts), for TOUCHING THE GROUND beside a build as well as under it.
+ * `natural` tells natural ground (nearMiss.ts): a natural formation alone is never a recipe built wrong.
  */
 export function smashPreview(read: (x: number, y: number, z: number) => number, hit: Cell, bare: boolean, natural?: (x: number, y: number, z: number) => boolean): Preview | null {
   const g = smashGroup(read, hit, bare)
@@ -109,7 +112,22 @@ export function smashPreview(read: (x: number, y: number, z: number) => number, 
   // Built wrong: touching or in the wrong hand only breaks; turned may compile, as another shape (nearMiss.ts).
   const miss = nearMiss(read, hit, natural)
   const tooBig = !compiled && !miss && tooBigBare(read, hit, bare, g)
-  return { hit: [hit[0], hit[1], hit[2]], bare, cells: g.smash, state: compiled ? 'compiles' : 'breaks', miss, tooBig, keys }
+  const p = { hit: [hit[0], hit[1], hit[2]] as Cell, bare, cells: g.smash, state: (compiled ? 'compiles' : 'breaks') as PreviewState, prize: recipeOf(g.arrangement), miss, tooBig, keys, label: '' }
+  p.label = previewLabel(p)
+  return p
+}
+
+/**
+ * The words by the cross (coordinator's ruling, 2026-11-28, in the owner's style: short, never a contradiction):
+ * an exact game recipe that will yield names its prize ("QUARRY CHARGE", "COMPILER"); a near miss never says
+ * COMPILES, only what is wrong ("WRONG BLOCK", "2 WRONG BLOCKS", "MISSING A BLOCK", "TURNED", "NOT AIR GAPPED"); any
+ * other isolated build says COMPILES (a player's blueprint may match it); anything else BREAKS and the count, with
+ * TOO BIG FOR A BARE HAND when that is why.
+ */
+export function previewLabel(p: Pick<Preview, 'state' | 'cells' | 'prize' | 'miss' | 'tooBig'>): string {
+  if (p.prize) return PRIZE_LABEL[p.prize]
+  if (p.miss) return missLabel(p.miss)
+  return previewLine(p.state, p.cells.length, p.tooBig ? 'big' : null)
 }
 
 /** Why the preview warns: a recipe built wrong, or a build too big for a bare hand; null when it does not. */
@@ -119,6 +137,7 @@ export function previewCause(p: Pick<Preview, 'miss' | 'tooBig'> | null): MissCa
 
 /** The colour of a state: the warning red when the set is a recipe built wrong or too big for a bare hand. */
 export function previewColor(state: PreviewState, cause: MissCause | null = null): string {
+  // A prize named is the mint of COMPILES (previewLabel).
   return cause ? PREVIEW_NEAR_MISS : state === 'compiles' ? PREVIEW_COMPILES : PREVIEW_BREAKS
 }
 
@@ -257,16 +276,19 @@ export interface SmashPreviewShown {
   count: number
   /** Why a game recipe built wrong will not compile (nearMiss.ts), or null. */
   cause: MissCause | null
+  /** The words by the cross (previewLabel), or empty with nothing shown. */
+  label: string
 }
 
 /** The preview on screen, for the HUD's line: set by the scene only when it changes, never per frame. */
-export const useSmashPreview = create<SmashPreviewShown>(() => ({ state: null, count: 0, cause: null }))
+export const useSmashPreview = create<SmashPreviewShown>(() => ({ state: null, count: 0, cause: null, label: '' }))
 
 /** Tell the HUD what is shown, only when that changed. */
 export function showPreview(p: Preview | null): void {
   const state = p?.state ?? null
   const count = p?.cells.length ?? 0
   const cause = previewCause(p)
+  const label = p?.label ?? ''
   const now = useSmashPreview.getState()
-  if (now.state !== state || now.count !== count || now.cause !== cause) useSmashPreview.setState({ state, count, cause })
+  if (now.state !== state || now.count !== count || now.cause !== cause || now.label !== label) useSmashPreview.setState({ state, count, cause, label })
 }

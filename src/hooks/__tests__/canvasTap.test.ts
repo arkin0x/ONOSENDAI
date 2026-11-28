@@ -1,10 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { installCanvasTap, markSceneTapHandled } from '../useCanvasTap'
 
-const canvas = { tagName: 'CANVAS', closest: () => null }
+const canvas = { tagName: 'CANVAS', dataset: { scene: 'main' }, closest: () => null }
+/** A game's own scene canvas. */
+const game = { tagName: 'CANVAS', dataset: { scene: 'game' }, closest: () => null }
+/** Another canvas on the page: a blueprint's drawing in a menu or the examine sheet. */
+const schematic = { tagName: 'CANVAS', dataset: {}, closest: () => null }
 const button = { tagName: 'BUTTON', closest: () => null }
 /** The compass's own canvas: a canvas, but not the scene. */
-const compass = { tagName: 'CANVAS', closest: (sel: string) => (sel.includes('.compass-3d') ? {} : null) }
+const compass = { tagName: 'CANVAS', dataset: { scene: 'main' }, closest: (sel: string) => (sel.includes('.compass-3d') ? {} : null) }
 
 type Fn = (e: Event) => void
 /**
@@ -68,6 +72,14 @@ function setup() {
 }
 
 describe('scene tap: the controls toggle only when nothing in the scene took the tap', () => {
+  it('a tap on a schematic or any other canvas that is not a scene does not toggle; a game\'s own scene does', () => {
+    const { onTap, tap } = setup()
+    tap({ at: schematic })
+    expect(onTap).not.toHaveBeenCalled()
+    tap({ at: game })
+    expect(onTap).toHaveBeenCalledTimes(1)
+  })
+
   it('a tap on empty space toggles', () => {
     const { onTap, tap } = setup()
     tap()

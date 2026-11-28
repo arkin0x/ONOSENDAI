@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { smashGroup, compiles, BARE_REACH } from '../smash'
-import { PREVIEW_BREAKS, PREVIEW_NEAR_MISS, previewCause, previewColor, previewLine, showPreview, smashPreview, useSmashPreview } from '../smashPreview'
+import { PREVIEW_BREAKS, PREVIEW_NEAR_MISS, previewCause, previewColor, previewLabel, previewLine, showPreview, smashPreview, useSmashPreview } from '../smashPreview'
 import { CAUSE_WORDS, TOO_BIG_LINE, confirmWords, missCause, nearMiss, nearMissLine, posesOf, rareLost, tooBigBare, type NearMiss } from '../nearMiss'
 import { gather } from '../arrangement'
 import { smashAsk } from '../smashConfirm'
@@ -45,7 +45,7 @@ describe("the owner's build: a correct T resting on the floor", () => {
   const read = reader(t([0, 0, 0]), ground)
   const hit = [1, 1, 0] as const // the upper Ferrovein, where he struck
 
-  it('is not isolated, so it only breaks; the preview says BREAKS 5 · TOUCHING THE GROUND in the warning red', () => {
+  it('is not isolated, so it only breaks; the preview says NOT AIR GAPPED in the warning red', () => {
     const g = smashGroup(read, hit, true)
     expect(g.isolated).toBe(false)
     expect(g.smash).toHaveLength(5)
@@ -53,14 +53,14 @@ describe("the owner's build: a correct T resting on the floor", () => {
     expect(p.state).toBe('breaks')
     expect(p.miss).toMatchObject({ recipe: 'compiler', touching: 'ground', turned: false })
     const cause = missCause(p.miss!)
-    expect(previewLine(p.state, p.cells.length, cause)).toBe('BREAKS 5 · TOUCHING THE GROUND')
+    expect(previewLabel(p)).toBe('NOT AIR GAPPED')
     expect(previewColor(p.state, cause)).toBe(PREVIEW_NEAR_MISS)
     expect(PREVIEW_NEAR_MISS).not.toBe(PREVIEW_BREAKS)
     // The HUD's line hears the cause.
     showPreview(p)
-    expect(useSmashPreview.getState()).toEqual({ state: 'breaks', count: 5, cause: 'ground' })
+    expect(useSmashPreview.getState()).toEqual({ state: 'breaks', count: 5, cause: 'ground', label: 'NOT AIR GAPPED' })
     showPreview(null)
-    expect(useSmashPreview.getState()).toEqual({ state: null, count: 0, cause: null })
+    expect(useSmashPreview.getState()).toEqual({ state: null, count: 0, cause: null, label: '' })
   })
 
   it('struck at any of its five blocks: the same near miss', () => {
@@ -92,14 +92,14 @@ describe("the owner's build: a correct T resting on the floor", () => {
 })
 
 describe('other near misses', () => {
-  it('a placed block touching it at a corner: TOUCHING A BLOCK', () => {
+  it('a placed block touching it at a corner: NOT AIR GAPPED (touching a block)', () => {
     const m = t([0, 5, 0])
     m.set(key([3, 8, 1]), GRIDSTONE) // corner to the right Rustband at (2, 7, 0)
     const read = reader(m)
     const p = smashPreview(read, [1, 6, 0], true)!
     expect(p.state).toBe('breaks')
     // The block is outside the bare hand's box round the hit, so only the T's five go.
-    expect(previewLine(p.state, p.cells.length, previewCause(p))).toBe('BREAKS 5 · TOUCHING A BLOCK')
+    expect(previewLabel(p)).toBe('NOT AIR GAPPED')
     expect(nearMissLine(p.miss!)).toBe('No Compiler. Not air gapped: touching another block.')
   })
 
@@ -109,7 +109,7 @@ describe('other near misses', () => {
     expect(nearMiss(reader(m), [1, 6, 0])?.touching).toBe('block')
   })
 
-  it('a block beside it that is natural ground: TOUCHING THE GROUND, when the world can tell (else a placed block)', () => {
+  it('a block beside it that is natural ground: touching the ground, when the world can tell (else a placed block)', () => {
     const m = t([0, 5, 0])
     m.set(key([3, 6, 0]), GRIDSTONE)
     const natural = (x: number, y: number, z: number): boolean => key([x, y, z]) === '3,6,0'
@@ -117,12 +117,12 @@ describe('other near misses', () => {
     expect(nearMiss(reader(m), [1, 6, 0], natural)?.touching).toBe('ground')
   })
 
-  it('lifted, the head along Z, bare-handed: it compiles as another shape, so COMPILES · TURNED THE WRONG WAY', () => {
+  it('lifted, the head along Z, bare-handed: it compiles as another shape, so TURNED', () => {
     const read = reader(t([0, 1, 0], true), ground)
     const p = smashPreview(read, [0, 3, 1], true)!
     expect(p.state).toBe('compiles')
     expect(p.miss).toMatchObject({ recipe: 'compiler', turned: true, touching: null })
-    expect(previewLine(p.state, 5, missCause(p.miss!))).toBe('COMPILES · TURNED THE WRONG WAY')
+    expect(previewLabel(p)).toBe('TURNED')
     expect(nearMissLine(p.miss!)).toBe('No Compiler: turned the wrong way.')
   })
 
@@ -146,7 +146,7 @@ describe('other near misses', () => {
     expect(nearMiss(read, [1, 2, 1])).toBeNull()
   })
 
-  it('the Quarry Charge on the floor: TOUCHING THE GROUND, with the Compiler in hand', () => {
+  it('the Quarry Charge on the floor: NOT AIR GAPPED (touching the ground), with the Compiler in hand', () => {
     const read = reader(quarry([0, 0, 0]), ground)
     expect(missCause(smashPreview(read, [1, 1, 1], false, nat)!.miss!)).toBe('ground')
   })
@@ -157,15 +157,15 @@ describe('other near misses', () => {
     expect(read(1, -1, 0)).toBe(0)
     const p = smashPreview(read, [1, 1, 0], true, nat)!
     expect(p.state).toBe('breaks')
-    expect(previewLine(p.state, p.cells.length, missCause(p.miss!))).toBe('BREAKS 5 · TOUCHING THE GROUND')
+    expect(previewLabel(p)).toBe('NOT AIR GAPPED')
   })
 
-  it('on a small placed platform (3 blocks) laid on the ground: TOUCHING A BLOCK, not the ground', () => {
+  it('on a small placed platform (3 blocks) laid on the ground: touching a block, not the ground', () => {
     const m = t([0, 1, 0])
     for (let x = 0; x <= 2; x++) m.set(key([x, 0, 0]), GRIDSTONE)
     const read = reader(m, ground)
     const p = smashPreview(read, [1, 2, 0], true, nat)!
-    expect(previewLine(p.state, p.cells.length, previewCause(p))).toBe('BREAKS 5 · TOUCHING A BLOCK')
+    expect(previewLabel(p)).toBe('NOT AIR GAPPED')
     expect(nearMissLine(p.miss!)).toBe('No Compiler. Not air gapped: touching another block.')
   })
 
@@ -179,13 +179,13 @@ describe('other near misses', () => {
 })
 
 describe('a turned recipe compiles as another shape, in either hand: still a near miss', () => {
-  it('the T turned a quarter, lifted: COMPILES · TURNED THE WRONG WAY in red, and it asks first', () => {
+  it('the T turned a quarter, lifted: TURNED in red, and it asks first', () => {
     const read = reader(t([0, 1, 0], true), ground)
     const g = smashGroup(read, [0, 3, 1], false)
     expect(compiles(g.arrangement)).toBe(true)
     const p = smashPreview(read, [0, 3, 1], false, nat)!
     expect(p.state).toBe('compiles')
-    expect(previewLine(p.state, 5, missCause(p.miss!))).toBe('COMPILES · TURNED THE WRONG WAY')
+    expect(previewLabel(p)).toBe('TURNED')
     expect(previewColor(p.state, missCause(p.miss!))).toBe(PREVIEW_NEAR_MISS)
     const ask = smashAsk(read, [0, 3, 1], false, nat)!
     expect(ask.words).toBe("Won't make the Compiler: turned the wrong way. Breaks 5 blocks, including placed Glowcore.")
@@ -196,7 +196,7 @@ describe('a turned recipe compiles as another shape, in either hand: still a nea
     const read = reader(quarry([0, 1, 0], true), ground)
     const p = smashPreview(read, [1, 2, 1], false, nat)!
     expect(p.state).toBe('compiles')
-    expect(previewLine(p.state, 7, missCause(p.miss!))).toBe('COMPILES · TURNED THE WRONG WAY')
+    expect(previewLabel(p)).toBe('TURNED')
     const ask = smashAsk(read, [1, 2, 1], false, nat)!
     expect(ask.rare).toEqual(['Cinderrock'])
     expect(ask.words).toBe("Won't make Quarry Charges: turned the wrong way. Breaks 7 blocks, including placed Cinderrock.")
@@ -221,7 +221,7 @@ describe('a bare hand compiles anything that fits its reach of 3 (owner, 2026-11
       const p = smashPreview(four, [x, 1, 0], true)!
       expect(p.state, `x ${x}`).toBe('breaks')
       expect(p.tooBig).toBe(true)
-      expect(previewLine(p.state, p.cells.length, previewCause(p))).toBe(`BREAKS ${p.cells.length} · TOO BIG FOR A BARE HAND`)
+      expect(previewLabel(p)).toBe(`BREAKS ${p.cells.length} · TOO BIG FOR A BARE HAND`)
       expect(previewColor(p.state, previewCause(p))).toBe(PREVIEW_NEAR_MISS)
       const held = smashPreview(four, [x, 1, 0], false)!
       expect(held.state).toBe('compiles')
@@ -259,7 +259,7 @@ describe("isolated means touching no block on a face, edge or corner (the owner'
     }
   })
 
-  it('a block at a corner of it does touch: it joins the group, which is no longer the T, so TOUCHING A BLOCK', () => {
+  it('a block at a corner of it does touch: it joins the group, which is no longer the T, so NOT AIR GAPPED', () => {
     const m = t([0, 1, 0])
     m.set(key([-1, 4, 1]), GRIDSTONE) // corner to the left Rustband at (0, 3, 0)
     const read = reader(m, ground)
@@ -267,11 +267,11 @@ describe("isolated means touching no block on a face, edge or corner (the owner'
     expect(g.cells).toHaveLength(6)
     // Four wide: too wide for a bare hand, so it only breaks, said as a near miss.
     const p = smashPreview(read, [1, 2, 0], true, nat)!
-    expect(previewLine(p.state, p.cells.length, previewCause(p))).toBe('BREAKS 5 · TOUCHING A BLOCK')
+    expect(previewLabel(p)).toBe('NOT AIR GAPPED')
     expect(smashAsk(read, [1, 2, 0], true, nat)!.words).toMatch(/^Won't compile\. Not air gapped: touching another block\./)
     // With the Compiler the six touch nothing else, so they compile as another shape: a near miss all the same.
     const held = smashPreview(read, [1, 2, 0], false, nat)!
-    expect(previewLine(held.state, held.cells.length, previewCause(held))).toBe('COMPILES · TOUCHING A BLOCK')
+    expect(previewLabel(held)).toBe('NOT AIR GAPPED')
     expect(smashAsk(read, [1, 2, 0], false, nat)!.words).toMatch(/^Won't make the Compiler\. Not air gapped: touching another block\./)
   })
 })
@@ -284,7 +284,7 @@ describe('a near miss only when the struck build is a recipe and at most 3 place
     return reader(m, ground)
   }
 
-  it('3 extra placed blocks: still the T built wrong, TOUCHING A BLOCK', () => {
+  it('3 extra placed blocks: still the T built wrong, NOT AIR GAPPED', () => {
     expect(nearMiss(withExtra(3), [1, 2, 0], nat)).toMatchObject({ recipe: 'compiler', touching: 'block' })
     expect(nearMiss(withExtra(1), [1, 2, 0], nat)?.touching).toBe('block')
   })
@@ -297,7 +297,7 @@ describe('a near miss only when the struck build is a recipe and at most 3 place
     expect(smashAsk(read, [1, 2, 0], false, nat)).toBeNull()
   })
 
-  it('the same on a turned T: 3 extra warns TURNED THE WRONG WAY, 4 extra says nothing', () => {
+  it('the same on a turned T: 3 extra warns TURNED, 4 extra says nothing', () => {
     const turned = (n: number): Read => {
       const m = t([0, 1, 0], true)
       for (let i = 0; i < n; i++) m.set(key([0, 4 + i, 1]), FERROVEIN) // a stack on top of the Glowcore
@@ -412,10 +412,10 @@ describe('the words keep the owner\'s rule', () => {
     const lines: string[] = [...Object.values(CAUSE_WORDS)]
     for (const recipe of ['compiler', 'quarry'] as const) for (const turned of [false, true]) for (const touching of [null, 'ground', 'block'] as const) {
       if (!turned && !touching) continue
-      const m: NearMiss = { recipe, name: recipe === 'compiler' ? 'the Compiler' : 'the Quarry Charge', turned, touching, wrong: [] }
+      const m: NearMiss = { recipe, name: recipe === 'compiler' ? 'the Compiler' : 'the Quarry Charge', turned, touching, wrong: [], missing: 0 }
       lines.push(nearMissLine(m), confirmWords(5, ['Glowcore'], m), confirmWords(5, ['Glowcore'], m, true))
     }
-    const wrong: NearMiss = { recipe: 'quarry', name: 'the Quarry Charge', turned: false, touching: null, wrong: [{ is: 5, should: 2 }] }
+    const wrong: NearMiss = { recipe: 'quarry', name: 'the Quarry Charge', turned: false, touching: null, wrong: [{ is: 5, should: 2 }], missing: 0 }
     lines.push(nearMissLine(wrong), confirmWords(7, ['Cinderrock'], wrong, true))
     lines.push(confirmWords(3, ['Glowcore'], null), confirmWords(3, ['Glowcore'], null, false, true), TOO_BIG_LINE)
     for (const l of lines) expect(l, l).not.toMatch(FORBIDDEN)

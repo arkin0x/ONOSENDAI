@@ -12,6 +12,7 @@
  */
 
 import { useEffect } from 'react'
+import { isSceneCanvas } from '../scene/sceneCanvas'
 
 /**
  * Marks the current gesture as already meaning something.
@@ -74,9 +75,11 @@ export function installCanvasTap(
   /** When the last lift that qualified as a tap happened (now()), or 0. */
   let liftedAt = 0
 
+  // A scene's canvas only (scene/sceneCanvas.ts): a tap on a blueprint's drawing in a menu, or any other canvas on the
+  // page, is that control's business and never folds the controls (owner, 2026-11-28, the same rule as TERRAIN's taps).
   const onCanvas = (e: Event): boolean => {
     const t = e.target as HTMLElement | null
-    return t?.tagName === 'CANVAS' && !t.closest?.(NOT_SCENE)
+    return isSceneCanvas(t) && !t!.closest?.(NOT_SCENE)
   }
 
   // Every press, even one a control stops on its way (the compass, a modal's

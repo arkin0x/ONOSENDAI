@@ -65,7 +65,7 @@ describe('the smash preview in the scene', () => {
     // Five blocks, four faces shared between them: 22 faces, two triangles each, in one geometry.
     expect(m.geometry.getAttribute('position').count).toBe(22 * 6)
     expect((m.material as MeshBasicMaterial).color.getHex()).toBe(new Color(PREVIEW_COMPILES).getHex())
-    expect(useSmashPreview.getState()).toEqual({ state: 'compiles', count: 5, cause: null })
+    expect(useSmashPreview.getState()).toEqual({ state: 'compiles', count: 5, cause: null, label: 'COMPILER' })
     expect(root.state().scene.children.filter((c) => c.name === 'terrain-smash-preview')).toHaveLength(1)
     const after = reads
     for (let i = 0; i < 30; i++) await root.frame()
@@ -121,7 +121,7 @@ describe('the smash preview in the scene', () => {
     await root.frame()
     await rest(PREVIEW_DEBOUNCE_MS + 20)
     await root.frame()
-    expect(useSmashPreview.getState()).toEqual({ state: 'compiles', count: 5, cause: null })
+    expect(useSmashPreview.getState()).toEqual({ state: 'compiles', count: 5, cause: null, label: 'COMPILER' })
     expect(preview().visible).toBe(false)
     expect(preview().geometry.getAttribute('position')).toBeUndefined()
     // The hold starts: the glow comes in.

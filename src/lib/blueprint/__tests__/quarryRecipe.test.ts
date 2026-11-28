@@ -14,7 +14,7 @@ import { compile, compiles, smashGroup, type SmashDeps } from '../smash'
 import { QUARRY_KEY_HEX, QUARRY_LOOKUP, QUARRY_NAME, gameNoDeploy, isQuarryPrize, toolName, toolWhat } from '../gameCard'
 import { isPrize, readRecord, recordTemplate, sealPrize, sheetShape, type RecordEvent } from '../format'
 import { keyOf } from '../keyClient'
-import { quarryModel, quarryPayload } from '../quarryModel'
+import { QUARRY_LOOK } from '../quarryModel'
 import { bytesToHex, hexToBytes } from '../../events'
 import vectors from './fixtures/blueprints-vectors.json'
 
@@ -129,8 +129,6 @@ describe('the Quarry Charge recipe (DECK-0010 §8.5)', () => {
     expect(toolWhat(p)).toMatch(/^Seven Quarry Charges/)
     expect(gameNoDeploy({ record: { id: 'game:quarry-charge' } })).toMatch(/seven Quarry Charges/)
     expect(gameNoDeploy({ record: { id: 'game:compiler' } })).toMatch(/Compiler/)
-    const payload = quarryPayload()
-    expect(payload.faces.length).toBe(48)
-    expect(quarryModel()).not.toBeNull()
+    expect(QUARRY_LOOK).toBe('tri-pack')
   })
 })

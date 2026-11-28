@@ -14,7 +14,7 @@ import { ITEM_ORANGE, isItemPrize } from '../lib/blueprint/itemMark'
 import { useEffect, useMemo, useState } from 'react'
 import { Bomb, Boxes, EyeOff, Hammer, PackageCheck, Sparkles } from 'lucide-react'
 import { isQuarryPrize, toolWhat } from '../lib/blueprint/gameCard'
-import { quarryModel } from '../lib/blueprint/quarryModel'
+import { quarryModelNow, useQuarryModel } from '../lib/blueprint/quarryModel'
 import { fromPayload } from 'sno-core/shards'
 import { useBlueprints } from '../store/useBlueprints'
 import { prizeName, usePrizePick } from '../store/usePrizePick'
@@ -91,7 +91,7 @@ export function PrizeStrip({ here }: { here: ToyRow[] }): JSX.Element | null {
 }
 
 function prizeModel(toy: ToyRow): ReturnType<typeof fromPayload> | null {
-  if (isQuarryPrize(toy.prize)) return quarryModel()
+  if (isQuarryPrize(toy.prize)) return quarryModelNow()
   if (toy.prize.type !== 'sno') return null
   const s = fromPayload(toy.prize.payload, toy.rowKey)
   return s ? keepOwnTable(s, toy.maker) : null
@@ -103,7 +103,9 @@ export function PrizeCard(): JSX.Element | null {
   const toy = useBlueprints((s) => s.toys.find((t) => t.rowKey === key) ?? null)
   const close = (): void => usePrizePick.getState().select(null)
   useModalStack(!!toy, close)
-  const shard = useMemo(() => (toy ? prizeModel(toy) : null), [toy])
+  // The Quarry Charge's model is read on first use: drawn once it is in (quarryModel.ts).
+  const quarry = useQuarryModel(!!toy && isQuarryPrize(toy.prize))
+  const shard = useMemo(() => (toy ? prizeModel(toy) : null), [toy, quarry])
   if (!toy) return null
   return (
     <Stacked>
@@ -131,6 +133,8 @@ export function PrizePicker({ here }: { here: ToyRow[] }): JSX.Element | null {
   const close = (): void => usePrizePick.getState().setPicker(false)
   useModalStack(open, close)
   useEffect(() => { if (open && here.length === 0) close() }, [open, here.length])
+  // Drawn again once the Quarry Charge's model is read, when one waits here.
+  useQuarryModel(open && here.some((t) => isQuarryPrize(t.prize)))
   if (!open) return null
   return (
     <Stacked>

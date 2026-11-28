@@ -1,60 +1,68 @@
 /**
- * quarryModel.ts - the Quarry Charge's look, made here rather than drawn in
- * the workshop: a squat dark casing with an orange band round its middle and
- * an orange lamp on top, the Compiler's orange (itemMark.ts ITEM_ORANGE,
- * built-in palette 117). It is the toy a compile leaves, the picture on its
- * blueprint and on the prize card. Plain boxes, so it reads at any size, and
- * made once, with no fetch.
+ * quarryModel.ts - the Quarry Charge's look: the Tri-Pack (owner,
+ * 2026-11-28), three charges strapped round a detonator mast, banded in
+ * hazard orange and wired to the mast's lamp with lines of light, a ring of
+ * light turning on the hub. Two models, the same metal in both:
+ *
+ * - at rest (quarryTriPack.sno.json): the toy a compile leaves, the
+ *   pictures on its blueprint and its prize card, the charge in hand;
+ * - armed (quarryTriPackArmed.sno.json): the charge burning in the world,
+ *   its light hotter and more of it, the hub ring turning faster
+ *   (scene/QuarryFx.tsx speeds it up again as the fuse runs out).
+ *
+ * Original models made for the app, bundled as built-in objects like the
+ * Compiler (compilerModel.ts), never one of the owner's private kits. Their
+ * parts travel inside them (DECK-0003 §1.10), keyed under the zero pubkey,
+ * so they draw with no fetch; each is read only when first drawn.
  */
 
-import { fromPayload, type ShardModel, type ShardPayload } from 'sno-core/shards'
+import { useEffect, useState } from 'react'
+import type { ShardModel } from 'sno-core/shards'
+import { fromPayload } from 'sno-core/shards'
+import { keepOwnTable } from '../carried'
 
-/** Built-in palette indices (sno-core snoPalette.json): the casing, its straps, the band and the lamp. */
-const CASING = 199
-const STRAP = 196
-const BAND = 117
-const LAMP = 245
+/** The key its carried parts are filed under. */
+export const QUARRY_AUTHOR = '0'.repeat(64)
 
-/** The model's units have 120 ticks each (DECK-0003 §1.1). */
-const TICKS = 120
+/** Which look the game's blueprint was drawn with: a card drawn with an older look is drawn again (gameBlueprint.ts). */
+export const QUARRY_LOOK = 'tri-pack'
 
-/** The boxes it is made of: from, to (model units), and colour. */
-const BOXES: ReadonlyArray<readonly [readonly [number, number, number], readonly [number, number, number], number]> = [
-  [[-2, -1.5, -2], [2, 1.5, 2], CASING],
-  [[-2.12, -0.35, -2.12], [2.12, 0.35, 2.12], BAND],
-  [[-2.06, -1.5, -0.4], [2.06, 1.5, 0.4], STRAP],
-  [[-0.55, 1.5, -0.55], [0.55, 2.3, 0.55], LAMP],
-]
+/** Where the detonator lamp stands in the model's own units: the top of the mast, on its axis. */
+export const QUARRY_LAMP: readonly [number, number, number] = [0, 3.5, 0]
+/** The model's box in its own units (both looks): the feet at y -3, the lamp at the top. */
+export const QUARRY_BOX = { min: [-2.08, -3, -2.32], max: [2.08, 3.6, 1.61] } as const
 
-/** The Quarry Charge as a payload (DECK-0003 §1.1): its boxes' corners and faces. */
-export function quarryPayload(): ShardPayload {
-  const vertices: Array<[number, number, number]> = []
-  const ticks: Array<[number, number, number]> = []
-  const colors: number[] = []
-  const faces: Array<[number, number, number]> = []
-  const facecolors: number[] = []
-  for (const [lo, hi, colour] of BOXES) {
-    const base = vertices.length
-    for (let k = 0; k < 8; k++) {
-      const p = [k & 1 ? hi[0] : lo[0], k & 2 ? hi[1] : lo[1], k & 4 ? hi[2] : lo[2]]
-      const whole = p.map((v) => Math.floor(v)) as [number, number, number]
-      vertices.push(whole)
-      ticks.push(p.map((v, a) => Math.min(TICKS - 1, Math.round((v - whole[a]) * TICKS))) as [number, number, number])
-      colors.push(colour)
-    }
-    // Two triangles a side, corners named by their bits (x 1, y 2, z 4).
-    for (const [a, b, c, d] of [[0, 2, 3, 1], [4, 5, 7, 6], [0, 4, 6, 2], [1, 3, 7, 5], [0, 1, 5, 4], [2, 6, 7, 3]]) {
-      faces.push([base + a, base + b, base + c], [base + a, base + c, base + d])
-    }
-    facecolors.push(colour, -11)
-  }
-  return { v: 2, name: 'Quarry Charge', unit: 0, mode: 'solid', vertices, ticks, colors, faces, facecolors }
+const cache: { rest?: Promise<ShardModel | null>; armed?: Promise<ShardModel | null> } = {}
+const ready: { rest: ShardModel | null; armed: ShardModel | null } = { rest: null, armed: null }
+
+function load(which: 'rest' | 'armed'): Promise<ShardModel | null> {
+  const p = cache[which] ??= (which === 'rest' ? import('./quarryTriPack.sno.json') : import('./quarryTriPackArmed.sno.json')).then((m) => {
+    const s = fromPayload((m as { default: unknown }).default, which === 'rest' ? 'quarry-tri-pack' : 'quarry-tri-pack-armed')
+    const kept = s ? keepOwnTable(s, QUARRY_AUTHOR) : null
+    ready[which] = kept
+    return kept
+  }).catch(() => null)
+  return p
 }
 
-let model: ShardModel | null | undefined
+/** The Quarry Charge at rest, read once. */
+export const quarryModel = (): Promise<ShardModel | null> => load('rest')
+/** The Quarry Charge armed, read once. */
+export const quarryArmedModel = (): Promise<ShardModel | null> => load('armed')
+/** A look already read, or null (it starts the read). */
+export function quarryModelNow(which: 'rest' | 'armed' = 'rest'): ShardModel | null {
+  if (!ready[which]) void load(which)
+  return ready[which]
+}
 
-/** The Quarry Charge's model, made once. */
-export function quarryModel(): ShardModel | null {
-  if (model === undefined) model = fromPayload(quarryPayload(), 'quarry-charge')
-  return model
+/** A look for a component: null until it is read, then the model; nothing is read while `on` is false. */
+export function useQuarryModel(on = true, which: 'rest' | 'armed' = 'rest'): ShardModel | null {
+  const [m, setM] = useState<ShardModel | null>(() => (on ? ready[which] : null))
+  useEffect(() => {
+    if (!on) return
+    let live = true
+    void load(which).then((x) => { if (live) setM(x) })
+    return () => { live = false }
+  }, [on, which])
+  return on ? m : null
 }

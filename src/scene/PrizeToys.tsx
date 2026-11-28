@@ -101,8 +101,7 @@ function useToyModel(toy: ToyRow): ShardModel | null {
   useEffect(() => {
     if (toy.prize.type !== 'tool') return
     let live = true
-    if (isQuarryPrize(toy.prize)) { setTool(quarryModel()); return }
-    void compilerModel().then((m) => { if (live) setTool(m) })
+    void (isQuarryPrize(toy.prize) ? quarryModel() : compilerModel()).then((m) => { if (live) setTool(m) })
     return () => { live = false }
   }, [toy])
   return sno ?? tool

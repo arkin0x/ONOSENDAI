@@ -60,6 +60,8 @@ interface BlueprintsState {
   /** One more build of a held blueprint. */
   noteBuilt: (lookup: string) => void
   archive: (rowKey: string, archived: boolean) => void
+  /** A game card's record drawn again (a newer look of its prize): everything else about the card stays, archived or not. */
+  redrawGame: (rowKey: string, record: NostrEvent) => void
 }
 
 let db: Promise<IDBDatabase | null> | null = null
@@ -181,6 +183,17 @@ export const useBlueprints = create<BlueprintsState>((set, get) => ({
     const cards = get().cards.map((c) => {
       if (c.lookup !== lookup) return c
       const n = { ...c, built: (c.built ?? 0) + 1 }
+      changed.push(n)
+      return n
+    })
+    if (changed.length) { set({ cards }); void persist((d) => writeCards(d, changed)) }
+  },
+
+  redrawGame: (rowKey, record) => {
+    const changed: BlueprintCard[] = []
+    const cards = get().cards.map((c) => {
+      if (c.rowKey !== rowKey || c.source !== 'game') return c
+      const n = { ...c, record }
       changed.push(n)
       return n
     })

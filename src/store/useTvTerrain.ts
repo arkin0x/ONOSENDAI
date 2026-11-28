@@ -1,0 +1,359 @@
+/**
+ * useTvTerrain.ts: TERRAIN on Cyberspace TV. Reads the blocks round the
+ * avatars on tape, flags TERRAIN beats, and keeps the meshes of the chunks
+ * a TERRAIN shot draws (scene/TvTerrain.tsx).
+ *
+ * Separate from the viewer's own TERRAIN (store/useTerrain.ts and
+ * store/terrainShare.ts, whose field is not drawn during TV): its own reader
+ * (lib/tv/terrainReader.ts), its own region-key cache, its own blocks worker
+ * (lib/terrain/makeBlocksClient.ts), all let go when TV ends.
+ *
+ * Ahead of the shot, as the bag scan reads ahead (store/useTv.ts tick):
+ * for the shot on screen and the next TERRAIN_AHEAD queued, any trip with a
+ * small step (lib/tv/terrainShot.ts mayBeTerrain) has the chunk of each of
+ * its beats read; its beats are flagged; and a TERRAIN shot then has the
+ * chunks round those read too (the 26 neighbours, and the ring beyond for
+ * the borders), and the meshes of the chunks it opens on made.
+ *
+ * On screen, during a TERRAIN shot: the chunk the avatar is in and its 26
+ * neighbours (27 at most) as of the tape's time, each that has blocks then.
+ * A chunk's mesh is made off the page: its blocks stacked as of tape time
+ * (ground from the blocks worker, cached), its faces against its six
+ * neighbours' borders, greedily meshed in the worker. Meshes are kept by
+ * what went into them (MESHES_KEPT), so a chunk whose blocks have not
+ * changed is never meshed twice, and one whose blocks change (a layer's
+ * publish reached on tape) keeps its old mesh on screen until the new one is
+ * in. One chunk job at a time on the stream (the stream box draws about
+ * 21.9 frames a second at 1080p), two on the site.
+ *
+ * Watching only: nothing here makes a signature, publishes or keeps anything past TV.
+ */
+
+import { create } from 'zustand'
+import { CYBERSPACE_RELAY, queryAnyChecked } from '../lib/relay'
+import { verifyOnce } from '../lib/verifiedSigs'
+import { keyStatusOn } from '../lib/terrain/builderStatus'
+import { makeBlocksClient, type BlocksClient } from '../lib/terrain/makeBlocksClient'
+import { borderSlab, type Borders, type ChunkMesh } from '../lib/terrain/mesh'
+import { chunkInSpace, chunkKey, chunkOf, type ChunkBase } from '../lib/terrain/coords'
+import { isBroadcast } from '../lib/tv/broadcast'
+import { TvTerrainReader, forgetTvRegionKeys, type ChunkAsOf, type TvTerrainDeps } from '../lib/tv/terrainReader'
+import { beatChunk, flagTerrainBeats, isTerrainShot, mayBeTerrain, neighbourhood, terrainStep, type TerrainCamera } from '../lib/tv/terrainShot'
+import type { Shot } from '../lib/tv/director'
+import type { Position } from '../lib/space'
+import { useMutes } from './useMutes'
+
+/** How many queued shots after the one on screen are read ahead. */
+export const TERRAIN_AHEAD = 2
+/** The chunks drawn: the avatar's and its neighbours out to this ring (27). */
+export const DRAW_RING = 1
+/** The chunks read round a TERRAIN shot's beats: the drawn ones and their neighbours, for the borders. */
+export const BORDER_RING = 2
+/** The most chunks drawn at once. */
+export const MAX_DRAWN = 27
+/** The most chunks read for one shot. */
+export const SHOT_READ_MAX = 250
+/** Meshes kept: the chunks drawn and the next shot's opening ones. */
+export const MESHES_KEPT = 54
+/** A chunk job not asked for again in this long is dropped (ms). */
+export const JOB_STALE_MS = 20_000
+
+/** One chunk on screen. */
+export interface DrawnChunk {
+  key: string
+  base: ChunkBase
+  meshKey: string
+  mesh: ChunkMesh
+}
+
+interface TvTerrainView {
+  /** The chunks a TERRAIN shot draws now, with their meshes (MAX_DRAWN at most). */
+  drawn: DrawnChunk[]
+}
+
+export const useTvTerrain = create<TvTerrainView>(() => ({ drawn: [] }))
+
+/** What TV's state says, for the tick: the shot, the moment on tape, the avatars, and the TERRAIN camera. */
+export interface TvTerrainFrame {
+  shot: Shot | null
+  tapeTime: number | null
+  avatars: Record<string, { position: Position; plane: number }>
+  terrain: (TerrainCamera & { shot: string }) | null
+}
+
+/** Whether the shot on screen plays as TERRAIN (store/useTv.ts sets `terrain` as the shot begins). */
+export function terrainOn(s: Pick<TvTerrainFrame, 'shot' | 'terrain'>): boolean {
+  return s.terrain !== null && s.shot !== null && s.terrain.shot === s.shot.id
+}
+
+let run = 0
+let reader: TvTerrainReader | null = null
+let client: BlocksClient | null = null
+let override: Partial<TvTerrainDeps> | null = null
+let namedAt = new Map<string, number>()
+/** Shots read for, this tape. */
+const prepared = new Set<string>()
+/** Meshes by what went into them; null for a chunk with no face to draw. */
+const meshes = new Map<string, ChunkMesh | null>()
+interface Job { key: string; pri: number; touched: number; run: () => Promise<void> }
+const jobs = new Map<string, Job>()
+let running = 0
+/** Bumped as each chunk job ends, so what is drawn is worked out again. */
+let meshVersion = 0
+/** The chunks drawn, by chunk key: a chunk being meshed again stays on screen as it was. */
+let shown = new Map<string, DrawnChunk>()
+let lastWant = ''
+let lastMuted: unknown = null
+
+/** For tests: replace what the reader talks to (null puts the real one back). Takes effect at the next start. */
+export function setTvTerrainDeps(next: Partial<TvTerrainDeps> | null): void {
+  override = next
+}
+
+function liveDeps(): TvTerrainDeps {
+  const ask = (f: Parameters<typeof queryAnyChecked>[1]): ReturnType<typeof queryAnyChecked> => queryAnyChecked([CYBERSPACE_RELAY], f)
+  return {
+    query: async (f) => {
+      const r = await ask(f)
+      if (r.trouble) throw new Error(`canonical relay: ${String(r.trouble)}`)
+      return r.events
+    },
+    keyStatus: async (author, keys) => {
+      const out = await keyStatusOn(ask, author, keys, verifyOnce, namedAt)
+      while (namedAt.size > 2000) namedAt.delete(namedAt.keys().next().value as string)
+      return out
+    },
+    ground: async (base, revision) => {
+      if (!client) throw new Error('TV ended')
+      return (await client.generateChunk(base, revision)).blocks
+    },
+    verify: (ev) => verifyOnce(ev),
+    muted: () => useMutes.getState().muted.pubkeys,
+    now: () => Date.now(),
+  }
+}
+
+/** TV came on: a reader and a blocks worker of its own. */
+export function startTvTerrain(): void {
+  stopTvTerrain()
+  client = makeBlocksClient()
+  reader = new TvTerrainReader({ ...liveDeps(), ...override })
+}
+
+/** TV went off: everything let go, the worker and TV's region keys too. */
+export function stopTvTerrain(): void {
+  run++
+  client?.release('TV ended')
+  client = null
+  reader = null
+  namedAt = new Map()
+  meshes.clear()
+  forgetTvRegionKeys()
+  newTapeTvTerrain()
+}
+
+/** A new tape: nothing of the last one's shots drawn or read for (what was read stays, as the bag scan's does). */
+export function newTapeTvTerrain(): void {
+  prepared.clear()
+  jobs.clear()
+  running = 0
+  run++
+  shown = new Map()
+  lastWant = ''
+  if (useTvTerrain.getState().drawn.length) useTvTerrain.setState({ drawn: [] })
+}
+
+/** The reader of this TV run (tests, and the scene's probe). */
+export function tvTerrainReader(): TvTerrainReader | null {
+  return reader
+}
+
+/** Whether nothing is being read or meshed (tests). */
+export function tvTerrainIdle(): boolean {
+  return running === 0 && jobs.size === 0
+}
+
+/** How many meshes are kept (tests). */
+export function tvTerrainMeshesKept(): number {
+  return meshes.size
+}
+
+/**
+ * From TV's tick: read ahead for the shots coming, and work out what the
+ * TERRAIN shot on screen draws now.
+ */
+export function tvTerrainTick(s: TvTerrainFrame, queue: readonly Shot[]): void {
+  const r = reader
+  if (!r) return
+  for (const shot of [s.shot, ...queue.slice(0, TERRAIN_AHEAD)]) {
+    if (!shot || prepared.has(shot.id) || !mayBeTerrain(shot)) continue
+    prepared.add(shot.id)
+    void prepareShot(shot, r, run)
+  }
+  drawFor(s, r)
+  pump()
+}
+
+/** Distinct chunks, in the order first met. */
+function distinct(bases: Iterable<ChunkBase>): ChunkBase[] {
+  const out = new Map<string, ChunkBase>()
+  for (const b of bases) { const k = chunkKey(b); if (!out.has(k)) out.set(k, b) }
+  return [...out.values()]
+}
+
+/** Read a shot's chunks, flag its beats, and for a TERRAIN shot read round them and mesh where it opens. */
+async function prepareShot(shot: Shot, r: TvTerrainReader, id: number): Promise<void> {
+  const beatBases = distinct(shot.beats.filter(terrainStep).map(beatChunk))
+  await r.prepare(beatBases)
+  if (id !== run) return
+  flagTerrainBeats(shot.beats, (b, t) => r.surveyedAsOf(b, t))
+  if (!isTerrainShot(shot)) return
+  // The drawn ring first, then the ring beyond (borders only).
+  const near = distinct(beatBases.flatMap((b) => neighbourhood(b, DRAW_RING)))
+  const far = distinct(beatBases.flatMap((b) => neighbourhood(b, BORDER_RING)))
+  await r.prepare(distinct([...near, ...far]).slice(0, SHOT_READ_MAX))
+  if (id !== run) return
+  // Where it opens: meshed ahead, behind whatever is on screen now.
+  const first = shot.beats[0]
+  const at = terrainStep(first) ? first.from.position : first.action.position
+  const plane = terrainStep(first) ? first.from.plane : first.action.plane
+  const centre = chunkOf(at.x, at.y, at.z, plane)
+  for (const b of neighbourhood(centre, DRAW_RING)) {
+    const a = r.asOf(b, shot.start)
+    if (a && (a.surveyed || a.cells)) queueMesh(r, a, shot.start, 10 + far1(b, centre))
+  }
+  pump()
+}
+
+/** The six face neighbours, in mesh.ts Borders order: -x, +x, -y, +y, -z, +z. */
+const FACES: ReadonlyArray<readonly [number, number, number]> = [[-1, 0, 0], [1, 0, 0], [0, -1, 0], [0, 1, 0], [0, 0, -1], [0, 0, 1]]
+const step = (b: ChunkBase, o: readonly [number, number, number]): ChunkBase => ({ x: b.x + 32n * BigInt(o[0]), y: b.y + 32n * BigInt(o[1]), z: b.z + 32n * BigInt(o[2]), plane: b.plane })
+/** How many chunks apart, on the furthest axis (0 for the same chunk, 1 for a neighbour). */
+function far1(a: ChunkBase, b: ChunkBase): number {
+  const d = (u: bigint, v: bigint): number => Number((u > v ? u - v : v - u) / 32n)
+  return Math.max(d(a.x, b.x), d(a.y, b.y), d(a.z, b.z))
+}
+
+/**
+ * A chunk's mesh key as of tape time: its own signature and its six
+ * neighbours' (their borders shape its faces). '?' for a neighbour not read
+ * yet, so the mesh is made again once it is.
+ */
+export function meshKeyOf(r: TvTerrainReader, a: ChunkAsOf, t: number): string {
+  const sides = FACES.map((o) => {
+    const n = step(a.base, o)
+    if (!chunkInSpace(n)) return '0'
+    const na = r.asOf(n, t)
+    if (!na) return '?'
+    return na.surveyed || na.cells ? na.signature : '0'
+  })
+  return [a.signature, ...sides].join('#')
+}
+
+/** Ask for a chunk's mesh as of tape time `t`: stacked, bordered, meshed in the worker. */
+function queueMesh(r: TvTerrainReader, a: ChunkAsOf, t: number, pri: number): string {
+  const key = meshKeyOf(r, a, t)
+  if (meshes.has(key)) return key
+  const now = performance.now()
+  const had = jobs.get(key)
+  if (had) { had.pri = Math.min(had.pri, pri); had.touched = now; return key }
+  const base = a.base
+  const id = run
+  jobs.set(key, {
+    key, pri, touched: now,
+    run: async () => {
+      const own = await r.blocksAsOf(base, t)
+      if (id !== run) return
+      if (!own) { keepMesh(key, null); return }
+      const borders = await Promise.all(FACES.map(async (o, face) => {
+        const n = step(base, o)
+        if (!chunkInSpace(n)) return null
+        const nb = await r.blocksAsOf(n, t)
+        return nb ? borderSlab(nb, face ^ 1) : null
+      }))
+      const c = client
+      if (!c || id !== run) return
+      const m = await c.meshChunkAsync(own, borders as Borders)
+      if (id === run) keepMesh(key, m.quads > 0 ? m : null)
+    },
+  })
+  return key
+}
+
+function keepMesh(key: string, m: ChunkMesh | null): void {
+  meshes.delete(key)
+  meshes.set(key, m)
+  if (meshes.size <= MESHES_KEPT) return
+  // The oldest first, never one on screen.
+  const onScreen = new Set([...shown.values()].map((d) => d.meshKey))
+  for (const k of meshes.keys()) {
+    if (meshes.size <= MESHES_KEPT) break
+    if (!onScreen.has(k)) meshes.delete(k)
+  }
+}
+
+/** Run chunk jobs, the most wanted first: one at a time on the stream, two on the site. */
+function pump(): void {
+  const limit = isBroadcast() ? 1 : 2
+  const now = performance.now()
+  while (running < limit && client && reader) {
+    let best: Job | null = null
+    for (const j of jobs.values()) {
+      if (now - j.touched > JOB_STALE_MS) { jobs.delete(j.key); continue }
+      if (!best || j.pri < best.pri) best = j
+    }
+    if (!best) return
+    jobs.delete(best.key)
+    running++
+    const id = run
+    void best.run().catch(() => { /* asked for again while still wanted */ }).finally(() => {
+      if (id !== run) return
+      running--
+      meshVersion++
+      pump()
+    })
+  }
+}
+
+/** What the TERRAIN shot on screen draws now: the avatar's chunk and its neighbours as of tape time. */
+function drawFor(s: TvTerrainFrame, r: TvTerrainReader): void {
+  const shot = s.shot
+  const a = shot ? s.avatars[shot.pubkey] : undefined
+  if (!terrainOn(s) || !shot || !a || s.tapeTime === null) {
+    if (shown.size || useTvTerrain.getState().drawn.length) {
+      shown = new Map()
+      lastWant = ''
+      useTvTerrain.setState({ drawn: [] })
+    }
+    return
+  }
+  const centre = chunkOf(a.position.x, a.position.y, a.position.z, a.plane)
+  const muted = useMutes.getState().muted
+  const want = `${shot.id}|${s.tapeTime}|${chunkKey(centre)}|${r.version}|${meshVersion}`
+  if (want === lastWant && muted === lastMuted) return
+  lastWant = want
+  lastMuted = muted
+  const next: DrawnChunk[] = []
+  const unread: ChunkBase[] = []
+  for (const b of neighbourhood(centre, DRAW_RING)) {
+    if (next.length >= MAX_DRAWN) break
+    const asOf = r.asOf(b, s.tapeTime)
+    if (!asOf) unread.push(b)
+    if (!asOf || (!asOf.surveyed && !asOf.cells)) continue
+    const key = asOf.key
+    const mk = queueMesh(r, asOf, s.tapeTime, far1(b, centre))
+    const m = meshes.get(mk)
+    if (m !== undefined) {
+      if (m) next.push({ key, base: b, meshKey: mk, mesh: m })
+      continue
+    }
+    // Being meshed: the chunk as it was drawn until the new mesh is in.
+    const old = shown.get(key)
+    if (old) next.push(old)
+  }
+  // Not read (let go to make room, or never read ahead): read now; the drawing is worked out again when it lands.
+  if (unread.length) void r.prepare(unread)
+  const was = useTvTerrain.getState().drawn
+  shown = new Map(next.map((d) => [d.key, d]))
+  if (was.length !== next.length || was.some((d, i) => d.meshKey !== next[i].meshKey)) useTvTerrain.setState({ drawn: next })
+}

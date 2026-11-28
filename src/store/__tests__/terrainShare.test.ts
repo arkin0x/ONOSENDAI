@@ -58,6 +58,7 @@ import {
   removeCrew, resetShare, retireDeviceKey, sceneDraws, setShareDeps, shownRevision, useShare,
 } from '../terrainShare'
 import { groundFor, groundRevisionFor } from '../useTerrain'
+import { explicitCells } from '../terrainShare'
 import { setGroundWriteRevisionForTests } from '../../lib/terrain/groundRevision'
 import { SURVEYED, foldChunk, openTerrainDb, readOwner } from '../../lib/terrain/terrainDb'
 import { encodeLayer } from '../../lib/terrain/layer'
@@ -67,7 +68,7 @@ import { builderRecord, forgetBuilderRecords, namedKey } from '../../lib/terrain
 import { fixTags, onActionSigned } from '../../lib/terrain/builderTags'
 import { chunkKey, chunkOf, type ChunkBase } from '../../lib/terrain/coords'
 import { generate, type GroundRevision } from '../../lib/terrain/generate'
-import { EMPTY } from '../../lib/terrain/blocks'
+import { EMPTY, kindId } from '../../lib/terrain/blocks'
 import { readLayer, type KeyStatus } from '../../lib/terrain/layerReader'
 import { keyStatusOn } from '../../lib/terrain/builderStatus'
 import { wallItems } from '../walkWalls'
@@ -929,9 +930,9 @@ describe('the ground\'s revision (DECK-0009 revision 3: a chunk keeps the revisi
   const g = (b: ChunkBase, r: GroundRevision): Uint8Array => generate(b, null, r).blocks
 
   /** A place in a chunk open under both revisions, to stand in. */
-  function openPlace(b: ChunkBase): { x: bigint; y: bigint; z: bigint; plane: 0 } {
+  function openPlace(b: ChunkBase): { x: bigint; y: bigint; z: bigint; plane: number } {
     const a = g(b, 2), c = g(b, 3)
-    for (let o = 32767; o >= 0; o--) if (a[o] === EMPTY && c[o] === EMPTY) return { x: b.x + BigInt(o & 31), y: b.y + BigInt(o >> 10), z: b.z + BigInt((o >> 5) & 31), plane: 0 }
+    for (let o = 32767; o >= 0; o--) if (a[o] === EMPTY && c[o] === EMPTY) return { x: b.x + BigInt(o & 31), y: b.y + BigInt(o >> 10), z: b.z + BigInt((o >> 5) & 31), plane: b.plane }
     throw new Error('no open cell')
   }
 
@@ -948,7 +949,7 @@ describe('the ground\'s revision (DECK-0009 revision 3: a chunk keeps the revisi
     const ground = g(base, revision)
     const values = ground.slice()
     for (const [c, v] of Object.entries(cells)) values[Number(c)] = v
-    const plain = nextPlaintext(null, 0, values, ground, { revision, surveyed })!
+    const plain = nextPlaintext(null, base.plane as 0 | 1, values, ground, { revision, surveyed })!
     const { key, lookupId } = chunkRegionKey(base)
     hold(finalizeEvent({ kind: LAYER_KIND, created_at: createdAt, tags: layerTags({ lookupId, author: who.pubkey, encrypted: await encryptForRegion(key, plaintextJson(plain)) }), content: '' }, who.builder) as unknown as NostrEvent)
   }
@@ -990,7 +991,10 @@ describe('the ground\'s revision (DECK-0009 revision 3: a chunk keeps the revisi
     await flush('test')
     expect(myLayers()).toHaveLength(1)
     const first = (await opened(myLayers()[0], K9)).planes[0]
-    expect(first).toMatchObject({ survey: true, ground: 2, surveyed: myLayers()[0].created_at })
+    // Its date is your survey's on this device, the one your own view used before it went out: never later than the layer.
+    const surveyedHere = (await rowOf(key))!.surveyed
+    expect(first).toMatchObject({ survey: true, ground: 2, surveyed: surveyedHere })
+    expect(surveyedHere).toBeLessThanOrEqual(myLayers()[0].created_at)
     expect(mineSome(1)).toBe(1)
     await flush('test')
     expect(myLayers()).toHaveLength(2)
@@ -1145,6 +1149,97 @@ describe('the ground\'s revision (DECK-0009 revision 3: a chunk keeps the revisi
     const r = await readLayer(mine, { verify: (e) => verifyEvent(e as never), key: rk, lookupId, ground: async (_p, rev) => g(K9, rev), keyStatus: async () => 'valid' })
     if (r.status !== 'counted') throw new Error(r.status)
     expect(r.layer.planes[0].changed).toEqual([minedHere, theirRock].sort((x, y) => x - y))
+  })
+
+  /** A cell where the two revisions' grounds differ, both solid, from the far end (and not `not`). */
+  const differing = (b: ChunkBase, not: number[] = []): number => {
+    const a = g(b, 2), c = g(b, 3)
+    for (let o = 32767; o >= 0; o--) if (a[o] !== c[o] && a[o] !== EMPTY && c[o] !== EMPTY && kindId(a[o]) !== kindId(c[o]) && !not.includes(o)) return o
+    return -1
+  }
+
+  it('mining and the Quarry Charge carry the base you were shown: your revision 2 survey in a home whose owner surveyed at revision 3', async () => {
+    // A home owner whose home chunk has cells where the revisions differ.
+    let owner = stranger(), home: ChunkBase | null = null
+    for (let i = 0; i < 40; i++) {
+      const c = coordToXyz(hexToCoord(owner.pubkey))
+      const b = chunkOf(c.x, c.y, c.z, c.plane)
+      if (differing(b) >= 0 && differing(b, [differing(b)]) >= 0) { home = b; break }
+      owner = stranger()
+    }
+    if (!home) throw new Error('no home chunk where the revisions differ')
+    await named(true, openPlace(home))
+    const key = await surveyHere()
+    expect(terrainSession!.world.slotByKey(key)!.revision).toBe(2)
+    // The owner surveys at revision 3: inside the home only the owner's survey counts, so you are shown revision 3.
+    await layerAt(owner, home, 3, 1_790_000_100)
+    await readChunks([home])
+    await settle(300)
+    expect(shownRevision(key)).toBe(3)
+    const s = terrainSession!
+    const at = (o: number): [number, number, number] => [Number(home!.x - s.world.origin.x) + (o & 31), Number(home!.y - s.world.origin.y) + (o >> 10), Number(home!.z - s.world.origin.z) + ((o >> 5) & 31)]
+    const g2 = g(home, 2), g3 = g(home, 3)
+    const c1 = differing(home), c2 = differing(home, [c1])
+    expect(s.world.blockCs(...at(c1))).toBe(g3[c1])
+    const count = (id: number): number => T().inventory.counts[kindId(id)] ?? 0
+    const before = { shown: count(g3[c1]), own: count(g2[c1]) }
+    expect(T().mine({ cell: at(c1), normal: [0, 1, 0], distance: 1 })).toBe(true)
+    expect(count(g3[c1])).toBe(before.shown + 1)
+    expect(count(g2[c1])).toBe(before.own)
+    // The Quarry Charge's blast carries the same way.
+    const out = T().blast([at(c2)])
+    expect(out).toHaveLength(1)
+    expect(out[0].carry).toBe(kindId(g3[c2]))
+  })
+
+  it('your blocks moved to another revision as they load keep a change that is now the ground\'s value, so it still outranks a stranger (§5.4)', async () => {
+    const p = openPlace(K9)
+    standAt(p)
+    await T().enter()
+    await settle(100)
+    const key = chunkKey(K9)
+    const g2 = g(K9, 2), g3 = g(K9, 3)
+    const c = differing(K9)
+    expect(c).toBeGreaterThanOrEqual(0)
+    // Your layer kept against revision 3, with that cell set to what revision 2's ground holds; the row says revision 2.
+    const mine = g3.slice()
+    mine[c] = g2[c]
+    const db = await openTerrainDb()
+    await putMany(db, SURVEYED, [{ rowKey: `${me()}|${key}`, owner: me(), chunk: key, t: Date.now() - 60_000, revision: 2, surveyed: 1_790_000_000 }])
+    await foldChunk(db, me(), key, encodeLayer(g3, mine, 0, 3), [], Date.now())
+    db.close()
+    await reloadAt(p)
+    const slot = terrainSession!.world.slotByKey(key)!
+    expect(slot.revision).toBe(2)
+    expect(slot.own![c]).toBe(g2[c])
+    expect(explicitCells(key).has(c)).toBe(true)
+    // A stranger changes that cell: yours stands for you.
+    await layerAt(stranger(), K9, 2, 1_790_000_100, { [c]: 8 })
+    await readChunks([K9])
+    await settle(300)
+    expect(terrainSession!.world.slotByKey(key)!.blocks![c]).toBe(g2[c])
+  })
+
+  it('one date for your survey before and after your first layer: your other device\'s later survey at another revision never flips the base once yours goes out', async () => {
+    setGroundWriteRevisionForTests(3)
+    await named(true, openPlace(K9))
+    const key = await surveyHere()
+    const surveyedHere = (await rowOf(key))!.surveyed
+    expect(terrainSession!.world.slotByKey(key)!.revision).toBe(3)
+    mineSome(1)
+    // Your other device surveyed after you, at revision 2, and published first.
+    const other = generateSecretKey()
+    hold(await sign({ kind: 3333, created_at: Math.floor(Date.now() / 1000), tags: [['A', 'hop'], ['builder', getPublicKey(other)]], content: '' }))
+    await layerAt({ pubkey: me(), builder: other }, K9, 2, surveyedHere + 30, {}, surveyedHere + 30)
+    // Yours goes out a while later.
+    const later = Date.now() + 120_000
+    setShareDeps({ now: () => later })
+    await flush('test')
+    await settle(300)
+    const ev = myLayers().filter((e) => e.pubkey !== getPublicKey(other)).at(-1)!
+    expect(ev.created_at).toBeGreaterThan(surveyedHere + 30)
+    expect((await opened(ev, K9)).planes[0]).toMatchObject({ ground: 3, surveyed: surveyedHere })
+    expect(terrainSession!.world.slotByKey(key)!.revision).toBe(3)
   })
 
   it('the mixed chunk: your revision 2 survey stays the base; a stranger\'s revision 3 layer mines one cell, read against its own ground', async () => {

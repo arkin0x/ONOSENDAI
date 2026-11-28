@@ -133,6 +133,60 @@ export function canonicalNumbers(text: string): boolean {
   return tokens.every((t) => /^(0|-?[1-9][0-9]*)$/.test(t))
 }
 
+const CANONICAL = /^(0|-?[1-9][0-9]*)$/
+
+/**
+ * Whether every number in each plane's `cells` and `pal` is written as §5.3
+ * requires (canonicalNumbers' rule), the other numbers of the plaintext left
+ * to their own readers: a `surveyed` that is not an integer reads as the
+ * layer's created_at, and never drops the layer (§5.4). JSON.parse reads
+ * `1.0` as `1`, so the text is walked: a number is checked when it sits in an
+ * array under `cells` or `pal` of an object in the top-level `planes`.
+ */
+export function canonicalCells(text: string): boolean {
+  // Each open container: what it is, and the key (or '#' for an array element) it sits under.
+  const stack: Array<{ arr: boolean; under: string; key: string | null }> = []
+  let i = 0
+  let pendingKey: string | null = null
+  const n = text.length
+  while (i < n) {
+    const ch = text[i]
+    if (ch === '"') {
+      let j = i + 1
+      while (j < n && text[j] !== '"') j += text[j] === '\\' ? 2 : 1
+      const str = text.slice(i + 1, j)
+      i = j + 1
+      const top = stack[stack.length - 1]
+      // A string in an object that a colon follows is a key.
+      let k = i
+      while (k < n && /\s/.test(text[k])) k++
+      if (top && !top.arr && text[k] === ':') pendingKey = str
+      continue
+    }
+    if (ch === '{' || ch === '[') {
+      const top = stack[stack.length - 1]
+      stack.push({ arr: ch === '[', under: top?.arr ? '#' : pendingKey ?? '', key: null })
+      pendingKey = null
+      i++
+      continue
+    }
+    if (ch === '}' || ch === ']') { stack.pop(); pendingKey = null; i++; continue }
+    if (ch === '-' || (ch >= '0' && ch <= '9')) {
+      let j = i + 1
+      while (j < n && /[0-9.eE+-]/.test(text[j])) j++
+      const tok = text.slice(i, j)
+      i = j
+      const top = stack[stack.length - 1]
+      const strict = stack.length === 4 && top.arr && (top.under === 'cells' || top.under === 'pal') && stack[1].arr && stack[1].under === 'planes' && stack[2].under === '#'
+      if (strict && !CANONICAL.test(tok)) return false
+      pendingKey = null
+      continue
+    }
+    i++
+  }
+  return true
+}
+
 // ---------------------------------------------------------------------------------------------------------------
 // Planes (§5.4)
 
@@ -232,12 +286,14 @@ function isPlaneObject(p: unknown): p is PlaneObject {
 }
 
 /**
- * The plaintext of a layer, read strictly (§5.4), or null: numbers as §5.3
- * writes them, 1 or 2 plane objects, at most one per plane, and an optional
- * `cobuilders` of 0 to 64 pubkeys. Other fields are ignored.
+ * The plaintext of a layer, read strictly (§5.4), or null: the cells and the
+ * palettes' numbers as §5.3 writes them (canonicalCells), 1 or 2 plane
+ * objects, at most one per plane, and an optional `cobuilders` of 0 to 64
+ * pubkeys. Other fields are ignored, and a `surveyed` that is not an integer
+ * never drops the layer (it reads as created_at: readSurveyed).
  */
 export function parsePlaintext(text: string): LayerPlaintext | null {
-  if (!canonicalNumbers(text)) return null
+  if (!canonicalCells(text)) return null
   let v: unknown
   try { v = JSON.parse(text) } catch { return null }
   const o = v as { planes?: unknown; cobuilders?: unknown } | null
@@ -571,11 +627,28 @@ export function changesOf(p: LayerPlaintext, groundOf: GroundAt, createdAt = 0):
  * (all of one rank, so the earliest `surveyed`, then the lower builder key
  * and event id), and that earliest `surveyed`. Null when no part surveys.
  */
-export function startAt(parts: ReadonlyArray<{ changes: PlaneChanges; builder: string; id: string }>): PlaneAt | null {
+export function startAt(parts: ReadonlyArray<{ changes: PlaneChanges; builder: string; id: string }>, view: WriterView | null = null): PlaneAt | null {
   const surveys = parts.filter((p) => p.changes.survey)
-  const revision = baseRevision(surveys.map((p) => ({ revision: p.changes.revision, rank: 0, surveyed: p.changes.surveyed, author: '', builder: p.builder, id: p.id })))
+  if (surveys.length === 0) return null
+  const rank = view?.rank ?? 0
+  const own: SurveyEntry[] = surveys.map((p) => ({ revision: p.changes.revision, rank, surveyed: p.changes.surveyed, author: view?.author ?? '', builder: p.builder, id: p.id }))
+  // Everyone else's counted surveys in the writer's view (§7.5): inside a home only a home owner's count, so the author's own count only when the author is one.
+  const others = view?.others ?? []
+  const homeOnly = others.some((e) => e.rank === 1) && rank !== 1
+  const revision = baseRevision(homeOnly ? others : [...own, ...others])
   if (revision === null) return null
   return { revision, surveyed: Math.min(...surveys.map((p) => p.changes.surveyed)) }
+}
+
+/**
+ * The rest of a writer's view of a plane, for a layer started from the
+ * author's other keys (§5.6): the author's own rank there, and everyone
+ * else's counted surveys (surveysOf over their counted layers).
+ */
+export interface WriterView {
+  author: string
+  rank: number
+  others: readonly SurveyEntry[]
 }
 
 /**
@@ -583,12 +656,13 @@ export function startAt(parts: ReadonlyArray<{ changes: PlaneChanges; builder: s
  * author's other keys' layers there, the twin included, with every changed
  * cell's value, the newer layer winning where two change one cell; then
  * this writer's own changes over them (`mine`, signed by `mineKey`). Each
- * surveyed plane names the base revision among them and the earliest
+ * surveyed plane names the base revision in the writer's view (`viewOf`:
+ * inside a home, the home owner's) and the earliest of the author's
  * `surveyed` (startAt), and is written against that revision's ground; a
  * cell changed at its base value is written explicitly, so it stays a
  * change whichever revision the new layer names.
  */
-export function startFrom(others: ReadonlyArray<{ changes: Map<0 | 1, PlaneChanges>; createdAt: number; builder: string; id: string }>, mine: Map<0 | 1, PlaneChanges>, groundOf: GroundAt, cobuilders: readonly string[], mineKey: { builder: string; id: string } = { builder: '', id: '' }): LayerPlaintext {
+export function startFrom(others: ReadonlyArray<{ changes: Map<0 | 1, PlaneChanges>; createdAt: number; builder: string; id: string }>, mine: Map<0 | 1, PlaneChanges>, groundOf: GroundAt, cobuilders: readonly string[], mineKey: { builder: string; id: string } = { builder: '', id: '' }, viewOf: (plane: 0 | 1) => WriterView | null = () => null): LayerPlaintext {
   // Oldest first, so the newer layer's value is the one left standing.
   const order = [...others].sort((a, b) => -withinRank({ ...a, author: '' }, { ...b, author: '' }))
   const planes: PlaneObject[] = []
@@ -596,7 +670,7 @@ export function startFrom(others: ReadonlyArray<{ changes: Map<0 | 1, PlaneChang
     const sources = [...order.map((o) => ({ changes: o.changes.get(plane), builder: o.builder, id: o.id })), { changes: mine.get(plane), ...mineKey }]
       .filter((c): c is { changes: PlaneChanges; builder: string; id: string } => !!c.changes)
     if (sources.length === 0) continue
-    const at = startAt(sources)
+    const at = startAt(sources, viewOf(plane))
     const g = at ? groundOf(plane, at.revision) : null
     if (at && !g) continue
     const base = g ?? new Uint8Array(CELLS)

@@ -19,7 +19,10 @@ import { sha256 } from '@noble/hashes/sha2.js'
 import { idx, type ChunkBase } from '../terrain/coords'
 import { B, FEATURES, FEATURES_R3, featuresOf, generate, isGroundRevision } from '../terrain/generate'
 import { GROUND_WRITE_REVISION, groundWriteRevision, readSurveyed, setGroundWriteRevisionForTests, storedRevision } from '../terrain/groundRevision'
-import { baseRevision, decodePlane, encodePlane, nextPlaintext, parsePlaintext, plaintextJson, resolveStack, startFrom, changesOf, type StackLayer, type StackView } from '../terrain/blockLayer'
+import { baseRevision, canonicalCells, decodePlane, encodePlane, nextPlaintext, parsePlaintext, plaintextJson, resolveStack, startAt, startFrom, changesOf, layerTags, LAYER_KIND, type StackLayer, type StackView } from '../terrain/blockLayer'
+import { readLayer } from '../terrain/layerReader'
+import { regionKeyAt, encryptForRegion } from '../shardCrypto'
+import { finalizeEvent, generateSecretKey, verifyEvent } from 'nostr-tools/pure'
 import { applyLayer, encodeLayer, layerRevision, rebaseBlocks } from '../terrain/layer'
 import { composeView } from '../../store/terrainShare'
 import M from './fixtures/deck0009-blocks-vectors.json'
@@ -272,5 +275,77 @@ describe('the write revision (§3.10: read a release before writing)', () => {
 
   it('a stored row without a revision is revision 2', () => {
     expect([undefined, null, 1, 2, 3, 4, '3'].map(storedRevision)).toEqual([2, 2, 2, 2, 3, 2, 2])
+  })
+})
+
+describe('a `surveyed` that is not an integer never drops the layer (§5.4)', () => {
+  const ORIGIN: ChunkBase = { x: 0n, y: 0n, z: 0n, plane: 0 }
+  const g2 = generate(ORIGIN).blocks
+  const v = g2.slice()
+  v[g2.findIndex((id) => id !== 0)] = 0
+  const text = plaintextJson(nextPlaintext(null, 0, v, g2, { revision: 2, surveyed: 123 })!)
+  const withSurveyed = (raw: string | null): string => (raw === null ? text.replace('"surveyed":123,', '') : text.replace('"surveyed":123', `"surveyed":${raw}`))
+
+  it('every one of the DECK\'s examples, read through the whole plaintext', () => {
+    const ex = M.base_revision.cases.find((c) => 'surveyed_examples' in c) as unknown as { surveyed_examples: Array<{ plane: { surveyed?: unknown }; created_at: number; surveyed: number }> }
+    for (const e of ex.surveyed_examples) {
+      const raw = 'surveyed' in e.plane ? JSON.stringify(e.plane.surveyed) : null
+      const p = parsePlaintext(withSurveyed(raw))
+      expect(p, String(raw)).not.toBeNull()
+      const d = decodePlane(p!.planes[0], g2, e.created_at)
+      expect(d !== 'aside' && d?.surveyed, String(raw)).toBe(e.surveyed)
+      expect(d !== 'aside' && d?.changed.length).toBe(1)
+    }
+  })
+
+  it('a stranger\'s layer naming `surveyed: 400.5` is counted, its survey dated created_at', async () => {
+    const { key, lookupId } = regionKeyAt(ORIGIN, 5, 5)
+    const encrypted = await encryptForRegion(key, withSurveyed('400.5'))
+    const ev = finalizeEvent({ kind: LAYER_KIND, created_at: 500, tags: layerTags({ lookupId, author: pk(0xa1), encrypted }), content: '' }, generateSecretKey())
+    const r = await readLayer(ev as never, { verify: (e) => verifyEvent(e as never), key, lookupId, ground: async () => g2, keyStatus: async () => 'valid' })
+    expect(r.status).toBe('counted')
+    if (r.status !== 'counted') return
+    expect(r.layer.planes[0].surveyed).toBe(500)
+    expect(r.layer.planes[0].changed).toHaveLength(1)
+  })
+
+  it('the cells and the palette stay strict', () => {
+    expect(canonicalCells('{"planes":[{"pal":[null,1],"cells":[0,-1,1]}],"x":1.5}')).toBe(true)
+    expect(canonicalCells('{"planes":[{"pal":[null,1.0],"cells":[0]}]}')).toBe(false)
+    expect(canonicalCells('{"planes":[{"pal":[null],"cells":[0,-1e2]}]}')).toBe(false)
+    expect(canonicalCells('{"planes":[{"pal":[null],"cells":[01]}]}')).toBe(false)
+    expect(canonicalCells('{"planes":[{"pal":[null],"cells":[0,-0]}]}')).toBe(false)
+    // A key inside a string is not a key.
+    expect(canonicalCells('{"planes":[{"note":"cells","pal":[null],"cells":[0]}],"cobuilders":[]}')).toBe(true)
+    expect(parsePlaintext(text.replace('"cells":[0', '"cells":[0.0'))).toBeNull()
+    expect(parsePlaintext(text.replace('"pal":[null,0]', '"pal":[null,0e0]'))).toBeNull()
+  })
+})
+
+describe('a layer started from your other keys inside a home names the home owner\'s base (§5.6)', () => {
+  const own = [{ changes: { survey: true, cells: new Map<number, number>(), revision: 2 as const, surveyed: 100 }, builder: pk(2), id: pk(20) }]
+  const ownerAt3 = { revision: 3 as const, rank: 1, surveyed: 900, author: pk(0x70), builder: pk(0x71), id: pk(0x72) }
+
+  it('the home owner\'s revision, your own earliest date', () => {
+    expect(startAt(own, { author: pk(1), rank: 2, others: [ownerAt3] })).toEqual({ revision: 3, surveyed: 100 })
+  })
+
+  it('outside a home, or when you are the home owner, your own keys decide', () => {
+    expect(startAt(own)).toEqual({ revision: 2, surveyed: 100 })
+    expect(startAt(own, { author: pk(1), rank: 2, others: [{ ...ownerAt3, rank: 4, surveyed: 0 }] })).toEqual({ revision: 2, surveyed: 100 })
+    expect(startAt(own, { author: pk(1), rank: 1, others: [ownerAt3] })).toEqual({ revision: 2, surveyed: 100 })
+  })
+
+  it('startFrom writes it: the owner\'s revision, your changes explicit against its ground', () => {
+    const b: ChunkBase = { x: BigInt(M.base_revision.mixed.chunk[0]), y: BigInt(M.base_revision.mixed.chunk[1]), z: BigInt(M.base_revision.mixed.chunk[2]), plane: 0 }
+    const g2 = generate(b, null, 2).blocks, g3 = generate(b, null, 3).blocks
+    const c = g2.findIndex((id, o) => id !== g3[o] && id !== 0)
+    const mine = new Map([[0 as const, { survey: true, cells: new Map([[c, g2[c]]]), revision: 2 as const, surveyed: 100 }]])
+    const p = startFrom([], mine, (_pl, r) => (r === 3 ? g3 : g2), [], { builder: pk(2), id: '' }, () => ({ author: pk(1), rank: 2, others: [ownerAt3] }))
+    expect(p.planes[0]).toMatchObject({ ground: 3, surveyed: 100 })
+    const d = decodePlane(p.planes[0], g3, 1000)
+    if (!d || d === 'aside') throw new Error('plane')
+    expect(d.changed).toEqual([c])
+    expect(d.values[c]).toBe(g2[c])
   })
 })

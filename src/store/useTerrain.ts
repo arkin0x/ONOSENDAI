@@ -62,7 +62,7 @@ import type { RayHit } from '../lib/terrain/raycast'
 import { airProblem, bodyCells, placeTarget, type Cell } from '../lib/terrain/airPlace'
 import {
   addExplicit, applyCarried, connectShareHost, explicitCells, fieldClosing, liveChanged, noteChange, noteChanges, noteMove, othersRevision, prepareChunk, publishedPlane, READ_RING, identityLeaving,
-  readNear, sharedKeys, shownRevision, surveyedForYou, terrainClosed, terrainOpened, viewOf,
+  readNear, sharedKeys, shownFromBase, shownRevision, surveyedForYou, terrainClosed, terrainOpened, viewOf,
 } from './terrainShare'
 import { loadBuilder, releaseBuilderDb } from '../lib/terrain/builderKey'
 import { quarryHooks } from './quarryHooks'
@@ -253,11 +253,32 @@ function builtBlocks(s: TerrainSession, key: string, generated: Uint8Array, revi
   else if (layer && lr !== null && layerGround) {
     const at = applyLayer(layerGround, layer, lr)
     applied = at && rebaseBlocks(at, layerGround, generated)
+    // A cell you changed to what is now this revision's ground stays a change (§5.4), as after a merge (host.rebase).
+    if (at) {
+      const kept: number[] = []
+      for (let c = 0; c < CELLS; c++) if (at[c] !== layerGround[c] && at[c] === generated[c]) kept.push(c)
+      if (kept.length) addExplicit(key, kept)
+    }
   }
   if (layer && !applied) s.unreadable.add(key)
   const blocks = applied ?? generated.slice()
   for (const { change } of s.pending.get(key) ?? []) blocks[change.cell] = change.id
   return blocks
+}
+
+/**
+ * What mining a cell carries: your own block there, or, where you never
+ * changed it and it shows the base (no layer changed it), the base you were
+ * shown: the ground at the base revision, which is not your own revision's
+ * where someone who ranks above you surveyed at another (a home owner, or
+ * another device of yours that surveyed first). So what you carry is what
+ * you saw, as the mining stats record it. `shown` is the cell as drawn.
+ */
+function yieldOf(slot: ChunkSlot & { own: Uint8Array }, cell: number, shown: number): number {
+  const yours = slot.own[cell]
+  // The common case first: a cell you changed, or a base at your own revision, gives your own block.
+  if (!slot.generated || yours !== slot.generated[cell] || shownRevision(slot.key) === (slot.revision ?? 2)) return yours
+  return shownFromBase(slot.key, cell) && !explicitCells(slot.key).has(cell) ? shown : yours
 }
 
 /**
@@ -383,8 +404,8 @@ export const useTerrain = create<TerrainState>((set, get) => ({
     // A chunk someone else surveyed is yours to build in at once (surveyShown); one nobody surveyed is never drawn.
     const at = s.world.locate(dx, dy, dz)
     if (!surveyShown(s, at.slot)) { get().say('Survey this chunk before building in it.'); return false }
-    // What is yours in that cell: someone else's block mined is gone for you (and for whoever ranks you first), never carried.
-    const yours = at.slot.own[at.cell]
+    // What is yours in that cell: someone else's block mined is gone for you (and for whoever ranks you first), never carried; the base you were shown is.
+    const yours = yieldOf(at.slot, at.cell, id)
     const change = s.world.setCs(dx, dy, dz, EMPTY)
     if (!change) return false
     record(s, change)
@@ -508,8 +529,8 @@ export const useTerrain = create<TerrainState>((set, get) => ({
       if (id <= EMPTY) continue
       const at = s.world.locate(c[0], c[1], c[2])
       if (!surveyShown(s, at.slot)) continue
-      // What is yours in that cell: someone else's block taken is gone for you, never carried.
-      const yours = at.slot.own[at.cell]
+      // What is yours in that cell: someone else's block taken is gone for you, never carried; the base you were shown is.
+      const yours = yieldOf(at.slot, at.cell, id)
       const change = s.world.setCs(c[0], c[1], c[2], EMPTY)
       if (!change) continue
       changes.push(change)
@@ -1035,7 +1056,10 @@ export async function groundFor(chunk: string | ChunkBase): Promise<{ revision: 
 connectShareHost({
   field: () => {
     const s = terrainSession
-    return s ? { owner: s.owner, plane: s.plane, db: s.db, slot: (key) => s.world.slotByKey(key), surveyed: (key) => s.surveyedKeys.has(key) } : null
+    return s ? {
+      owner: s.owner, plane: s.plane, db: s.db, slot: (key) => s.world.slotByKey(key), surveyed: (key) => s.surveyedKeys.has(key),
+      surveyedAt: (key) => (s.surveyedKeys.has(key) ? s.revisions.get(key)?.surveyed : undefined),
+    } : null
   },
   head: headNow,
   active: () => useTerrain.getState().active,

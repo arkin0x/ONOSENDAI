@@ -105,6 +105,7 @@ function pillarMaterial(color: string, strength: number): ShaderMaterial {
     depthWrite: false,
     depthTest: true,
     side: DoubleSide,
+    forceSinglePass: true,
     toneMapped: false,
     ...NO_BLOOM_BLEND,
   })
@@ -141,7 +142,7 @@ function makeParts(): { slots: Slot[]; beacon: Group; core: ShaderMaterial; glow
   const starGeo = new ShapeGeometry(starShape(STAR_SIZE))
   const core = pillarMaterial('#fff1c2', 1)
   const glow = pillarMaterial(STAR_GOLD, 0.55)
-  const starMat = new MeshBasicMaterial({ color: STAR_GOLD, transparent: true, opacity: 0, depthWrite: false, side: DoubleSide, toneMapped: false, ...NO_BLOOM_BLEND })
+  const starMat = new MeshBasicMaterial({ color: STAR_GOLD, transparent: true, opacity: 0, depthWrite: false, side: DoubleSide, forceSinglePass: true, toneMapped: false, ...NO_BLOOM_BLEND })
   const beacon = new Group()
   beacon.visible = false
   const coreMesh = new Mesh(coreGeo, core)

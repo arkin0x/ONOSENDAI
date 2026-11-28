@@ -20,7 +20,7 @@
 
 import { useEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
-import { AdditiveBlending, CanvasTexture, Group, Sprite, SpriteMaterial } from 'three'
+import { AdditiveBlending, BoxGeometry, CanvasTexture, Group, MeshBasicMaterial, Sprite, SpriteMaterial } from 'three'
 import type { ClockReading } from 'sno-core/animClock'
 import type { ShardModel } from 'sno-core/shards'
 import { terrainSession, type TerrainSession } from '../store/useTerrain'
@@ -104,8 +104,16 @@ export function fuseClock(armedAtMs: number): ClockOverride {
   }
 }
 
-/** One charge burning: the armed Tri-Pack in its cell, the lamp flashing on the beeps, the seconds over it. */
-function PlacedCharge({ charge, model, glow, digits }: { charge: ArmedCharge; model: ShardModel; glow: SpriteMaterial; digits: SpriteMaterial[] }): JSX.Element {
+/** The stand-in while the armed model is not read (or could not be): a dark casing banded in orange, made once. */
+const STAND_IN = new BoxGeometry(1, 1, 1)
+interface StandIn { casing: MeshBasicMaterial; band: MeshBasicMaterial }
+
+/**
+ * One charge burning: the armed Tri-Pack in its cell (or, while it is not
+ * read, a plain banded box: the fuse shows either way), the lamp flashing on
+ * the beeps, the seconds over it.
+ */
+function PlacedCharge({ charge, model, standIn, glow, digits }: { charge: ArmedCharge; model: ShardModel | null; standIn: StandIn; glow: SpriteMaterial; digits: SpriteMaterial[] }): JSX.Element {
   const group = useRef<Group>(null)
   const lamp = useRef<Sprite>(null)
   const digit = useRef<Sprite>(null)
@@ -130,11 +138,18 @@ function PlacedCharge({ charge, model, glow, digits }: { charge: ArmedCharge; mo
   })
   return (
     <group ref={group}>
-      <group position={[0, LIFT, 0]} scale={SCALE}>
-        <AnimClock.Provider value={clock}>
-          <ShardMesh shard={model} world lit />
-        </AnimClock.Provider>
-      </group>
+      {model ? (
+        <group position={[0, LIFT, 0]} scale={SCALE}>
+          <AnimClock.Provider value={clock}>
+            <ShardMesh shard={model} world lit />
+          </AnimClock.Provider>
+        </group>
+      ) : (
+        <group position={[0, STANDS * 0.4, 0]}>
+          <mesh geometry={STAND_IN} material={standIn.casing} scale={[0.5, STANDS * 0.8, 0.5]} raycast={() => {}} />
+          <mesh geometry={STAND_IN} material={standIn.band} scale={[0.52, 0.12, 0.52]} raycast={() => {}} />
+        </group>
+      )}
       <sprite ref={lamp} material={glow} scale={[0.9, 0.9, 1]} position={[QUARRY_LAMP[0] * SCALE, LIFT + QUARRY_LAMP[1] * SCALE, QUARRY_LAMP[2] * SCALE]} renderOrder={15} visible={false} raycast={() => {}} />
       <sprite ref={digit} material={digits[2]} scale={[0.6, 0.6, 1]} position={[0, STANDS + 0.45, 0]} renderOrder={16} visible={false} raycast={() => {}} />
     </group>
@@ -154,9 +169,12 @@ export function QuarryFx({ axes }: { axes: ViewAxes }): JSX.Element {
     const glowMap = glowTexture()
     const glow = new SpriteMaterial({ map: glowMap, color: ITEM_ORANGE, blending: AdditiveBlending, depthWrite: false, depthTest: false, transparent: true, toneMapped: false })
     const digits = [1, 2, 3].map((d) => new SpriteMaterial({ map: digitTexture(d), depthWrite: false, depthTest: false, transparent: true, toneMapped: false }))
-    return { glow, glowMap, digits }
+    const standIn: StandIn = { casing: new MeshBasicMaterial({ color: '#1d2224', toneMapped: false }), band: new MeshBasicMaterial({ color: ITEM_ORANGE, toneMapped: false }) }
+    return { glow, glowMap, digits, standIn }
   }, [])
   useEffect(() => () => {
+    look.standIn.casing.dispose()
+    look.standIn.band.dispose()
     for (const m of look.digits) { m.map?.dispose(); m.dispose() }
     look.glow.dispose()
     look.glowMap?.dispose()
@@ -181,10 +199,16 @@ export function QuarryFx({ axes }: { axes: ViewAxes }): JSX.Element {
 
   return (
     <group ref={frame} name="quarry-fx" visible={false} matrixAutoUpdate={false}>
-      {model && charges.slice(0, CHARGES_DRAWN).map((c) => <PlacedCharge key={c.id} charge={c} model={model} glow={look.glow} digits={look.digits} />)}
+      {shownCharges(charges, terrainSession).map((c) => <PlacedCharge key={c.id} charge={c} model={model} standIn={look.standIn} glow={look.glow} digits={look.digits} />)}
       <primitive object={drops.group} />
     </group>
   )
+}
+
+/** The charges drawn in a field: its identity's and plane's first, then at most CHARGES_DRAWN of them (review of #962). */
+export function shownCharges<C extends Pick<ArmedCharge, 'owner' | 'plane'>>(charges: readonly C[], s: Pick<TerrainSession, 'owner' | 'plane'> | null): C[] {
+  if (!s) return []
+  return charges.filter((c) => c.owner === s.owner && c.plane === s.plane).slice(0, CHARGES_DRAWN)
 }
 
 /** None, the same every frame. */

@@ -106,4 +106,18 @@ describe('the blueprint drawn again with the Tri-Pack', () => {
     // And a grant check never grants it twice.
     expect(await grantQuarryIfDue(pk, { 2: 1 }, async () => ({}))).toBe(false)
   })
+
+  it('never redraws with no pictures: a render that failed (no WebGL) keeps the card\'s own', async () => {
+    const pk = 'cd'.repeat(32)
+    useCyberspace.setState({ identity: { ...useCyberspace.getState().identity, pubkey: pk } })
+    await useBlueprints.getState().load(pk)
+    const old = await giftRecord({ ...QUARRY_GIFT, lookAt: undefined }, { iso: pic })
+    useBlueprints.getState().addGame({ lookup: QUARRY_GIFT.lookup, record: old as never })
+    expect(await redrawIfStale(QUARRY_GIFT, pk, async () => ({}))).toBe(false)
+    const card = useBlueprints.getState().cards.find((c) => c.rowKey === `${pk}/${QUARRY_CARD_ID}`)!
+    expect(card.record).toEqual(old)
+    expect(Object.keys(readRecord(card.record)!.views)).toEqual(['iso'])
+    // Tried again later, with pictures, it is drawn.
+    expect(await redrawIfStale(QUARRY_GIFT, pk, async () => ({ iso: pic, z: pic }))).toBe(true)
+  })
 })

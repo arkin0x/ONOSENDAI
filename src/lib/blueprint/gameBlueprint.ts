@@ -172,7 +172,10 @@ export async function redrawIfStale(gift: GameGift, owner: string, draw: () => P
   if (!had || !staleLook(gift, had.record) || granting.has(busy)) return false
   granting.add(busy)
   try {
-    const record = await giftRecord(gift, await draw())
+    const views = await draw()
+    // No pictures (no canvas, WebGL lost): the card keeps the ones it has, and is tried again another time (review of #962).
+    if (!Object.keys(views).length) return false
+    const record = await giftRecord(gift, views)
     if (useBlueprints.getState().owner !== owner) return false
     useBlueprints.getState().redrawGame(rowKey, record as NostrEvent)
     return true

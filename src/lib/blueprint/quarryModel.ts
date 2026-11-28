@@ -24,9 +24,6 @@ import { keepOwnTable } from '../carried'
 /** The key its carried parts are filed under. */
 export const QUARRY_AUTHOR = '0'.repeat(64)
 
-/** Which look the game's blueprint was drawn with: a card drawn with an older look is drawn again (gameBlueprint.ts). */
-export const QUARRY_LOOK = 'tri-pack'
-
 /** Where the detonator lamp stands in the model's own units: the top of the mast, on its axis. */
 export const QUARRY_LAMP: readonly [number, number, number] = [0, 3.5, 0]
 /** The model's box in its own units (both looks): the feet at y -3, the lamp at the top. */
@@ -35,14 +32,22 @@ export const QUARRY_BOX = { min: [-2.08, -3, -2.32], max: [2.08, 3.6, 1.61] } as
 const cache: { rest?: Promise<ShardModel | null>; armed?: Promise<ShardModel | null> } = {}
 const ready: { rest: ShardModel | null; armed: ShardModel | null } = { rest: null, armed: null }
 
+/** Read a look once; a read that failed is forgotten, so the next use tries again (review of #962). */
 function load(which: 'rest' | 'armed'): Promise<ShardModel | null> {
   const p = cache[which] ??= (which === 'rest' ? import('./quarryTriPack.sno.json') : import('./quarryTriPackArmed.sno.json')).then((m) => {
     const s = fromPayload((m as { default: unknown }).default, which === 'rest' ? 'quarry-tri-pack' : 'quarry-tri-pack-armed')
     const kept = s ? keepOwnTable(s, QUARRY_AUTHOR) : null
     ready[which] = kept
+    if (!kept) cache[which] = undefined
     return kept
-  }).catch(() => null)
+  }).catch(() => { cache[which] = undefined; return null })
   return p
+}
+
+/** For tests: forget both looks, as a page that never read them. */
+export function forgetQuarryModels(): void {
+  cache.rest = cache.armed = undefined
+  ready.rest = ready.armed = null
 }
 
 /** The Quarry Charge at rest, read once. */

@@ -72,7 +72,7 @@ function Held({ shard, still, dipAt }: { shard: ShardModel; still: boolean; dipA
     // On a phone held upright the bottom third of the screen is the pad's (and LOOK's ball on the right): it stands just
     // over it, at the right edge.
     const upright = size.width < size.height
-    return { scale: tall / h, centre, x: halfW - tall * (upright ? 0.6 : 1.05), y: upright ? -halfH * 0.3 + tall * 0.5 : -halfH + tall * 0.45 }
+    return { scale: tall / h, centre, x: halfW - tall * (upright ? 0.6 : 1.05), y: upright ? -halfH * 0.2 + tall * 0.5 : -halfH + tall * 0.45 }
   }, [size.width, size.height])
   useFrame(() => {
     const g = holder.current
@@ -101,9 +101,9 @@ export function HeldCharge({ shown = true }: { shown?: boolean }): JSX.Element |
   const still = useReducedMotion()
   const shard = useQuarryModel(true)
   const on = shown && left > 0
-  // A dip each time one is placed (the count goes down).
   // The armed look is read now, so a charge placed draws it at once (scene/QuarryFx.tsx).
   useEffect(() => { void quarryArmedModel() }, [])
+  // A dip each time one is placed (the count goes down).
   const dipAt = useRef(-Infinity)
   const was = useRef(left)
   useEffect(() => {

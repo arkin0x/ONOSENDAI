@@ -2,17 +2,17 @@
  * blocksJob.ts - the work the blocks worker does (workers/blocks.worker.ts),
  * as plain functions, so the page can run the same code when no worker can
  * start (tests, a browser that refuses one) and the answer is the same:
- * a chunk's ground, its mesh, and its light for Block shading (light.ts).
+ * a chunk's ground at a revision, its mesh, and its light for Block shading (light.ts).
  */
 
 import { clearTable, seeThroughTable, tileTable } from './blocks'
 import type { ChunkBase } from './coords'
-import { generate } from './generate'
+import { generate, type GroundRevision } from './generate'
 import { meshChunk, type Borders, type ChunkMesh } from './mesh'
 import { computeLight, lightTables, type LightTables } from './light'
 
 export type BlocksRequest =
-  | { type: 'generate'; id: number; base: ChunkBase }
+  | { type: 'generate'; id: number; base: ChunkBase; revision: GroundRevision }
   | { type: 'mesh'; id: number; blocks: Uint8Array; borders: Borders }
   | { type: 'light'; id: number; around: Array<Uint8Array | null>; skyTop: Uint8Array | null }
 
@@ -32,7 +32,7 @@ export function handleBlocks(req: BlocksRequest): { answer: BlocksAnswer; transf
   const t0 = performance.now()
   try {
     if (req.type === 'generate') {
-      const g = generate(req.base)
+      const g = generate(req.base, null, req.revision)
       return { answer: { type: 'generate', id: req.id, blocks: g.blocks, top: g.top, rind: g.rind, ms: performance.now() - t0 }, transfer: [g.blocks.buffer] }
     }
     if (req.type === 'light') {

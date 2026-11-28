@@ -1,9 +1,9 @@
-// TERRAIN generator, revision 2: measure what the tables make, against the owner's targets (2026-11-24).
+// TERRAIN generator, revision 2 or 3 (REVISION=3): measure what the tables make, against the owner's targets (2026-11-24).
 // 1. MAXK_AT_LEAST: the share of chunks whose costliest cube reaches each K, over N_K random chunks (K only, cheap).
 // 2. Every block's rates over N_GEN random chunks with the full generator: share of solid cells per family,
 //    chance a chunk has any, amount when present. The rare band is measured analytically (eligible share x chance)
 //    and checked by a run with its chances raised.
-// Usage: [SEED=n] [RAISE=1] node scripts/terrain-calibrate.mjs [N_K] [N_GEN]
+// Usage: [SEED=n] [RAISE=1] [REVISION=2|3] node scripts/terrain-calibrate.mjs [N_K] [N_GEN]
 import { build } from 'esbuild'
 import { mkdtempSync } from 'node:fs'
 import { join } from 'node:path'
@@ -30,11 +30,12 @@ const fam = {}
 const conds = {}
 const has = {}, amount = {}
 let chunks = 0
-const odds = process.env.RAISE ? { features: G.FEATURES, rare: G.RARE.map(([id, k]) => [id, k, 2 ** 32]) } : undefined
+const revision = Number(process.env.REVISION ?? 2)
+const odds = process.env.RAISE ? { features: G.featuresOf(revision), rare: G.RARE.map(([id, k]) => [id, k, 2 ** 32]) } : undefined
 const t0 = Date.now()
 for (let i = 0; i < N_GEN; i++) {
   const b = chunk(i)
-  const g = G.generate(b, odds)
+  const g = G.generate(b, odds, revision)
   if (i < 200 && g.maxK !== G.chunkMaxK(b)) throw new Error(`chunkMaxK ${G.chunkMaxK(b)} differs from the generator's ${g.maxK}`)
   chunks++
   const c = {}

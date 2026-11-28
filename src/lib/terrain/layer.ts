@@ -14,13 +14,15 @@
  * Kept on the device; while LIVE store/terrainShare.ts publishes it (kind
  * 33339, sealed to the region key, DECK-0009 §5), and this plane is what
  * goes inside.
+ *
+ * Each layer names the ground revision it was written against (`ground`):
+ * the chunk's own revision (lib/terrain/groundRevision.ts), 2 for every
+ * layer made before revision 3. A diff is read against that revision's
+ * ground, whatever the chunk's revision is now (rebaseBlocks moves it).
  */
 
 import { CELLS } from './coords'
-import { GENERATOR_VERSION } from './generate'
-
-/** The ground revision written (DECK §3.10: absent means 1). */
-const GROUND: number = GENERATOR_VERSION
+import { isGroundRevision, type GroundRevision } from './generate'
 
 export interface Layer {
   plane: 0 | 1
@@ -68,7 +70,7 @@ function unrun(r: unknown, into: Uint16Array, limit: number): boolean {
   return o === into.length
 }
 
-function plane(form: 'diff' | 'whole', p: 0 | 1, generated: Uint8Array, current: Uint8Array): Layer {
+function plane(form: 'diff' | 'whole', p: 0 | 1, generated: Uint8Array, current: Uint8Array, revision: GroundRevision): Layer {
   const pal: Array<number | null> = form === 'diff' ? [null] : []
   const at = new Map<number, number>()
   const cells = new Uint16Array(CELLS)
@@ -79,20 +81,37 @@ function plane(form: 'diff' | 'whole', p: 0 | 1, generated: Uint8Array, current:
     if (i === undefined) { i = pal.length; at.set(c, i); pal.push(c) }
     cells[o] = i
   }
-  return { plane: p, survey: true, ...(GROUND !== 1 ? { ground: GROUND } : {}), form, pal, cells: runs(cells) }
+  return { plane: p, survey: true, ground: revision, form, pal, cells: runs(cells) }
 }
 
-/** The diff of `current` from `generated`. */
-export const diffLayer = (generated: Uint8Array, current: Uint8Array, p: 0 | 1 = 0): Layer => plane('diff', p, generated, current)
+/** The diff of `current` from `generated`, the ground at `revision`. */
+export const diffLayer = (generated: Uint8Array, current: Uint8Array, p: 0 | 1, revision: GroundRevision): Layer => plane('diff', p, generated, current, revision)
 
-/** The whole of `current`. */
-export const wholeLayer = (current: Uint8Array, p: 0 | 1 = 0): Layer => plane('whole', p, current, current)
+/** The whole of `current`, over the ground at `revision`. */
+export const wholeLayer = (current: Uint8Array, p: 0 | 1, revision: GroundRevision): Layer => plane('whole', p, current, current, revision)
 
-/** The plane to write: the diff or the whole chunk, whichever is shorter as compact JSON (DECK §5.5). */
-export function encodeLayer(generated: Uint8Array, current: Uint8Array, p: 0 | 1 = 0): Layer {
-  const d = diffLayer(generated, current, p)
-  const w = wholeLayer(current, p)
+/** The plane to write: the diff or the whole chunk, whichever is shorter as compact JSON (DECK §5.5), against the ground at `revision`. */
+export function encodeLayer(generated: Uint8Array, current: Uint8Array, p: 0 | 1, revision: GroundRevision): Layer {
+  const d = diffLayer(generated, current, p, revision)
+  const w = wholeLayer(current, p, revision)
   return JSON.stringify(w).length < JSON.stringify(d).length ? w : d
+}
+
+/** The ground revision a layer was written against, or null when it names none this client makes (absent is revision 1). */
+export function layerRevision(l: Pick<Layer, 'ground'>): GroundRevision | null {
+  return isGroundRevision(l.ground) ? l.ground : null
+}
+
+/**
+ * Your blocks moved from one revision's ground to another's: a cell you never
+ * changed (it holds `from`'s ground, and is not in `explicit`) takes `to`'s
+ * ground; every cell you changed keeps its value. The rock and caves of
+ * revisions 2 and 3 are the same, so only vein and rare cells can move.
+ */
+export function rebaseBlocks(values: Uint8Array, from: Uint8Array, to: Uint8Array, explicit: ReadonlySet<number> = new Set()): Uint8Array {
+  const out = new Uint8Array(CELLS)
+  for (let o = 0; o < CELLS; o++) out[o] = values[o] === from[o] && !explicit.has(o) ? to[o] : values[o]
+  return out
 }
 
 /** Whether a layer changes nothing. */
@@ -107,13 +126,14 @@ export function isLayer(v: unknown): v is Layer {
 }
 
 /**
- * The chunk a layer describes, over `generated`; null when it cannot be read
- * (malformed, or a diff against a ground revision this code does not make).
+ * The chunk a layer describes, over `generated`, the ground at `revision`;
+ * null when it cannot be read (malformed, or a diff against another
+ * revision's ground: read it over that one, layerRevision).
  */
-export function applyLayer(generated: Uint8Array, layer: Layer): Uint8Array | null {
+export function applyLayer(generated: Uint8Array, layer: Layer, revision: GroundRevision): Uint8Array | null {
   if (!isLayer(layer)) return null
   // A whole chunk stands by itself; only a diff depends on the ground it was taken against.
-  if (layer.form === 'diff' && (layer.ground ?? 1) !== GENERATOR_VERSION) return null
+  if (layer.form === 'diff' && layer.ground !== revision) return null
   const pal = layer.pal
   if (pal.length < 1 || pal.length > 256) return null
   for (let i = 0; i < pal.length; i++) {

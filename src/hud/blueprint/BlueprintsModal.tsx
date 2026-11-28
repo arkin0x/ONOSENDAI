@@ -63,7 +63,7 @@ export const BLUEPRINTS_ICON = DraftingCompass
 export const NO_BLUEPRINTS = 'No blueprints yet.'
 export const NO_MINE = 'None of your own yet. Make one in BUILD with the BLUEPRINT tool.'
 export const NO_HELD = 'None found yet. Blueprints wait in the world, in chests and behind doors.'
-export const NO_BUILT = 'Nothing built yet. Build a blueprint and smash it with the Compiler.'
+export const NO_BUILT = 'Nothing built yet. Build a blueprint and smash it.'
 
 /** Whether BLUEPRINTS is open, and the row a tile was tapped for. A store, so a tile, the tutorial or a test can open it. */
 export const useBlueprintsModal = create<{ open: boolean; focus: string | null }>(() => ({ open: false, focus: null }))

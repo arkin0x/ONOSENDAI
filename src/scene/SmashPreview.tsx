@@ -29,8 +29,8 @@ import { modalUp } from '../hooks/useEscape'
 import { useReducedMotion } from '../hooks/useReducedMotion'
 import { useSmashHold } from '../terrain/smashHold'
 import { RESOLVE_AFTER_MS, SWING_MS } from '../lib/blueprint/smash'
-import { PreviewTracker, advancePhase, previewColor, pulseOpacity, outerFaces, showPreview, smashPreview, type Preview, type PreviewAim } from '../lib/blueprint/smashPreview'
-import { missCause, naturalOf } from '../lib/blueprint/nearMiss'
+import { PreviewTracker, advancePhase, previewCause, previewColor, pulseOpacity, outerFaces, showPreview, smashPreview, type Preview, type PreviewAim } from '../lib/blueprint/smashPreview'
+import { naturalOf } from '../lib/blueprint/nearMiss'
 import { NO_BLOOM_BLEND } from './shardFaces'
 import { terrainCursor } from './TerrainLayer'
 
@@ -120,7 +120,7 @@ export function SmashPreview(): JSX.Element {
       g.computeBoundingSphere()
       geometry.current = g
       m.geometry = g
-      material.color.set(previewColor(shown.state, shown.miss ? missCause(shown.miss) : null))
+      material.color.set(previewColor(shown.state, previewCause(shown)))
     }
     phase.current = advancePhase(phase.current, Math.min(delta, 0.1) * 1000, holdCharge(now))
     material.opacity = pulseOpacity(phase.current, calm.current)

@@ -34,7 +34,7 @@ import { readRecord, toolCount, type Prize, type RecordEvent } from './format'
 import { isQuarry } from '../terrain/terrainDb'
 import type { ToyRow } from './blueprintDb'
 import { noteMining } from '../../store/miningStats'
-import { nearMiss, nearMissLine, naturalOf } from './nearMiss'
+import { TOO_BIG_LINE, nearMiss, nearMissLine, naturalOf, tooBigBare } from './nearMiss'
 import { askBeforeSmash, dropSmashAsk, smashAsk, smashAsking, smashAskingFor } from './smashConfirm'
 
 // Whether the Compiler is the chosen slot (otherwise the hand is bare): with the terrain store, where the preview asks it too.
@@ -62,7 +62,7 @@ export function holdSmash(): void {
       whoosh()
       setTimeout(() => { void strike(target, b, { field, me }) }, SWING_MS)
     }
-    // A smash that will not compile and would waste recipe materials asks first (smashConfirm.ts); a compiling one never.
+    // A recipe built wrong, or a smash that will not compile and would destroy placed rare materials, asks first (smashConfirm.ts).
     const ask = terrainSession === field && smashAskingFor(me) ? smashAsk((x, y, z) => field.world.blockCs(x, y, z), target, b, naturalOf(field.world)) : null
     if (!ask) { go(); return true }
     askBeforeSmash(ask, () => { startSwing(); go() })
@@ -127,8 +127,10 @@ export async function strike(target: readonly [number, number, number], bare: bo
   const owner0 = useCyberspace.getState().identity.pubkey
   const g = smashGroup(read, target, bare)
   if (!g.smash.length) { useTerrain.getState().say('Nothing there to smash.'); return }
-  // A game recipe built wrong, read before its blocks go, so the line after says why (nearMiss.ts).
-  const miss = compiles(g.arrangement, bare) ? null : nearMiss(read, target, bare, naturalOf(s.world))
+  // A game recipe built wrong, read before its blocks go, so the line after says why when nothing came of it (nearMiss.ts).
+  const miss = nearMiss(read, target, naturalOf(s.world))
+  // Bare-handed, an isolated build too long for the bare reach: said after (nearMiss.ts tooBigBare).
+  const tooBig = !miss && !compiles(g.arrangement) && tooBigBare(read, target, bare, g.arrangement)
   // What goes is the smash set (a construction whole, else the reach's box round the hit), spent whether or not it
   // compiles (DECK-0010 §4.3); what compiles is the gather's arrangement.
   const refused = useTerrain.getState().clear(g.smash)
@@ -151,7 +153,7 @@ export async function strike(target: readonly [number, number, number], bare: bo
   let more = false
   if (g.isolated && g.arrangement) {
     const lo = { x: o.x + BigInt(g.lo[0]), y: o.y + BigInt(g.lo[1]), z: o.z + BigInt(g.lo[2]) }
-    try { ({ found, offline, unknown, more } = await compile(g.arrangement, bare, depsFor(lo, g.size))) } catch { found = [] }
+    try { ({ found, offline, unknown, more } = await compile(g.arrangement, depsFor(lo, g.size))) } catch { found = [] }
   }
   await wait(struck + RESOLVE_AFTER_MS - performance.now())
   // The prizes are the identity's that struck: one switched away from while it compiled gets none, and the new one none
@@ -165,7 +167,7 @@ export async function strike(target: readonly [number, number, number], bare: bo
   if (!found.length) {
     useSmashFx.getState().resolve(id, 'miss')
     // Only what this code does: no recheck happens later, and a prize of an unknown type is not opened (review of #943).
-    useTerrain.getState().say(miss ? nearMissLine(miss) : missLine(compiles(g.arrangement, bare), offline, unknown > 0))
+    useTerrain.getState().say(miss ? nearMissLine(miss) : tooBig ? TOO_BIG_LINE : missLine(compiles(g.arrangement), offline, unknown > 0))
     return
   }
   useSmashFx.getState().resolve(id, 'match')

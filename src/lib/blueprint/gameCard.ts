@@ -18,13 +18,13 @@ export const QUARRY_NAME = 'Quarry Charges'
 /** What a game blueprint says where DEPLOY would be. */
 export const GAME_NO_DEPLOY = 'Everyone gets this one. Build it in the air with a gap all round, then smash it to make your Compiler.'
 /** What the Quarry Charge's blueprint says there. */
-export const QUARRY_NO_DEPLOY = 'Everyone gets this one. Build it in the air with a gap all round, then smash it with the Compiler for seven Quarry Charges.'
+export const QUARRY_NO_DEPLOY = 'Everyone gets this one. Build it in the air with a gap all round, then smash it for seven Quarry Charges.'
 /**
  * CONSTRUCTION on a game blueprint's card and examine sheet, in place of "May be built anywhere" (owner's lost
  * Glowcore, 2026-11-28: his Compiler rested on the floor, so it was not isolated and compiled nothing). The owner's
  * wording: "a gap all round", "isolated", "not touching any other block".
  */
-export const GAME_CONSTRUCTION = 'Build it in the air with a gap all round. No other block may touch it on faces, edges or corners, not even the ground.'
+export const GAME_CONSTRUCTION = 'Build it with a gap all round: no block may touch it, not even at an edge or corner.'
 /** Short, where the title block has room for a word or two. */
 export const GAME_CONSTRUCTION_SHORT = 'In the air'
 /**

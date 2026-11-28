@@ -9,16 +9,24 @@
  * own recipes (recipes.ts: the Compiler and the Quarry Charge) and why it
  * will not compile:
  *
- * - touching: another block is in the recipe's box grown by one (faces,
- *   edges and corners). "The ground" when that block is natural ground (when
- *   the caller can tell) or lies under the build, what it rests on; "a block"
- *   otherwise.
+ * - touching: another block touches one of the recipe's blocks on a face,
+ *   edge or corner (the owner's isolation rule, as arrangement.ts gather). "The ground" only when that block is natural ground
+ *   (TERRAIN's generated block, unchanged: TerrainWorld naturalCs); a placed
+ *   block, even a platform under the build, is "a block" (review of #969).
  * - turned: the right blocks in the right shape, but rotated or mirrored
  *   into another arrangement (every turn and mirror of the box is tried; one
  *   that gives the same arrangement, as the Quarry Charge's mirror across Y
- *   or Z does, is the right way round).
- * - needs the Compiler: the Quarry Charge, isolated and the right way round,
- *   struck bare-handed (only the Compiler's own recipe compiles bare).
+ *   or Z does, is the right way round). An isolated turned recipe
+ *   still compiles, in either hand, as the arrangement it is, but it
+ *   is not the recipe and makes nothing unless someone made a blueprint of
+ *   that shape: it is a near miss all the same (review of #969).
+ *
+ * And for any build, not only the game's: too big for a bare hand, an
+ * isolated construction longer than a bare hand's reach of 3 on some axis
+ * (tooBigBare). A bare hand compiles anything that fits its reach (owner,
+ * 2026-11-28: "You should be able to compile anything without the compiler
+ * as long as it's small enough to fit within the range."), so that is the
+ * only hand a build can be wrong for.
  *
  * The struck block must be one of the recipe's: the search anchors the
  * recipe on it in every orientation, so it is a few reads per anchor and
@@ -31,7 +39,7 @@
  * round"; never the words for upright posture.
  */
 
-import { arrangementFrom, type Cell } from './arrangement'
+import { arrangementFrom, gather, type Cell } from './arrangement'
 import { cellAt, type Arrangement } from './format'
 import { CINDERROCK, COMPILER_RECIPE, GLOWCORE, QUARRY_CHARGE_RECIPE, sameArrangement } from './recipes'
 import { blockName } from '../terrain/blocks'
@@ -49,10 +57,8 @@ export interface NearMiss {
   name: string
   /** Rotated or mirrored into another arrangement. */
   turned: boolean
-  /** What touches it: natural ground or what it rests on, another block, or nothing. */
+  /** What touches it: natural ground, another block, or nothing. */
   touching: 'ground' | 'block' | null
-  /** The Quarry Charge struck bare-handed: it compiles only with the Compiler in hand. */
-  needsCompiler: boolean
 }
 
 /** One orientation of a recipe: its blocks as offsets from its box's low corner, its size, and whether it is turned. */
@@ -66,6 +72,9 @@ const RECIPES: ReadonlyArray<{ id: RecipeId; name: string; recipe: Arrangement }
   { id: 'compiler', name: 'the Compiler', recipe: COMPILER_RECIPE },
   { id: 'quarry', name: 'the Quarry Charge', recipe: QUARRY_CHARGE_RECIPE },
 ]
+
+/** What a recipe makes, in a sentence: "it won't make Quarry Charges". */
+const MAKES: Readonly<Record<RecipeId, string>> = { compiler: 'the Compiler', quarry: 'Quarry Charges' }
 
 function blocksOf(a: Arrangement): Array<readonly [number, number, number, number]> {
   const out: Array<readonly [number, number, number, number]> = []
@@ -100,11 +109,11 @@ function allPoses(): Array<{ id: RecipeId; name: string; poses: Pose[] }> {
 }
 
 /**
- * Whether a game recipe stands at `hit` (its blocks exactly, in some orientation, the hit one of them) and will not
- * compile; null when no recipe is there, or when it is there and compiles. `natural` says whether a cell is natural
- * ground (TERRAIN's generated ground, unchanged); without it only what the build rests on counts as the ground.
+ * Whether a game recipe is built at `hit` (its blocks exactly, in some orientation, the hit one of them) but will not
+ * make what it makes; null when no recipe is there, or when it is there and makes it. `natural` says whether a cell is
+ * natural ground (TERRAIN's generated ground, unchanged); without it nothing touching counts as the ground.
  */
-export function nearMiss(read: Read, hit: Cell, bare: boolean, natural?: (x: number, y: number, z: number) => boolean): NearMiss | null {
+export function nearMiss(read: Read, hit: Cell, natural?: (x: number, y: number, z: number) => boolean): NearMiss | null {
   const hitId = read(hit[0], hit[1], hit[2])
   if (!hitId) return null
   let best: NearMiss | null = null
@@ -113,26 +122,29 @@ export function nearMiss(read: Read, hit: Cell, bare: boolean, natural?: (x: num
     const lo = [hit[0] - b[0], hit[1] - b[1], hit[2] - b[2]] as const
     if (!pose.blocks.every(([x, y, z, id]) => read(lo[0] + x, lo[1] + y, lo[2] + z) === id)) continue
     const touching = touchOf(read, lo, pose, natural)
-    const needsCompiler = bare && r.id !== 'compiler'
-    // Isolated, the right way round and in a hand that compiles it: not a miss.
-    if (!touching && !pose.turned && !needsCompiler) return null
-    const m: NearMiss = { recipe: r.id, name: r.name, turned: pose.turned, touching, needsCompiler }
+    // Isolated and the right way round: it compiles in either hand (every game recipe fits a bare hand's reach).
+    if (!touching && !pose.turned) return null
+    const m: NearMiss = { recipe: r.id, name: r.name, turned: pose.turned, touching }
     // The right way round wins over a turned reading of the same blocks.
     if (!best || (best.turned && !m.turned)) best = m
   }
   return best
 }
 
-/** What touches a recipe at `lo`: a cell of its box grown by one that is not one of its blocks and holds a block. */
+/**
+ * What touches a recipe at `lo`: a block, not one of its own, on a face, edge or corner of one of its blocks (the
+ * owner's isolation rule, as arrangement.ts gather; a block in its box that touches nothing does not count).
+ */
 function touchOf(read: Read, lo: readonly [number, number, number], pose: Pose, natural?: (x: number, y: number, z: number) => boolean): 'ground' | 'block' | null {
   const mine = new Set(pose.blocks.map(([x, y, z]) => `${x},${y},${z}`))
   let found: 'ground' | 'block' | null = null
-  for (let y = -1; y <= pose.size[1]; y++) for (let z = -1; z <= pose.size[2]; z++) for (let x = -1; x <= pose.size[0]; x++) {
+  for (const [bx, by, bz] of pose.blocks) for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
+    const x = bx + dx, y = by + dy, z = bz + dz
     if (mine.has(`${x},${y},${z}`)) continue
     const wx = lo[0] + x, wy = lo[1] + y, wz = lo[2] + z
     if (!read(wx, wy, wz)) continue
-    // Under the build (what it rests on), or natural ground anywhere round it.
-    if (y < 0 || natural?.(wx, wy, wz)) return 'ground'
+    // Natural ground anywhere round it, under it or beside it; anything placed is a block.
+    if (natural?.(wx, wy, wz)) return 'ground'
     found = 'block'
   }
   return found
@@ -144,20 +156,32 @@ export function naturalOf(world: { naturalCs?: (x: number, y: number, z: number)
   return f ? (x, y, z) => f.call(world, x, y, z) : undefined
 }
 
-/** The one cause the preview names, most important first. */
-export type MissCause = 'turned' | 'ground' | 'block' | 'compiler'
-
-export function missCause(m: NearMiss): MissCause {
-  return m.turned ? 'turned' : m.touching === 'ground' ? 'ground' : m.touching === 'block' ? 'block' : 'compiler'
+/**
+ * Whether a bare-handed smash at `hit` meets an isolated construction too big for a bare hand: its own gather (reach
+ * 3) makes no arrangement, but the Compiler's (reach 16) does, so the build is isolated and longer than 3 on some axis.
+ * Worked out only bare-handed and only when nothing compiles (a gather of 31 by 31 by 31 cells at most).
+ */
+export function tooBigBare(read: Read, hit: Cell, bare: boolean, bareArrangement: unknown): boolean {
+  return bare && !bareArrangement && gather(read, hit).arrangement !== null
 }
 
-/** The preview's tail after BREAKS and the count. */
+/** The one cause the preview names, most important first. */
+export type MissCause = 'turned' | 'ground' | 'block' | 'big'
+
+export function missCause(m: NearMiss): MissCause {
+  return m.turned ? 'turned' : m.touching === 'ground' ? 'ground' : 'block'
+}
+
+/** The preview's tail after BREAKS (or COMPILES) and the count. */
 export const CAUSE_WORDS: Readonly<Record<MissCause, string>> = {
   turned: 'TURNED THE WRONG WAY',
   ground: 'TOUCHING THE GROUND',
   block: 'TOUCHING A BLOCK',
-  compiler: 'NEEDS THE COMPILER',
+  big: 'TOO BIG FOR A BARE HAND',
 }
+
+/** The line after a bare-handed smash of a build too big for it. */
+export const TOO_BIG_LINE = 'Nothing compiled. That build is too big for a bare hand, which compiles builds up to 3 blocks on every side. The Compiler reaches 16.'
 
 /** Why a near miss will not compile, in the past (after the smash) or the present (before it). */
 function reasons(m: NearMiss, past: boolean): string {
@@ -165,16 +189,14 @@ function reasons(m: NearMiss, past: boolean): string {
   if (m.turned) why.push(past ? 'it was turned the wrong way' : 'it is turned the wrong way')
   if (m.touching === 'ground') why.push(past ? 'it touched the ground' : 'it is touching the ground')
   if (m.touching === 'block') why.push(past ? 'it touched another block' : 'it is touching another block')
-  if (m.needsCompiler) why.push('it needs the Compiler in hand')
   return list(why)
 }
 
-/** How to build it so it compiles, or nothing when only the hand was wrong. */
+/** How to build it so it compiles. */
 function fixOf(m: NearMiss): string {
   return m.turned && m.touching ? ' Build it as the card shows, with a gap all round.'
     : m.turned ? ' Build it as the card shows.'
-      : m.touching ? ' Build it with a gap all round.'
-        : ''
+      : ' Build it with a gap all round.'
 }
 
 /** The line after the smash: "That was the Compiler, but it touched the ground. Build it with a gap all round." */
@@ -185,10 +207,18 @@ export function nearMissLine(m: NearMiss): string {
 /** Recipe materials too rare to lose without asking: the rare band, Glowcore and Cinderrock. */
 export const RARE_MATERIALS: ReadonlySet<number> = new Set([...PRIZED, GLOWCORE, CINDERROCK])
 
-/** The rare recipe materials among the blocks a smash would delete, by name, rarest kinds as found, once each. */
-export function rareLost(ids: Iterable<number>): string[] {
+/**
+ * The rare recipe materials among the blocks a smash would delete, by name, once each: only blocks someone placed
+ * (owner's ruling, 2026-11-28: digging natural ore never asks). `natural` tells natural ground; without it every block
+ * counts as placed.
+ */
+export function rareLost(blocks: Iterable<{ at: readonly [number, number, number]; id: number }>, natural?: (x: number, y: number, z: number) => boolean): string[] {
   const out: string[] = []
-  for (const id of ids) if (RARE_MATERIALS.has(id)) { const n = blockName(id); if (!out.includes(n)) out.push(n) }
+  for (const b of blocks) {
+    if (!RARE_MATERIALS.has(b.id) || natural?.(b.at[0], b.at[1], b.at[2])) continue
+    const n = blockName(b.id)
+    if (!out.includes(n)) out.push(n)
+  }
   return out
 }
 
@@ -198,14 +228,17 @@ function list(words: readonly string[]): string {
 }
 
 /**
- * The confirm's question, when a smash that will not compile would destroy rare materials or is a recipe near miss:
- * "This won't compile. It breaks 5 blocks, including your Glowcore. Smash anyway?", or for a near miss "This is the
- * Compiler, but it is touching the ground, so it won't compile. Build it with a gap all round. Smashing breaks 5
- * blocks, including your Glowcore. Smash anyway?"
+ * The confirm's question, when a smash that will not compile would destroy placed rare materials, or is a game recipe
+ * built wrong: "This won't compile. It breaks 5 blocks, including placed Glowcore. Smash anyway?", or for a near miss
+ * "This is the Compiler, but it is touching the ground, so it won't compile. Build it with a gap all round. Smashing
+ * breaks 5 blocks, including placed Glowcore. Smash anyway?". An isolated turned recipe compiles, in either hand, as
+ * another shape, so it "won't make" the recipe's prize rather than "won't compile" (`compiled`).
  */
-export function confirmWords(count: number, rare: readonly string[], miss: NearMiss | null): string {
+export function confirmWords(count: number, rare: readonly string[], miss: NearMiss | null, compiled = false, tooBig = false): string {
   const blocks = `${count} block${count === 1 ? '' : 's'}`
-  const incl = rare.length ? `, including your ${list(rare)}` : ''
-  if (!miss) return `This won't compile. It breaks ${blocks}${incl}. Smash anyway?`
-  return `This is ${miss.name}, but ${reasons(miss, false)}, so it won't compile.${fixOf(miss)} Smashing breaks ${blocks}${incl}. Smash anyway?`
+  const incl = rare.length ? `, including placed ${list(rare)}` : ''
+  const big = tooBig ? ' It is too big for a bare hand, which compiles builds up to 3 blocks on every side.' : ''
+  if (!miss) return `This won't compile.${big} It breaks ${blocks}${incl}. Smash anyway?`
+  const outcome = compiled ? `it won't make ${MAKES[miss.recipe]}` : "it won't compile"
+  return `This is ${miss.name}, but ${reasons(miss, false)}, so ${outcome}.${fixOf(miss)} Smashing breaks ${blocks}${incl}. Smash anyway?`
 }

@@ -27,13 +27,16 @@
  *    Compiler's own lookup yields the Compiler alone, so nobody can attach a
  *    stranger's prize to every newcomer's first smash (§6.1). The other game
  *    recipe, the Quarry Charge's (§8.5), likewise yields seven Quarry
- *    Charges alone, and only with the Compiler in hand.
+ *    Charges alone.
  * 6. Prizes appear as toys where the build stood (store/useBlueprints.ts
  *    toys, scene/PrizeToys.tsx); no match leaves grey dust and one line.
  *
- * A bare hand (anything but the Compiler in hand) smashes the same way with a
- * longer hold and a smaller reach (a build of 3 by 3 by 3 at most), and
- * only the Compiler's own recipe compiles for it.
+ * A bare hand (anything but the Compiler in hand) smashes and compiles the
+ * same way, with a longer hold and a smaller reach: a build of 3 by 3 by 3 at
+ * most (owner, 2026-11-28: "You should be able to compile anything without
+ * the compiler as long as it's small enough to fit within the range."). The
+ * Compiler, the Quarry Charge and players' blueprints that fit all compile
+ * bare-handed; the Compiler only reaches further (16) and holds faster.
  */
 
 import { gather, smashCells, type Cell } from './arrangement'
@@ -64,7 +67,7 @@ export const RESOLVE_AFTER_MS = 1200
 export const RING_MAX = 8
 /** The most prizes unsealed from one lookup (the spec's 4, raised at the owner's word; the ring shows RING_MAX). */
 export const PRIZES_MAX = 32
-/** The line a smash leaves when nothing was compiled: not a construction, or one a bare hand cannot compile (design page 3). */
+/** The line a smash leaves when nothing was compiled: not a construction (touching something, or too big for the reach: design page 3). */
 export const MISS_LINE = 'Nothing compiled. The blocks are spent.'
 /** The line when a construction was compiled but no blueprint matches it (the preview said COMPILES: smashPreview.ts). */
 export const NO_MATCH_LINE = 'Compiled. No blueprint matches. The blocks are spent.'
@@ -84,9 +87,12 @@ export function missLine(compiled: boolean, offline: boolean, unknown: boolean):
 /** When it compiled into a prize this version cannot open. */
 export const UNKNOWN_LINE = 'It compiled into something this version cannot open yet.'
 
-/** Whether a smash compiles what it gathered: a construction, and with a bare hand only the Compiler's recipe (compile below). */
-export function compiles(a: Arrangement | null, bare: boolean): boolean {
-  return !!a && (!bare || sameArrangement(a, COMPILER_RECIPE))
+/**
+ * Whether a smash compiles what it gathered: a construction, in either hand (owner, 2026-11-28). The reach already
+ * limits a bare hand: its gather takes a construction of at most BARE_REACH on every axis (smashGroup).
+ */
+export function compiles(a: Arrangement | null): boolean {
+  return !!a
 }
 
 /** One prize found: what it is, and whose blueprint gave it. */
@@ -166,14 +172,13 @@ export async function prizesOf(records: readonly RecordEvent[], lookup: string, 
   return out
 }
 
-/** Every prize for an arrangement: a bare hand only ever compiles the Compiler's recipe. */
 /** The most location-lock heights one smash tries (each costs a region key and a key); more held are said as "more may be waiting". */
 export const LOCK_HEIGHTS_TRIED = 4
 
-export async function compile(a: Arrangement, bare: boolean, deps: SmashDeps): Promise<{ lookup: string; found: Found[]; offline: boolean; unknown: number; more: boolean }> {
+/** Every prize for an arrangement, in either hand (the reach decided what was gathered). */
+export async function compile(a: Arrangement, deps: SmashDeps): Promise<{ lookup: string; found: Found[]; offline: boolean; unknown: number; more: boolean }> {
   // The Compiler's own recipe yields the Compiler, and only it (§6.1): known by its blocks, so its key is never made twice.
   if (sameArrangement(a, COMPILER_RECIPE)) return { lookup: await compilerRecipeLookup(), found: [{ prize: { type: 'tool', tool: 'compiler' }, name: 'The Compiler', maker: 'game', lookup: await compilerRecipeLookup(), record: null }], offline: false, unknown: 0, more: false }
-  if (bare) return { lookup: '', found: [], offline: false, unknown: 0, more: false }
   // The Quarry Charge's recipe (§8.5) yields seven Quarry Charges from the client's own copy, and records under its lookup are never read (§6.1).
   if (sameArrangement(a, QUARRY_CHARGE_RECIPE)) return { lookup: QUARRY_LOOKUP, found: [{ prize: { type: 'tool', tool: 'quarry-charge', count: QUARRY_CHARGE_COUNT }, name: QUARRY_NAME, maker: 'game', lookup: QUARRY_LOOKUP, record: null }], offline: false, unknown: 0, more: false }
   const { key, lookup } = await keyOf(a)

@@ -1,16 +1,22 @@
 /**
  * smashConfirm.ts - a smash asks first when it would waste recipe materials
- * (owner's lost Glowcore, 2026-11-28): when the hold completes and the smash
- * will NOT compile, but would delete a rare recipe material (the rare band,
- * Glowcore or Cinderrock: nearMiss.ts RARE_MATERIALS) or is one of the
- * game's own recipes built wrong (nearMiss.ts), a confirm comes up instead of
- * the swing: "This won't compile. It breaks 5 blocks, including your
- * Glowcore. Smash anyway?" with SMASH and CANCEL.
+ * (owner's lost Glowcore, 2026-11-28): when the hold completes, a confirm
+ * comes up instead of the swing for (owner's ruling on bulk digging,
+ * 2026-11-28) only:
+ *
+ * a. one of the game's own recipes built wrong (nearMiss.ts), including an
+ *    isolated turned one that would compile as another shape; or
+ * b. a smash that will NOT compile and would delete PLACED rare recipe
+ *    materials (the rare band, Glowcore or Cinderrock: nearMiss.ts
+ *    RARE_MATERIALS). Natural ore in the ground never asks, so digging stays
+ *    one hold: "This won't compile. It breaks 5 blocks, including placed
+ *    Glowcore. Smash anyway?" with SMASH and CANCEL.
  *
  * - CANCEL spends nothing: no block is cleared, nothing swings.
  * - SMASH swings and deletes, as any smash does (a smash always deletes when
  *   confirmed); the blocks are read again at the impact (smashRun.ts strike).
- * - A smash that compiles never asks.
+ * - A smash that compiles the recipe, or any construction that is not a
+ *   recipe built wrong, never asks.
  * - "Don't ask again", OFF by default, is kept per identity (owner,
  *   2026-11-19: "all local data per npub, in IndexedDB"): one record per
  *   pubkey, `onosendai:smash-ask-off:<pubkey>`, through lib/kvStore.ts (the
@@ -24,7 +30,7 @@ import { create } from 'zustand'
 import { kvGet, kvSet } from '../kvStore'
 import { useCyberspace } from '../../store/useCyberspace'
 import { compiles, smashGroup } from './smash'
-import { confirmWords, nearMiss, rareLost, type NearMiss } from './nearMiss'
+import { confirmWords, nearMiss, rareLost, tooBigBare, type NearMiss } from './nearMiss'
 import type { Cell } from './arrangement'
 
 /** The record's prefix; the pubkey follows. */
@@ -43,24 +49,29 @@ export interface SmashAsk {
 }
 
 /**
- * Whether a smash at `target` should ask first, and what: null when it compiles, has nothing to delete, or would
- * destroy no rare material and is no recipe built wrong.
+ * Whether a smash at `target` should ask first, and what: a game recipe built wrong, or a smash that will not compile
+ * and would delete placed rare materials; null otherwise. `natural` tells natural ground (TerrainWorld naturalCs):
+ * natural ore never asks, and only natural ground is "the ground"; without it every block counts as placed.
  */
 export function smashAsk(read: (x: number, y: number, z: number) => number, target: Cell, bare: boolean, natural?: (x: number, y: number, z: number) => boolean): SmashAsk | null {
   const g = smashGroup(read, target, bare)
-  if (!g.smash.length || compiles(g.arrangement, bare)) return null
-  const miss = nearMiss(read, target, bare, natural)
-  const rare = rareLost(g.blocks.map((b) => b.id))
-  if (!miss && !rare.length) return null
-  return { words: confirmWords(g.smash.length, rare, miss), count: g.smash.length, rare, miss }
+  if (!g.smash.length) return null
+  const compiled = compiles(g.arrangement)
+  const miss = nearMiss(read, target, natural)
+  const rare = rareLost(g.blocks, natural)
+  if (!miss && (compiled || !rare.length)) return null
+  const tooBig = !compiled && !miss && tooBigBare(read, target, bare, g.arrangement)
+  return { words: confirmWords(g.smash.length, rare, miss, compiled, tooBig), count: g.smash.length, rare, miss }
 }
 
-/** The confirm on screen: the question and what SMASH does, or null. */
-export const useSmashConfirm = create<{ ask: (SmashAsk & { go: () => void }) | null }>(() => ({ ask: null }))
+/** The confirm on screen: the question, what SMASH does, and its own id (the modal is keyed by it), or null. */
+export const useSmashConfirm = create<{ ask: (SmashAsk & { go: () => void; id: number }) | null }>(() => ({ ask: null }))
+
+let asked = 0
 
 /** Put the question up; `go` swings and smashes, run only on SMASH. */
 export function askBeforeSmash(ask: SmashAsk, go: () => void): void {
-  useSmashConfirm.setState({ ask: { ...ask, go } })
+  useSmashConfirm.setState({ ask: { ...ask, go, id: ++asked } })
 }
 
 /** Whether a confirm is up. */

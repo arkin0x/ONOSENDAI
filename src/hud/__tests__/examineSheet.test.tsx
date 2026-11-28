@@ -253,7 +253,7 @@ describe("the game's own blueprints say how to build them isolated (owner's lost
     expect(m.says('Anywhere')).toBe(false)
     expect(m.says(GAME_CONSTRUCTION_SHORT)).toBe(true)
     await m.unmount()
-    expect(GAME_CONSTRUCTION).toBe('Build it in the air with a gap all round. No other block may touch it on faces, edges or corners, not even the ground.')
+    expect(GAME_CONSTRUCTION).toBe('Build it with a gap all round: no block may touch it, not even at an edge or corner.')
     expect(GAME_AIR_LINE).toMatch(/tapping the number under PLACE/)
     expect(constructionWords('standard', undefined, true)).toBe(GAME_CONSTRUCTION)
     expect(constructionShort('standard', undefined, true)).toBe(GAME_CONSTRUCTION_SHORT)
@@ -262,7 +262,7 @@ describe("the game's own blueprints say how to build them isolated (owner's lost
 
   it('the cards\' own lines say it too, and no blueprint copy uses the words for upright posture', () => {
     expect(GAME_NO_DEPLOY).toBe('Everyone gets this one. Build it in the air with a gap all round, then smash it to make your Compiler.')
-    expect(QUARRY_NO_DEPLOY).toMatch(/in the air with a gap all round, then smash it with the Compiler for seven Quarry Charges\.$/)
+    expect(QUARRY_NO_DEPLOY).toMatch(/in the air with a gap all round, then smash it for seven Quarry Charges\.$/)
     const forbidden = /stand-alone|standalone|stand alone|\bstands?\b|\bstanding\b|—|–/i
     for (const line of [GAME_NO_DEPLOY, QUARRY_NO_DEPLOY, GAME_CONSTRUCTION, GAME_CONSTRUCTION_SHORT, GAME_AIR_LINE]) expect(line).not.toMatch(forbidden)
   })

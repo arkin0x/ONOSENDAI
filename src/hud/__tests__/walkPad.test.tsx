@@ -269,7 +269,7 @@ describe('GRAVITY, JUMP and DOWN on the right (arkinox, 2026-11-10; owner, 2026-
     expect(drawn().some((b) => b.props.className === 'walkside')).toBe(false)
   })
 
-  it('the stylesheet: the stick\'s place on the left over the menu button; on the right GRAVITY over round JUMP and DOWN on a thumb\'s arc, DOWN lower and outboard, a clear gap over the commit block, and the LOOK ball above', () => {
+  it('the stylesheet: the stick\'s place on the left over the menu button; on the right GRAVITY directly over the commit block, a clear gap, then round JUMP and DOWN on a thumb\'s arc, DOWN lower and outboard, and the LOOK ball above', () => {
     const css = readFileSync(resolve(__dirname, '../../styles.css'), 'utf8')
     const rule = (sel: string): string => {
       const at = css.indexOf(`\n${sel} {`)
@@ -298,18 +298,22 @@ describe('GRAVITY, JUMP and DOWN on the right (arkinox, 2026-11-10; owner, 2026-
     expect(rule('.walkside')).toContain('width: var(--walkside-width);')
     expect(css).toContain('--walkside-bottom: 92px;')
     expect(rule('.touchpad')).toContain('bottom: 92px;')
-    // The commit block is 14 + 40 + 4 + 26 = 84px tall: JUMP and DOWN 24px or more over it.
+    // The commit block is 14 + 40 + 4 + 26 = 84px tall: GRAVITY directly over it, the block's own 4px gap
+    // (owner, 2026-11-28: "The gravity button should go directly above the mode buttons and then have a gap
+    // between it and the jump and down buttons"), JUMP and DOWN 24px or more over GRAVITY.
     expect(css).toContain('.touchops {\n  bottom: 14px;\n  display: grid;\n  grid-template-columns: 56px 62px;\n  grid-template-rows: 40px 26px;')
-    expect(92 + px('--walkside-lift') - (14 + 40 + 4 + 26)).toBeGreaterThanOrEqual(24)
+    expect(css).toContain('--walkside-lift: -4px;')
+    expect(92 - 4 - (14 + 40 + 4 + 26)).toBe(4)
+    expect(px('--arc-gap')).toBeGreaterThanOrEqual(24)
     // Round, larger than the old 38px keys, JUMP the larger and higher, inboard; DOWN lower and outboard.
     const last = (sel: string): string => { const at = css.lastIndexOf(`\n${sel} {`); return css.slice(at, css.indexOf('}', at)) }
     const jump = last('.walkside .touchpad__key--jump')
     const down = last('.walkside .touchpad__key--down')
     expect(rule('.walkside .touchpad__key--jump,\n.walkside .touchpad__key--down')).toContain('border-radius: 50%;')
     expect(jump).toContain('left: 0;')
-    expect(jump).toContain('bottom: var(--jump-rise);')
+    expect(jump).toContain('bottom: calc(var(--gravity-h) + var(--arc-gap) + var(--jump-rise));')
     expect(down).toContain('right: 0;')
-    expect(down).toContain('bottom: 0;')
+    expect(down).toContain('bottom: calc(var(--gravity-h) + var(--arc-gap));')
     expect(px('--jump-size')).toBeGreaterThanOrEqual(60)
     expect(px('--down-size')).toBeGreaterThan(38)
     expect(px('--down-size')).toBeLessThanOrEqual(px('--jump-size'))
@@ -319,9 +323,9 @@ describe('GRAVITY, JUMP and DOWN on the right (arkinox, 2026-11-10; owner, 2026-
     const d = px('--down-size') / 2
     const gap = Math.hypot((122 - d) - j, (px('--jump-rise') + j) - d) - j - d
     expect(gap).toBeGreaterThanOrEqual(6)
-    // GRAVITY across the top of the column, clear of JUMP.
-    expect(rule('.walkside .touchpad__key--gravity')).toContain('top: 0;')
-    expect(css).toContain('--walkside-h: calc(var(--jump-rise) + var(--jump-size) + 10px + var(--gravity-h));')
+    // GRAVITY across the bottom of the column, over the commit block, the arc gap under JUMP and DOWN.
+    expect(rule('.walkside .touchpad__key--gravity')).toContain('bottom: 0;')
+    expect(css).toContain('--walkside-h: calc(var(--gravity-h) + var(--arc-gap) + var(--jump-rise) + var(--jump-size));')
     // SPACE and C printed with a mouse only.
     expect(css).toContain('@media (hover: hover) and (pointer: fine) {\n  .walkside .touchpad__key--jump .touchpad__keyhint,')
     // The LOOK ball a gap above the cluster; beside it on a short screen.

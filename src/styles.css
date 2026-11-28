@@ -12306,11 +12306,14 @@ a.feed__act { text-decoration: none; }
  * above down/jump. Make the down and jump buttons slightly higher so there
  * is space between them and the mode buttons ... make them larger and
  * round, like a game controller, and angle them for comfort (down button
- * slightly lower than jump)"): in the controls' column (122px), a clear gap
- * (--walkside-lift; 26px) above the commit block, JUMP and DOWN round on a
- * right thumb's arc, JUMP (64px) higher and inboard, DOWN (52px) lower and
- * outboard, and GRAVITY across the column above them. The LOOK ball stands
- * a gap above GRAVITY (on a short screen beside them). */
+ * slightly lower than jump)"; and after the phone test: "The gravity button
+ * should go directly above the mode buttons and then have a gap between it
+ * and the jump and down buttons"): in the controls' column (122px), from
+ * the bottom, GRAVITY across the column directly over the commit block (its
+ * own 4px gap), then a clear gap (--arc-gap, 24px), then JUMP and DOWN
+ * round on a right thumb's arc, JUMP (64px) higher and inboard, DOWN (52px)
+ * lower and outboard. The LOOK ball stands a gap above them (on a short
+ * screen beside them). */
 :root {
   --walkside-bottom: 92px;
   /* Three 38px cells and two 4px gaps, the pad's own width. */
@@ -12322,9 +12325,11 @@ a.feed__act { text-decoration: none; }
   /* JUMP's bottom over DOWN's: the arc's rise. */
   --jump-rise: 16px;
   --gravity-h: 24px;
-  /* From the walk pad's bottom (8px over the commit block) to JUMP and DOWN's: a 26px gap over WALK, the mode and HOP. */
-  --walkside-lift: 18px;
-  --walkside-h: calc(var(--jump-rise) + var(--jump-size) + 10px + var(--gravity-h));
+  /* From the walk pad's bottom (8px over the commit block) to GRAVITY's: 4px over WALK, the mode and HOP, the block's own gap. */
+  --walkside-lift: -4px;
+  /* GRAVITY's top to JUMP and DOWN's lowest edge. */
+  --arc-gap: 24px;
+  --walkside-h: calc(var(--gravity-h) + var(--arc-gap) + var(--jump-rise) + var(--jump-size));
 }
 .app:has(.hosaka-pulse) {
   --walkpad-left: calc(var(--menu-left) + var(--menu-size) + var(--routeov-gap));
@@ -12377,13 +12382,13 @@ a.feed__act { text-decoration: none; }
 .walkside .touchpad__key--down svg { filter: drop-shadow(0 1px 2px #000); }
 .walkside .touchpad__key--jump {
   left: 0;
-  bottom: var(--jump-rise);
+  bottom: calc(var(--gravity-h) + var(--arc-gap) + var(--jump-rise));
   width: var(--jump-size);
   height: var(--jump-size);
 }
 .walkside .touchpad__key--down {
   right: 0;
-  bottom: 0;
+  bottom: calc(var(--gravity-h) + var(--arc-gap));
   width: var(--down-size);
   height: var(--down-size);
 }
@@ -12412,8 +12417,8 @@ a.feed__act { text-decoration: none; }
     left: calc(var(--walkpad-left) + var(--controls-width) + var(--routeov-gap) + var(--hud-mid));
   }
 }
-/* GRAVITY: a chip across the top of the right column, lit while gravity is
- * on, clear of JUMP by 10px so a jump never grazes it. */
+/* GRAVITY: a chip across the column directly over the commit block, lit
+ * while gravity is on, --arc-gap under JUMP and DOWN so a jump never grazes it. */
 .touchpad__key--gravity {
   font-size: 9px;
   letter-spacing: 0.14em;
@@ -12422,7 +12427,7 @@ a.feed__act { text-decoration: none; }
 .walkside .touchpad__key--gravity {
   left: 0;
   right: 0;
-  top: 0;
+  bottom: 0;
   height: var(--gravity-h);
 }
 .walkside .touchpad__key--gravity.is-on:not(:active) {
@@ -15681,8 +15686,8 @@ li.sfold__none { display: block; padding: 10px 4px; font-size: 11px; color: var(
     --terrain-row-slot: min(32px, calc((100vw - 32px - 27px) / 10));
     --terrain-lift: calc(var(--terrain-row-slot) + 8px);
     --walkside-bottom: calc(92px + var(--terrain-lift));
-    /* The hotbar row already stands between JUMP and DOWN and the commit block (a 56px gap): only 12px over the hotbar. */
-    --walkside-lift: 8px;
+    /* The hotbar row stands over the commit block here: GRAVITY stands directly over the hotbar, 4px over its top. */
+    --walkside-lift: 0px;
   }
   .app:has(.terrainview):has(.touchpad.is-lifted) { --walkside-bottom: calc(116px + var(--terrain-lift)); }
   .app:has(.terrainview) .touchpad { bottom: calc(92px + var(--terrain-lift)); }

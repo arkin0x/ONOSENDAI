@@ -12,9 +12,8 @@
  * |---|---|
  * | no overlap | no two controls' boxes intersect (the zone is under the walk pad's box by design, so those two are not compared) |
  * | the zone | it touches none of the right-hand controls, the LOOK ball, the commit block, TERRAIN's tools or the hotbar |
- * | the gap | JUMP's and DOWN's lowest edge stands 24px or more over the commit block |
+ * | the order | from the bottom: the commit block, GRAVITY directly over it (8px or less; in TERRAIN on a phone held upright the hotbar row stands between, and GRAVITY is directly over that), then 24px or more, then JUMP and DOWN (owner, 2026-11-28: "The gravity button should go directly above the mode buttons and then have a gap between it and the jump and down buttons") |
  * | the arc | DOWN lower than JUMP and further out (right), JUMP and DOWN round and not touching |
- * | GRAVITY | above JUMP and DOWN, in the right column |
  * | a mouse | no zone; the walk pad's box prints W A S D |
  *
  * On a touch screen it also drives the stick with real touches (Input.dispatchTouchEvent, so the browser does its own
@@ -156,18 +155,22 @@ for (const size of SIZES) {
       const caps = await page.locator('.walkstick-home--keys .walkstick-home__cap').count()
       if (caps !== 4) fail(`${label}: W A S D not printed (${caps})`)
     }
-    const { jump: j, down: d, gravity: g, commit: c } = r
-    if (j && d && c) {
-      const gap = c.t - Math.max(j.b, d.b)
-      if (gap < 24) fail(`${label}: JUMP and DOWN only ${gap.toFixed(1)}px over the commit block`)
+    const { jump: j, down: d, gravity: g, commit: c, hotbar: hb } = r
+    if (j && d && c && g) {
+      // GRAVITY directly over the commit block, or over the hotbar where the hotbar row stands between them.
+      const under = hb && hb.t < c.t && hb.l < g.r && g.l < hb.r ? hb : c
+      const sit = under.t - g.b
+      if (sit < 2 || sit > 8) fail(`${label}: GRAVITY ${sit.toFixed(1)}px over the ${under === hb ? 'hotbar' : 'commit block'}, not directly over it`)
+      if (!(g.l >= c.l - 1 && g.r <= c.r + 1)) fail(`${label}: GRAVITY not in the commit block's column`)
+      const gap = g.t - Math.max(j.b, d.b)
+      if (gap < 24) fail(`${label}: JUMP and DOWN only ${gap.toFixed(1)}px over GRAVITY`)
       if (!(d.b > j.b)) fail(`${label}: DOWN not lower than JUMP`)
       if (!(d.r > j.r)) fail(`${label}: DOWN not outboard of JUMP`)
       if (j.radius !== '50%' && parseFloat(j.radius) < (j.r - j.l) / 2 - 1) fail(`${label}: JUMP not round (${j.radius})`)
       const jr = (j.r - j.l) / 2, dr = (d.r - d.l) / 2
       const apart = Math.hypot((j.l + jr) - (d.l + dr), (j.t + jr) - (d.t + dr)) - jr - dr
       if (apart < 6) fail(`${label}: JUMP and DOWN ${apart.toFixed(1)}px apart`)
-      if (g && !(g.b <= Math.min(j.t, d.t) - 6)) fail(`${label}: GRAVITY not above JUMP and DOWN`)
-      if (!bad) console.log(`${label}: clear; gap over the commit block ${gap.toFixed(0)}px, DOWN ${(d.b - j.b).toFixed(0)}px lower, ${apart.toFixed(0)}px apart; JUMP ${(j.r - j.l).toFixed(0)}px, DOWN ${(d.r - d.l).toFixed(0)}px`)
+      if (!bad) console.log(`${label}: clear; GRAVITY ${sit.toFixed(0)}px over the ${under === hb ? 'hotbar' : 'commit block'}, JUMP and DOWN ${gap.toFixed(0)}px over GRAVITY, DOWN ${(d.b - j.b).toFixed(0)}px lower, ${apart.toFixed(0)}px apart; JUMP ${(j.r - j.l).toFixed(0)}px, DOWN ${(d.r - d.l).toFixed(0)}px`)
     }
     if (SHOTS && ['390x844', '844x390', '1440x900 mouse'].includes(size.name)) {
       fs.mkdirSync(SHOTS, { recursive: true })

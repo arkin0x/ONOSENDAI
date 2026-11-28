@@ -66,11 +66,13 @@
  * it), and a finger landing anywhere in the lower left takes it there and
  * then. With a mouse or keys the box prints W A S D instead
  * (hooks/useFingerInput.ts). The stick is level only: GRAVITY, JUMP and
- * DOWN are the right thumb's, GRAVITY above two round buttons set on a
- * thumb's arc, JUMP higher and inboard, DOWN lower and outboard, a clear
- * gap above the commit block (owner, 2026-11-28: "make them larger and
- * round, like a game controller, and angle them for comfort (down button
- * slightly lower than jump)").
+ * DOWN are the right thumb's: GRAVITY directly over the commit block, then
+ * a clear gap, then two round buttons set on a thumb's arc, JUMP higher and
+ * inboard, DOWN lower and outboard (owner, 2026-11-28: "make them larger
+ * and round, like a game controller, and angle them for comfort (down
+ * button slightly lower than jump)"; "The gravity button should go
+ * directly above the mode buttons and then have a gap between it and the
+ * jump and down buttons").
  */
 
 import { useEffect, useState, type ReactNode } from 'react'
@@ -555,7 +557,7 @@ export function TouchControls(): JSX.Element {
       {/* The stick's zone: the lower left, under every button, a finger's only (hud/WalkStick.tsx). */}
       {walking && atHead && finger && <WalkStickZone terrain={terrainOn} onHeld={setStickHeld} veil={veil('pad.arrows')} />}
 
-      {/* WALK's right: GRAVITY above JUMP and DOWN, round, on a thumb's arc (owner, 2026-11-28). */}
+      {/* WALK's right: GRAVITY over the commit block, a gap, then JUMP and DOWN, round, on a thumb's arc (owner, 2026-11-28). */}
       {walking && (
         <div className="walkside" role="group" aria-label="Gravity, jump and down">
           <button

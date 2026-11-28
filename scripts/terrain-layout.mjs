@@ -20,7 +20,8 @@
  * socket is answered here. With SHOTS=<dir>, a screenshot of each phone with the bag open is saved there.
  *
  * The stick (owner, 2026-11-28; hud/WalkStick.tsx): the walk pad's box (`pad`) is the stick's resting place, GRAVITY
- * stands in the right cluster (`jump`, .walkside) above JUMP and DOWN, and on a touch screen the stick's zone
+ * stands in the right cluster (`jump`, .walkside) under JUMP and DOWN, directly over the commit block (over the hotbar
+ * on a phone held upright, `gravity`), 24px or more under them (`order`), and on a touch screen the stick's zone
  * (.walkstick, under every button by design) must reach none of TERRAIN's tools, the hotbar, the right cluster, the
  * LOOK ball or the commit block. scripts/walk-layout.mjs checks the cluster's arc and its gap over the commit block.
  *
@@ -182,6 +183,19 @@ for (const size of SIZES) {
         if (under.length) { bad++; console.log(`${label}: the stick zone reaches ${under.join(', ')}`) }
         else console.log(`${label}: the stick zone clear`)
       }
+    }
+    // The right column's order (owner, 2026-11-28: "The gravity button should go directly above the mode buttons and
+    // then have a gap between it and the jump and down buttons"): GRAVITY directly over whatever is under it, the arc 24px or more over GRAVITY.
+    if (!menu || size.w >= 1101) {
+      const o = await page.evaluate(`(${box.toString()})(${JSON.stringify({ g: '.walkside .touchpad__key--gravity', j: '.walkside .touchpad__key--jump', d: '.walkside .touchpad__key--down' })})`)
+      if (o.g && o.j && o.d && rects.commit) {
+        const hb = rects.hotbar
+        const under = hb && hb.t < rects.commit.t && hb.l < o.g.r && o.g.l < hb.r ? hb : rects.commit
+        const sit = under.t - o.g.b
+        const gap = o.g.t - Math.max(o.j.b, o.d.b)
+        if (sit < 2 || sit > 8 || gap < 24) { bad++; console.log(`${label}: ORDER GRAVITY ${sit.toFixed(1)}px over the ${under === hb ? 'hotbar' : 'commit block'}, JUMP and DOWN ${gap.toFixed(1)}px over GRAVITY`) }
+        else console.log(`${label}: order clear (GRAVITY ${sit.toFixed(0)}px over the ${under === hb ? 'hotbar' : 'commit block'}, the arc ${gap.toFixed(0)}px over it)`)
+      } else { bad++; console.log(`${label}: order not measured (no GRAVITY, JUMP or DOWN)`) }
     }
     const missing = (menu && size.w < 1101 ? ['menu'] : ['hotbar', 'place', 'pad', 'menu', 'air']).filter((k) => !rects[k])
     if (missing.length) { bad++; console.log(`${label}: missing ${missing.join(', ')}`) }

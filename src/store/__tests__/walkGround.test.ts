@@ -10,7 +10,9 @@
  *
  * - a continuous walk up and down a ramp, and over a half-gibson ledge,
  *   never draws the feet or the eye below the surface, at 60 and 30 fps and
- *   through frame-time spikes, with gravity on and off;
+ *   through frame-time spikes, under gravity;
+ * - with gravity off the walk flies at its height: over a dip and off a drop
+ *   the feet never go down into it, and a ledge over its line holds it;
  * - at a fractional position the walker is drawn at the surface's height;
  * - stopped on a half-height surface, once its move has landed, it still
  *   stands on that surface, not on the gibson;
@@ -52,7 +54,7 @@ vi.mock('../../lib/relay', async (orig) => {
 
 import { newShard, type ShardModel } from 'sno-core/shards'
 import { useCyberspace } from '../useCyberspace'
-import { tickFall, useWalk } from '../useWalk'
+import { fallState, tickFall, useWalk } from '../useWalk'
 import { useShards, type WorldItem } from '../useShards'
 import { useWorkshop } from '../useWorkshop'
 import { FOOT_RADIUS, REST_FLOOR, clearWalls, eyePlace, eyeReach, restDrop, wallItemsAt, wallsBuilt } from '../walkWalls'
@@ -305,7 +307,8 @@ async function walkOver(surface: (x: number) => number, keyCode: string, until: 
 const PACES: Array<[string, number, boolean]> = [['60 fps', 16, false], ['30 fps', 33, false], ['60 fps with spikes', 16, true]]
 
 describe('the feet and the eye never go below the surface', () => {
-  for (const gravity of [true, false]) {
+  // Walking up a ramp or onto a ledge is gravity's: with it off you fly at your height (below).
+  for (const gravity of [true]) {
     for (const [name, ms, spikes] of PACES) {
       it(`up and down the ramp, gravity ${gravity ? 'on' : 'off'}, ${name}`, async () => {
         const ramp = withConstrain(rampFixture(), 'all')
@@ -352,7 +355,8 @@ function stairs(rise: number, run: number, n: number): { shard: ShardModel; heig
 
 describe('stairs: the feet stand on each step and the camera climbs smoothly', () => {
   for (const [rise, run] of [[1, 1.5], [2, 3], [0.6, 0.7]] as const) {
-    for (const gravity of [true, false]) {
+    // The stair step-up is gravity's (store/walkStep.ts).
+    for (const gravity of [true]) {
       it(`risers of ${rise} every ${run}, gravity ${gravity ? 'on' : 'off'}: never below a step, and the camera never jumps`, async () => {
         const { shard, height } = stairs(rise, run, 5)
         world(start, shard, [0, 0, 0])
@@ -460,7 +464,8 @@ describe('a jump onto a block, and leaving WALK', () => {
 })
 
 describe('the walker stands on the geometry, not on the gibson', () => {
-  for (const gravity of [true, false]) {
+  // Up the ramp and onto the ledge under gravity; with it off, the same standing is checked where you fly (below).
+  for (const gravity of [true]) {
     it(`at a fractional position on the ramp it is drawn on the highest ground under its footprint, gravity ${gravity ? 'on' : 'off'}`, async () => {
       const ramp = withConstrain(rampFixture(), 'all')
       world(start, ramp, [24, 0, 0])
@@ -575,7 +580,8 @@ describe('the step WALK (the switch off)', () => {
   it('steps whole gibsons as it always did, the walker drawn with its origin on the surface, and the eye asked as it always was', async () => {
     useFluidWalk.setState({ on: false })
     world(start, ledge(), [0, 0, 0])
-    await walk(false)
+    // Under gravity, so the press climbs onto the ledge and settles off it (store/walkStep.ts).
+    await walk(true)
     const cells: V3[] = []
     for (const code of ['KeyW', 'KeyW', 'KeyW', 'KeyW', 'KeyS', 'KeyS']) {
       down(code)
@@ -603,6 +609,11 @@ describe('the step WALK (the switch off)', () => {
   })
 })
 
+/** A floor 0.4 under the start gibson, with `cut` (from x0 to x1) a gibson lower. */
+function floorWith(x0: number, x1: number): { shard: ShardModel; surface: (x: number) => number } {
+  const shard = boxes('Cut floor', [[[-40, -4, -40], [x0, LOW, 40]], [[x0, -4, -40], [x1, LOW - 1, 40]], ...(x1 < 40 ? [[[x1, -4, -40], [40, LOW, 40]] as [V3, V3]] : [])])
+  return { shard, surface: (x: number) => (x >= x0 && x < x1 ? LOW - 1 : LOW) }
+}
 /**
  * Under GRAVITY, ground that drops away is fallen to at gravity's pace, not
  * stuck to (arkinox, 2026-11-24: "if I walk over a 1 block dip, my avatar
@@ -612,11 +623,7 @@ describe('the step WALK (the switch off)', () => {
  * FOOT_SNAP). Display only: the anchor and the chain take the same steps.
  */
 describe('under GRAVITY the feet fall onto ground that drops away, at gravity\'s pace', () => {
-  /** A floor 0.4 under the start gibson, with `cut` (from x0 to x1) a gibson lower. */
-  function floorWith(x0: number, x1: number): { shard: ShardModel; surface: (x: number) => number } {
-    const shard = boxes('Cut floor', [[[-40, -4, -40], [x0, LOW, 40]], [[x0, -4, -40], [x1, LOW - 1, 40]], ...(x1 < 40 ? [[[x1, -4, -40], [40, LOW, 40]] as [V3, V3]] : [])])
-    return { shard, surface: (x: number) => (x >= x0 && x < x1 ? LOW - 1 : LOW) }
-  }
+
 
   /** Hold W (+X) from the start, every frame `ms`, until the drawn x passes `until`: the drawn feet, frame by frame. */
   async function run(until: number, ms = 16): Promise<Array<{ t: number; x: number; y: number }>> {
@@ -725,14 +732,87 @@ describe('under GRAVITY the feet fall onto ground that drops away, at gravity\'s
     expect(worstStep).toBeLessThan(0.5)
   })
 
-  it('gravity off, a drop is eased down as before (nothing falls)', async () => {
+  it('gravity off, walking off a drop keeps the height: nothing falls, and the feet never go down into it', async () => {
     const { shard } = floorWith(3.5, 40)
     world(start, shard, [0, 0, 0])
     await walk(false)
     const path = await run(10)
-    const i0 = path.findIndex((f) => f.y < LOW - 1e-6)
-    const i1 = path.findIndex((f) => f.y <= LOW - 1 + 1e-6)
-    expect(i1).toBeGreaterThan(i0)
-    expect((path[i1].t - path[i0 - 1].t) / 1000).toBeLessThan(0.1)
+    expect(drawn()[0]).toBeGreaterThan(10)
+    expect(Number(useCyberspace.getState().cursor.y - start.y)).toBe(0)
+    expect(fallState()).toBeNull()
+    // On the floor, then floating on the gibson's own floor (REST_FLOOR) past its edge: never down at the lower floor.
+    expect(Math.min(...path.map((f) => f.y))).toBeGreaterThanOrEqual(-REST_FLOOR - 1e-6)
+  })
+})
+
+/**
+ * Gravity off you fly (arkinox, 2026-11-28: "When I have gravity off, when
+ * I am flying near blocks underneath me, I seem to stick to them and I fall
+ * into holes, even though gravity is off"): the walk keeps its height over
+ * holes and ledges, is held by what is in its way instead of climbing it,
+ * and the feet are never drawn down into a hole or below the surface.
+ */
+describe('gravity off: flying over blocks keeps the height', () => {
+  it('over a dip a gibson deep and back onto the floor beyond, fluid: the anchor never leaves its height and the feet never go into the dip', async () => {
+    const { shard, surface } = floorWith(3.5, 6.5)
+    world(start, shard, [0, 0, 0])
+    await walk(false)
+    const ys = new Set<number>()
+    let lowest = Infinity
+    let below = Infinity
+    down('KeyW')
+    for (let k = 0; k < 2000 && drawn()[0] < 10; k++) {
+      frame(16)
+      await keepUp()
+      ys.add(Number(useCyberspace.getState().cursor.y - start.y))
+      const p = drawn()
+      lowest = Math.min(lowest, p[1])
+      below = Math.min(below, p[1] - surface(p[0]))
+    }
+    up('KeyW')
+    expect(drawn()[0]).toBeGreaterThanOrEqual(10)
+    expect([...ys]).toEqual([0])
+    expect(lowest).toBeGreaterThanOrEqual(-REST_FLOOR - 1e-6)
+    expect(below).toBeGreaterThanOrEqual(-1e-6)
+    // Back over the floor: standing on it again, as before the dip.
+    for (let k = 0; k < 60; k++) frame(16)
+    expect(drawn()[1]).toBeCloseTo(LOW, 9)
+  })
+
+  it('a half-gibson ledge over your line holds you at its face: no climb, and the feet never below the floor', async () => {
+    world(start, ledge(), [0, 0, 0])
+    await walk(false)
+    for (let k = 0; k < 10; k++) frame(16)
+    expect(drawn()[1]).toBeCloseTo(LOW, 9)
+    const onto = await walkOver(ledgeHeight, 'KeyW', (x) => x > 6, 16, false)
+    const cs = useCyberspace.getState()
+    expect(Number(cs.cursor.y - start.y)).toBe(0)
+    expect(Number(cs.cursor.x - start.x)).toBeLessThan(LEDGE_AT)
+    expect(drawn()[0]).toBeLessThan(LEDGE_AT)
+    // The footprint may reach the ledge's lip (footGround), never past it, and never below the floor.
+    expect(drawn()[1]).toBeLessThanOrEqual(HIGH + 1e-9)
+    expect(onto.worstFeet).toBeGreaterThanOrEqual(-1e-6)
+  })
+
+  it('the step WALK too: over the dip at the same height, and held by the ledge', async () => {
+    useFluidWalk.setState({ on: false })
+    const { shard } = floorWith(1.5, 2.5)
+    world(start, shard, [0, 0, 0])
+    await walk(false)
+    for (let k = 0; k < 4; k++) {
+      down('KeyW'); frame(16); up('KeyW')
+      for (let f = 0; f < 30; f++) frame(16)
+      expect(Number(useCyberspace.getState().cursor.y - start.y)).toBe(0)
+    }
+    expect(Number(useCyberspace.getState().cursor.x - start.x)).toBe(4)
+    useWalk.getState().exit()
+    world(start, ledge(), [0, 0, 0])
+    useCyberspace.setState({ cursor: { ...start } })
+    await walk(false)
+    for (let k = 0; k < 4; k++) { down('KeyW'); frame(16); up('KeyW'); for (let f = 0; f < 30; f++) frame(16) }
+    const cs = useCyberspace.getState()
+    expect(Number(cs.cursor.y - start.y)).toBe(0)
+    // The last gibson before the ledge's face (x 2.3), and no further.
+    expect(Number(cs.cursor.x - start.x)).toBe(2)
   })
 })

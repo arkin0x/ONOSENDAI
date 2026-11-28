@@ -104,7 +104,7 @@ function LandingTile({ card, views, fresh }: { card: BlueprintCard; views: CardV
         <span className="bp-land__gameline">{gameNoDeploy(card)}</span>
       ) : (
         <>
-          <button type="button" className="bp-land__go" onClick={() => place('here')} title="Leave it where you stand, for others to find. They each take a copy">
+          <button type="button" className="bp-land__go" onClick={() => place('here')} title="Leave it where you are, for others to find. They each take a copy">
             <MapPin size={13} strokeWidth={2.25} aria-hidden />DEPLOY
           </button>
           <button type="button" className="bp-land__chest" onClick={() => place('chest')} title="Put a copy in a new chest">

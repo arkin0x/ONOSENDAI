@@ -10,10 +10,14 @@
  * What it says (lib/terrain/assay.ts): the ground type with its signature
  * rock, the hardness (terrain K, out of 16), a gentle line for each recipe
  * block here, then every kind in the chunk, rarest first, with how many you
- * MINED here and how many are LEFT, and whether any of it shows ("visible")
- * or it is all inside ("buried"). A list only, never where: the finding stays
- * yours. A tap or a slide across the core reads out each layer's kind (Core,
- * below).
+ * MINED here and how many are LEFT, and under its name how many of what is
+ * left you could see without digging and how many are buried (owner,
+ * 2026-11-28: "surely they arent always one or the other"): "2 visible ·
+ * 5 buried", "all visible" or "all buried". A block beside air that is
+ * closed off from the outside, or on the chunk's edge against the next
+ * chunk's rock, is buried (lib/terrain/assay.ts). A list only, never where:
+ * the finding stays yours. A tap or a slide across the core reads out each
+ * layer's kind (Core, below).
  *
  * Live (owner, 2026-11-28: "can we make the card live update how many of the
  * blocks in the chunk you've mined and how many are left total?"): while it is
@@ -35,7 +39,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react'
-import { Eye, EyeOff, Layers, Pickaxe, ScrollText, Star, Undo2 } from 'lucide-react'
+import { Layers, Pickaxe, ScrollText, Star, Undo2 } from 'lucide-react'
 import { ModalClose } from '../hud/ui/ModalClose'
 import { Chamfer } from '../hud/ui/Chamfer'
 import { Stacked, useModalStack } from '../hud/modalStack'
@@ -58,19 +62,27 @@ export function tallyLine(mined: number, left: number): string {
   return `${m} · ${count(left)} left`
 }
 
+/** The one-line explainer over the lists. */
+export const VISIBLE_KEY = 'Visible means you can see it without digging.'
+
+/** The line under a kind's name: "2 visible · 5 buried", "all visible" or "all buried"; "none left" once it is all gone. */
+export function visibilityLine(visible: number, buried: number): string {
+  if (visible + buried === 0) return 'none left'
+  if (buried === 0) return 'all visible'
+  if (visible === 0) return 'all buried'
+  return `${count(visible)} visible · ${count(buried)} buried`
+}
+
 export function Row({ row }: { row: CardRow }): JSX.Element {
-  const mark = row.count === 0 ? 'is-gone' : row.visible ? 'is-visible' : 'is-buried'
+  const mark = row.count === 0 ? 'is-gone' : row.visible === 0 ? 'is-buried' : row.buried === 0 ? 'is-visible' : 'is-some'
   return (
     <li className={`survey-row${row.prized ? ' is-prized' : ''}`}>
       <Chamfer size={34}><Swatch id={row.id} size={24} /></Chamfer>
       <span className="survey-row__name">{row.name}</span>
       <span className="survey-row__leader" aria-hidden />
-      <span className={`survey-row__mark ${mark}`}>
-        {row.visible ? <Eye size={11} strokeWidth={2.25} aria-hidden /> : <EyeOff size={11} strokeWidth={2.25} aria-hidden />}
-        {row.count === 0 ? 'gone' : row.visible ? 'visible' : 'buried'}
-      </span>
       <span className={`survey-row__mined${row.mined > 0 ? '' : ' is-none'}`} aria-label={`${count(row.mined)} mined`}>{row.mined > 0 ? count(row.mined) : '-'}</span>
       <span className="survey-row__count" aria-label={`${count(row.count)} left`}>{count(row.count)}</span>
+      <span className={`survey-row__seen ${mark}`}>{visibilityLine(row.visible, row.buried)}</span>
     </li>
   )
 }
@@ -309,6 +321,7 @@ export function SurveyCard(): JSX.Element | null {
             )}
 
             <p className="survey-card__tally">{tallyLine(card.minedTotal, card.total)}</p>
+            <p className="survey-card__key">{VISIBLE_KEY}</p>
             <Section name="FINDS" />
             {card.finds.length > 0
               ? <ul className="survey-card__list">{card.finds.map((r) => <Row key={r.id} row={r} />)}</ul>

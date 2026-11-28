@@ -111,17 +111,16 @@ describe('compiling', () => {
   })
 
   it('the Compiler recipe yields the Compiler, bare hand or not', async () => {
-    expect((await compile(COMPILER_RECIPE, true, deps())).found.map((f) => f.prize)).toEqual([{ type: 'tool', tool: 'compiler' }])
+    expect((await compile(COMPILER_RECIPE, deps())).found.map((f) => f.prize)).toEqual([{ type: 'tool', tool: 'compiler' }])
   })
 
-  it('a bare hand compiles nothing else; the Compiler unseals a held blueprint', async () => {
+  it('a held blueprint unseals in either hand: a bare hand compiles anything in reach (owner, 2026-11-28)', async () => {
     const arrangement = arrangementFrom([{ at: [0, 0, 0], id: GRIDSTONE }, { at: [1, 0, 0], id: FERROVEIN }])!
     const made = await makeBlueprint({ arrangement, shown: () => true, title: 'Rail', prize: { type: 'sno', payload: { v: 2, name: 'Rail piece' } }, reveal: 'hidden', lock: 'standard' },
       async (t) => ({ ...t, id: 'f'.repeat(64), pubkey: 'b'.repeat(64), sig: 'c'.repeat(128) }))
     if ('refused' in made) throw new Error(made.refused)
     expect((await keyOf(arrangement)).lookup).toBe(made.lookup)
-    expect((await compile(arrangement, true, deps([made.record]))).found).toEqual([])
-    const found = (await compile(arrangement, false, deps([made.record]))).found
+    const found = (await compile(arrangement, deps([made.record]))).found
     expect(found.map((f) => [f.name, f.maker])).toEqual([['Rail', 'b'.repeat(64)]])
   })
 

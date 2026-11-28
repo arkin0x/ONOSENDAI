@@ -45,7 +45,7 @@ function fromHex(h: string): Uint8Array {
 /** A survey card as kept with the star: every kind's counts, the ground, the hardness and the core. `at` is the first survey's date (ms) or null. */
 export function snapshotOf(card: SurveyCardData, at: number | null): ChunkSnapshot {
   // Rarest first, MAX_ROWS at most: a chunk's finds are always kept; only the commonest rock of a crowded chunk is left off.
-  const rows: SnapRow[] = [...card.finds, ...card.common].slice(0, MAX_ROWS).map((r) => [r.id, r.count, r.mined, r.visible ? 1 : 0])
+  const rows: SnapRow[] = [...card.finds, ...card.common].slice(0, MAX_ROWS).map((r) => [r.id, r.count, r.mined, Math.min(r.visible, r.count)])
   return {
     g: card.ground?.family ?? null,
     k: card.hardness?.max ?? null,
@@ -71,7 +71,10 @@ export function groundOf(family: string | null): { family: string; name: string;
 
 /** A saved card, ready to draw with the survey card's own parts (terrain/SurveyCard.tsx). */
 export function cardOfSnapshot(s: ChunkSnapshot): SurveyCardData {
-  const rows: CardRow[] = s.r.map(([id, count, mined, seen]) => ({ id, name: blockName(id), count, mined, visible: count > 0 && seen === 1, prized: PRIZED.has(id) }))
+  const rows: CardRow[] = s.r.map(([id, count, mined, seen]) => {
+    const visible = Math.min(seen, count)
+    return { id, name: blockName(id), count, mined, visible, buried: count - visible, prized: PRIZED.has(id) }
+  })
   return {
     ground: groundOf(s.g),
     hardness: s.k === null ? null : { max: s.k, mean: s.m ?? s.k },

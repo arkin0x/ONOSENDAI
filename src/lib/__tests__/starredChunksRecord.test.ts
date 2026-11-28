@@ -114,7 +114,7 @@ describe('reading', () => {
       const c = chunkKey({ x: BigInt(`0x${hex(20)}`) << 5n, y: BigInt(`0x${hex(20)}`) << 5n, z: BigInt(`0x${hex(20)}`) << 5n, plane: rnd(2) })
       // Finds in tens, common rock in thousands, as a chunk's card counts them; the core in runs of a few kinds.
       const kinds = ids.filter(() => rnd(3) === 0).concat([2, 1]).slice(-MAX_ROWS)
-      const r = kinds.map((id) => [id, id > 6 ? rnd(80) : 1000 + rnd(9000), rnd(40), rnd(2)] as [number, number, number, 0 | 1])
+      const r = kinds.map((id) => [id, id > 6 ? rnd(80) : 1000 + rnd(9000), rnd(40), rnd(40)] as [number, number, number, number])
       const band = (): string => ['01', '02', '05', '07', '08', '00'][rnd(6)]
       let d = ''
       while (d.length < 64) { const b = band(); d += b.repeat(1 + rnd(8)) }

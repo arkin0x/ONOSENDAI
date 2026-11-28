@@ -55,6 +55,8 @@ import { PrizeCard, PrizeFlights, PrizePicker, PrizeStrip, usePrizesHere } from 
 import { useBlueprintTool } from '../store/useBlueprintTool'
 import { recordAtCursor } from '../lib/blueprint/capture'
 import { previewColor, previewLine, useSmashPreview } from '../lib/blueprint/smashPreview'
+import { CAUSE_WORDS } from '../lib/blueprint/nearMiss'
+import { SmashConfirm } from './SmashConfirm'
 import { useAirPlace } from '../store/useAirPlace'
 import { AirStepper } from './AirStepper'
 import { Swatch } from './Swatch'
@@ -317,7 +319,8 @@ function useCompiling(): boolean {
 
 /**
  * What a smash at the cross would do, in one line just over the hold ring's place (scene/SmashPreview.tsx pulses the
- * blocks): COMPILES for a construction, BREAKS and the count for anything else, with a mark in the pulse's colour. Its
+ * blocks): COMPILES for a construction, BREAKS and the count for anything else, with a mark in the pulse's colour, and
+ * for a game recipe built wrong why, in the warning red ("BREAKS 5 · TOUCHING THE GROUND": lib/blueprint/nearMiss.ts). Its
  * slot is always there, whether a ring is up or not, so nothing moves when it or a hold comes and goes (styles.css
  * --terrain-over-cross). Over the cross (beside the ring on a screen on its side) it never covers the first-visit
  * steps, SMASH or LOOK.
@@ -325,12 +328,13 @@ function useCompiling(): boolean {
 export function SmashPreviewLabel(): JSX.Element {
   const state = useSmashPreview((s) => s.state)
   const count = useSmashPreview((s) => s.count)
+  const cause = useSmashPreview((s) => s.cause)
   return (
     <div className="terrain-smash-preview" aria-live="off">
       {state && (
-        <span className={`terrain-smash-preview__text terrain-smash-preview__text--${state}`}>
-          <span className="terrain-smash-preview__mark" style={{ background: previewColor(state) }} aria-hidden />
-          {previewLine(state, count)}
+        <span className={`terrain-smash-preview__text terrain-smash-preview__text--${state}${cause ? ' terrain-smash-preview__text--near' : ''}`}>
+          <span className="terrain-smash-preview__mark" style={{ background: previewColor(state, cause) }} aria-hidden />
+          {cause ? <>{previewLine(state, count)}<span className="terrain-smash-preview__why" style={{ color: previewColor(state, cause) }}>{' · '}{CAUSE_WORDS[cause]}</span></> : previewLine(state, count)}
         </span>
       )}
     </div>
@@ -690,6 +694,8 @@ function TerrainScreen({ covered }: { covered: boolean }): JSX.Element {
       <HoldRing />
       {/* What a smash at the cross would do, just over the ring's place, or beside it on a screen on its side (it stays put whether a ring is up or not). */}
       <SmashPreviewLabel />
+      {/* A smash that would waste recipe materials without compiling asks first (lib/blueprint/smashConfirm.ts). */}
+      <SmashConfirm />
 
       {/* What just happened (a refusal, a survey), in a slot of its own, nothing moves: over the preview line, growing
           upward, clear of the hold ring and its plate under the cross and of the controls under it (review of #948);
@@ -703,7 +709,7 @@ function TerrainScreen({ covered }: { covered: boolean }): JSX.Element {
       <div className={`terrain-hint${holding || smashing ? ' is-under-hold' : ''}`} aria-live="polite">
         {capturing ? (
           <span className="prize-strip prize-strip--record" role="group" aria-label="Record a blueprint">
-            <span className="prize-strip__count">Aim at a build that stands alone</span>
+            <span className="prize-strip__count">Aim at a build with a gap all round</span>
             <button className="prize-strip__btn prize-strip__btn--go" onClick={recordAtCursor}>RECORD<Key>R</Key></button>
             <button className="prize-strip__btn" onClick={() => { useBlueprintTool.getState().set({ capturing: false, open: true }); leaveTerrain() }}>BACK</button>
           </span>

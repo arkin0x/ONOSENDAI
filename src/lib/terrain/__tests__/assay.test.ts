@@ -1,8 +1,12 @@
 /**
  * assay.test.ts - the survey card's numbers (lib/terrain/assay.ts): one pass
- * over a chunk counts every kind exactly as a direct scan does, marks a kind
- * visible only when one of its faces is drawn (open space, or a see-through
- * or walk-through block of another kind, across the chunk's edge too), finds
+ * over a chunk counts every kind exactly as a direct scan does, and of each
+ * kind counts a block visible only when one of its faces is drawn (open
+ * space, or a see-through or walk-through block of another kind) onto open
+ * space you can reach from outside without digging, across the chunk and its
+ * 26 neighbours, and buried otherwise (owner, 2026-11-28: "what if the air
+ * adjacent to the block is cut off from the outside"; "it has to account for
+ * any adjacent chunks"), finds
  * each layer's kind for the core, sorts the card rarest first, says the
  * recipe lines gently, and is worked out once per version, never again
  * until the chunk or a neighbour changes. What you mined (owner, 2026-11-28)
@@ -13,11 +17,12 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { generate } from '../generate'
 import { CELLS, idx, type ChunkBase } from '../coords'
-import { KINDS } from '../blocks'
+import { KINDS, clearTable } from '../blocks'
+import { aroundIndex } from '../light'
 import { TerrainWorld } from '../world'
 import { encodeLayer, applyLayer } from '../layer'
 import {
-  AVERAGE_HARDNESS, COMMON, RARITY, hardnessLine, STRATA_MIN, assayBlocks, assayRuns, chunkAssay, chunkMined, forgetAssays, minedBlocks, recipeNotes, surveyCard, type GroundFacts,
+  AVERAGE_HARDNESS, COMMON, RARITY, hardnessLine, STRATA_MIN, assayBlocks, hoodBlocks, hoodIndex, reachOpen, assayRuns, chunkAssay, chunkMined, forgetAssays, minedBlocks, recipeNotes, surveyCard, type GroundFacts,
 } from '../assay'
 
 const GRIDSTONE = 1, UMBERSLATE = 2, RUSTBAND = 5, CINDERROCK = 7, PRISMITE = 8, RIMEGLASS = 10, TIDEWATER = 11, FERROVEIN = 40, COBALTINE = 41, GLOWCORE = 42, VOIDPEARL = 193
@@ -58,53 +63,199 @@ describe('the counts', () => {
   })
 })
 
-describe('visible or buried', () => {
+/** 26 neighbours (light.ts aroundIndex order), each made by `make` from its chunk offset; the middle is unused. */
+const hood = (make: (dx: number, dy: number, dz: number) => Uint8Array | null): Array<Uint8Array | null> => {
+  const out: Array<Uint8Array | null> = new Array(27).fill(null)
+  for (let dz = -1; dz <= 1; dz++) for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) if (dx || dy || dz) out[aroundIndex(dx, dy, dz)] = make(dx, dy, dz)
+  return out
+}
+const allSolid = (): Array<Uint8Array | null> => hood(() => solid())
+
+/**
+ * The direct scan the pass is held to, written another, plainer way: cells
+ * named by their place in the chunk's frame, -32 to 63 on each axis, read
+ * from whichever chunk holds them; a flood (a stack, y slowest last) from
+ * every open cell on the outside of the 3 by 3 by 3; then each block's six
+ * faces by the mesher's rule. Per kind: visible and buried.
+ */
+function directScan(b: Uint8Array, around: ReadonlyArray<Uint8Array | null> = []): { visible: Map<number, number>; buried: Map<number, number> } {
+  const ct = clearTable()
+  const chunkOf = (v: number): number => (v < 0 ? -1 : v > 31 ? 1 : 0)
+  const at = (x: number, y: number, z: number): number => {
+    const cx = chunkOf(x), cy = chunkOf(y), cz = chunkOf(z)
+    const src = cx === 0 && cy === 0 && cz === 0 ? b : around[aroundIndex(cx, cy, cz)]
+    return src ? src[(x - 32 * cx) + 32 * (z - 32 * cz) + 1024 * (y - 32 * cy)] : 0
+  }
+  const isOpen = (id: number): boolean => id === 0 || ct[id] === 1
+  const key = (x: number, y: number, z: number): number => (x + 32) + 96 * ((y + 32) + 96 * (z + 32))
+  const reached = new Uint8Array(96 ** 3)
+  const stack: number[] = []
+  const visit = (x: number, y: number, z: number): void => {
+    if (x < -32 || x > 63 || y < -32 || y > 63 || z < -32 || z > 63) return
+    const k = key(x, y, z)
+    if (reached[k] || !isOpen(at(x, y, z))) return
+    reached[k] = 1
+    stack.push(x, y, z)
+  }
+  for (let p = -32; p <= 63; p++) for (let q = -32; q <= 63; q++) {
+    visit(-32, p, q); visit(63, p, q); visit(p, -32, q); visit(p, 63, q); visit(p, q, -32); visit(p, q, 63)
+  }
+  while (stack.length) {
+    const z = stack.pop()!, y = stack.pop()!, x = stack.pop()!
+    visit(x - 1, y, z); visit(x + 1, y, z); visit(x, y - 1, z); visit(x, y + 1, z); visit(x, y, z - 1); visit(x, y, z + 1)
+  }
+  const visible = new Map<number, number>(), buried = new Map<number, number>()
+  const bump = (m: Map<number, number>, id: number): void => { m.set(id, (m.get(id) ?? 0) + 1) }
+  for (let y = 0; y < 32; y++) for (let z = 0; z < 32; z++) for (let x = 0; x < 32; x++) {
+    const id = at(x, y, z)
+    if (id === 0) continue
+    const seen = ([[-1, 0, 0], [1, 0, 0], [0, -1, 0], [0, 1, 0], [0, 0, -1], [0, 0, 1]] as const).some(([dx, dy, dz]) => {
+      const n = at(x + dx, y + dy, z + dz)
+      return reached[key(x + dx, y + dy, z + dz)] === 1 && (n === 0 || (ct[n] === 1 && n !== id))
+    })
+    bump(seen ? visible : buried, id)
+  }
+  return { visible, buried }
+}
+
+/** The pass's counts against the direct scan, every kind. */
+function matchesScan(b: Uint8Array, around: ReadonlyArray<Uint8Array | null> = []): void {
+  const a = assayBlocks(b, around)
+  const d = directScan(b, around)
+  for (let id = 1; id < 256; id++) {
+    expect(a.shown[id]).toBe(d.visible.get(id) ?? 0)
+    expect(a.counts[id] - a.shown[id]).toBe(d.buried.get(id) ?? 0)
+  }
+}
+
+/** The chunk next to BASE at chunk offset (dx, dy, dz), generated. */
+const nextDoor = (dx: number, dy: number, dz: number): Uint8Array => generate({ ...BASE, x: BASE.x + 32n * BigInt(dx), y: BASE.y + 32n * BigInt(dy), z: BASE.z + 32n * BigInt(dz) }).blocks
+
+describe('visible or buried, block by block', () => {
+  it('the chunk and its 26 neighbours make one 96 by 96 by 96 block, each in its place', () => {
+    const b = solid()
+    const n = hood((dx, dy, dz) => (dx === 1 && dy === -1 && dz === 0 ? solid(PRISMITE) : null))
+    const h = hoodBlocks(b, n)
+    expect(h[hoodIndex(0, 0, 0, 5, 6, 7)]).toBe(GRIDSTONE)
+    expect(h[hoodIndex(1, -1, 0, 31, 0, 2)]).toBe(PRISMITE)
+    expect(h[hoodIndex(-1, 0, 0, 31, 6, 7)]).toBe(0)
+  })
+
+  it('per kind, the visible and buried counts match a direct scan of a real generated chunk, alone and with its real neighbours', () => {
+    const g = generate(BASE)
+    matchesScan(g.blocks)
+    matchesScan(g.blocks, hood((dx, dy, dz) => (Math.abs(dx) + Math.abs(dy) + Math.abs(dz) === 1 ? nextDoor(dx, dy, dz) : null)))
+    const card = surveyCard(assayBlocks(g.blocks), null)
+    for (const r of [...card.finds, ...card.common]) expect(r.visible + r.buried).toBe(r.count)
+  })
+
+  it('and with Tidewater, glass, a sealed pocket, and a cave in a neighbour', () => {
+    const g = generate(BASE).blocks.slice()
+    for (let y = 2; y < 30; y++) g[idx(7, y, 7)] = TIDEWATER
+    for (let z = 4; z < 20; z++) g[idx(20, 9, z)] = RIMEGLASS
+    for (let y = 12; y <= 14; y++) for (let z = 12; z <= 14; z++) for (let x = 12; x <= 14; x++) g[idx(x, y, z)] = 0
+    g[idx(15, 13, 13)] = GLOWCORE
+    const n = allSolid()
+    const west = n[aroundIndex(-1, 0, 0)]!
+    for (let x = 0; x < 32; x++) west[idx(x, 20, 20)] = 0 // a tunnel right through the -x neighbour
+    n[aroundIndex(0, 1, 0)] = null // nobody surveyed the chunk above
+    matchesScan(g, n)
+  })
+
   it('a block with open space beside it is visible; one walled in on all six sides is buried', () => {
     const b = solid()
     b[idx(10, 10, 10)] = GLOWCORE // buried deep
-    b[idx(20, 31, 20)] = PRISMITE // on the top face of the chunk: the chunk above is open space
+    b[idx(20, 31, 20)] = PRISMITE // on the top face of the chunk: nobody surveyed the chunk above, so it is open space
     const a = assayBlocks(b)
-    expect(a.seen[GLOWCORE]).toBe(0)
-    expect(a.seen[PRISMITE]).toBe(1)
-    // A cave beside the Glowcore opens it.
-    b[idx(11, 10, 10)] = 0
-    expect(assayBlocks(b).seen[GLOWCORE]).toBe(1)
+    expect(a.shown[GLOWCORE]).toBe(0)
+    expect(a.shown[PRISMITE]).toBe(1)
+    // With every neighbour open space, each Gridstone on the chunk's six faces is seen; the rest are buried.
+    expect(a.shown[GRIDSTONE]).toBe(CELLS - 30 * 30 * 30 - 1)
   })
 
-  it('seen through glass or water counts as visible; glass beside glass does not', () => {
+  it('counts each block, not each kind: two of a kind visible and five buried', () => {
+    const b = solid()
+    for (const x of [3, 6, 9, 12, 15]) b[idx(x, 10, 10)] = GLOWCORE // five deep inside
+    b[idx(4, 31, 4)] = GLOWCORE // two on the top face
+    b[idx(8, 31, 8)] = GLOWCORE
+    const a = assayBlocks(b)
+    expect(a.counts[GLOWCORE]).toBe(7)
+    expect(a.shown[GLOWCORE]).toBe(2)
+    expect(surveyCard(a, facts).finds.find((r) => r.id === GLOWCORE)).toMatchObject({ count: 7, visible: 2, buried: 5 })
+  })
+
+  it('a sealed pocket of air is buried; a tunnel from the outside to it makes its walls visible', () => {
+    const b = solid()
+    for (let y = 9; y <= 11; y++) for (let z = 9; z <= 11; z++) for (let x = 9; x <= 11; x++) b[idx(x, y, z)] = 0
+    b[idx(12, 10, 10)] = GLOWCORE // in the pocket's wall
+    b[idx(10, 12, 10)] = CINDERROCK // and in its roof
+    const a = assayBlocks(b)
+    expect(a.shown[GLOWCORE]).toBe(0)
+    expect(a.shown[CINDERROCK]).toBe(0)
+    expect(surveyCard(a, facts).finds.find((r) => r.id === GLOWCORE)).toMatchObject({ visible: 0, buried: 1 })
+    // Dig from the pocket out to the chunk's -x face, where nobody surveyed the next chunk.
+    for (let x = 0; x < 9; x++) b[idx(x, 10, 10)] = 0
+    const open = assayBlocks(b)
+    expect(open.shown[GLOWCORE]).toBe(1)
+    expect(open.shown[CINDERROCK]).toBe(1)
+  })
+
+  it('a block on the edge is buried against a solid neighbour, and visible where the next chunk is open space', () => {
+    const b = solid()
+    b[idx(0, 12, 12)] = GLOWCORE
+    expect(assayBlocks(b).shown[GLOWCORE]).toBe(1)
+    const n = allSolid()
+    const a = assayBlocks(b, n)
+    expect(a.shown[GLOWCORE]).toBe(0)
+    expect(a.shown[GRIDSTONE]).toBe(0)
+    // The +x neighbour's facing cell for (31, y, z) is its (0, y, z).
+    const c = solid()
+    c[idx(31, 2, 3)] = VOIDPEARL
+    expect(assayBlocks(c, n).shown[VOIDPEARL]).toBe(0)
+    // Open air at the edge with the next chunk solid behind it: a sealed pocket, buried.
+    const d = solid()
+    d[idx(0, 12, 12)] = 0
+    d[idx(1, 12, 12)] = GLOWCORE
+    expect(reachOpen(hoodBlocks(d, n))[hoodIndex(0, 0, 0, 0, 12, 12)]).toBe(0)
+    expect(assayBlocks(d, n).shown[GLOWCORE]).toBe(0)
+  })
+
+  it('a block on the edge beside a cave in the next chunk is visible when the cave reaches the outside, buried when it is closed', () => {
+    const b = solid()
+    b[idx(0, 12, 12)] = GLOWCORE
+    const n = allSolid()
+    const west = n[aroundIndex(-1, 0, 0)]!
+    west[idx(31, 12, 12)] = 0 // the cell the Glowcore faces
+    expect(assayBlocks(b, n).shown[GLOWCORE]).toBe(0)
+    // The cave runs on to the -x neighbour's far side, the outside of the 3 by 3 by 3.
+    for (let x = 0; x < 31; x++) west[idx(x, 12, 12)] = 0
+    expect(assayBlocks(b, n).shown[GLOWCORE]).toBe(1)
+    // Or bends up into the chunk above that one, where nobody surveyed.
+    for (let x = 0; x < 31; x++) west[idx(x, 12, 12)] = 1
+    for (let y = 12; y < 32; y++) west[idx(31, y, 12)] = 0
+    n[aroundIndex(-1, 1, 0)] = null
+    expect(assayBlocks(b, n).shown[GLOWCORE]).toBe(1)
+  })
+
+  it('seen through glass or water that reaches the outside counts as visible; glass beside glass does not', () => {
     const b = solid()
     b[idx(8, 8, 8)] = COBALTINE
-    b[idx(8, 9, 8)] = RIMEGLASS
+    for (let y = 9; y < 32; y++) b[idx(8, y, 8)] = RIMEGLASS // a glass column up to the chunk's top
     b[idx(16, 16, 16)] = FERROVEIN
-    b[idx(16, 16, 17)] = TIDEWATER
+    for (let z = 17; z < 32; z++) b[idx(16, 16, z)] = TIDEWATER // a run of Tidewater out to the +z face
     b[idx(3, 3, 3)] = RIMEGLASS
     b[idx(3, 3, 4)] = RIMEGLASS
     const a = assayBlocks(b)
-    expect(a.seen[COBALTINE]).toBe(1)
-    expect(a.seen[FERROVEIN]).toBe(1)
-    // The Rimeglass at (8, 9, 8) sits on Cobaltine and Gridstone: walled in, each Rimeglass block only touches rock or Rimeglass.
-    expect(a.seen[RIMEGLASS]).toBe(0)
-  })
-
-  it('on the chunk\'s edge it looks at the next chunk: open space where none is held, buried against its rock', () => {
-    const b = solid()
-    b[idx(0, 12, 12)] = GLOWCORE
-    expect(assayBlocks(b).seen[GLOWCORE]).toBe(1)
-    // Every neighbour solid: the edge block is walled in, and so is everything else.
-    const all = Array.from({ length: 6 }, () => solid())
-    const a = assayBlocks(b, all)
-    expect(a.seen[GLOWCORE]).toBe(0)
-    expect(a.seen[GRIDSTONE]).toBe(0)
-    // The -x neighbour open at the facing cell (31, 12, 12): seen again.
-    all[0][idx(31, 12, 12)] = 0
-    expect(assayBlocks(b, all).seen[GLOWCORE]).toBe(1)
-    // The +x neighbour's facing cell for (31, y, z) is (0, y, z).
+    expect(a.shown[COBALTINE]).toBe(1)
+    expect(a.shown[FERROVEIN]).toBe(1)
+    // Glass beside glass draws no face: only the column's top block shows (open air above it); the rest of the column and the pair at (3, 3, 3), each touching only rock or Rimeglass, are buried.
+    expect(a.shown[RIMEGLASS]).toBe(1)
+    expect(a.counts[RIMEGLASS] - a.shown[RIMEGLASS]).toBe(22 + 2)
+    // Glass closed in by rock: what is behind it is buried.
     const c = solid()
-    c[idx(31, 2, 3)] = VOIDPEARL
-    const n = Array.from({ length: 6 }, () => solid())
-    expect(assayBlocks(c, n).seen[VOIDPEARL]).toBe(0)
-    n[1][idx(0, 2, 3)] = 0
-    expect(assayBlocks(c, n).seen[VOIDPEARL]).toBe(1)
+    c[idx(8, 8, 8)] = COBALTINE
+    c[idx(8, 9, 8)] = RIMEGLASS
+    expect(assayBlocks(c).shown[COBALTINE]).toBe(0)
   })
 })
 
@@ -216,14 +367,57 @@ describe('kept per chunk and version', () => {
     const w = field()
     const s = w.slotAt(0, 0, 0)!
     const a = chunkAssay(w, s)!
-    expect(a.seen[GRIDSTONE]).toBe(1)
+    expect(a.shown[GRIDSTONE]).toBeGreaterThan(0)
     for (const [x, y, z] of [[-1, 0, 0], [1, 0, 0], [0, -1, 0], [0, 1, 0], [0, 0, -1], [0, 0, 1]] as const) {
       const n = w.slotAt(x, y, z, true)!
       w.setBlocks(n.key, solid(), solid())
     }
     const b = chunkAssay(w, s)!
     expect(b).not.toBe(a)
-    expect(b.seen[GRIDSTONE]).toBe(0)
+    expect(b.shown[GRIDSTONE]).toBe(0)
+  })
+
+  it('a neighbour across a corner counts again too, and a block mined there changes it', () => {
+    const w = field()
+    const s = w.slotAt(0, 0, 0)!
+    // The six face neighbours solid; a Glowcore on the chunk's edge, seen only through a tunnel in the -x neighbour.
+    for (const [x, y, z] of [[-1, 0, 0], [1, 0, 0], [0, -1, 0], [0, 1, 0], [0, 0, -1], [0, 0, 1]] as const) {
+      const n = w.slotAt(x, y, z, true)!
+      w.setBlocks(n.key, solid(), solid())
+    }
+    w.setCs(0, 12, 0, GLOWCORE) // on the chunk's -x and -z edges
+    const west = w.slotAt(-1, 0, 0)!
+    west.blocks![idx(31, 12, 0)] = 0 // the cell the Glowcore faces
+    for (let x = 0; x < 31; x++) west.blocks![idx(x, 12, 0)] = 0 // a tunnel to the -x neighbour's far side
+    west.version++
+    expect(chunkAssay(w, s)!.shown[GLOWCORE]).toBe(1)
+    // Close the tunnel's far end: it still runs along the -z side of that chunk, beside the corner chunk (-1, 0, -1), open space while nobody surveyed it.
+    west.blocks![idx(0, 12, 0)] = 1
+    west.version++
+    expect(chunkAssay(w, s)!.shown[GLOWCORE]).toBe(1)
+    const corner = w.slotAt(-1, 0, -1, true)!
+    w.setBlocks(corner.key, solid(), solid())
+    const walled = chunkAssay(w, s)!
+    expect(walled.shown[GLOWCORE]).toBe(0)
+    corner.blocks![idx(10, 12, 31)] = 0 // a hole at the corner chunk's +z face, under the tunnel's (10, 12, 0)
+    for (let z = 0; z < 31; z++) corner.blocks![idx(10, 12, z)] = 0 // and on out to its -z side
+    corner.version++
+    const again = chunkAssay(w, s)!
+    expect(again).not.toBe(walled)
+    expect(again.shown[GLOWCORE]).toBe(1)
+  })
+
+  it('a neighbour surveyed but not loaded walls the edge in by the ground it is given', () => {
+    const w = field()
+    const s = w.slotAt(0, 0, 0)!
+    w.setCs(0, 12, 12, GLOWCORE)
+    expect(chunkAssay(w, s)!.shown[GLOWCORE]).toBe(1)
+    const ground = hood((dx, dy, dz) => (dx === -1 && dy === 0 && dz === 0 ? solid() : null))
+    expect(chunkAssay(w, s, ground)!.shown[GLOWCORE]).toBe(0)
+    // The same ground again: the kept pass.
+    const before = assayRuns()
+    chunkAssay(w, s, ground)
+    expect(assayRuns()).toBe(before)
   })
 
   it('no blocks yet: no pass', () => {
@@ -286,7 +480,7 @@ describe('what you mined', () => {
     expect(minedBlocks(own, ground).reduce((a, b) => a + b, 0)).toBe(0)
   })
 
-  it('someone else\'s removals are not yours: only your own blocks are read, never what stands', () => {
+  it('someone else\'s removals are not yours: only your own blocks are read, never what is there now', () => {
     const w = new TerrainWorld(BASE, { right: { axis: 'x', dir: 1 }, up: { axis: 'y', dir: 1 }, out: { axis: 'z', dir: 1 } })
     const slot = w.slotAt(0, 0, 0, true)!
     const ground = solid()
@@ -362,7 +556,7 @@ describe('what you mined', () => {
     own[idx(3, 3, 3)] = 0
     own[idx(1, 1, 1)] = 0
     const card = surveyCard(assayBlocks(own), facts, { mined: minedBlocks(own, ground) })
-    expect(card.finds).toEqual([expect.objectContaining({ id: GLOWCORE, count: 0, mined: 1, visible: false })])
+    expect(card.finds).toEqual([expect.objectContaining({ id: GLOWCORE, count: 0, mined: 1, visible: 0, buried: 0 })])
     expect(card.common).toEqual([expect.objectContaining({ id: GRIDSTONE, count: CELLS - 2, mined: 1 })])
     expect(card.total).toBe(CELLS - 2)
     expect(card.minedTotal).toBe(2)

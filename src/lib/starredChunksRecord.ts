@@ -58,8 +58,8 @@ export const MAX_NOTE = 48
 export const MAX_ROWS = 16
 const FORMAT = 1
 
-/** One kind on a saved card: [block id, how many are left, how many you mined, 1 when any of it shows]. */
-export type SnapRow = [number, number, number, 0 | 1]
+/** One kind on a saved card: [block id, how many are left, how many you mined, how many of those left you could see without digging]. */
+export type SnapRow = [number, number, number, number]
 
 /** A survey card as it was last seen: enough to draw the saved card. */
 export interface ChunkSnapshot {
@@ -130,7 +130,8 @@ export function validSnapshot(o: unknown): ChunkSnapshot | undefined {
     const [id, left, mined, seen] = r as unknown[]
     if (typeof id !== 'number' || !Number.isInteger(id) || id < 1 || id > 255 || !okCount(left) || !okCount(mined)) continue
     if (rows.some((x) => x[0] === id)) continue
-    rows.push([id, left, mined, seen === 1 ? 1 : 0])
+    // How many show, never more than are left (a 0/1 from before the card counted them reads as none or one).
+    rows.push([id, left, mined, okCount(seen) ? Math.min(seen, left) : 0])
   }
   return {
     g: typeof v.g === 'string' && FAMILY.test(v.g) ? v.g : null,

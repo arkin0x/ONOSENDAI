@@ -9,7 +9,8 @@
  *   and a solid OPAQUE hold and slide you; a see-through OPAQUE, OFF and no
  *   setting at all do not, and you walk straight on through;
  * - a diagonal into a wall slides along it, never through its corner;
- * - a riser is climbed while sliding and on a diagonal;
+ * - under GRAVITY a riser is climbed while sliding and on a diagonal; with
+ *   gravity off it is not (you fly, at your height);
  * - a diagonal step is ONE hop, ONE chain event, changing two axes, and costs
  *   per axis what the two straight steps would;
  * - under GRAVITY a diagonal off a ledge stops past the edge and falls;
@@ -292,9 +293,10 @@ describe('a diagonal', () => {
     expect(moved(start)).toEqual([5, 0, -7])
   })
 
-  it('climbs a riser on the way, the same on both ways round its square', () => {
+  it('climbs a riser on the way, the same on both ways round its square, under GRAVITY', () => {
     // A riser 1 high from z -1.5 on, across the whole floor.
     world(start, floor(), boxes('Riser', 'all', [[[-10, -1, -20], [20, 0, -1.5]]]))
+    useWalk.getState().setGravity(true)
     walk()
     face(45)
     forward(1)
@@ -304,12 +306,23 @@ describe('a diagonal', () => {
     expect(moved(start)).toEqual([2, 1, -2])
     expect(useWalk.getState().queue).toHaveLength(0)
   })
+
+  it('gravity off, the riser is not climbed: you fly on at your height, along its face (arkinox, 2026-11-28)', () => {
+    world(start, floor(), boxes('Riser', 'all', [[[-10, -1, -20], [20, 0, -1.5]]]))
+    walk()
+    face(45)
+    forward(3)
+    const m = moved(start)
+    expect(m[1]).toBe(0)
+    expect(m[2]).toBe(-1)
+  })
 })
 
 describe('a slide', () => {
-  it('climbs a riser on the way along the wall', () => {
+  it('climbs a riser on the way along the wall, under GRAVITY', () => {
     // A riser 1 high along the end wall from x 3.5 on.
     world(start, floor(), corridor('all'), boxes('Riser', 'all', [[[3.5, -1, -8], [20, 0, -4.5]]]))
+    useWalk.getState().setGravity(true)
     walk()
     face(10)
     forward(7 + 3)

@@ -120,6 +120,8 @@ export const MOVED_PREFIXES: readonly string[] = [
   'onosendai:air-place:',
   // The chunks you starred per player (store/starredChunks.ts): the list, with each one's saved card.
   'onosendai:starred-chunks:',
+  // TERRAIN's "Don't ask again" for a smash that would waste recipe materials, per player (lib/blueprint/smashConfirm.ts).
+  'onosendai:smash-ask-off:',
 ]
 
 /**

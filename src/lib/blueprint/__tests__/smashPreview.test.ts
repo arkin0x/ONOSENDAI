@@ -65,13 +65,12 @@ describe('the preview set is the smash set', () => {
     expect(sorted(p.cells)).toEqual(sorted(smashGroup(read, [1, 2, 0], false).smash))
   })
 
-  it('bare-handed, a build other than the recipe is taken whole but only breaks (a bare hand compiles the recipe alone)', () => {
+  it('bare-handed, a build other than the recipe is taken whole and compiles, as with the Compiler (owner, 2026-11-28)', () => {
     const pair = reader(new Map([['0,0,0', GRIDSTONE], ['1,0,0', GRIDSTONE]]))
     const bare = smashPreview(pair, [0, 0, 0], true)!
     expect(sorted(bare.cells)).toEqual(sorted(smashGroup(pair, [0, 0, 0], true).smash))
     expect(bare.cells).toHaveLength(2)
-    expect(bare.state).toBe('breaks')
-    // The same pair with the Compiler compiles.
+    expect(bare.state).toBe('compiles')
     expect(smashPreview(pair, [0, 0, 0], false)!.state).toBe('compiles')
   })
 
@@ -115,7 +114,7 @@ describe('colour and line', () => {
     showPreview(p)
     showPreview(p)
     showPreview(p)
-    expect(useSmashPreview.getState()).toEqual({ state: 'compiles', count: 5 })
+    expect(useSmashPreview.getState()).toEqual({ state: 'compiles', count: 5, cause: null })
     showPreview(null)
     showPreview(null)
     expect(useSmashPreview.getState().state).toBeNull()
@@ -133,9 +132,9 @@ describe('the line a smash with no prize leaves agrees with the preview', () => 
     expect(NO_MATCH_LINE).toBe('Compiled. No blueprint matches. The blocks are spent.')
     const broken = smashPreview(ground, [0, -1, 0], false)!
     expect(missLine(broken.state === 'compiles', false, false)).toBe(MISS_LINE)
-    // Bare-handed, a build other than the recipe compiles nothing, whatever a relay says.
+    // Bare-handed, a build other than the recipe compiles too (owner, 2026-11-28), so a silent relay is said.
     const pair = smashPreview(reader(new Map([['0,0,0', GRIDSTONE], ['1,0,0', GRIDSTONE]])), [0, 0, 0], true)!
-    expect(missLine(pair.state === 'compiles', true, false)).toBe(MISS_LINE)
+    expect(missLine(pair.state === 'compiles', true, false)).toBe(OFFLINE_LINE)
     // Compiled, with no relay answering or a prize this version cannot open: those say so.
     expect(missLine(true, true, false)).toBe(OFFLINE_LINE)
     expect(missLine(true, false, true)).toBe(UNKNOWN_LINE)

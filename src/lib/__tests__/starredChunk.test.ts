@@ -82,7 +82,7 @@ describe('names and the prompt', () => {
   })
 
   it('the card asks to be starred for Glowcore, Cinderrock and the rare band, never for common rock or Prismite', () => {
-    const rows = (ids: number[]) => ({ finds: ids.map((id) => ({ id, name: ['', 'Gridstone'][id] ?? ({ 42: 'Glowcore', 7: 'Cinderrock', 8: 'Prismite', 193: 'Voidpearl' } as Record<number, string>)[id], count: 1, mined: 0, visible: false, prized: false })) })
+    const rows = (ids: number[]) => ({ finds: ids.map((id) => ({ id, name: ['', 'Gridstone'][id] ?? ({ 42: 'Glowcore', 7: 'Cinderrock', 8: 'Prismite', 193: 'Voidpearl' } as Record<number, string>)[id], count: 1, mined: 0, visible: 0, buried: 1, prized: false })) })
     expect(promptLine(rows([42]))).toBe('Glowcore here. Star this chunk to find it again.')
     expect(promptLine(rows([193, 42, 7]))).toBe('Voidpearl and Glowcore here. Star this chunk to find it again.')
     expect(promptLine(rows([7]))).toBe('Cinderrock here. Star this chunk to find it again.')

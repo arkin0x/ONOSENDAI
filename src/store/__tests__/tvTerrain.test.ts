@@ -9,6 +9,9 @@
  * - On screen, a TERRAIN shot draws its avatar's chunk and neighbours (27 at
  *   most) with their meshes; asked again, nothing is meshed twice; off
  *   TERRAIN, nothing is drawn; TV's region keys go when TV ends.
+ * - Block shading: the site's /tv lights each chunk by the viewer's Block
+ *   shading setting (its light worked out and cached, the chunk drawn once
+ *   it is in); the stream never does, and no light job runs there.
  * - The viewer's own field is never drawn during TV: the TV scene does not
  *   mount it, and it stays hidden while TV is on however it is mounted.
  */
@@ -35,7 +38,10 @@ import { encryptForRegion } from '../../lib/shardCrypto'
 import type { NostrEvent } from '../../lib/events'
 import { tvRegionKey, tvRegionKeysHeld, type TvTerrainDeps } from '../../lib/tv/terrainReader'
 import type { Beat, Shot } from '../../lib/tv/director'
-import { MAX_DRAWN, setTvTerrainDeps, startTvTerrain, stopTvTerrain, terrainOn, tvTerrainIdle, tvTerrainMeshesKept, tvTerrainTick, useTvTerrain, type TvTerrainFrame } from '../useTvTerrain'
+import { MAX_DRAWN, setTvTerrainDeps, startTvTerrain, stopTvTerrain, terrainOn, tvLighting, tvTerrainIdle, tvTerrainLightsKept, tvTerrainMeshesKept, tvTerrainTick, useTvTerrain, type TvTerrainFrame } from '../useTvTerrain'
+import { setBroadcastForTest } from '../../lib/tv/broadcast'
+import { useLayers } from '../useLayers'
+import { LIGHT_BYTES } from '../../lib/terrain/light'
 import { fieldVisible } from '../../scene/TerrainLayer'
 
 const BASE: ChunkBase = { x: 0x468ace02468ace024680n, y: 0x13579bdf13579bdf13560n, z: 0x0abcdef0abcdef0abce0n, plane: 0 }
@@ -95,6 +101,58 @@ function tripOf(beats: Beat[]): Shot {
 afterEach(() => {
   stopTvTerrain()
   setTvTerrainDeps(null)
+  setBroadcastForTest(null)
+  useLayers.setState({ blockShading: true })
+})
+
+/** A TERRAIN shot over BASE read ahead and put on screen at 1101; resolves once its chunks are drawn and nothing is left to do. */
+async function onScreen(): Promise<TvTerrainFrame> {
+  const m = mockDeps([await surveyLayer(BASE, 1000), finalizeEvent({ kind: 3333, created_at: 990, tags: [['A', 'hop']], content: '' }, sk) as unknown as NostrEvent])
+  setTvTerrainDeps(m.deps)
+  startTvTerrain()
+  const shot = tripOf([beat(1100, 4, 5), beat(1101, 5, 6)])
+  tvTerrainTick({ shot: null, tapeTime: null, avatars: {}, terrain: null }, [shot])
+  await until(() => shot.beats.every((b) => b.terrain) && tvTerrainIdle())
+  const frame: TvTerrainFrame = { shot, tapeTime: 1101, avatars: { [pk]: { position: shot.beats[1].action.position, plane: 0 } }, terrain: { mode: 'orbit', shot: shot.id } }
+  await until(() => { tvTerrainTick(frame, []); return useTvTerrain.getState().drawn.length > 0 && tvTerrainIdle() })
+  return frame
+}
+
+describe('block lighting: the site\'s /tv lights its blocks, the stream never does', () => {
+  it('on the site, with Block shading on, each chunk is drawn with its light, worked out once', async () => {
+    setBroadcastForTest(false)
+    useLayers.setState({ blockShading: true })
+    expect(tvLighting()).toBe(true)
+    const frame = await onScreen()
+    const d = useTvTerrain.getState().drawn[0]
+    expect(d.light).not.toBeNull()
+    expect(d.light!.length).toBe(LIGHT_BYTES)
+    const kept = tvTerrainLightsKept()
+    expect(kept).toBeGreaterThan(0)
+    tvTerrainTick({ ...frame, tapeTime: 1100 }, [])
+    expect(tvTerrainIdle()).toBe(true)
+    expect(tvTerrainLightsKept()).toBe(kept)
+  }, 30_000)
+
+  it('on the site, with Block shading off, no light', async () => {
+    setBroadcastForTest(false)
+    useLayers.setState({ blockShading: false })
+    expect(tvLighting()).toBe(false)
+    await onScreen()
+    expect(useTvTerrain.getState().drawn[0].light).toBeNull()
+    expect(tvTerrainLightsKept()).toBe(0)
+  }, 30_000)
+
+  it('on the stream, never: no light job runs even with Block shading on', async () => {
+    setBroadcastForTest(true)
+    useLayers.setState({ blockShading: true })
+    expect(tvLighting()).toBe(false)
+    await onScreen()
+    const d = useTvTerrain.getState().drawn[0]
+    expect(d.light).toBeNull()
+    expect(d.lightKey).toBeNull()
+    expect(tvTerrainLightsKept()).toBe(0)
+  }, 30_000)
 })
 
 describe('the TV terrain engine', () => {

@@ -26,6 +26,14 @@
  * in. One chunk job at a time on the stream (the stream box draws about
  * 21.9 frames a second at 1080p), two on the site.
  *
+ * Block shading (tvLighting): on the site's /tv each chunk is lit as your
+ * own field is, by your Block shading setting (Settings, Effects): its light
+ * worked out in the worker from the chunk and its 26 neighbours as of tape
+ * time, cached like its mesh, and the chunk drawn only once both are in, so
+ * it never shows lit and then darkens. On the stream (lib/tv/broadcast.ts
+ * isBroadcast, the streamer's ?broadcast=1) there is no light at all: every
+ * chunk draws fully lit and no light job runs.
+ *
  * Watching only: nothing here makes a signature, publishes or keeps anything past TV.
  */
 
@@ -35,6 +43,7 @@ import { verifyOnce } from '../lib/verifiedSigs'
 import { keyStatusOn } from '../lib/terrain/builderStatus'
 import { makeBlocksClient, type BlocksClient } from '../lib/terrain/makeBlocksClient'
 import { borderSlab, type Borders, type ChunkMesh } from '../lib/terrain/mesh'
+import { FOOT, aroundIndex, lightTables, shadedColumns } from '../lib/terrain/light'
 import { chunkInSpace, chunkKey, chunkOf, type ChunkBase } from '../lib/terrain/coords'
 import { isBroadcast } from '../lib/tv/broadcast'
 import { TvTerrainReader, forgetTvRegionKeys, type ChunkAsOf, type TvTerrainDeps } from '../lib/tv/terrainReader'
@@ -42,6 +51,7 @@ import { beatChunk, flagTerrainBeats, isTerrainShot, mayBeTerrain, neighbourhood
 import type { Shot } from '../lib/tv/director'
 import type { Position } from '../lib/space'
 import { useMutes } from './useMutes'
+import { useLayers } from './useLayers'
 
 /** How many queued shots after the one on screen are read ahead. */
 export const TERRAIN_AHEAD = 2
@@ -64,6 +74,18 @@ export interface DrawnChunk {
   base: ChunkBase
   meshKey: string
   mesh: ChunkMesh
+  /** Its light (lib/terrain/light.ts computeLight's bytes) where TV lights its blocks (tvLighting), else null. */
+  light: Uint8Array<ArrayBuffer> | null
+  lightKey: string | null
+}
+
+/**
+ * Whether TV lights its blocks: on the site, by your Block shading setting;
+ * never on the stream (lib/tv/broadcast.ts isBroadcast), where no light job
+ * runs and every chunk draws fully lit.
+ */
+export function tvLighting(): boolean {
+  return !isBroadcast() && useLayers.getState().blockShading
 }
 
 interface TvTerrainView {
@@ -95,6 +117,8 @@ let namedAt = new Map<string, number>()
 const prepared = new Set<string>()
 /** Meshes by what went into them; null for a chunk with no face to draw. */
 const meshes = new Map<string, ChunkMesh | null>()
+/** Lights by what went into them (the chunk and its neighbours as of tape time). */
+const lights = new Map<string, Uint8Array<ArrayBuffer>>()
 interface Job { key: string; pri: number; touched: number; run: () => Promise<void> }
 const jobs = new Map<string, Job>()
 let running = 0
@@ -148,6 +172,7 @@ export function stopTvTerrain(): void {
   reader = null
   namedAt = new Map()
   meshes.clear()
+  lights.clear()
   forgetTvRegionKeys()
   newTapeTvTerrain()
 }
@@ -171,6 +196,11 @@ export function tvTerrainReader(): TvTerrainReader | null {
 /** Whether nothing is being read or meshed (tests). */
 export function tvTerrainIdle(): boolean {
   return running === 0 && jobs.size === 0
+}
+
+/** How many lights are kept (tests). */
+export function tvTerrainLightsKept(): number {
+  return lights.size
 }
 
 /** How many meshes are kept (tests). */
@@ -218,9 +248,12 @@ async function prepareShot(shot: Shot, r: TvTerrainReader, id: number): Promise<
   const at = terrainStep(first) ? first.from.position : first.action.position
   const plane = terrainStep(first) ? first.from.plane : first.action.plane
   const centre = chunkOf(at.x, at.y, at.z, plane)
+  const lit = tvLighting()
   for (const b of neighbourhood(centre, DRAW_RING)) {
     const a = r.asOf(b, shot.start)
-    if (a && (a.surveyed || a.cells)) queueMesh(r, a, shot.start, 10 + far1(b, centre))
+    if (!a || (!a.surveyed && !a.cells)) continue
+    queueMesh(r, a, shot.start, 10 + far1(b, centre))
+    if (lit) queueLight(r, a, shot.start, 10 + far1(b, centre))
   }
   pump()
 }
@@ -280,6 +313,68 @@ function queueMesh(r: TvTerrainReader, a: ChunkAsOf, t: number, pri: number): st
   return key
 }
 
+/** The chunks above whose columns shade a chunk's sky (TerrainWorld lightInputs): two up, and the eight round that. */
+const SKY: ReadonlyArray<readonly [number, number, number]> = [-1, 0, 1].flatMap((dz) => [-1, 0, 1].map((dx) => [dx, 2, dz] as const))
+const AROUND: ReadonlyArray<readonly [number, number, number]> = [-1, 0, 1].flatMap((dz) => [-1, 0, 1].flatMap((dy) => [-1, 0, 1].map((dx) => [dx, dy, dz] as const)))
+let passTable: Uint8Array | null = null
+
+/** A chunk's light key as of tape time: its own signature, its 26 neighbours' and the chunks over its sky ('?' for one not read). */
+export function lightKeyOf(r: TvTerrainReader, a: ChunkAsOf, t: number): string {
+  const sig = (o: readonly [number, number, number]): string => {
+    const n = step(a.base, o)
+    if (!chunkInSpace(n)) return '0'
+    const na = r.asOf(n, t)
+    if (!na) return '?'
+    return na.surveyed || na.cells ? na.signature : '0'
+  }
+  return ['L', ...AROUND.map(sig), ...SKY.map(sig)].join('#')
+}
+
+/** Ask for a chunk's light as of tape time `t`: from its blocks and its 26 neighbours', and the columns above, worked out in the worker. */
+function queueLight(r: TvTerrainReader, a: ChunkAsOf, t: number, pri: number): string {
+  const key = lightKeyOf(r, a, t)
+  if (lights.has(key)) return key
+  const now = performance.now()
+  const had = jobs.get(key)
+  if (had) { had.pri = Math.min(had.pri, pri); had.touched = now; return key }
+  const base = a.base
+  const id = run
+  jobs.set(key, {
+    key, pri, touched: now,
+    run: async () => {
+      const around = await Promise.all(AROUND.map(async (o) => {
+        const n = step(base, o)
+        return chunkInSpace(n) ? r.blocksAsOf(n, t) : null
+      }))
+      const ordered: Array<Uint8Array | null> = new Array(27).fill(null)
+      AROUND.forEach((o, i) => { ordered[aroundIndex(o[0], o[1], o[2])] = around[i] })
+      let skyTop: Uint8Array | null = null
+      for (const o of SKY) {
+        const n = step(base, o)
+        if (!chunkInSpace(n)) continue
+        const above = await r.blocksAsOf(n, t)
+        if (!above) continue
+        passTable ??= lightTables().pass
+        const cols = shadedColumns(above, passTable)
+        skyTop ??= new Uint8Array(FOOT * FOOT).fill(1)
+        for (let z = 0; z < 32; z++) for (let x = 0; x < 32; x++) if (cols[x + 32 * z]) skyTop[(o[0] + 1) * 32 + x + FOOT * ((o[2] + 1) * 32 + z)] = 0
+      }
+      const c = client
+      if (!c || id !== run) return
+      const bytes = await c.lightChunkAsync(ordered, skyTop)
+      if (id !== run) return
+      lights.delete(key)
+      lights.set(key, bytes)
+      const onScreen = new Set([...shown.values()].map((d) => d.lightKey))
+      for (const k of lights.keys()) {
+        if (lights.size <= MESHES_KEPT) break
+        if (!onScreen.has(k)) lights.delete(k)
+      }
+    },
+  })
+  return key
+}
+
 function keepMesh(key: string, m: ChunkMesh | null): void {
   meshes.delete(key)
   meshes.set(key, m)
@@ -329,7 +424,8 @@ function drawFor(s: TvTerrainFrame, r: TvTerrainReader): void {
   }
   const centre = chunkOf(a.position.x, a.position.y, a.position.z, a.plane)
   const muted = useMutes.getState().muted
-  const want = `${shot.id}|${s.tapeTime}|${chunkKey(centre)}|${r.version}|${meshVersion}`
+  const lit = tvLighting()
+  const want = `${shot.id}|${s.tapeTime}|${chunkKey(centre)}|${r.version}|${meshVersion}|${lit}`
   if (want === lastWant && muted === lastMuted) return
   lastWant = want
   lastMuted = muted
@@ -342,12 +438,15 @@ function drawFor(s: TvTerrainFrame, r: TvTerrainReader): void {
     if (!asOf || (!asOf.surveyed && !asOf.cells)) continue
     const key = asOf.key
     const mk = queueMesh(r, asOf, s.tapeTime, far1(b, centre))
+    const lk = lit ? queueLight(r, asOf, s.tapeTime, far1(b, centre)) : null
     const m = meshes.get(mk)
-    if (m !== undefined) {
-      if (m) next.push({ key, base: b, meshKey: mk, mesh: m })
+    const light = lk === null ? null : lights.get(lk)
+    // Lit, a chunk waits for its light too, so it never shows lit and then darkens.
+    if (m !== undefined && light !== undefined) {
+      if (m) next.push({ key, base: b, meshKey: mk, mesh: m, light, lightKey: lk })
       continue
     }
-    // Being meshed: the chunk as it was drawn until the new mesh is in.
+    // Being meshed or lit: the chunk as it was drawn until the new one is in.
     const old = shown.get(key)
     if (old) next.push(old)
   }
@@ -355,5 +454,5 @@ function drawFor(s: TvTerrainFrame, r: TvTerrainReader): void {
   if (unread.length) void r.prepare(unread)
   const was = useTvTerrain.getState().drawn
   shown = new Map(next.map((d) => [d.key, d]))
-  if (was.length !== next.length || was.some((d, i) => d.meshKey !== next[i].meshKey)) useTvTerrain.setState({ drawn: next })
+  if (was.length !== next.length || was.some((d, i) => d.meshKey !== next[i].meshKey || d.lightKey !== next[i].lightKey)) useTvTerrain.setState({ drawn: next })
 }

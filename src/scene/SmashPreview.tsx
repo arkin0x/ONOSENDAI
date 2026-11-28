@@ -2,7 +2,7 @@
  * SmashPreview.tsx - the blocks a smash would take, pulsing before it happens
  * (lib/blueprint/smashPreview.ts has the rules: the set is smash.ts
  * smashGroup's own, mint when it compiles, the Compiler's orange when it only
- * breaks).
+ * breaks, the warning red when it is a game recipe built wrong: nearMiss.ts).
  *
  * Drawn inside TerrainLayer's Marks frame (the field's frame, a cell one unit
  * at any zoom), beside the block outline, as the set's outer
@@ -30,6 +30,7 @@ import { useReducedMotion } from '../hooks/useReducedMotion'
 import { useSmashHold } from '../terrain/smashHold'
 import { RESOLVE_AFTER_MS, SWING_MS } from '../lib/blueprint/smash'
 import { PreviewTracker, advancePhase, previewColor, pulseOpacity, outerFaces, showPreview, smashPreview, type Preview, type PreviewAim } from '../lib/blueprint/smashPreview'
+import { missCause, naturalOf } from '../lib/blueprint/nearMiss'
 import { NO_BLOOM_BLEND } from './shardFaces'
 import { terrainCursor } from './TerrainLayer'
 
@@ -95,7 +96,7 @@ export function SmashPreview(): JSX.Element {
   const aim = useRef<PreviewAim>({ field: {}, x: 0, y: 0, z: 0, bare: false, version: 0 })
   const tracker = useMemo(() => new PreviewTracker((a) => {
     const s = a.field as TerrainSession
-    return smashPreview((x, y, z) => s.world.blockCs(x, y, z), [a.x, a.y, a.z], a.bare)
+    return smashPreview((x, y, z) => s.world.blockCs(x, y, z), [a.x, a.y, a.z], a.bare, naturalOf(s.world))
   }), [])
   useEffect(() => () => {
     geometry.current?.dispose()
@@ -119,7 +120,7 @@ export function SmashPreview(): JSX.Element {
       g.computeBoundingSphere()
       geometry.current = g
       m.geometry = g
-      material.color.set(previewColor(shown.state))
+      material.color.set(previewColor(shown.state, shown.miss ? missCause(shown.miss) : null))
     }
     phase.current = advancePhase(phase.current, Math.min(delta, 0.1) * 1000, holdCharge(now))
     material.opacity = pulseOpacity(phase.current, calm.current)

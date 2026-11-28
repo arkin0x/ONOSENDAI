@@ -115,7 +115,7 @@ describe('colour and line', () => {
     showPreview(p)
     showPreview(p)
     showPreview(p)
-    expect(useSmashPreview.getState()).toEqual({ state: 'compiles', count: 5 })
+    expect(useSmashPreview.getState()).toEqual({ state: 'compiles', count: 5, cause: null })
     showPreview(null)
     showPreview(null)
     expect(useSmashPreview.getState().state).toBeNull()

@@ -4,7 +4,9 @@
  * prizes that appear (lib/blueprint/smash.ts has the rules, without the app).
  *
  * The hold (terrain/smashHold.ts) fixes the block hit; when it completes the
- * held Compiler swings (SWING_MS), and at the impact the group is cleared in
+ * held Compiler swings (SWING_MS), unless the smash would waste recipe
+ * materials without compiling, when it asks first (smashConfirm.ts) and
+ * swings only on SMASH. At the impact the group is cleared in
  * your layer and the shatter starts. The key is made during the shatter, and
  * the outcome shows no sooner than RESOLVE_AFTER_MS after the impact: toys
  * where the build stood (store/useBlueprints.ts, scene/PrizeToys.tsx), or
@@ -19,7 +21,7 @@ import { useCyberspace } from '../../store/useCyberspace'
 import { useInventory } from '../../store/useInventory'
 import { useMutes } from '../../store/useMutes'
 import { followsKnown } from '../../store/terrainShare'
-import { cancelSmashHold as cancelHold, startSmashHold, useSmashHold } from '../../terrain/smashHold'
+import { cancelSmashHold as cancelHold, startSmashHold, startSwing, useSmashHold } from '../../terrain/smashHold'
 import { humStart, humStop, impact, whoosh } from './smashSound'
 import { terrainCursor } from '../../scene/TerrainLayer'
 import { query } from '../relay'
@@ -32,6 +34,8 @@ import { readRecord, toolCount, type Prize, type RecordEvent } from './format'
 import { isQuarry } from '../terrain/terrainDb'
 import type { ToyRow } from './blueprintDb'
 import { noteMining } from '../../store/miningStats'
+import { nearMiss, nearMissLine, naturalOf } from './nearMiss'
+import { askBeforeSmash, dropSmashAsk, smashAsk, smashAsking, smashAskingFor } from './smashConfirm'
 
 // Whether the Compiler is the chosen slot (otherwise the hand is bare): with the terrain store, where the preview asks it too.
 export { compilerInHand } from '../../store/useTerrain'
@@ -43,6 +47,8 @@ export function holdSmash(): void {
   if (!s || !hit) { useTerrain.getState().say('Aim at a block to smash it.'); return }
   if (!cellInReach(s, hit.cell)) { useTerrain.getState().say(OUT_OF_REACH); return }
   if (useSmashHold.getState().since !== null) return
+  // A confirm is up: it is answered first.
+  if (smashAsking()) return
   const bare = !compilerInHand()
   const ms = bare ? BARE_HOLD_MS : COMPILER_HOLD_MS
   // The field and the identity as the hold starts: the impact clears blocks in this field, for this identity, or none
@@ -52,8 +58,15 @@ export function holdSmash(): void {
   humStart(ms, bare)
   startSmashHold(hit.cell, ms, bare, (target, b) => {
     humStop()
-    whoosh()
-    setTimeout(() => { void strike(target, b, { field, me }) }, SWING_MS)
+    const go = (): void => {
+      whoosh()
+      setTimeout(() => { void strike(target, b, { field, me }) }, SWING_MS)
+    }
+    // A smash that will not compile and would waste recipe materials asks first (smashConfirm.ts); a compiling one never.
+    const ask = terrainSession === field && smashAskingFor(me) ? smashAsk((x, y, z) => field.world.blockCs(x, y, z), target, b, naturalOf(field.world)) : null
+    if (!ask) { go(); return true }
+    askBeforeSmash(ask, () => { startSwing(); go() })
+    return false
   })
 }
 
@@ -114,6 +127,8 @@ export async function strike(target: readonly [number, number, number], bare: bo
   const owner0 = useCyberspace.getState().identity.pubkey
   const g = smashGroup(read, target, bare)
   if (!g.smash.length) { useTerrain.getState().say('Nothing there to smash.'); return }
+  // A game recipe built wrong, read before its blocks go, so the line after says why (nearMiss.ts).
+  const miss = compiles(g.arrangement, bare) ? null : nearMiss(read, target, bare, naturalOf(s.world))
   // What goes is the smash set (a construction whole, else the reach's box round the hit), spent whether or not it
   // compiles (DECK-0010 §4.3); what compiles is the gather's arrangement.
   const refused = useTerrain.getState().clear(g.smash)
@@ -150,7 +165,7 @@ export async function strike(target: readonly [number, number, number], bare: bo
   if (!found.length) {
     useSmashFx.getState().resolve(id, 'miss')
     // Only what this code does: no recheck happens later, and a prize of an unknown type is not opened (review of #943).
-    useTerrain.getState().say(missLine(compiles(g.arrangement, bare), offline, unknown > 0))
+    useTerrain.getState().say(miss ? nearMissLine(miss) : missLine(compiles(g.arrangement, bare), offline, unknown > 0))
     return
   }
   useSmashFx.getState().resolve(id, 'match')
@@ -234,9 +249,10 @@ export function takeToy(rowKey: string): boolean {
 }
 
 // A hold is for the hand it started with: choosing another slot lets go (a Compiler hold never finishes bare, or the other way round).
-useTerrain.subscribe((t, prev) => { if (t.inventory.slot !== prev.inventory.slot || t.active !== prev.active) cancelSmashHold() })
+// A confirm waiting for its answer goes the same way, with nothing spent.
+useTerrain.subscribe((t, prev) => { if (t.inventory.slot !== prev.inventory.slot || t.active !== prev.active) { cancelSmashHold(); dropSmashAsk() } })
 // A change of identity ends a hold too: the smash belongs to the identity that began it.
-useCyberspace.subscribe((c, prev) => { if (c.identity.pubkey !== prev.identity.pubkey) cancelSmashHold() })
+useCyberspace.subscribe((c, prev) => { if (c.identity.pubkey !== prev.identity.pubkey) { cancelSmashHold(); dropSmashAsk() } })
 
 /** Whether a smash hold is under way. */
 export const smashHolding = (): boolean => useSmashHold.getState().since !== null

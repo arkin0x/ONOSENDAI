@@ -26,7 +26,8 @@
  *   - Starring, renaming and removing mark the record dirty. A fresh snapshot
  *     of a saved chunk's card (you mined there) never does: it rides along
  *     with the next real change.
- *   - A dirty record is written at most once every WRITE_EVERY_MS: QUIET_MS
+ *   - A dirty record is written at most once every WRITE_EVERY_MS (a race
+ *     with another device's write can sign again, at most twice, as MINING's): QUIET_MS
  *     after the change (so a star and its rename are one write), or as soon as
  *     the last try is WRITE_EVERY_MS old. Hiding the page writes a dirty
  *     record too, held to the same floor since the last try.
@@ -166,7 +167,10 @@ export const useStarredChunks = create<StarredState>((set) => ({
 function publishList(): void {
   const me = deps.self()
   const entries = me ? entriesOf(localFor(me, deps).rec) : []
-  useStarredChunks.setState({ entries, keys: new Set(entries.map((e) => e.c)) })
+  const keys = new Set(entries.map((e) => e.c))
+  // A guide whose chunk left the list (removed here or on another device) ends: nothing would be left to switch it off.
+  const guide = useStarredChunks.getState().guide
+  useStarredChunks.setState({ entries, keys, ...(guide && !keys.has(guide.key) ? { guide: null } : {}) })
 }
 
 // -- this device's side ------------------------------------------------------
@@ -265,12 +269,23 @@ export function starChunk(key: string, snapshot: ChunkSnapshot | undefined): boo
   return edit(true, (rec, now) => {
     const was = rec.e[key]
     if (!was && Object.keys(rec.e).length >= MAX_STARRED_CHUNKS) return null
-    const entry: StarEntry = was ? { ...was, t: now } : { c: key, a: now, t: now }
+    // Newer than anything it replaces, even against a clock that ran ahead elsewhere.
+    const t = Math.max(now, was?.t ?? 0, (rec.x[key] ?? -1) + 1)
+    const entry: StarEntry = was ? { ...was, t } : { c: key, a: now, t }
     if (snapshot) { entry.s = snapshot; entry.st = now }
     const x = { ...rec.x }
     delete x[key]
-    return { e: { ...rec.e, [key]: entry }, x }
-  })
+    const next = { e: { ...rec.e, [key]: entry }, x }
+    // Never past what one event carries: refused here, at the star, never later at every write.
+    try { planRecord(next) } catch { return null }
+    return next
+  }) && clearUndoFor(key)
+}
+
+/** A chunk starred again: the UNDO for its removal is moot. Always true. */
+function clearUndoFor(key: string): true {
+  if (useStarredChunks.getState().removed?.entry.c === key) useStarredChunks.setState({ removed: null })
+  return true
 }
 
 /** Take the chunk `key` off the list, a tombstone left; UNDO stays for UNDO_MS. Returns the entry taken, or null. */
@@ -312,7 +327,8 @@ export function renameChunk(key: string, typed: string): boolean {
   return edit(true, (rec, now) => {
     const was = rec.e[key]
     if (!was || (was.n ?? '') === note) return null
-    const entry: StarEntry = { ...was, nt: now, t: now }
+    const t = Math.max(now, was.t, was.nt ?? 0)
+    const entry: StarEntry = { ...was, nt: Math.max(now, was.nt ?? 0), t }
     if (note) entry.n = note
     else delete entry.n
     return { ...rec, e: { ...rec.e, [key]: entry } }
@@ -328,7 +344,8 @@ export function refreshSnapshot(key: string, snapshot: ChunkSnapshot): boolean {
   return edit(false, (rec, now) => {
     const was = rec.e[key]
     if (!was || sameSnapshot(was.s, snapshot)) return null
-    return { ...rec, e: { ...rec.e, [key]: { ...was, s: snapshot, st: now, t: Math.max(was.t, now) } } }
+    // Its own time only: the entry's (which a tombstone is weighed against) stays as it was.
+    return { ...rec, e: { ...rec.e, [key]: { ...was, s: snapshot, st: Math.max(now, was.st ?? 0) } } }
   })
 }
 
@@ -430,6 +447,8 @@ async function syncOnce(D: StarredDeps, write: boolean): Promise<Outcome> {
   const crypto = D.crypto()
   if (!crypto.nip44Decrypt) return done('unsupported', NO_NIP44)
   useStarredChunks.setState({ status: 'syncing' })
+  // Stopped part way (another identity, LOCAL, the tutorial, the switch): never left saying "syncing".
+  const quit = (): Outcome => { if (D.self() === me) useStarredChunks.setState({ status: 'idle' }); return none }
   const remote = await readRemote(me, crypto, D)
   if (D.self() !== me) return none
   if (remote.unsupported) return done('unsupported', NO_NIP44)
@@ -465,19 +484,19 @@ async function syncOnce(D: StarredDeps, write: boolean): Promise<Outcome> {
     keysFor(me).set(wrapped, k)
     made = { me, wrapped, key: k }
   }
-  if (!mayWrite(D, me)) return none
+  if (!mayWrite(D, me)) return quit()
   const ahead = remote.createdAt + 1 > nowS + MAX_AHEAD_S
   const createdAt = ahead ? nowS : Math.max(nowS, remote.createdAt + 1)
   let ev: NostrEvent
   try { ev = await D.sign(recordTemplate(sealRecord(text, key.key, key.wrapped), createdAt)) } catch (err) {
     return done('error', `Your saved chunks were not signed: ${err instanceof Error ? err.message : String(err)}`)
   }
-  if (ev.pubkey !== me || !mayWrite(D, me)) return none
+  if (ev.pubkey !== me || !mayWrite(D, me)) return quit()
   // A signer may take minutes: another device's write meanwhile means read, merge and sign again.
   const again = await D.fetch(FILTER(me))
   if (again.trouble) return done('error', NOT_ANSWERED)
   if ((newestRecord(again.events.filter((e) => D.verify(e)), me)?.id ?? null) !== remote.id) return { wrote: false, raced: true }
-  if (!mayWrite(D, me)) return none
+  if (!mayWrite(D, me)) return quit()
   const res = await D.publish(ev)
   if (!res.ok) return done('error', `Your saved chunks were not saved to the relay (${res.reason}).`)
   const now = localFor(me, D)

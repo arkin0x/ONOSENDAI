@@ -18,7 +18,7 @@ import { finalizeEvent, generateSecretKey, getPublicKey, verifyEvent } from 'nos
 import { matchFilter } from 'nostr-tools/filter'
 import { v2 as nip44 } from 'nostr-tools/nip44'
 import { hexToBytes, type NostrEvent } from '../../lib/events'
-import { STARRED_D, STARRED_KIND, decodeRecord, openRecord, recordContent, type ChunkSnapshot } from '../../lib/starredChunksRecord'
+import { STARRED_D, STARRED_KIND, decodeRecord, openRecord, planRecord, recordContent, type ChunkSnapshot } from '../../lib/starredChunksRecord'
 import { chunkKey } from '../../lib/terrain/coords'
 import {
   HIDE_FLOOR_MS, QUIET_MS, UNDO_MS, WRITE_EVERY_MS, endGuide, expireUndo, guideTo, identityChanged, isDirty, localFor, nudgeStarred, refreshSnapshot, renameChunk,
@@ -136,6 +136,28 @@ describe('starring', () => {
     expect(back.s?.r[0]).toEqual([42, 2, 0, 1])
     expect(back.t).toBeGreaterThan(removed!.t)
     expect(localFor(me).rec.x[K(1)]).toBeUndefined()
+  })
+
+  it('starring again right after a removal drops its UNDO', () => {
+    as(device(), { live: () => false })
+    starChunk(K(1), snap())
+    unstarChunk(K(1))
+    expect(useStarredChunks.getState().removed).not.toBeNull()
+    starChunk(K(1), snap())
+    expect(useStarredChunks.getState().removed).toBeNull()
+    expect(localFor(me).rec.x[K(1)]).toBeUndefined()
+  })
+
+  it('a star that would not fit one event is refused at the star, and the list stays saveable', () => {
+    as(device(), { live: () => false })
+    // The worst a card can be: every row full of random counts, a random core. Each refusal leaves the list as it was.
+    let seed = 3
+    const rnd = (n: number): number => { seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) % n }
+    const worst = (): ChunkSnapshot => ({ g: 'volcanic', k: 14, m: 11, r: Array.from({ length: 16 }, (_, i) => [i + 1, rnd(1e9), rnd(1e9), 1] as [number, number, number, 1]), d: Array.from({ length: 64 }, () => '0123456789abcdef'[rnd(16)]).join(''), v: 0 })
+    let refused = 0
+    for (let i = 0; i < 150; i++) if (!starChunk(K(1000 + i * 7919), worst())) refused++
+    expect(refused).toBeGreaterThan(0)
+    expect(() => planRecord(localFor(me).rec)).not.toThrow()
   })
 
   it('UNDO goes when its time is up, and the removal stands', () => {
@@ -293,6 +315,23 @@ describe('the guide', () => {
     guideTo(K(1))
     expect(useStarredChunks.getState().guide).toEqual({ key: K(1), waypoint: true, hud: true })
     endGuide()
+    expect(useStarredChunks.getState().guide).toBeNull()
+  })
+
+  it('a guided chunk removed on another device ends the guide when its list is read', async () => {
+    const a = device()
+    as(a)
+    starChunk(K(1), snap())
+    await syncStarred()
+    const b = device()
+    as(b)
+    await syncStarred(false)
+    unstarChunk(K(1))
+    await syncStarred()
+    as(a)
+    useStarredChunks.setState({ guide: { key: K(1), waypoint: true, hud: true } })
+    await syncStarred(false)
+    expect(useStarredChunks.getState().keys.has(K(1))).toBe(false)
     expect(useStarredChunks.getState().guide).toBeNull()
   })
 

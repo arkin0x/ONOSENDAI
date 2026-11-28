@@ -76,7 +76,7 @@ const EDGES = edgeSegments(BOX)
 const LOOK = {
   near: { edge: 0.32, halo: 0.08, face: 0 },
   guided: { edge: 0.62, halo: 0.2, face: 0 },
-  here: { edge: 0.85, halo: 0.28, face: 0.05 },
+  here: { edge: 0.9, halo: 0.3, face: 0.018 },
 } as const
 
 /** A five-pointed star, flat, pointing up, `r` across from its middle to a point. */
@@ -274,8 +274,10 @@ export function StarredChunkMarks({ axes }: { axes: ViewAxes }): JSX.Element {
       tg.off = tg.base && tg.base.plane === s.plane ? cornerOffset(s, tg.base) : null
     }
     if (!tg.off) { b.visible = false; return }
-    // The middle of the chunk's floor, in render space.
-    scratch.at.set(tg.off[0] + SIDE / 2, tg.off[1], tg.off[2] + SIDE / 2).applyMatrix4(f.m)
+    // The middle of the chunk's floor, in render space: its face lowest on screen, whichever axis the view has as up.
+    const up = axes.up.axis === 'x' ? 0 : axes.up.axis === 'y' ? 1 : 2
+    const foot = (i: number): number => tg.off![i] + (i !== up ? SIDE / 2 : axes.up.dir > 0 ? 0 : SIDE)
+    scratch.at.set(foot(0), foot(1), foot(2)).applyMatrix4(f.m)
     const unit = f.m.getMaxScaleOnAxis()
     const k = beaconPlacement(scratch.pos, scratch.at, state.camera.position, unit)
     b.position.copy(scratch.pos)

@@ -26,10 +26,12 @@
  * MERGING. Merge, never replace (mergeRecords), as the hidden list does: a
  * chunk taken off your list leaves a tombstone `{ c, t }`, so another device's
  * older copy does not bring it back; the newer of an entry and a tombstone
- * stands, and an entry wins a tie. Inside an entry each part is its own: the
- * note by when it was written (`nt`), the snapshot by when it was taken
- * (`st`), so a rename on one device and a fresh snapshot on another both
- * survive. Commutative, associative and idempotent. Tombstones are bounded
+ * stands, and an entry wins a tie. An entry's time (`t`) is when it was last
+ * starred, restored or renamed, never when its card was counted again, so a
+ * visit on a device that has not heard of a removal yet never brings the chunk
+ * back. Inside an entry each part is its own: the note by when it was written
+ * (`nt`), the snapshot by when it was taken (`st`), so a rename on one device
+ * and a fresh snapshot on another both survive. Commutative, associative and idempotent. Tombstones are bounded
  * (pruneGone): the newest MAX_TOMBSTONES, none older than TOMBSTONE_MAX_AGE_S.
  */
 
@@ -46,14 +48,14 @@ export const STARRED_D = 'onosendai/starred'
 /** The longest the sealed text may be, as one hidden-list shard (hidesRecord MAX_SHARD_CHARS): an event under 56 KB. */
 export const MAX_RECORD_CHARS = 40_000
 /** The most chunks kept on the list. */
-export const MAX_STARRED_CHUNKS = 200
+export const MAX_STARRED_CHUNKS = 150
 export const MAX_TOMBSTONES = 500
 /** Some 400 days, as the hidden list's. */
 export const TOMBSTONE_MAX_AGE_S = 400 * 86_400
 /** A note is a name for the list, not a diary. */
 export const MAX_NOTE = 48
-/** The most kinds a snapshot carries (every chunk holds far fewer). */
-const MAX_ROWS = 64
+/** The most kinds a snapshot carries: the rarest first, so a card's finds are always kept (a chunk rarely holds more). */
+export const MAX_ROWS = 16
 const FORMAT = 1
 
 /** One kind on a saved card: [block id, how many are left, how many you mined, 1 when any of it shows]. */
@@ -80,7 +82,7 @@ export interface StarEntry {
   c: string
   /** When it was starred, unix seconds. */
   a: number
-  /** When it last changed (the newest of its parts), unix seconds: the newer of an entry and a tombstone stands. */
+  /** When it was last starred, restored or renamed, unix seconds (never a fresh snapshot): the newer of an entry and a tombstone stands. */
   t: number
   /** Your note for it, when you wrote one. */
   n?: string
@@ -155,8 +157,9 @@ export function validEntry(o: unknown): StarEntry | null {
     const s = validSnapshot(v.s)
     if (s) { out.s = s; out.st = v.st }
   }
-  // An entry is never older than its parts.
-  out.t = Math.max(out.t, out.nt ?? 0, out.st ?? 0)
+  // An entry is never older than its note. Its snapshot's time stays its own: a card counted again never brings back a
+  // chunk another device took off the list (review of the starred-chunks PR).
+  out.t = Math.max(out.t, out.nt ?? 0)
   return out
 }
 

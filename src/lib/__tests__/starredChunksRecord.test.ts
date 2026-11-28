@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest'
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure'
 import { v2 as nip44 } from 'nostr-tools/nip44'
 import {
-  MAX_RECORD_CHARS, MAX_STARRED_CHUNKS, STARRED_D, STARRED_KIND, cleanNote, decodeRecord, emptyRecord, encodeRecord, mergeRecords, newRecordKey,
+  MAX_RECORD_CHARS, MAX_ROWS, MAX_STARRED_CHUNKS, STARRED_D, STARRED_KIND, cleanNote, decodeRecord, emptyRecord, encodeRecord, mergeRecords, newRecordKey,
   newestRecord, openRecord, planRecord, recordContent, recordTemplate, sameRecord, sealRecord, validEntry,
   type ChunkSnapshot, type StarEntry, type StarredRecord,
 } from '../starredChunksRecord'
@@ -41,15 +41,24 @@ describe('merging', () => {
 
   it('inside an entry the note and the snapshot each go by their own time: a rename here and a fresh card there both survive', () => {
     const renamed = entry(1, 100, { n: 'Glowcore cave', nt: 300, t: 300 })
-    const counted = entry(1, 100, { s: snap(1), st: 400, t: 400 })
+    const counted = entry(1, 100, { s: snap(1), st: 400 })
     for (const m of [mergeRecords(rec([renamed]), rec([counted])), mergeRecords(rec([counted]), rec([renamed]))]) {
       expect(m.e[key(1)].n).toBe('Glowcore cave')
       expect(m.e[key(1)].s?.r[0]).toEqual([42, 1, 0, 1])
-      expect(m.e[key(1)].t).toBe(400)
+      // A card counted again is not an edit of the entry: its time stays the rename's.
+      expect(m.e[key(1)].t).toBe(300)
     }
     // A cleared note (empty, newer) beats an older one.
     const cleared = entry(1, 100, { nt: 500, t: 500 })
     expect(mergeRecords(rec([renamed]), rec([cleared])).e[key(1)].n).toBeUndefined()
+  })
+
+  it('a card counted again on a device that missed a removal never brings the chunk back', () => {
+    // Removed on the phone at 200; the desktop, not yet told, mines there at 300 and counts the card again.
+    const phone = rec([], [[key(1), 200]])
+    const desktop = rec([entry(1, 100, { s: snap(1), st: 300 })])
+    expect(mergeRecords(phone, desktop).e[key(1)]).toBeUndefined()
+    expect(validEntry({ ...entry(1, 100), st: 300 })?.t).toBe(100)
   })
 
   it('is commutative, associative and idempotent', () => {
@@ -88,8 +97,32 @@ describe('reading', () => {
     expect(back.x[key(1)]).toBe(200)
   })
 
-  it('the full list fits one event', () => {
-    const many = rec(Array.from({ length: MAX_STARRED_CHUNKS }, (_, i) => entry(i, 1795800000 + i, { n: `Saved chunk number ${i} with a long note`, nt: 1795800000 + i })))
+  it('the full list fits one event, with varied cards as full as a snapshot carries', () => {
+    // A seeded shuffle: keys far apart, every card different, the most rows a snapshot keeps, long notes.
+    // mulberry32: a small seeded generator with no short cycles in its low bits.
+    let seed = 7
+    const rnd = (n: number): number => {
+      seed = (seed + 0x6d2b79f5) | 0
+      let t = Math.imul(seed ^ (seed >>> 15), 1 | seed)
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+      return (((t ^ (t >>> 14)) >>> 0) % n)
+    }
+    const hex = (n: number): string => Array.from({ length: n }, () => '0123456789abcdef'[rnd(16)]).join('')
+    const ids = [197, 192, 196, 43, 195, 194, 193, 42, 7, 12, 8, 13, 14, 41, 40, 9, 10, 11, 6, 3, 5, 4, 2, 1]
+    const words = ['Glowcore', 'cave', 'ridge', 'by', 'the', 'shelf', 'north', 'pit', 'deep', 'vein', 'blue', 'cliff', 'home', 'spot']
+    const many = rec(Array.from({ length: MAX_STARRED_CHUNKS }, (_, i) => {
+      const c = chunkKey({ x: BigInt(`0x${hex(20)}`) << 5n, y: BigInt(`0x${hex(20)}`) << 5n, z: BigInt(`0x${hex(20)}`) << 5n, plane: rnd(2) })
+      // Finds in tens, common rock in thousands, as a chunk's card counts them; the core in runs of a few kinds.
+      const kinds = ids.filter(() => rnd(3) === 0).concat([2, 1]).slice(-MAX_ROWS)
+      const r = kinds.map((id) => [id, id > 6 ? rnd(80) : 1000 + rnd(9000), rnd(40), rnd(2)] as [number, number, number, 0 | 1])
+      const band = (): string => ['01', '02', '05', '07', '08', '00'][rnd(6)]
+      let d = ''
+      while (d.length < 64) { const b = band(); d += b.repeat(1 + rnd(8)) }
+      const s: ChunkSnapshot = { g: 'volcanic', k: rnd(17), m: rnd(1600) / 100, r, d: d.slice(0, 64), v: 1795000000 + rnd(9999999) }
+      const n = Array.from({ length: 2 + rnd(5) }, () => words[rnd(words.length)]).join(' ')
+      return { c, a: 1795000000 + rnd(9999999), t: 1796000000 + i, n, nt: 1796000000 + i, s, st: 1796000000 + rnd(999) }
+    }))
+    expect(Object.keys(many.e)).toHaveLength(MAX_STARRED_CHUNKS)
     expect(planRecord(many).length).toBeLessThanOrEqual(MAX_RECORD_CHARS)
   })
 })

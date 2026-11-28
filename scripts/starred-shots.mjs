@@ -110,7 +110,7 @@ for (const size of SIZES) {
   await page.evaluate(async (key) => { (await import('/src/terrain/surveyCard.ts')).openSurveyCard(key) }, seeded.here)
   await page.waitForTimeout(1500)
   const asking = await page.evaluate(() => ({ line: document.querySelector('.survey-star')?.textContent ?? '', asking: !!document.querySelector('.survey-card__star.is-asking') }))
-  if (!/Glowcore here\. Star this chunk to find it again\./.test(asking.line) || !asking.asking) fail(size, `card prompt: ${JSON.stringify(asking)}`)
+  if (!/Glowcore.* here\. Star this chunk to find it again\./.test(asking.line) || !asking.asking) fail(size, `card prompt: ${JSON.stringify(asking)}`)
   await page.screenshot({ path: `${OUT}/card-prompt-${size.w}x${size.h}.png` })
   // Star it.
   await page.click('.survey-card__star')
@@ -158,8 +158,8 @@ for (const size of SIZES) {
   await page.keyboard.press('Escape')
   await page.evaluate(() => { const m = document.querySelector('.hamburger-menu'); if (document.querySelector('.panel--mining')) m?.click() })
   await page.waitForTimeout(1200)
-  // A little up, so the beacon rises in view.
-  await page.evaluate(async () => { (await import('/src/lib/walkLook.ts')).walkLookBy(0, 40) })
+  // A little up, and on a narrow phone a little right, so the beacon (one chunk right, four ahead) rises in view.
+  await page.evaluate(async ([dx]) => { (await import('/src/lib/walkLook.ts')).walkLookBy(dx, -50) }, [size.touch ? Math.round(size.w * 0.06) : 0])
   await page.waitForTimeout(3000)
   const hud = await page.evaluate(() => { const t = document.querySelector('[data-target="starred-chunk"]'); return t ? { text: t.textContent, style: t.getAttribute('style') } : null })
   if (!hud) fail(size, 'no HUD target marker')

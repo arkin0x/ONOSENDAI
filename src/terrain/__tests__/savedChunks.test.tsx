@@ -15,7 +15,7 @@
  * - the HUD TARGET in the target list, in gold, in its own plane only.
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 ;(globalThis as { window?: unknown }).window ??= globalThis
 ;(globalThis as { addEventListener?: unknown }).addEventListener ??= () => {}

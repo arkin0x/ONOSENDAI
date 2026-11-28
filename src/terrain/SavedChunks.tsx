@@ -93,7 +93,8 @@ function rowSwatch(e: StarEntry): number | null {
 }
 
 function Arrow({ w, size = 16 }: { w: Where | null; size?: number }): JSX.Element {
-  const flat = !w || !w.samePlane || w.inside
+  // No way on the level (inside, the other plane, straight above or below): a pin, never an arrow pointing at the sun.
+  const flat = !w || !w.samePlane || w.inside || (w.dx === 0n && w.dz === 0n)
   return (
     <span className={`saved-arrow${flat ? ' is-flat' : ''}`} style={{ '--deg': `${flat ? 0 : w!.deg}deg` } as CSSProperties} aria-hidden>
       {flat ? <MapPin size={size} strokeWidth={2} /> : <Navigation2 size={size} strokeWidth={2} fill="currentColor" />}

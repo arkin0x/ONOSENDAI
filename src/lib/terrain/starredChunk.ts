@@ -22,7 +22,7 @@
 import { blockName } from './blocks'
 import { COMMON, GROUND_LOOK, PRIZED, type CardRow, type SurveyCardData } from './assay'
 import { N, chunkKey, chunkOf, parseChunkKey, type ChunkBase } from './coords'
-import type { ChunkSnapshot, SnapRow, StarEntry } from '../starredChunksRecord'
+import { MAX_ROWS, type ChunkSnapshot, type SnapRow, type StarEntry } from '../starredChunksRecord'
 import type { Position } from '../space'
 
 /** A saved chunk's gold: its star, its beacon, its outline and its HUD marker. */
@@ -44,7 +44,8 @@ function fromHex(h: string): Uint8Array {
 
 /** A survey card as kept with the star: every kind's counts, the ground, the hardness and the core. `at` is the first survey's date (ms) or null. */
 export function snapshotOf(card: SurveyCardData, at: number | null): ChunkSnapshot {
-  const rows: SnapRow[] = [...card.finds, ...card.common].map((r) => [r.id, r.count, r.mined, r.visible ? 1 : 0])
+  // Rarest first, MAX_ROWS at most: a chunk's finds are always kept; only the commonest rock of a crowded chunk is left off.
+  const rows: SnapRow[] = [...card.finds, ...card.common].slice(0, MAX_ROWS).map((r) => [r.id, r.count, r.mined, r.visible ? 1 : 0])
   return {
     g: card.ground?.family ?? null,
     k: card.hardness?.max ?? null,

@@ -47,6 +47,8 @@ import { Swatch } from './Swatch'
 import { findsHere, promptFinds, snapshotOf } from '../lib/terrain/starredChunk'
 import { refreshSnapshot, starChunk, undoRemove, unstarChunk, useStarredChunks } from '../store/starredChunks'
 import { openSavedChunks } from './savedChunksUi'
+import { MAX_STARRED_CHUNKS } from '../lib/starredChunksRecord'
+import { BRIEF_TOAST_MS, useToast } from '../store/useToast'
 
 const count = (n: number): string => n.toLocaleString('en-US')
 
@@ -194,7 +196,7 @@ export function Core({ strata }: { strata: Uint8Array }): JSX.Element {
  */
 export function StarLine({ chunk, rare, starred, removed }: { chunk: string; rare: string | null; starred: boolean; removed: boolean }): JSX.Element {
   let body: JSX.Element
-  if (removed) {
+  if (removed && !starred) {
     body = <><span className="survey-star__words">Taken off your saved chunks.</span><button type="button" className="survey-star__undo" onClick={() => undoRemove()}><Undo2 size={12} strokeWidth={2.25} aria-hidden />UNDO</button></>
   } else if (starred) {
     body = <><span className="survey-star__words">{rare ? `${rare} Saved: ` : 'Saved: '}</span><button type="button" className="survey-star__link" onClick={() => openSavedChunks(chunk)}>SAVED CHUNKS</button></>
@@ -253,7 +255,7 @@ export function SurveyCard(): JSX.Element | null {
   const rare = rareRows.length ? findsHere(rareRows) : null
   const toggleStar = (): void => {
     if (starred) unstarChunk(key)
-    else starChunk(key, snapshotOf(card, at))
+    else if (!starChunk(key, snapshotOf(card, at))) useToast.getState().show({ label: 'Your saved chunks are full', meta: `${MAX_STARRED_CHUNKS} at most. Remove one in MINING, SAVED CHUNKS, to star this one.`, mark: 'star', ms: BRIEF_TOAST_MS })
   }
   return (
     <Stacked>
